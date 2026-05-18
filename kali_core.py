@@ -108,7 +108,7 @@ DEFAULT_SETTINGS = {
     # Behaviour
     "system_prompt": "",
     "auto_start_ollama": True,
-    "stop_ollama_on_quit": False,
+    "stop_ollama_on_quit": True,
     "agent_mode_default": True,        # Kali defaults to agent on
     "confirm_all_commands": True,
 
@@ -234,6 +234,17 @@ class OllamaBackend:
             return False
 
     def stop_serve(self) -> None:
+        # Best-effort: stop any kali-managed systemd unit too
+        for unit in ("kali-ollama.service", "oracle-ollama.service"):
+            try:
+                subprocess.run(
+                    ["systemctl", "--user", "stop", unit],
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=4)
+            except Exception:
+                pass
         if not self._started_by_us or self._proc is None:
             return
         try:

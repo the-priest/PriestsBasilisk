@@ -1,76 +1,90 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
-  <defs>
-    <linearGradient id="dragonGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%"  stop-color="#cba6f7"/>
-      <stop offset="100%" stop-color="#89b4fa"/>
-    </linearGradient>
-    <radialGradient id="eyeGrad" cx="50%" cy="50%" r="50%">
-      <stop offset="0%"  stop-color="#fab387"/>
-      <stop offset="60%" stop-color="#f38ba8"/>
-      <stop offset="100%" stop-color="#11111b"/>
-    </radialGradient>
-  </defs>
+<!--
+  Placeholder dragon icon: my own stylized interpretation, white on
+  black, in the spirit of Kali Linux.  The official Kali Linux dragon
+  is OffSec's trademark; for the exact artwork, download the official
+  SVG from https://www.kali.org/docs/policy/trademark/ and overwrite
+  this file in place — the .desktop entry will pick it up.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
 
-  <!-- Background circle (subtle, for the app icon mask) -->
-  <circle cx="64" cy="64" r="62" fill="#1e1e2e"/>
+  <rect width="256" height="256" fill="#000000"/>
 
-  <!-- Dragon head silhouette: head-on view, angular, fierce.
-       Composed of polygons. Inspired by but not a copy of the
-       Kali Linux dragon. -->
-  <g fill="url(#dragonGrad)">
+  <g fill="#ffffff" fill-rule="evenodd">
 
-    <!-- Crown / forehead spike (top center) -->
-    <polygon points="64,12 58,28 70,28"/>
+    <!-- Top crown -->
+    <polygon points="128,10 118,40 138,40"/>
 
-    <!-- Left horn (curves outward and back) -->
-    <path d="M 56,26
-             L 42,16
-             L 30,22
-             L 28,36
-             L 38,32
-             L 48,38
-             Z"/>
+    <!-- Left horn -->
+    <path d="M 118,40 L 88,32 L 78,42 L 62,34 L 54,46 L 38,38 L 30,52
+             L 18,46 L 14,64 L 26,68 L 18,78 L 32,82 L 26,92 L 42,94
+             L 38,104 L 54,102 L 52,114 L 70,108 L 80,98 L 92,84
+             L 102,70 L 114,58 Z"/>
 
-    <!-- Right horn (mirror) -->
-    <path d="M 72,26
-             L 86,16
-             L 98,22
-             L 100,36
-             L 90,32
-             L 80,38
-             Z"/>
+    <!-- Right horn -->
+    <path d="M 138,40 L 168,32 L 178,42 L 194,34 L 202,46 L 218,38 L 226,52
+             L 238,46 L 242,64 L 230,68 L 238,78 L 224,82 L 230,92 L 214,94
+             L 218,104 L 202,102 L 204,114 L 186,108 L 176,98 L 164,84
+             L 154,70 L 142,58 Z"/>
 
-    <!-- Cheek ridges left -->
-    <polygon points="34,40 22,52 28,68 38,58 44,48"/>
+    <!-- Inner ear left -->
+    <path d="M 84,96 L 70,112 L 78,118 L 88,108 L 92,116 L 100,104
+             L 96,92 Z"/>
 
-    <!-- Cheek ridges right -->
-    <polygon points="94,40 106,52 100,68 90,58 84,48"/>
+    <!-- Inner ear right -->
+    <path d="M 172,96 L 186,112 L 178,118 L 168,108 L 164,116 L 156,104
+             L 160,92 Z"/>
 
-    <!-- Main face / muzzle (downward-pointing pentagon) -->
-    <polygon points="48,38 80,38 88,58 64,82 40,58"/>
+    <!-- Outer mane left -->
+    <path d="M 58,118 L 42,138 L 50,148 L 36,154 L 50,164 L 42,176 L 58,170
+             L 56,184 L 70,170 L 66,154 L 74,140 L 70,128 Z"/>
 
-    <!-- Jaw lower extensions -->
-    <polygon points="40,58 64,82 56,98 48,90"/>
-    <polygon points="88,58 64,82 72,98 80,90"/>
+    <!-- Outer mane right -->
+    <path d="M 198,118 L 214,138 L 206,148 L 220,154 L 206,164 L 214,176
+             L 198,170 L 200,184 L 186,170 L 190,154 L 182,140 L 186,128 Z"/>
 
-    <!-- Side fangs / tendrils -->
-    <polygon points="30,60 24,76 32,72 36,64"/>
-    <polygon points="98,60 104,76 96,72 92,64"/>
+    <!-- Forehead shield -->
+    <path d="M 100,70 L 156,70 L 168,98 L 168,114 L 158,132 L 128,148
+             L 98,132 L 88,114 L 88,98 Z"/>
+
+    <!-- Third eye cutout -->
+    <polygon fill="#000000" points="128,82 120,98 128,114 136,98"/>
+
+    <!-- Eyes (cutouts) -->
+    <path fill="#000000" d="M 100,110 L 118,118 L 118,124 L 112,124
+                            L 100,118 Z"/>
+    <path fill="#000000" d="M 156,110 L 138,118 L 138,124 L 144,124
+                            L 156,118 Z"/>
+
+    <!-- Cheek left -->
+    <path d="M 80,118 L 68,134 L 76,146 L 90,140 L 96,128 L 90,120 Z"/>
+
+    <!-- Cheek right -->
+    <path d="M 176,118 L 188,134 L 180,146 L 166,140 L 160,128 L 166,120 Z"/>
+
+    <!-- Upper jaw -->
+    <path d="M 96,140 L 160,140 L 156,168 L 144,180 L 128,186 L 112,180
+             L 100,168 Z"/>
+
+    <!-- Mouth cutout -->
+    <path fill="#000000" d="M 114,160 L 142,160 L 138,172 L 128,178
+                            L 118,172 Z"/>
+
+    <!-- Side fangs left -->
+    <polygon points="76,146 64,186 80,176 86,154"/>
+    <polygon points="92,166 86,196 100,184 102,168"/>
+
+    <!-- Side fangs right -->
+    <polygon points="180,146 192,186 176,176 170,154"/>
+    <polygon points="164,166 170,196 156,184 154,168"/>
+
+    <!-- Lower beard -->
+    <path d="M 110,180 L 100,210 L 114,200 L 118,212 L 122,196 L 128,214
+             L 134,196 L 138,212 L 142,200 L 156,210 L 146,180 L 138,184
+             L 128,186 L 118,184 Z"/>
 
     <!-- Chin spike -->
-    <polygon points="58,86 64,108 70,86"/>
+    <polygon points="124,196 128,232 132,196"/>
 
   </g>
-
-  <!-- Eyes: glowing orange/red embers -->
-  <ellipse cx="50" cy="56" rx="6" ry="4" fill="url(#eyeGrad)"/>
-  <ellipse cx="78" cy="56" rx="6" ry="4" fill="url(#eyeGrad)"/>
-
-  <!-- Dark mouth slit -->
-  <polygon points="56,74 72,74 64,80" fill="#11111b"/>
-
-  <!-- Center forehead jewel/dot (kali third eye motif) -->
-  <circle cx="64" cy="44" r="3" fill="#f5c2e7"/>
-
 </svg>

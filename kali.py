@@ -12,7 +12,7 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("Pango", "1.0")
-from gi.repository import Gtk, Adw, GLib, Gdk, Gio, Pango, GdkPixbuf  # noqa
+from gi.repository import Gtk, Adw, GLib, Gdk, Gio, Pango, GdkPixbuf, GObject  # noqa
 
 import sys
 import os
@@ -119,11 +119,11 @@ headerbar {
 .chat-row .title-line {
     color: #cdd6f4;
     font-weight: 600;
-    font-size: 14px;
+    font-size: 16px;
 }
 .chat-row .meta-line {
     color: #7f849c;
-    font-size: 11px;
+    font-size: 13px;
     margin-top: 2px;
 }
 .chat-row .pin-icon {
@@ -162,7 +162,7 @@ headerbar {
     border-radius: 18px 18px 6px 18px;
     padding: 14px 18px;
     margin: 4px 12px 4px 80px;
-    font-size: 15px;
+    font-size: 17px;
 }
 
 /* Assistant: left-aligned, transparent, larger text */
@@ -171,37 +171,26 @@ headerbar {
     color: #cdd6f4;
     padding: 8px 16px;
     margin: 4px 12px;
-    font-size: 15px;
-    line-height: 1.55;
+    font-size: 17px;
+    line-height: 1.6;
 }
 
-.msg-tool-call {
-    background-color: #181825;
-    border: 1px solid #45475a;
-    border-radius: 10px;
-    padding: 12px 16px;
-    margin: 6px 16px;
-    color: #f5c2e7;
-    font-family: 'JetBrains Mono', 'Fira Code', 'DejaVu Sans Mono', monospace;
-    font-size: 12px;
+/* Compact tool indicator (replaces visible JSON dump) */
+.msg-tool-indicator {
+    padding: 2px 16px 2px 60px;
+    margin: 0 12px;
 }
-
-.msg-tool-result {
-    background-color: #181825;
-    border: 1px solid #45475a;
-    border-left: 3px solid #94e2d5;
-    border-radius: 10px;
-    padding: 12px 16px;
-    margin: 6px 16px;
-    color: #cdd6f4;
-    font-family: 'JetBrains Mono', 'Fira Code', 'DejaVu Sans Mono', monospace;
+.tool-indicator-label {
+    color: #6c7086;
     font-size: 12px;
+    font-style: italic;
+    opacity: 0.85;
 }
 
 .msg-system-notice {
     color: #6c7086;
     font-style: italic;
-    font-size: 12px;
+    font-size: 13px;
     padding: 6px 16px;
     margin: 4px 16px;
 }
@@ -227,11 +216,11 @@ headerbar {
 
 .role-label {
     color: #7f849c;
-    font-weight: 600;
-    font-size: 11px;
-    letter-spacing: 0.5px;
+    font-weight: 700;
+    font-size: 13px;
+    letter-spacing: 0.7px;
     text-transform: uppercase;
-    margin: 0 0 2px 0;
+    margin: 0 0 3px 0;
 }
 .role-label.user { color: #89b4fa; }
 .role-label.kali { color: #cba6f7; }
@@ -258,8 +247,8 @@ headerbar {
     background-color: transparent;
     color: #f5e0dc;
     font-family: 'JetBrains Mono', 'Fira Code', 'DejaVu Sans Mono', monospace;
-    font-size: 13px;
-    padding: 10px 12px;
+    font-size: 15px;
+    padding: 12px 14px;
 }
 
 /* ===== Input area ===== */
@@ -274,13 +263,13 @@ headerbar {
     background-color: #313244;
     border-radius: 22px;
     padding: 6px 8px 6px 16px;
-    min-height: 48px;
+    min-height: 52px;
 }
 
 .input-frame textview {
     background-color: transparent;
     color: #cdd6f4;
-    font-size: 15px;
+    font-size: 17px;
     padding: 8px 0;
 }
 
@@ -498,7 +487,38 @@ class CodeBlockWidget(Gtk.Box):
         self.append(sw)
 
     def _on_copy(self, _btn):
-        self.get_clipboard().set(self.code)
+        text = self.code
+        try:
+            value = GObject.Value()
+            value.init(GObject.TYPE_STRING)
+            value.set_string(text)
+            provider = Gdk.ContentProvider.new_for_value(value)
+            display = self.get_display() or Gdk.Display.get_default()
+            display.get_clipboard().set_content(provider)
+            # Also set primary clipboard for middle-click paste
+            try:
+                display.get_primary_clipboard().set_content(provider)
+            except Exception:
+                pass
+            # Visual feedback
+            self._show_copied()
+        except Exception as e:
+            log(f"clipboard copy failed: {e}")
+
+    def _show_copied(self):
+        """Brief 'Copied!' flash on the button."""
+        try:
+            header = self.get_first_child()
+            if header is None:
+                return
+            btn = header.get_last_child()
+            if btn is None:
+                return
+            btn.set_icon_name("emblem-ok-symbolic")
+            GLib.timeout_add(900,
+                lambda: (btn.set_icon_name("edit-copy-symbolic") or False))
+        except Exception:
+            pass
 
 
 class Avatar(Gtk.Label):
@@ -524,12 +544,12 @@ class MessageWidget(Gtk.Box):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         self.role = role
         self.meta = meta or {}
-        self._content = ""
+        self._content = content or ""
         self._blocks_container: Optional[Gtk.Box] = None
         self._streaming_label: Optional[Gtk.Label] = None
         self.add_css_class("msg-row")
         self._build_shell()
-        if content:
+        if content and role != "tool":
             self.set_content(content)
 
     def _build_shell(self):
@@ -577,12 +597,27 @@ class MessageWidget(Gtk.Box):
             self._blocks_container = inner
 
         elif self.role == "tool":
-            inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
             kind = self.meta.get("kind", "result")
-            inner.add_css_class("msg-tool-call" if kind == "call"
-                                else "msg-tool-result")
-            self.append(inner)
-            self._blocks_container = inner
+            if kind == "result":
+                # Hide tool results entirely — let the assistant summarize.
+                self.set_visible(False)
+                self._blocks_container = None
+                return
+            # Tool CALL: compact one-line indicator
+            tool_name = self.meta.get("tool_name", "")
+            if not tool_name:
+                # Try to parse from legacy content like "⚙ tool: check_updates({...})"
+                import re as _re
+                m = _re.search(r'tool:\s*([a-zA-Z_]+)', self._content or "")
+                tool_name = m.group(1) if m else "tool"
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+            row.add_css_class("msg-tool-indicator")
+            row.set_halign(Gtk.Align.START)
+            lbl = Gtk.Label(label=f"⚙  used {tool_name}", xalign=0.0)
+            lbl.add_css_class("tool-indicator-label")
+            row.append(lbl)
+            self.append(row)
+            self._blocks_container = None
 
         else:
             inner = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
@@ -592,6 +627,8 @@ class MessageWidget(Gtk.Box):
 
     def set_content(self, text: str):
         self._content = text
+        if self.role == "tool" or self._blocks_container is None:
+            return
         child = self._blocks_container.get_first_child()
         while child is not None:
             nxt = child.get_next_sibling()
@@ -1438,6 +1475,11 @@ class MainWindow(Adw.ApplicationWindow):
             self._show_empty_state()
         else:
             for m in msgs:
+                # Skip stored tool-result rows entirely; the assistant's
+                # follow-up message already conveys their content.
+                kind = (m.meta or {}).get("kind")
+                if kind == "tool_result":
+                    continue
                 self._append_message_widget(m.role, m.content, m.meta)
 
         GLib.idle_add(self._scroll_to_bottom)
@@ -1615,8 +1657,8 @@ class MainWindow(Adw.ApplicationWindow):
         call = calls[0]
         self._append_message_widget(
             "tool",
-            f"⚙ tool: {call.name}({json.dumps(call.args)})",
-            meta={"kind": "call"})
+            f"used {call.name}",
+            meta={"kind": "call", "tool_name": call.name})
         self.store.add_message(self.current_chat_id, "tool",
                                 f"⚙ tool: {call.name}({json.dumps(call.args)})",
                                 meta={"kind": "call"})
@@ -1651,8 +1693,8 @@ class MainWindow(Adw.ApplicationWindow):
             self._feed_tool_result(f"Unknown tool '{call.name}'.")
 
     def _feed_tool_result(self, result_text, display_text=None):
-        shown = display_text if display_text is not None else result_text
-        self._append_message_widget("tool", shown, meta={"kind": "result"})
+        # Don't render tool results in the UI — assistant summarizes them.
+        # Store in DB so the model can read them in the next turn.
         self.store.add_message(self.current_chat_id, "user",
                                 f"<tool_result>\n{result_text}\n</tool_result>",
                                 meta={"kind": "tool_result"})

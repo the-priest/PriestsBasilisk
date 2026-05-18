@@ -74,6 +74,16 @@ What it installs:
 
 **Uninstall:** `~/.local/share/kali/install.sh --uninstall` (chat history kept).
 
+### Removing a previous Oracle install
+
+If you installed the older Oracle version of this app, the installer auto-detects it and prompts you to remove it. Or do it explicitly:
+
+```bash
+~/.local/share/kali/install.sh --remove-oracle
+```
+
+This stops and disables `oracle-ollama.service`, removes `~/.local/bin/oracle`, the desktop entry, the systemd unit, and wipes `~/.local/share/oracle/` and `~/.config/oracle/`. Your chat history migrates to Kali if Kali doesn't already have its own DB. Your Kali install is not touched.
+
 ### Manual install
 
 ```bash
@@ -87,9 +97,10 @@ cd kali
 | flag                 | what it does                                            |
 | -------------------- | ------------------------------------------------------- |
 | `--update`           | explicit update (same as default install)               |
-| `--uninstall`        | remove app (chat history kept)                          |
+| `--uninstall`        | remove Kali (chat history kept)                         |
+| `--remove-oracle`    | remove the old Oracle install (Kali untouched)          |
 | `--refresh-ollama`   | re-run Ollama's installer to update it                  |
-| `--no-systemd`       | don't install the systemd unit                          |
+| `--no-systemd`       | don't install the systemd unit file                     |
 | `--no-ollama`        | skip Ollama entirely (Groq-only setup)                  |
 | `--no-model`         | don't pull a local model                                |
 | `--no-groq`          | don't install the groq library or prompt for a key      |

@@ -23,7 +23,8 @@
 # Usage:
 #   ./install.sh                     # install or update
 #   ./install.sh --update            # explicit update (same code path)
-#   ./install.sh --uninstall         # remove (chat history kept)
+#   ./install.sh --uninstall         # remove Kali (chat history kept)
+#   ./install.sh --remove-oracle     # remove the old Oracle install
 #   ./install.sh --refresh-ollama    # also re-run the ollama installer
 #   ./install.sh --no-systemd        # don't install the systemd unit
 #   ./install.sh --no-ollama         # don't touch ollama
@@ -57,6 +58,7 @@ for arg in "$@"; do
   case "$arg" in
     --uninstall)         ACTION="uninstall" ;;
     --update)            ACTION="install" ;;
+    --remove-oracle)     ACTION="remove-oracle" ;;
     --no-systemd)        SKIP_SYSTEMD=1 ;;
     --no-ollama)         SKIP_OLLAMA=1 ;;
     --no-model)          SKIP_MODEL=1 ;;
@@ -128,7 +130,30 @@ uninstall() {
   exit 0
 }
 
-[ "${ACTION}" = "uninstall" ] && uninstall
+remove_oracle() {
+  step "removing the old Oracle installation"
+  systemctl --user stop    oracle-ollama.service 2>/dev/null || true
+  systemctl --user disable oracle-ollama.service 2>/dev/null || true
+  rm -f  "${SYSTEMD_DIR}/oracle-ollama.service"
+  systemctl --user daemon-reload 2>/dev/null || true
+  rm -f  "${BIN_DIR}/oracle"
+  rm -f  "${DESKTOP_DIR}/oracle.desktop"
+  update-desktop-database "${DESKTOP_DIR}" 2>/dev/null || true
+  # Migrate any chat history before removing the old data dir, in case
+  # Kali doesn't have its own DB yet.
+  if [ -f "${OLD_DATA_DIR}/chats.db" ] && [ ! -f "${DATA_DIR}/chats.db" ]; then
+    mkdir -p "${DATA_DIR}"
+    cp "${OLD_DATA_DIR}/chats.db" "${DATA_DIR}/chats.db"
+    ok "migrated chats.db → ${DATA_DIR}"
+  fi
+  rm -rf "${OLD_DATA_DIR}"
+  rm -rf "${OLD_CONFIG_DIR}"
+  ok "Oracle fully removed.  (Kali install untouched.)"
+  exit 0
+}
+
+[ "${ACTION}" = "uninstall" ]     && uninstall
+[ "${ACTION}" = "remove-oracle" ] && remove_oracle
 
 # ── intro ─────────────────────────────────────────────────────────
 
@@ -143,9 +168,20 @@ ${M}╚════════════════════════�
   install dir:     ${INSTALL_DIR}
 
   Cloud backend (Groq) is primary, local Ollama is fallback.
+  Ollama runs ONLY while the app is open (starts on launch, stops on quit).
   Heads up: the local model pull is the slowest step (~3-5 min on
   phone WiFi for the default 1.3 GB model).  Stay put.
 EOF
+
+# Detect a stale oracle install and warn (don't auto-remove — let the user decide)
+if [ -f "${DESKTOP_DIR}/oracle.desktop" ] || [ -f "${BIN_DIR}/oracle" ] \
+   || [ -f "${SYSTEMD_DIR}/oracle-ollama.service" ]; then
+  echo
+  warn "previous Oracle installation detected"
+  echo "      To remove it:  $0 --remove-oracle"
+  echo "      (your chat history will be preserved)"
+  echo
+fi
 
 # ── 1. Python ─────────────────────────────────────────────────────
 
@@ -267,12 +303,36 @@ wait_for_ollama() {
   return 1
 }
 
-start_ollama() {
+start_ollama_temp() {
+  # Start ollama just long enough to pull the model.  Tracks whether we
+  # started it so we can stop it after.
   if ollama_healthy; then
-    ok "ollama serve already running"
+    OLLAMA_STARTED_TEMP=0
     return 0
   fi
+  say "starting ollama temporarily (for the model pull only)"
+  nohup ollama serve >/dev/null 2>&1 &
+  disown 2>/dev/null || true
+  if wait_for_ollama; then
+    OLLAMA_STARTED_TEMP=1
+    return 0
+  fi
+  return 1
+}
 
+stop_ollama_temp() {
+  # Stop only if we started it.  Leaves user-started ollamas alone.
+  if [ "${OLLAMA_STARTED_TEMP:-0}" = "1" ]; then
+    say "stopping the temporary ollama"
+    pkill -f "ollama serve" 2>/dev/null || true
+    sleep 1
+  fi
+}
+
+install_systemd_unit_file() {
+  # Install the unit file but DO NOT enable or start it.  User can
+  # manually `systemctl --user enable kali-ollama.service` if they want
+  # ollama always-on.  Default: app starts ollama on launch, stops on quit.
   if [ $SKIP_SYSTEMD -eq 0 ] && command -v systemctl >/dev/null; then
     mkdir -p "${SYSTEMD_DIR}"
     OLLAMA_BIN=$(command -v ollama || echo "/usr/local/bin/ollama")
@@ -294,48 +354,48 @@ Environment=OLLAMA_NUM_PARALLEL=1
 WantedBy=default.target
 EOF
     systemctl --user daemon-reload
-    systemctl --user enable kali-ollama.service >/dev/null 2>&1 || true
-    say "starting ollama via systemd --user"
-    if systemctl --user start kali-ollama.service 2>/dev/null && wait_for_ollama; then
-      ok "ollama serve running (systemd)"
-      return 0
-    fi
-    warn "systemd start failed — falling back to detached launch"
+    ok "systemd unit file installed (NOT enabled — app manages ollama)"
   fi
+}
 
-  say "starting ollama serve in background"
-  nohup ollama serve >/dev/null 2>&1 &
-  disown 2>/dev/null || true
-  if wait_for_ollama; then
-    ok "ollama serve running (detached)"
-    return 0
-  fi
-  return 1
+# Make sure nothing's auto-started left over from earlier installs (oracle or kali)
+disable_old_units() {
+  for unit in oracle-ollama.service kali-ollama.service; do
+    if systemctl --user is-enabled "${unit}" >/dev/null 2>&1; then
+      systemctl --user disable "${unit}" >/dev/null 2>&1 || true
+      systemctl --user stop    "${unit}" >/dev/null 2>&1 || true
+      say "disabled previously-enabled ${unit}"
+    fi
+  done
 }
 
 if [ $SKIP_OLLAMA -eq 0 ]; then
-  step "starting ollama serve"
-  if ! start_ollama; then
-    warn "ollama serve didn't come up — Kali can still run with Groq alone"
-  fi
+  step "ollama service config"
+  disable_old_units
+  install_systemd_unit_file
 fi
 
 # ── 6. Pull a model ───────────────────────────────────────────────
 
 if [ $SKIP_OLLAMA -eq 0 ] && [ $SKIP_MODEL -eq 0 ]; then
   step "fallback model: ${MODEL}"
-  if ollama list 2>/dev/null | awk 'NR>1{print $1}' | grep -qx "${MODEL}"; then
-    ok "${MODEL} already pulled"
+  if ! start_ollama_temp; then
+    warn "couldn't start ollama for the pull — skipping model"
   else
-    say "pulling ${MODEL} — progress below is from ollama (this is the slow step)"
-    printf '%s\n' "${D}──────────────────────────────────────────────${X}"
-    if ! ollama pull "${MODEL}"; then
-      warn "pull failed.  Retrying in 3s..."
-      sleep 3
-      ollama pull "${MODEL}" || warn "could not pull ${MODEL} — continuing without local fallback"
+    if ollama list 2>/dev/null | awk 'NR>1{print $1}' | grep -qx "${MODEL}"; then
+      ok "${MODEL} already pulled"
+    else
+      say "pulling ${MODEL} — progress below is from ollama (this is the slow step)"
+      printf '%s\n' "${D}──────────────────────────────────────────────${X}"
+      if ! ollama pull "${MODEL}"; then
+        warn "pull failed.  Retrying in 3s..."
+        sleep 3
+        ollama pull "${MODEL}" || warn "could not pull ${MODEL} — continuing without local fallback"
+      fi
+      printf '%s\n' "${D}──────────────────────────────────────────────${X}"
+      ok "${MODEL} pulled"
     fi
-    printf '%s\n' "${D}──────────────────────────────────────────────${X}"
-    ok "${MODEL} pulled"
+    stop_ollama_temp
   fi
 else
   warn "skipping model pull"
@@ -443,11 +503,6 @@ EOF
 update-desktop-database "${DESKTOP_DIR}" 2>/dev/null || true
 ok "launcher + desktop entry installed"
 
-if [ $SKIP_SYSTEMD -eq 0 ] && command -v systemctl >/dev/null; then
-  systemctl --user enable kali-ollama.service >/dev/null 2>&1 || true
-  ok "systemd unit enabled (starts at login)"
-fi
-
 # ── 9. Groq API key prompt ────────────────────────────────────────
 
 GROQ_KEY_TO_WRITE=""
@@ -511,7 +566,7 @@ defaults = {
     "max_tokens": 2048,
     "system_prompt": "",
     "auto_start_ollama": True,
-    "stop_ollama_on_quit": False,
+    "stop_ollama_on_quit": True,
     "agent_mode_default": True,
     "confirm_all_commands": True,
     "watcher_enabled": False,
