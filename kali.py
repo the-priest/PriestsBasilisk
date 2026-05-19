@@ -44,7 +44,7 @@ from kali_persona import (
 
 APP_ID  = "org.thepriest.kali"
 APP_NAME = "Kali"
-VERSION = "0.3.4"
+VERSION = "0.3.5"
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -558,6 +558,45 @@ class Avatar(Gtk.Label):
         self.set_size_request(size, size)
 
 
+def _make_wrap_label() -> Gtk.Label:
+    """Return a Gtk.Label that wraps AND reports a wrapped natural
+    width, so it shrinks to fit the parent allocation on narrow
+    screens instead of overflowing.
+
+    GTK4 background: by default, a Label with set_wrap(True) STILL
+    reports its single-line, unwrapped width as the natural width.
+    That natural width is propagated up the widget tree, so the
+    layout thinks the chat bubble "needs" the full line width.  On a
+    Phosh phone the natural width is almost always wider than the
+    physical screen, so the bubble overflows the right edge and the
+    text gets clipped.
+
+    Two settings fix this:
+      - max-width-chars caps the natural width to N characters.  On
+        the phone the actual allocation is narrower than that cap, so
+        the label is given less width and wraps to it.  On the desktop
+        the cap stops a single very long line from making the bubble
+        span the entire monitor.
+      - natural-wrap-mode = WORD (GTK 4.6+) makes the label's natural
+        width the WRAPPED width (at word boundaries) instead of the
+        single-line width.  This stops the natural width from being
+        inflated by long lines.
+    """
+    lbl = Gtk.Label()
+    lbl.set_wrap(True)
+    lbl.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+    lbl.set_xalign(0.0)
+    lbl.set_hexpand(True)
+    lbl.set_max_width_chars(50)
+    try:
+        lbl.set_natural_wrap_mode(Gtk.NaturalWrapMode.WORD)
+    except (AttributeError, TypeError):
+        # Older libadwaita / GTK without NaturalWrapMode.  The label
+        # will still wrap; it just won't shrink as aggressively.
+        pass
+    return lbl
+
+
 class MessageWidget(Gtk.Box):
     """A single chat message."""
 
@@ -667,10 +706,7 @@ class MessageWidget(Gtk.Box):
                 self._blocks_container.append(
                     CodeBlockWidget(b["content"], b["lang"]))
             else:
-                lbl = Gtk.Label()
-                lbl.set_wrap(True)
-                lbl.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-                lbl.set_xalign(0.0)
+                lbl = _make_wrap_label()
                 # NOT selectable — selectable labels swallow touch swipes
                 # and break message-list scrolling.  Code blocks have a
                 # copy button; prose can be copied via long-press menu.
@@ -686,10 +722,7 @@ class MessageWidget(Gtk.Box):
             nxt = child.get_next_sibling()
             self._blocks_container.remove(child)
             child = nxt
-        self._streaming_label = Gtk.Label()
-        self._streaming_label.set_wrap(True)
-        self._streaming_label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-        self._streaming_label.set_xalign(0.0)
+        self._streaming_label = _make_wrap_label()
         # NOT selectable — see comment in set_content
         self._streaming_label.set_text("")
         self._blocks_container.append(self._streaming_label)
@@ -1161,7 +1194,12 @@ class MainWindow(Adw.ApplicationWindow):
     def __init__(self, app: "KaliApp"):
         super().__init__(application=app)
         self.set_title(APP_NAME)
-        self.set_default_size(1200, 800)
+        # Phone-friendly default.  On desktop the user can resize.  The
+        # previous 1200×800 default made GTK's layout engine reserve a
+        # natural-width budget far wider than the phone's actual
+        # viewport, which propagated down to message bubbles and caused
+        # them to overflow the right edge of the screen.
+        self.set_default_size(440, 800)
         self.app = app
         self.settings = load_settings()
         self.ollama = OllamaBackend()
@@ -1236,16 +1274,25 @@ class MainWindow(Adw.ApplicationWindow):
         # area.  Collapse it so the sidebar overlays content instead of
         # pushing it aside.  Two paths: a libadwaita Breakpoint when
         # available (reactive to resize), and a static fallback gated
-        # on the detected UI scale (phones have scale >= ~1.1).
+        # on actual screen width when Breakpoint isn't supported.
         try:
             bp = Adw.Breakpoint.new(
-                Adw.BreakpointCondition.parse("max-width: 600sp"))
+                Adw.BreakpointCondition.parse("max-width: 600px"))
             bp.add_setter(self.split, "collapsed", True)
             self.add_breakpoint(bp)
         except Exception as e:
             log(f"breakpoint unavailable, using static collapse: {e}")
-            if _UI_SCALE >= 1.05:
-                self.split.set_collapsed(True)
+            # Detect narrow screen via Gdk directly so we don't depend on
+            # UI scale (which is about font sizes, not screen geometry).
+            try:
+                display = Gdk.Display.get_default()
+                mon = display.get_monitors().get_item(0) if display else None
+                if mon:
+                    geo = mon.get_geometry()
+                    if geo.width < 700:
+                        self.split.set_collapsed(True)
+            except Exception:
+                pass
 
     def _build_sidebar(self):
         sb = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
