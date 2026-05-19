@@ -44,7 +44,7 @@ from kali_persona import (
 
 APP_ID  = "org.thepriest.kali"
 APP_NAME = "Kali"
-VERSION = "0.3"
+VERSION = "0.3.1"
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -361,8 +361,7 @@ scrollbar slider {
     min-height: 50px;
 }
 scrollbar slider:hover { background-color: #6c7086; }
-}
-scrollbar slider:hover { background-color: #585b70; }
+scrollbar slider:active { background-color: #7f849c; }
 
 /* ===== Entry ===== */
 
@@ -1166,6 +1165,22 @@ class MainWindow(Adw.ApplicationWindow):
 
         self.split.set_sidebar(self._build_sidebar())
         self.split.set_content(self._build_main())
+
+        # On narrow screens (phones, split-view tablets) the 280-360 px
+        # sidebar eats the whole window, leaving no room for the chat
+        # area.  Collapse it so the sidebar overlays content instead of
+        # pushing it aside.  Two paths: a libadwaita Breakpoint when
+        # available (reactive to resize), and a static fallback gated
+        # on the detected UI scale (phones have scale >= ~1.1).
+        try:
+            bp = Adw.Breakpoint.new(
+                Adw.BreakpointCondition.parse("max-width: 600sp"))
+            bp.add_setter(self.split, "collapsed", True)
+            self.add_breakpoint(bp)
+        except Exception as e:
+            log(f"breakpoint unavailable, using static collapse: {e}")
+            if _UI_SCALE >= 1.05:
+                self.split.set_collapsed(True)
 
     def _build_sidebar(self):
         sb = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
@@ -2094,7 +2109,6 @@ class MainWindow(Adw.ApplicationWindow):
                     out.append({"role": "user", "content": m.content})
             elif m.role == "system":
                 out.append({"role": "system", "content": m.content})
-        return out
         return out
 
     # ── agent toggle ────────────────────────────────────────────

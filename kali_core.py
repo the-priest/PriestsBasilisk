@@ -128,8 +128,7 @@ DEFAULT_SETTINGS = {
 
     # UI
     "theme": "mocha",
-    "ui_scale": 0,  # 0 = auto-detect; manual values 0.5 to 2.0
-    "ui_scale": 1.0,                   # 1.0 = standard, 1.2 = bigger
+    "ui_scale": 0,  # 0 = auto-detect; manual values 0.3 to 3.0
     "show_token_count": False,
     "show_provider_pill": True,
 }
