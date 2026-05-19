@@ -44,7 +44,7 @@ from kali_persona import (
 
 APP_ID  = "org.thepriest.kali"
 APP_NAME = "Kali"
-VERSION = "0.3.2"
+VERSION = "0.3.3"
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -920,9 +920,9 @@ class SettingsDialog(Adw.PreferencesDialog):
         dg = Adw.PreferencesGroup()
         dg.set_title("UI scale")
         dg.set_description(
-            "Resize text, padding, and controls.  Restart required for "
-            "changes to take effect.  Set to 0 (then restart) for "
-            "automatic detection based on screen size.")
+            "Resize text, padding, and controls.  Changes apply live — "
+            "no restart needed.  Set to 0 for automatic detection based "
+            "on screen size.")
 
         # Use a SpinRow over the full useful range.  0 is a sentinel
         # meaning "let auto-detection pick" — clamped on the lower side
@@ -939,7 +939,7 @@ class SettingsDialog(Adw.PreferencesDialog):
         # Reset button row
         reset_row = Adw.ActionRow()
         reset_row.set_title("Reset to auto-detect")
-        reset_row.set_subtitle("Sets scale back to 0.  Takes effect on restart.")
+        reset_row.set_subtitle("Sets scale back to 0 and re-runs detection.")
         reset_btn = Gtk.Button(label="Reset")
         reset_btn.set_valign(Gtk.Align.CENTER)
         reset_btn.add_css_class("icon-button")
@@ -1104,10 +1104,29 @@ class SettingsDialog(Adw.PreferencesDialog):
         self._set("max_tokens", int(row.get_value()))
 
     def _on_ui_scale(self, row):
-        # Persist as float.  Auto-detect happens at app startup when the
-        # stored value is outside the (0.3, 3.0) range — see
-        # _detect_ui_scale() in kali.py.
-        self._set("ui_scale", float(row.get_value()))
+        # Persist as float.  Then trigger a LIVE CSS reload so the
+        # change is visible immediately — no app restart needed.
+        # Debounce the reload by 200ms so rapid scrolling doesn't
+        # spam the CSS provider.
+        value = float(row.get_value())
+        self._set("ui_scale", value)
+
+        if hasattr(self, "_ui_scale_timeout") and self._ui_scale_timeout:
+            try:
+                GLib.source_remove(self._ui_scale_timeout)
+            except Exception:
+                pass
+            self._ui_scale_timeout = None
+
+        def _do_reload():
+            try:
+                self.win.app.reload_css(value)
+            except Exception as e:
+                log(f"ui_scale live reload failed: {e}")
+            self._ui_scale_timeout = None
+            return False
+
+        self._ui_scale_timeout = GLib.timeout_add(200, _do_reload)
 
     def _on_agent_default(self, row, _ps):
         self._set("agent_mode_default", row.get_active())
@@ -2327,19 +2346,40 @@ class KaliApp(Adw.Application):
         super().__init__(application_id=APP_ID,
                           flags=Gio.ApplicationFlags.DEFAULT_FLAGS)
         self.win: Optional[MainWindow] = None
+        # Hold the CSS provider so we can rebuild it live when the
+        # user moves the UI-scale slider in Settings.  Without this
+        # the user has to restart Kali to see scale changes.
+        self.css_provider: Optional[Gtk.CssProvider] = None
 
     def do_startup(self):
         Adw.Application.do_startup(self)
-        provider = Gtk.CssProvider()
+        self.css_provider = Gtk.CssProvider()
         global _UI_SCALE
         _UI_SCALE = _detect_ui_scale()
-        provider.load_from_data(_scale_css(CSS, _UI_SCALE))
+        self.css_provider.load_from_data(_scale_css(CSS, _UI_SCALE))
         log(f"ui_scale = {_UI_SCALE:.2f}")
         Gtk.StyleContext.add_provider_for_display(
-            Gdk.Display.get_default(), provider,
+            Gdk.Display.get_default(), self.css_provider,
             Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
         Adw.StyleManager.get_default().set_color_scheme(
             Adw.ColorScheme.FORCE_DARK)
+
+    def reload_css(self, scale: float):
+        """Apply a new UI scale without restart.  Called from the
+        Settings UI-scale slider.  GTK4's CssProvider re-resolves
+        styles on widgets when load_from_data is called again, so
+        the change is visible immediately."""
+        global _UI_SCALE
+        if scale and 0.3 < scale < 3:
+            _UI_SCALE = float(scale)
+        else:
+            # 0 (or out-of-range) means "use auto-detect"
+            _UI_SCALE = _detect_ui_scale()
+        try:
+            self.css_provider.load_from_data(_scale_css(CSS, _UI_SCALE))
+            log(f"ui_scale reloaded → {_UI_SCALE:.2f}")
+        except Exception as e:
+            log(f"reload_css failed: {e}")
 
     def do_activate(self):
         if not self.win:
@@ -2366,7 +2406,9 @@ def _detect_ui_scale() -> float:
     means HiDPI which is almost always a phone or tablet) when width_mm
     is 0 (some compositors don't report it).
 
-    Phone (< 100 mm wide)            → 1.15  (LARGER than current)
+    Phone (< 100 mm wide)            → 0.9   (slightly smaller than CSS base;
+                                              the CSS sizes are already big
+                                              enough on the OP6's narrow width)
     Tablet (100-200 mm)              → 1.0
     Laptop (200-350 mm)              → 0.85
     Desktop monitor (> 350 mm)       → 0.7
@@ -2397,7 +2439,7 @@ def _detect_ui_scale() -> float:
 
         if width_mm > 0:
             if width_mm < 100:
-                bucket = "phone"; scale = 1.15
+                bucket = "phone"; scale = 0.9
             elif width_mm < 200:
                 bucket = "tablet"; scale = 1.0
             elif width_mm < 350:
@@ -2417,7 +2459,10 @@ def _detect_ui_scale() -> float:
         device_w = int(geo.width) * sf
 
         if sf >= 2 or device_w < 1280:
-            bucket = "phone/hidpi"; scale = 1.15
+            # HiDPI compositors (Phosh on a phone) already enlarge text via
+            # the scale factor.  Don't double up — use 1.0, let the user
+            # dial in further via the Settings slider if they want.
+            bucket = "phone/hidpi"; scale = 1.0
         elif device_w < 1920:
             bucket = "laptop"; scale = 0.85
         else:
