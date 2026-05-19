@@ -44,7 +44,7 @@ from kali_persona import (
 
 APP_ID  = "org.thepriest.kali"
 APP_NAME = "Kali"
-VERSION = "0.3.5"
+VERSION = "0.3.6"
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -1194,12 +1194,14 @@ class MainWindow(Adw.ApplicationWindow):
     def __init__(self, app: "KaliApp"):
         super().__init__(application=app)
         self.set_title(APP_NAME)
-        # Phone-friendly default.  On desktop the user can resize.  The
-        # previous 1200×800 default made GTK's layout engine reserve a
-        # natural-width budget far wider than the phone's actual
-        # viewport, which propagated down to message bubbles and caused
-        # them to overflow the right edge of the screen.
-        self.set_default_size(440, 800)
+        # Compute layout width = HALF the detected device width.  Phosh
+        # on the OP6 reports geometry in device pixels via Gdk even
+        # though the compositor applies a ~2× scale, so the layout
+        # engine thinks it has 1080 px to work with when only ~486 are
+        # actually on-screen.  Halving matches what's visible and stops
+        # bubbles/text from overflowing the right edge.
+        self._layout_width = self._compute_layout_width()
+        self.set_default_size(self._layout_width, 800)
         self.app = app
         self.settings = load_settings()
         self.ollama = OllamaBackend()
@@ -1228,6 +1230,24 @@ class MainWindow(Adw.ApplicationWindow):
         self._boot()
         GLib.idle_add(self._initial_chat_load)
         GLib.idle_add(self._refresh_sidebar)
+
+    def _compute_layout_width(self) -> int:
+        """Half the detected device width, in pixels, used as a hard
+        upper bound for the chat content.  See the comment in
+        MainWindow.__init__."""
+        try:
+            display = Gdk.Display.get_default()
+            if display:
+                mons = display.get_monitors()
+                if mons and mons.get_n_items() > 0:
+                    mon = mons.get_item(0)
+                    geo = mon.get_geometry()
+                    halved = geo.width // 2
+                    log(f"layout_width: device={geo.width} → half={halved}")
+                    return max(300, halved)
+        except Exception as e:
+            log(f"layout_width detection failed: {e}")
+        return 540  # OP6 portrait fallback
 
     def _initial_chat_load(self):
         """At launch, open the most recent chat if any exist; otherwise
@@ -1434,10 +1454,24 @@ class MainWindow(Adw.ApplicationWindow):
         self.msg_box.set_margin_bottom(12)
         self.msg_box.set_margin_start(8)
         self.msg_box.set_margin_end(8)
-        self.msg_scroll.set_child(self.msg_box)
+        # Cap the chat area to _layout_width.  Adw.Clamp forces its child
+        # to never exceed maximum_size, regardless of what GTK thinks
+        # the window width is.  This is the hard fix for the phone:
+        # bubbles physically cannot extend beyond _layout_width pixels.
+        msg_clamp = Adw.Clamp()
+        msg_clamp.set_maximum_size(self._layout_width)
+        msg_clamp.set_tightening_threshold(self._layout_width)
+        msg_clamp.set_child(self.msg_box)
+        self.msg_scroll.set_child(msg_clamp)
         main.append(self.msg_scroll)
 
-        main.append(self._build_input_area())
+        # Cap the input area too, so the textbox lines up with the chat.
+        input_area = self._build_input_area()
+        input_clamp = Adw.Clamp()
+        input_clamp.set_maximum_size(self._layout_width)
+        input_clamp.set_tightening_threshold(self._layout_width)
+        input_clamp.set_child(input_area)
+        main.append(input_clamp)
         return main
 
     def _build_input_area(self):
