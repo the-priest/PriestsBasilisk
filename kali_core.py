@@ -92,12 +92,16 @@ GROQ_FALLBACK_CHAIN = [
 # Verified against each provider's docs, May 2026.
 # ─────────────────────────────────────────────────────────────────────
 
+# Default is DeepSeek-V4-Flash (operator choice): newest DeepSeek MoE, 284B
+# total / 13B active, 1M context, fast.  V4 replaced V3 on SiliconFlow in
+# Apr 2026 — the old deepseek-chat/reasoner aliases retire Jul 2026.  Pro is
+# the heavier sibling kept as the first fallback for harder reasoning.
 SILICONFLOW_CHAIN = [
-    "deepseek-ai/DeepSeek-V3",
-    "Qwen/Qwen3-235B-A22B-Instruct",
-    "moonshotai/Kimi-K2-Instruct",
-    "deepseek-ai/DeepSeek-R1",
-    "Qwen/Qwen3-32B",
+    "deepseek-ai/DeepSeek-V4-Flash",
+    "deepseek-ai/DeepSeek-V4-Pro",
+    "Qwen/Qwen3-235B-A22B-Instruct-2507",
+    "moonshotai/Kimi-K2.5",
+    "zai-org/GLM-4.6",
     "Qwen/Qwen2.5-72B-Instruct",
 ]
 
@@ -237,6 +241,21 @@ DEFAULT_SETTINGS = {
     "ui_scale": 0,  # 0 = auto-detect; manual values 0.3 to 3.0
     "show_token_count": False,
     "show_provider_pill": True,
+
+    # ── kali_ext sidecar (memory / skills / foresight / headless worker) ──
+    # Everything here is OFF by default.  With all of these false, the sidecar
+    # injects nothing, spawns no threads, runs no background work, and Kali
+    # behaves exactly as a stock build.  Flip them on per feature when you
+    # want them — nothing here runs in the background unless you enable it.
+    "memory_enabled":          False,   # persistent cross-session recall
+    "memory_recall_k":         6,       # how many memories to inject per turn
+    "memory_consolidate":      False,   # model-based fact extraction (costs a call)
+    "skills_enabled":          False,   # self-written, sandbox-tested skills
+    "foresight_enabled":       False,   # predict consequences before acting
+    "foresight_model":         False,   # add a model pass on top of the rules
+    "worker_enabled":          False,   # the headless systemd --user companion
+    "worker_interval_seconds": 300,     # worker poll cadence (when enabled)
+    "one_command_at_a_time":   True,    # never propose/run >1 command per message
 }
 
 # Add a key + model slot for every registered provider so the schema is

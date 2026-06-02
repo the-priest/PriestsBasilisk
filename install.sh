@@ -367,6 +367,33 @@ done
 # (the icon is installed below from an inline heredoc — guaranteed)
 ok "code installed at ${INSTALL_DIR}"
 
+# ── 7a2. Install the optional kali_ext sidecar (memory/skills/foresight) ──
+# Additive: if absent, Kali simply runs without the extensions (every hook
+# is guarded). If present, parse-check every module before copying so a
+# broken sidecar can never overwrite a working one.
+if [ -d "${SRC_DIR}/kali_ext" ]; then
+  if python3 - "${SRC_DIR}/kali_ext" <<'PYEOF'
+import ast, sys, pathlib
+root = pathlib.Path(sys.argv[1])
+bad = []
+for p in root.rglob("*.py"):
+    try:
+        ast.parse(p.read_text())
+    except SyntaxError as e:
+        bad.append(f"{p}: {e}")
+if bad:
+    print("\n".join(bad)); sys.exit(1)
+PYEOF
+  then
+    rm -rf "${INSTALL_DIR}/kali_ext"
+    cp -r "${SRC_DIR}/kali_ext" "${INSTALL_DIR}/kali_ext"
+    rm -rf "${INSTALL_DIR}/kali_ext/__pycache__"
+    ok "kali_ext sidecar installed (extensions are off until enabled in settings)"
+  else
+    warn "kali_ext has a syntax error — skipping it; Kali will run without extensions"
+  fi
+fi
+
 # ── 7b. Install the icon (INLINE — guaranteed to exist) ───────────
 
 step "icon"

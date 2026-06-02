@@ -1,0 +1,239 @@
+"""
+extman — the one seam between Kali and the sidecar.
+
+Holds the injected primitives (settings, model-completion callable, optional
+embedder), owns the long-lived stores (memory, skills), and exposes the four
+hook functions the host calls.  Every public function is null-safe: if the
+sidecar was never init()'d, or the relevant setting is off, it returns the
+input unchanged / an empty result, so a broken or absent sidecar can never
+take Kali down.
+"""
+
+from __future__ import annotations
+
+import os
+import traceback
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional
+
+from . import memory as _memory
+from . import skills as _skills
+from . import foresight as _foresight
+
+
+class _State:
+    """Module-level singleton.  Cheap to reason about; one operator, one app."""
+    def __init__(self) -> None:
+        self.ready: bool = False
+        self.settings: Dict[str, Any] = {}
+        self.data_dir: Path = Path.home() / ".local" / "share" / "kali"
+        self.ext_dir: Path = self.data_dir / "ext"
+        self.complete_fn: Optional[Callable[[str, str], str]] = None
+        self.embed_fn: Optional[Callable[[List[str]], List[List[float]]]] = None
+        self.mem: Optional[_memory.MemoryStore] = None
+        self.skl: Optional[_skills.SkillStore] = None
+
+    def on(self, key: str, default: bool = False) -> bool:
+        return bool(self.settings.get(key, default))
+
+
+S = _State()
+
+
+def _log(msg: str) -> None:
+    try:
+        S.ext_dir.mkdir(parents=True, exist_ok=True)
+        with open(S.ext_dir / "ext.log", "a", encoding="utf-8") as f:
+            f.write(msg.rstrip() + "\n")
+    except Exception:
+        pass
+
+
+# ── boot ────────────────────────────────────────────────────────────────
+
+def init(settings: Dict[str, Any],
+         data_dir: str = "~/.local/share/kali",
+         complete_fn: Optional[Callable[[str, str], str]] = None,
+         embed_fn: Optional[Callable[[List[str]], List[List[float]]]] = None
+         ) -> None:
+    """Call once at host startup, after settings load and the router exists.
+
+    complete_fn(system, user) -> str   : a SHORT synchronous completion using
+        whatever backend the host already routes to.  Used for memory
+        consolidation and the optional foresight model pass.  May raise / time
+        out; callers tolerate it.  If None, the sidecar runs in heuristic-only
+        mode (no model calls) and still works.
+    embed_fn(texts) -> list[vector]    : optional.  If provided, memory recall
+        uses cosine similarity; if None, recall falls back to keyword+recency.
+    """
+    try:
+        S.settings = settings or {}
+        S.data_dir = Path(os.path.expanduser(data_dir))
+        S.ext_dir = S.data_dir / "ext"
+        S.ext_dir.mkdir(parents=True, exist_ok=True)
+        S.complete_fn = complete_fn
+        S.embed_fn = embed_fn
+        S.mem = _memory.MemoryStore(S.ext_dir / "memory.db", embed_fn=embed_fn)
+        S.skl = _skills.SkillStore(S.ext_dir / "skills")
+        S.ready = True
+        _log(f"[init] ready dir={S.ext_dir} model={'yes' if complete_fn else 'no'} "
+             f"embed={'yes' if embed_fn else 'no'}")
+    except Exception:
+        S.ready = False
+        _log("[init] FAILED\n" + traceback.format_exc())
+
+
+def system_prompt_block() -> str:
+    """Static text to append to the system prompt when the sidecar is live.
+
+    Documents the new tools so the model knows they exist.  Empty if the
+    sidecar is off — so a stock Kali prompt is unchanged.  Host appends this
+    via the persona custom-addendum seam (no edit to kali_persona.py needed).
+    """
+    if not S.ready:
+        return ""
+    parts: List[str] = []
+    if S.on("memory_enabled"):
+        parts.append(_memory.PROMPT_BLOCK)
+    if S.on("skills_enabled"):
+        parts.append(S.skl.prompt_block())
+    if S.on("foresight_enabled"):
+        parts.append(_foresight.PROMPT_BLOCK)
+    return ("\n\n".join(p for p in parts if p)).strip()
+
+
+# ── hook 1: recall injection (before stream_chat) ─────────────────────────
+
+def inject_memory(messages: List[Dict[str, str]]) -> List[Dict[str, str]]:
+    """Given the assembled message list, return it with a compact recall
+    block spliced in right after the system message.  Relevance-scoped:
+    pulls the top-k memories matching the latest user turn, never the whole
+    store, so the token window does not grow with history."""
+    if not (S.ready and S.on("memory_enabled") and S.mem):
+        return messages
+    try:
+        query = _latest_user_text(messages)
+        if not query:
+            return messages
+        k = int(S.settings.get("memory_recall_k", 6))
+        hits = S.mem.recall(query, k=k)
+        block = S.mem.format_block(hits)
+        if not block:
+            return messages
+        recall_msg = {"role": "system", "content": block}
+        if messages and messages[0].get("role") == "system":
+            return [messages[0], recall_msg, *messages[1:]]
+        return [recall_msg, *messages]
+    except Exception:
+        _log("[inject_memory] " + traceback.format_exc())
+        return messages
+
+
+# ── hook 2: turn recorder (after a turn settles) ──────────────────────────
+
+def record_turn(user_text: str, assistant_text: str) -> None:
+    """Fire-and-forget after each completed turn.  Heuristic capture is
+    instant and synchronous; model-based consolidation (if enabled and a
+    completer exists) is debounced and done on a background thread so it
+    never sits on the UI path."""
+    if not (S.ready and S.on("memory_enabled") and S.mem):
+        return
+    try:
+        S.mem.observe_turn(user_text or "", assistant_text or "",
+                           complete_fn=S.complete_fn,
+                           consolidate=S.on("memory_consolidate"))
+    except Exception:
+        _log("[record_turn] " + traceback.format_exc())
+
+
+# ── hook 3: extra tools (merged into the dispatch dict) ───────────────────
+
+def extra_tools(host: Any) -> Dict[str, Callable[[Dict[str, Any]], None]]:
+    """Return {tool_name: fn(args)} to merge into the host dispatch table.
+
+    `host` is the MainWindow.  Each fn must, exactly like the host's own
+    tool handlers, end by feeding a result back via host._feed_tool_result.
+    We do that through a tiny adapter so the sidecar never needs to know the
+    host's threading model beyond that one call.
+    """
+    if not S.ready:
+        return {}
+
+    def _feed(result_text: str) -> None:
+        host._feed_tool_result(result_text)
+
+    out: Dict[str, Callable[[Dict[str, Any]], None]] = {}
+
+    if S.on("memory_enabled") and S.mem:
+        out["memory_recall"] = lambda a: _feed(
+            S.mem.tool_recall(a.get("query", ""),
+                              int(a.get("k", 8))))
+        out["memory_remember"] = lambda a: _feed(
+            S.mem.tool_remember(a.get("text", ""),
+                                a.get("kind", "fact"),
+                                float(a.get("salience", 0.5))))
+        out["memory_forget"] = lambda a: _feed(
+            S.mem.tool_forget(a.get("query", a.get("id", ""))))
+
+    if S.on("skills_enabled") and S.skl:
+        # skill_write is registered by the HOST (kali.py), not here, so its
+        # save can go through Kali's own confirm dialog before the sidecar
+        # validates + sandbox-tests + persists via commit_skill().
+        out["skill_list"] = lambda a: _feed(S.skl.tool_list())
+        out["skill_run"] = lambda a: _feed(
+            S.skl.tool_run(a.get("name", ""),
+                           a.get("args", {}),
+                           timeout=int(a.get("timeout", 20))))
+
+    return out
+
+
+def commit_skill(name: str, code: str, test: str, description: str,
+                 capabilities: List[str]) -> Dict[str, Any]:
+    """Called by the host when the operator clicks Apply on a skill card.
+    The click is the approval.  Validate -> sandbox-test -> persist."""
+    if not (S.ready and S.skl):
+        return {"ok": False, "error": "sidecar not ready"}
+    return S.skl.commit(name, code, test, description, capabilities)
+
+
+# ── hook 4: foresight (before an action executes) ─────────────────────────
+
+def foresight(command: str, kind: str = "shell") -> Dict[str, Any]:
+    """Predict the consequences of an action before it runs and return a
+    verdict the host can act on:
+
+        {"verdict": "allow" | "caution" | "block",
+         "reversibility": "reversible" | "hard" | "irreversible",
+         "blast_radius": "process" | "user" | "system" | "network",
+         "reasons": [str, ...],
+         "undo": str | None}
+
+    Deterministic rules run always (free, instant).  A model pass runs only
+    if foresight_model is on AND a completer exists, and only refines a
+    non-block verdict — it can escalate to caution/block but the hard rules
+    cannot be talked down by it.  If the sidecar is off, returns an allow so
+    the host gate behaves exactly as today.
+    """
+    if not S.ready or not S.on("foresight_enabled"):
+        return {"verdict": "allow", "reasons": []}
+    try:
+        return _foresight.assess(
+            command, kind,
+            complete_fn=(S.complete_fn if S.on("foresight_model") else None))
+    except Exception:
+        _log("[foresight] " + traceback.format_exc())
+        return {"verdict": "allow", "reasons": ["foresight error; fell open"]}
+
+
+# ── helpers ───────────────────────────────────────────────────────────────
+
+def _latest_user_text(messages: List[Dict[str, str]]) -> str:
+    for m in reversed(messages):
+        if m.get("role") == "user":
+            c = m.get("content", "")
+            # ignore tool-result envelopes; recall on real user intent
+            if "<tool_result>" in c:
+                continue
+            return c
+    return ""

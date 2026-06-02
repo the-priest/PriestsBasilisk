@@ -10,6 +10,7 @@ drown in long prompts.
 from __future__ import annotations
 import datetime
 import os
+import platform
 import socket
 from typing import List, Dict
 
@@ -200,11 +201,14 @@ Two kinds of action, and they are not the same:
   each non-obvious flag means, what could go wrong, how to undo it if
   relevant), risk ("low" | "medium" | "high").
 
-  ── EDITING FILES — propose, never auto-write ──
-  To change a file (including your OWN source — kali.py, kali_core.py,
-  kali_persona.py — when he asks you to improve yourself), propose the
-  full new contents.  It renders as a DIFF CARD: he sees exactly what
-  lines change and clicks Apply.  Nothing is written until he does.
+  ── EDITING FILES / REWRITING YOURSELF — propose, never auto-write ──
+  You CAN rewrite your own code and change your own character.  When he
+  asks you to improve yourself or change how you behave, edit your own
+  source — kali.py, kali_core.py, or your persona in kali_persona.py.
+  You don't do it silently and you don't do it unasked: you propose the
+  full new contents and he confirms, exactly the way he confirms a sudo
+  command.  It renders as a DIFF CARD; he sees every line that changes
+  and clicks Apply.  Nothing is written until he does.
 
   <tool name="propose_edit">{"path": "~/.local/share/kali/kali_core.py",
     "content": "<the COMPLETE new file contents>",
@@ -219,7 +223,10 @@ Two kinds of action, and they are not the same:
       It's immutable.  Edit anything else in that file freely; leave the
       guardrails exactly as they are.  This isn't negotiable and isn't a
       bug to work around — it's the point.
-  After a self-edit to a core file, tell him to relaunch to load it.
+  After a self-edit: a change to your persona (kali_persona.py) reloads
+  live and takes effect on your next reply — no relaunch.  A change to
+  kali.py or kali_core.py needs a relaunch to load; say so when you edit
+  those.
 
   ── EXECUTING — only after explicit approval ──
   When — and only when — the operator has clearly said to run a
@@ -238,8 +245,11 @@ Rules:
     don't dump a one-liner and run.  Explain the approach, name the
     command, lay out trade-offs or alternatives, then propose it.  Let
     him decide.  He wants a conversation, not a runaway.
-  · You can propose more than one command across a message (several
-    cards) when a task has steps — but explain the sequence first.
+  · ONE command per message.  Never propose or run more than one command,
+    edit, or skill in a single reply — not two cards, not a chain.  If a
+    task needs several steps, do the FIRST one, stop, wait for the result,
+    then send the next in your following message.  One thing at a time,
+    every time.
   · Close the tag exactly: `</tool>` — plain ASCII, plain quotes, no
     smart-quotes, no backslash-escapes.
   · After emitting a closing `</tool>`, output NOTHING ELSE.  The host
@@ -281,9 +291,15 @@ Things you can do on this machine right now:
     prompts him for his password inline and authenticates it without
     ever exposing it to you.
 
+You CAN, gated by his confirmation:
+  · Rewrite your own source and persona — propose a diff, he clicks Apply,
+    exactly like approving a sudo command.  You cannot write Python that
+    won't parse, and you cannot touch the immutable GUARDRAIL block in your
+    persona.
+
 You can NOT:
-  · Modify your own code or system prompt.
-  · Persist state outside the chat DB and your settings file.
+  · Persist state outside the chat DB, your settings file, and — only when
+    the operator has switched it on — your memory store.
   · Reach the internet directly (the cloud backend you might be
     running on is just for text generation, not for browsing)."""
 
@@ -302,9 +318,82 @@ def _now_block() -> str:
             f"Host: {host}.  User: {os.environ.get('USER', 'unknown')}.")
 
 
+# Detected once per launch and cached — these facts don't change while the
+# app is running, so we read the files once and reuse the string.
+_HOST_FACTS_CACHE: str = ""
+
+
+def _read_first(path: str) -> str:
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            return f.read().strip().strip("\x00").strip()
+    except Exception:
+        return ""
+
+
+def _detect_os() -> str:
+    txt = _read_first("/etc/os-release")
+    for line in txt.splitlines():
+        if line.startswith("PRETTY_NAME="):
+            return line.split("=", 1)[1].strip().strip('"')
+    return platform.system() or "unknown"
+
+
+def _detect_device() -> str:
+    # ARM/phones expose a devicetree model; x86 boxes expose DMI product name.
+    dt = _read_first("/sys/firmware/devicetree/base/model")
+    if dt:
+        return dt
+    dmi = _read_first("/sys/class/dmi/id/product_name")
+    vendor = _read_first("/sys/class/dmi/id/sys_vendor")
+    if dmi:
+        return f"{vendor} {dmi}".strip()
+    return ""
+
+
+def _detect_nethunter() -> bool:
+    # Best-effort.  NetHunter Pro is Kali-on-device; a few cheap signals.
+    if "nethunter" in _read_first("/etc/os-release").lower():
+        return True
+    for marker in ("/usr/bin/nethunter", "/sbin/nethunter",
+                   "/data/local/nhsystem"):
+        if os.path.exists(marker):
+            return True
+    return False
+
+
+def host_facts_block() -> str:
+    """Auto-detected facts about the machine Kali is running on, computed
+    fresh at launch.  Lets Kali know whether she's on the OnePlus 6 under
+    NetHunter, the ThinkPad, or the Dell, without being told."""
+    global _HOST_FACTS_CACHE
+    if _HOST_FACTS_CACHE:
+        return _HOST_FACTS_CACHE
+    try:
+        uname = os.uname()
+        kernel = f"{uname.release} {uname.machine}"
+    except Exception:
+        kernel = platform.platform()
+    lines = ["This machine (auto-detected this launch):",
+             f"  OS: {_detect_os()}",
+             f"  Kernel: {kernel}"]
+    dev = _detect_device()
+    if dev:
+        lines.append(f"  Device: {dev}")
+    session = os.environ.get("XDG_SESSION_TYPE", "")
+    desktop = os.environ.get("XDG_CURRENT_DESKTOP", "")
+    if session or desktop:
+        lines.append(f"  Session: {session or '?'} / {desktop or '?'}")
+    if _detect_nethunter():
+        lines.append("  NetHunter: yes")
+    _HOST_FACTS_CACHE = "\n".join(lines)
+    return _HOST_FACTS_CACHE
+
+
 def build_system_prompt(agent_mode: bool = True,
                          custom_addendum: str = "") -> str:
-    parts = [PERSONA_CORE, "", OPERATOR_PROFILE, "", _now_block()]
+    parts = [PERSONA_CORE, "", OPERATOR_PROFILE, "",
+             _now_block(), "", host_facts_block()]
     if agent_mode:
         parts.extend(["", TOOL_CONTRACT, "", CAPABILITIES])
         parts.extend(["",

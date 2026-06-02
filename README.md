@@ -67,7 +67,7 @@ What it installs:
 - `groq` Python library (cloud backend)
 - Optional desktop-control helpers (xdotool/wmctrl on X11, or wtype/wlrctl/grim on Wayland; plus tesseract-ocr and playerctl) — for app launching, typing/clicking, screenshots and screen reading. Best-effort; skipped with `--no-helpers`.
 - Optional Playwright + Chromium for browser automation (skipped with `--no-browser`)
-- The three Python files + dragon SVG icon
+- The three Python files + dragon SVG icon, plus the optional `kali_ext/` sidecar (extensions stay off until you enable them in settings)
 - A `kali` launcher in `~/.local/bin/`
 - A `.desktop` entry so Kali shows up in your app grid
 - An optional prompt for your Groq API key (you can skip and add it later in Settings)
@@ -188,10 +188,23 @@ Off by default. Enable in Settings → Behaviour → Watcher. Surfaces events as
 
 ## What Kali can NOT do
 
-- **Modify her own code.** Hardcoded off. She can read her own source if you ask, but she can't write to it. This is deliberate.
-- **Persist state outside the chat DB and settings file.** No hidden side-channels.
-- **Reach the internet directly.** The Groq backend is for text generation only. She doesn't browse, scrape, or open URLs unless you do it through her by running `curl` via the `run` tool with your confirmation.
+- **Rewrite her own code without you.** She *can* rewrite her own source and persona — but only by proposing a diff you approve, exactly like approving a sudo command. The Apply click is the gate. She cannot write Python that fails to parse (refused before any write), and she cannot touch the immutable `GUARDRAIL` block in `kali_persona.py`. A persona edit reloads live; a `kali.py`/`kali_core.py` edit needs a relaunch. This gate is deliberate and is not removed by any feature below.
+- **Persist state outside the chat DB, settings file, and — only when you switch it on — the memory store** (`~/.local/share/kali/ext/memory.db`). No hidden side-channels; everything is a file you own with a settings toggle and a `memory_forget` tool.
+- **Reach the internet directly.** The cloud backend is for text generation only. She doesn't browse, scrape, or open URLs unless you do it through her by running `curl` via the `run` tool with your confirmation.
 - **Run as root without you.** She can't. Privileged commands are proposed, never auto-run, and when you approve one she asks for your sudo password in the confirmation dialog. The password is validated against `sudo` and used to cache the credential for that command; it is never written to disk or the log. The primary path feeds it once on `sudo -S`'s stdin and the command itself sees EOF. On hardened sudoers configs (`timestamp_timeout=0`) Kali falls back to `SUDO_ASKPASS`, which briefly places the password in the environment of that single sudo call only — readable in principle via `/proc/<pid>/environ` by your own user while the call runs, then cleared. In both paths the password never reaches the command's own stdin.
+
+## Optional extensions (`kali_ext/`)
+
+A sidecar package that adds memory, self-written skills, action foresight, and a headless companion. It imports nothing from Kali's core — it depends only on the standard library plus two callables Kali hands it at boot — so it can be deleted with no trace. **Everything here is OFF by default.** With all of these off, Kali behaves exactly as a stock build: nothing is injected, no threads start, and nothing runs in the background. Flip each on per feature in `settings.json` (or a Settings panel) when you want it.
+
+- **Persistent memory** (`memory_enabled`). Relevance-scoped recall across sessions: each turn only the top-k memories matching your message are injected, so the prompt never grows with history. Local SQLite, keyword recall by default (no GPU); embeddings optional. Tools: `memory_remember`, `memory_recall`, `memory_forget`.
+- **Self-written skills** (`skills_enabled`). Kali can author a Python tool, and on your confirmation it's ast-checked and its own test is run **in a sandbox** — saved only if the test passes. Saved skills run via `skill_run`, always sandboxed. Install `bubblewrap` (`apt install bubblewrap`) for real isolation; otherwise it falls back to a network-off, resource-capped child process.
+- **Foresight** (`foresight_enabled`). Before any state-changing command runs, its consequences are predicted and a verdict attached. Catastrophic, irreversible commands (wiping disks, `fastboot flash`/`erase`, fork bombs) are **blocked even in auto-mode**; risky-but-recoverable ones are flagged. Deterministic rules always run; an optional model pass (`foresight_model`) can only escalate, never downgrade.
+- **One command at a time** (`one_command_at_a_time`, on by default). Kali never proposes or runs more than one command per message.
+- **Auto-detected host.** Every launch, Kali detects the OS, kernel, device, session, and whether it's on NetHunter, and tells herself — no config.
+- **Headless companion** (`worker_enabled`, plus the optional `systemd --user` unit in `kali_ext/packaging/`). Moves the background checks, memory consolidation, and skill curation out of the GUI into a supervised user service. Does nothing unless `worker_enabled` is on, re-checked each tick. User scope, no root, never touches NetHunter's own units.
+
+See `kali_ext/WIRING.md` for how the six guarded hook lines plug into `kali.py`.
 
 ## File layout
 
@@ -200,19 +213,25 @@ Off by default. Enable in Settings → Behaviour → Watcher. Surfaces events as
   ├── kali.py                  # UI
   ├── kali_core.py             # backends, tools, audit
   ├── kali_persona.py          # personality + system prompt
+  ├── kali_ext/                # optional extensions (memory/skills/foresight/worker)
   ├── org.thepriest.kali.svg   # icon
   ├── chats.db                 # SQLite chat history
   ├── kali.log                 # diagnostics
-  └── backups/
-       └── chats-YYYYMMDD.db   # auto-backup before each install
+  ├── backups/
+  │    └── kali_*.YYYYMMDD-HHMMSS.bak   # auto-backup before each self-edit
+  └── ext/                     # created only when an extension is enabled
+       ├── memory.db           # persistent memory store
+       ├── skills/             # saved self-written skills
+       ├── events.jsonl        # headless worker event spool
+       └── ext.log             # extension diagnostics
 
 ~/.config/kali/
-  └── settings.json            # all settings, including Groq key
+  └── settings.json            # all settings, including provider keys
 
 ~/.local/bin/kali              # launcher
 ~/.local/share/applications/org.thepriest.kali.desktop
 ~/.local/share/icons/hicolor/scalable/apps/org.thepriest.kali.svg
-(systemd unit no longer used — cloud-only)
+~/.config/systemd/user/kali-ext.service   # optional headless companion (off by default)
 ```
 
 ## Tweaking the persona

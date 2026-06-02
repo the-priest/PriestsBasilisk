@@ -1249,6 +1249,7 @@ class MessageWidget(Gtk.Box):
         if self.role == "assistant":
             try:
                 for call in parse_tool_calls(text):
+                    _rendered = False
                     if call.name == "propose":
                         cmd = (call.args.get("command")
                                or call.args.get("cmd") or "").strip()
@@ -1259,6 +1260,7 @@ class MessageWidget(Gtk.Box):
                             explanation=str(call.args.get("explanation", "")),
                             risk=str(call.args.get("risk", "medium")),
                             on_run=self._on_run_command))
+                        _rendered = True
                     elif call.name in ("propose_edit", "write_file"):
                         # An edit proposal renders as a diff card.  It NEVER
                         # writes on its own — the operator's Apply click is
@@ -1281,6 +1283,11 @@ class MessageWidget(Gtk.Box):
                             truncated=d.get("truncated", False),
                             explanation=str(call.args.get("explanation", "")),
                             on_apply=self._run_proposed_edit))
+                        _rendered = True
+                    # One command at a time: only the first proposal becomes a
+                    # card.  Anything past it is ignored at render time.
+                    if _rendered:
+                        break
             except Exception as e:
                 log(f"propose render failed: {e}")
 
@@ -1851,6 +1858,23 @@ class MainWindow(Adw.ApplicationWindow):
         self.router = BackendRouter(self.cloud, self.settings)
         self.store = ChatStore()
         self.watcher = Watcher(self.settings, self._on_watcher_event)
+
+        # ── kali_ext sidecar (optional) ──
+        # Imports nothing from this app; depends only on stdlib + the two
+        # callables handed to init().  If the package is missing or init
+        # raises, self._ext stays None and every hook below no-ops, leaving
+        # Kali identical to a stock build.  Nothing here starts a background
+        # thread unless the matching setting is on.
+        self._ext = None
+        try:
+            from kali_ext import extman as _extman
+            _extman.init(settings=self.settings,
+                         data_dir="~/.local/share/kali",
+                         complete_fn=self._ext_complete,
+                         embed_fn=None)
+            self._ext = _extman
+        except Exception as _e:
+            log(f"kali_ext not loaded: {_e}")
 
         self.current_chat_id: Optional[int] = None
         self.current_agent_mode = bool(self.settings.get("agent_mode_default",
@@ -2590,6 +2614,31 @@ class MainWindow(Adw.ApplicationWindow):
             self.working_spinner.stop()
             self.working_row.set_visible(False)
 
+    def _ext_complete(self, system: str, user: str) -> str:
+        """Short, synchronous, non-streaming completion for the sidecar
+        (memory consolidation; the optional foresight model pass).  Routes
+        through the existing BackendRouter so it inherits the fallback chain.
+        Blocks the CALLING thread — the sidecar only ever calls this from a
+        background thread, never the UI thread.  Tolerant of failure: returns
+        "" on any error or timeout so a flaky model never wedges a feature."""
+        try:
+            if not self.router.any_available():
+                return ""
+            msgs = [{"role": "system", "content": system},
+                    {"role": "user", "content": user}]
+            buf = {"t": ""}
+            done = threading.Event()
+            self.router.stream_chat(
+                msgs,
+                lambda tok: buf.__setitem__("t", buf["t"] + tok),
+                lambda meta: done.set(),
+                lambda err: done.set(),
+                threading.Event())
+            done.wait(timeout=30)
+            return buf["t"]
+        except Exception:
+            return ""
+
     def _kick_assistant_turn(self):
         # If the operator hit stop between tool turns, don't start another.
         if self._stop_requested:
@@ -2625,10 +2674,25 @@ class MainWindow(Adw.ApplicationWindow):
         chat_id = self.streaming_chat_id
 
         history = self._build_history_for_model(chat_id)
+        addendum = self.settings.get("system_prompt", "")
+        if getattr(self, "_ext", None):
+            try:
+                extra = self._ext.system_prompt_block()
+                if extra:
+                    addendum = (addendum + "\n\n" + extra).strip()
+            except Exception:
+                pass
         sysprompt = build_system_prompt(
             agent_mode=self.current_agent_mode,
-            custom_addendum=self.settings.get("system_prompt", ""))
+            custom_addendum=addendum)
         full = assemble_messages(sysprompt, history)
+        # Splice in relevance-scoped recall (top-k memories for THIS turn).
+        # No-op unless memory is enabled; never grows with history length.
+        if getattr(self, "_ext", None):
+            try:
+                full = self._ext.inject_memory(full)
+            except Exception:
+                pass
 
         # Only show the streaming widget if user is looking at this chat
         if chat_id == self.current_chat_id:
@@ -2686,6 +2750,11 @@ class MainWindow(Adw.ApplicationWindow):
         # finish_streaming → set_content) and must NOT execute.  Only the
         # sensing/run tools are executable here.
         executable = [c for c in calls if c.name != "propose"]
+        # One command at a time: even if the model emitted several tool tags,
+        # only the first is ever acted on.  (The advisory card render path is
+        # clamped to one card too.)
+        if self.settings.get("one_command_at_a_time", True):
+            executable = executable[:1]
         # Honour the agent-mode toggle and the stop button.  If the user
         # turned agent mode off or hit stop, don't execute even if the
         # model emitted a tool tag.
@@ -2694,6 +2763,23 @@ class MainWindow(Adw.ApplicationWindow):
             self._set_working(True, "running tool…")
             self._execute_tool_calls(executable)
         else:
+            # Turn has fully settled (no tool chaining).  Record it for
+            # persistent memory in the background — no-op unless memory is on.
+            if getattr(self, "_ext", None) and not cancelled:
+                try:
+                    rec_chat = self.streaming_chat_id or self.current_chat_id
+                    msgs = self.store.list_messages(rec_chat)
+                    utext = ""
+                    for m in reversed(msgs):
+                        if (m.role == "user"
+                                and "<tool_result>" not in (m.content or "")):
+                            utext = m.content
+                            break
+                    threading.Thread(
+                        target=self._ext.record_turn,
+                        args=(utext, final), daemon=True).start()
+                except Exception:
+                    pass
             self._finish_turn_cleanup()
         return False
 
@@ -2847,6 +2933,17 @@ class MainWindow(Adw.ApplicationWindow):
                     a.get("action", ""), a.get("target", ""),
                     a.get("value", ""))),
         }
+        # Merge sidecar tools (memory_*, skill_list, skill_run).  Returns an
+        # empty dict unless the matching feature is enabled, so stock Kali is
+        # unchanged.  skill_write is registered here (not in the sidecar) so
+        # the save goes through Kali's own confirm dialog.
+        if getattr(self, "_ext", None):
+            try:
+                dispatch.update(self._ext.extra_tools(self))
+                if self.settings.get("skills_enabled", False):
+                    dispatch["skill_write"] = self._tool_skill_write
+            except Exception:
+                pass
         fn = dispatch.get(call.name)
         if fn:
             self.terminal_log(f"→ tool: {call.name}({json.dumps(call.args, separators=(',',':'))[:80]})", "info")
@@ -2906,6 +3003,49 @@ class MainWindow(Adw.ApplicationWindow):
         if self.settings.get("confirm_all_commands", True):
             confirm_command_dialog(self, description,
                                    f"Kali wants to: {description}", _go)
+        else:
+            _go(True)
+
+    def _tool_skill_write(self, a):
+        """Self-written skill.  The model supplies name/code/test/description/
+        capabilities.  Saving is gated by the same confirm dialog the operator
+        uses for commands: on approval the sidecar ast-checks the code, runs
+        its test IN THE SANDBOX, and keeps it only if the test passes.  Nothing
+        executes in Kali's own process."""
+        name = str(a.get("name", "")).strip()
+        code = str(a.get("code", ""))
+        test = str(a.get("test", ""))
+        desc = str(a.get("description", ""))
+        caps = list(a.get("capabilities", []) or [])
+
+        def _go(allow=True):
+            if not allow:
+                self._feed_tool_result(f"operator declined saving skill {name!r}")
+                return
+
+            def _bg():
+                try:
+                    r = self._ext.commit_skill(name, code, test, desc, caps)
+                except Exception as e:
+                    r = {"ok": False, "error": f"{type(e).__name__}: {e}"}
+                if r.get("ok"):
+                    self.terminal_log(f"✓ skill saved: {name} "
+                                      f"(sandbox: {r.get('tier')})", "ok")
+                else:
+                    self.terminal_log(f"✗ skill rejected: "
+                                      f"{r.get('reason') or r.get('error')}", "error")
+                GLib.idle_add(self._feed_tool_result,
+                              json.dumps(r, indent=2, default=str))
+            threading.Thread(target=_bg, daemon=True).start()
+
+        descr = (f"save self-written skill '{name}'"
+                 + (f" (caps: {', '.join(caps)})" if caps else "")
+                 + " — sandbox-tested before keeping")
+        if self.settings.get("confirm_all_commands", True):
+            confirm_command_dialog(self, descr,
+                                   f"Kali wrote a skill '{name}' and wants to "
+                                   f"save it. It will be tested in a sandbox "
+                                   f"before being kept.", _go)
         else:
             _go(True)
 
@@ -2971,6 +3111,25 @@ class MainWindow(Adw.ApplicationWindow):
         # operator approved.  Goes through the same gate as the card.
         self._execute_command(command, reason)
 
+    def _reload_persona(self) -> bool:
+        """Hot-reload kali_persona after a self-edit and rebind the names this
+        module imported from it, so a change to Kali's persona applies on the
+        next reply without a relaunch.  kali.py / kali_core.py changes still
+        need a relaunch (you can't safely swap a running app's own modules)."""
+        try:
+            import importlib
+            import kali_persona as _kp
+            importlib.reload(_kp)
+            global build_system_prompt, assemble_messages, title_from_first_message
+            build_system_prompt = _kp.build_system_prompt
+            assemble_messages = _kp.assemble_messages
+            title_from_first_message = _kp.title_from_first_message
+            log("persona hot-reloaded")
+            return True
+        except Exception as e:
+            log(f"persona reload failed: {e}")
+            return False
+
     def _run_proposed_edit(self, path, content, card=None):
         """Called when the operator clicks Apply on a proposed-edit card.
         The click IS the approval.  Mirrors _run_proposed_command: set up
@@ -3008,9 +3167,20 @@ class MainWindow(Adw.ApplicationWindow):
                 if r.get("backup"):
                     parts.append(f"backup: {r['backup']}")
                 if r.get("is_python"):
-                    parts.append("Python syntax was checked before writing. "
-                                 "If this was a core Kali file, relaunch to "
-                                 "load the new code.")
+                    base = os.path.basename(r["path"])
+                    if base == "kali_persona.py":
+                        if self._reload_persona():
+                            parts.append("Persona reloaded live — the new "
+                                         "character takes effect on my next "
+                                         "reply, no relaunch needed.")
+                        else:
+                            parts.append("Python syntax was checked, but the "
+                                         "live persona reload failed — "
+                                         "relaunch to apply.")
+                    else:
+                        parts.append("Python syntax was checked before "
+                                     "writing. This is a core file (kali.py / "
+                                     "kali_core.py) — relaunch to load it.")
                 out = "\n".join(parts)
             else:
                 out = f"write failed for {path}\nerror: {r.get('error')}"
@@ -3053,6 +3223,47 @@ class MainWindow(Adw.ApplicationWindow):
         command needs root (to collect the password)."""
         if not command:
             self._feed_tool_result("error: no command")
+            return
+
+        # ── foresight gate ──
+        # Predict consequences before running.  Off unless foresight_enabled.
+        # Runs in a background thread so the optional model pass can't freeze
+        # the UI, then resumes here.  A `block` (catastrophic / irreversible)
+        # refuses outright; a `caution` is surfaced and then proceeds through
+        # the normal confirm path.  The _fs_cleared flag stops re-entry.
+        if (not getattr(self, "_fs_cleared", False)
+                and getattr(self, "_ext", None)
+                and self.settings.get("foresight_enabled", False)):
+            def _fbg():
+                try:
+                    v = self._ext.foresight(command)
+                except Exception:
+                    v = {"verdict": "allow"}
+                def _resume():
+                    try:
+                        from kali_ext.foresight import render_card
+                    except Exception:
+                        render_card = lambda x: ""
+                    if v.get("verdict") == "block":
+                        self.terminal_log("■ foresight blocked the command", "error")
+                        self._feed_tool_result(
+                            "REFUSED by foresight (catastrophic / irreversible):\n"
+                            + render_card(v)
+                            + "\n\nIf you intend this, turn foresight off in "
+                            "Settings → Behaviour and re-issue it.")
+                        return False
+                    if v.get("verdict") == "caution":
+                        card = render_card(v)
+                        if card:
+                            self.terminal_log(card, "error")
+                    self._fs_cleared = True
+                    try:
+                        self._execute_command(command, reason, from_card=from_card)
+                    finally:
+                        self._fs_cleared = False
+                    return False
+                GLib.idle_add(_resume)
+            threading.Thread(target=_fbg, daemon=True).start()
             return
 
         # Long-running ops (package work, scans, builds) need more than the
