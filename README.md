@@ -1,6 +1,12 @@
+<!--
+title: Oracle5 — Kali AI assistant
+description: A local, loyal AI assistant that lives on your Linux machine. Multi-provider LLM, voice, desktop control, security auditing, self-improving Python skills. Designed for offensive security and power users.
+keywords: ai assistant, kali linux, llm, voice control, ai agent, security audit, openclaw alternative, hermes alternative, local ai, linux agent, nethunter, gtk4, personal assistant, jarvis
+-->
+
 <div align="center">
 
-# Kali
+# Kali — local AI assistant for Linux (OpenClaw / Hermes alternative)
 
 **A local, loyal AI assistant that lives on your machine — and has hands on it.**
 
@@ -8,7 +14,7 @@ Multi-provider cloud AI (SiliconFlow · Groq · Novita · GitHub Models · Googl
 Reads files. Drives your desktop. Searches the web. Browses GitHub. Audits security.
 Talks and listens. Runs commands — with your permission, one at a time.
 
-`v0.8.0` · GTK4 + libadwaita · Linux
+`v1.0.0` · GTK4 + libadwaita · Linux
 
 </div>
 
