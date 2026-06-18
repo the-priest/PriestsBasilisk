@@ -40,6 +40,7 @@ from kali_core import (
     tool_make_dir, tool_copy_path, tool_move_path, tool_delete_path,
     tool_path_info, tool_open_url, tool_browser,
     tool_web_search, tool_web_read, tool_github,
+    tool_osint_username, tool_osint_lookup, tool_social_read,
     quick_facts as tool_quick_facts,
     sudo_cached, detect_urgency, looks_degraded,
     note_command, recent_duplicate,
@@ -3590,10 +3591,22 @@ class MainWindow(Adw.ApplicationWindow):
         # Web / GitHub research — the tools most likely to chain.
         if n == "web_search":
             return lambda: tool_web_search(
-                a.get("query", a.get("q", "")), i(a.get("max_results", 6), 6))
+                a.get("query", a.get("q", "")), i(a.get("max_results", 6), 6),
+                a.get("site", ""))
         if n == "web_read":
             return lambda: tool_web_read(
                 a.get("url", ""), i(a.get("max_chars", 6000), 6000))
+        if n == "osint_username":
+            return lambda: tool_osint_username(
+                a.get("username", a.get("user", "")), a.get("sites", ""),
+                i(a.get("timeout", 12), 12))
+        if n == "osint_lookup":
+            return lambda: tool_osint_lookup(
+                a.get("target", a.get("name", "")), a.get("full_name", ""))
+        if n == "social_read":
+            return lambda: tool_social_read(
+                a.get("url", a.get("handle", a.get("url_or_handle", ""))),
+                i(a.get("max_chars", 6000), 6000))
         if n == "github":
             return lambda: tool_github(
                 a.get("action", ""), a.get("query", ""), a.get("repo", ""),
@@ -3826,10 +3839,28 @@ class MainWindow(Adw.ApplicationWindow):
             "web_search":        lambda a: self._tool_simple(
                 lambda: tool_web_search(
                     a.get("query", a.get("q", "")),
-                    _safe_int(a.get("max_results", 6), 6))),
+                    _safe_int(a.get("max_results", 6), 6),
+                    a.get("site", ""))),
             "web_read":          lambda a: self._tool_simple(
                 lambda: tool_web_read(
                     a.get("url", ""),
+                    _safe_int(a.get("max_chars", 6000), 6000))),
+
+            # ── OSINT (read-only: simple, public sources only) ──
+            # Footprint / username discovery across public profile sites and
+            # platform-aware public readers.  No login, no gated data.
+            "osint_username":    lambda a: self._tool_simple(
+                lambda: tool_osint_username(
+                    a.get("username", a.get("user", "")),
+                    a.get("sites", ""),
+                    _safe_int(a.get("timeout", 12), 12))),
+            "osint_lookup":      lambda a: self._tool_simple(
+                lambda: tool_osint_lookup(
+                    a.get("target", a.get("name", "")),
+                    a.get("full_name", ""))),
+            "social_read":       lambda a: self._tool_simple(
+                lambda: tool_social_read(
+                    a.get("url", a.get("handle", a.get("url_or_handle", ""))),
                     _safe_int(a.get("max_chars", 6000), 6000))),
 
             # ── GitHub (read-only: simple, headless) ──
@@ -3846,7 +3877,15 @@ class MainWindow(Adw.ApplicationWindow):
         # the save goes through Kali's own confirm dialog.
         if getattr(self, "_ext", None):
             try:
-                dispatch.update(self._ext.extra_tools(self))
+                for _tname, _tfn in self._ext.extra_tools(self).items():
+                    # Sidecar tools return a result STRING.  Run each off the
+                    # GTK main loop (this dispatch runs ON it) and feed the
+                    # result back via the loop — skill_run spawns a sandbox
+                    # subprocess that can take many seconds, and running it
+                    # inline here froze the whole UI until it returned.
+                    dispatch[_tname] = (lambda f:
+                                        (lambda a: self._bg_feed_text(
+                                            lambda: f(a))))(_tfn)
                 if self.settings.get("skills_enabled", False):
                     dispatch["skill_write"] = self._tool_skill_write
             except Exception:
@@ -3877,6 +3916,21 @@ class MainWindow(Adw.ApplicationWindow):
         # streaming_chat_id stays set — _kick_assistant_turn will preserve it
         self._kick_assistant_turn()
 
+    def _bg_feed_text(self, fn):
+        """Run fn() — which returns the final result STRING — on a background
+        thread, then feed that string back via the main loop.  Like
+        _tool_simple, but for callables that already produce the finished text
+        (no JSON re-encoding), e.g. the sidecar's memory_*/skill_* tools."""
+        def _bg():
+            try:
+                text = fn()
+            except Exception as e:
+                text = f"error: {type(e).__name__}: {e}"
+            if not isinstance(text, str):
+                text = json.dumps(text, default=str)
+            GLib.idle_add(self._feed_tool_result, text)
+        threading.Thread(target=_bg, daemon=True).start()
+
     def _tool_simple(self, fn):
         def _bg():
             try:
@@ -3901,7 +3955,7 @@ class MainWindow(Adw.ApplicationWindow):
         operator approves via a dialog first; when off (auto mode), the
         action runs immediately.  Either way the result is fed back to
         the model."""
-        def _go(allow=True):
+        def _go(allow=True, password=None):
             if not allow:
                 self._feed_tool_result(f"operator declined: {description}")
                 return
@@ -3925,7 +3979,7 @@ class MainWindow(Adw.ApplicationWindow):
         desc = str(a.get("description", ""))
         caps = list(a.get("capabilities", []) or [])
 
-        def _go(allow=True):
+        def _go(allow=True, password=None):
             if not allow:
                 self._feed_tool_result(f"operator declined saving skill {name!r}")
                 return
@@ -3949,10 +4003,24 @@ class MainWindow(Adw.ApplicationWindow):
                  + (f" (caps: {', '.join(caps)})" if caps else "")
                  + " — sandbox-tested before keeping")
         if self.settings.get("confirm_all_commands", True):
-            confirm_command_dialog(self, descr,
-                                   f"Kali wrote a skill '{name}' and wants to "
-                                   f"save it. It will be tested in a sandbox "
-                                   f"before being kept.", _go)
+            # Surface what's actually being approved: capabilities, any flagged
+            # constructs from the static screen, and a code preview.  Approving
+            # a skill you can't see defeats the point of the gate.
+            try:
+                from kali_ext import skills as _sk
+                flags = sorted({r for r in _sk._RISKY if r in code})
+            except Exception:
+                flags = []
+            preview = code.strip().splitlines()
+            preview_txt = "\n".join(preview[:18])
+            if len(preview) > 18:
+                preview_txt += f"\n… (+{len(preview) - 18} more lines)"
+            msg = (f"Kali wrote a skill '{name}' and wants to save it. It is "
+                   f"tested in a sandbox before being kept.\n\n"
+                   f"capabilities: {', '.join(caps) if caps else 'none'}\n"
+                   + (f"flagged: {', '.join(flags)}\n" if flags else "")
+                   + f"\ncode:\n{preview_txt}")
+            confirm_command_dialog(self, descr, msg, _go)
         else:
             _go(True)
 

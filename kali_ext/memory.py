@@ -30,6 +30,7 @@ import math
 import re
 import sqlite3
 import struct
+import threading
 import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -47,8 +48,10 @@ PROMPT_BLOCK = (
 
 # Cheap heuristic triggers for always-on capture (no model call).
 _REMEMBER_RE = re.compile(
-    r"\b(remember that|note that|keep in mind|for future|don'?t forget|"
-    r"my name is|i prefer|i use|i always|i never|i hate|i like)\b",
+    r"\b(remember that|remember this|note that|keep in mind|for future|"
+    r"don'?t forget|make a note|my name is|i'?m called|call me|i go by|"
+    r"i prefer|i use|i'?m using|i work|i'?m working on|i run|i own|i have a|"
+    r"i always|i never|i hate|i like|i love|my \w+ is|our \w+ is)\b",
     re.IGNORECASE)
 
 
@@ -110,12 +113,28 @@ class MemoryStore:
         self.embed_fn = embed_fn
         self._db = sqlite3.connect(str(self.path), check_same_thread=False)
         self._db.row_factory = sqlite3.Row
+        # One connection is shared across the UI thread (recall injection), the
+        # post-turn recorder thread (writes), and the tool dispatch (writes).
+        # A single sqlite connection is NOT safe for concurrent use, so every
+        # access below is serialised through this reentrant lock; remember()
+        # calling _is_duplicate() re-enters from the same thread, hence RLock.
+        # WAL + a busy timeout further smooth contention (incl. the separate
+        # worker process) instead of failing a write with "database is locked"
+        # — which previously dropped memories silently.
+        self._lock = threading.RLock()
+        try:
+            self._db.execute("PRAGMA journal_mode=WAL")
+            self._db.execute("PRAGMA synchronous=NORMAL")
+            self._db.execute("PRAGMA busy_timeout=5000")
+        except sqlite3.OperationalError:
+            pass
         self._fts = False
         self._turns_since_consolidate = 0
         self._init_schema()
 
     # ── schema ────────────────────────────────────────────────────────
     def _init_schema(self) -> None:
+      with self._lock:
         c = self._db
         c.execute("""
             CREATE TABLE IF NOT EXISTS memories(
@@ -143,6 +162,15 @@ class MemoryStore:
                   VALUES('delete', old.id, old.text);
                 END""")
             self._fts = True
+            # Repopulate the external-content index from the content table.  On
+            # a fresh DB this is a no-op; on a DB whose rows predate the FTS
+            # table (an upgrade) or drifted, it makes keyword recall see them
+            # again instead of silently missing them.  Isolated so a rebuild
+            # hiccup never disables an otherwise-working FTS path.
+            try:
+                c.execute("INSERT INTO mem_fts(mem_fts) VALUES('rebuild')")
+            except sqlite3.OperationalError:
+                pass
         except sqlite3.OperationalError:
             self._fts = False
         c.commit()
@@ -150,6 +178,7 @@ class MemoryStore:
     # ── write ─────────────────────────────────────────────────────────
     def remember(self, text: str, kind: str = "fact",
                  salience: float = 0.5, source: str = "manual") -> Optional[int]:
+      with self._lock:
         text = (text or "").strip()
         if len(text) < 4:
             return None
@@ -170,6 +199,7 @@ class MemoryStore:
         return cur.lastrowid
 
     def _is_duplicate(self, text: str) -> bool:
+      with self._lock:
         norm = re.sub(r"\s+", " ", text.lower()).strip()
         for row in self._db.execute("SELECT text FROM memories "
                                     "ORDER BY id DESC LIMIT 200"):
@@ -184,7 +214,10 @@ class MemoryStore:
         # 1. instant heuristic capture from the USER turn only (the model's
         #    own words are not facts about the operator).
         if _REMEMBER_RE.search(user_text):
-            line = user_text.strip().split("\n")[0][:400]
+            # Keep the whole statement (collapsed to one line, capped), not
+            # just the first physical line — the durable fact is often on a
+            # later line of a multi-line message.
+            line = re.sub(r"\s+", " ", user_text).strip()[:400]
             self.remember(line, kind="preference", salience=0.7,
                           source="heuristic")
         # 2. debounced model consolidation, only if asked and a completer is
@@ -236,6 +269,7 @@ class MemoryStore:
         return self._recall_keyword(query, k)
 
     def _recall_vector(self, query: str, k: int) -> List[sqlite3.Row]:
+      with self._lock:
         qv = self.embed_fn([query])[0]
         scored: List[Tuple[float, sqlite3.Row]] = []
         now = time.time()
@@ -250,6 +284,7 @@ class MemoryStore:
         return [r for _, r in scored[:k]]
 
     def _recall_keyword(self, query: str, k: int) -> List[sqlite3.Row]:
+      with self._lock:
         now = time.time()
         qtoks = _tokens(query)
         rows: List[sqlite3.Row] = []
@@ -294,6 +329,7 @@ class MemoryStore:
         return "\n".join(lines)
 
     def forget(self, query_or_id: str) -> int:
+      with self._lock:
         q = (query_or_id or "").strip()
         if not q:
             return 0
@@ -334,6 +370,7 @@ class MemoryStore:
         return f"forgot {n} memor{'y' if n == 1 else 'ies'}."
 
     def stats(self) -> Dict[str, Any]:
+      with self._lock:
         row = self._db.execute("SELECT COUNT(*) n, MAX(ts) last "
                                "FROM memories").fetchone()
         return {"count": row["n"], "last_ts": row["last"],

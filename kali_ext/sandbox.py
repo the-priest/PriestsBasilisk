@@ -109,10 +109,18 @@ def _bwrap_argv(scratch: str, allow_net: bool) -> List[str]:
         "--die-with-parent",
         "--new-session",
     ]
-    # /lib may be a symlink farm; bind the common arch dir if present.
-    for extra in ("/lib64", "/usr/lib"):
-        if os.path.isdir(extra):
-            argv[1:1] = []  # no-op placeholder; binds above cover usr
+    # The interpreter may live outside /usr (a venv, pyenv, or /opt build).  If
+    # so, the ro-binds above don't cover it and the sandbox can't find python at
+    # all — the child dies before running a line.  Bind its install prefix
+    # read-only when it isn't already on one of the bound roots.  Dedup so we
+    # never hand bwrap the same path twice.
+    seen = set()
+    for root in (os.path.dirname(py), getattr(sys, "base_prefix", ""),
+                 sys.prefix):
+        if (root and root not in seen and os.path.isdir(root)
+                and not root.startswith(("/usr", "/bin", "/lib"))):
+            seen.add(root)
+            argv += ["--ro-bind", root, root]
     if not allow_net:
         argv.append("--unshare-net")
     argv += [py, "-I", "-S"]
@@ -135,20 +143,33 @@ def run_python(code_path: str,
     scratch = tempfile.mkdtemp(prefix="kali-skill-")
     tier = "rlimit"
     try:
+        # The ONLY directory bound writable into the bwrap sandbox is `scratch`.
+        # The caller's script lives elsewhere (under the skills dir), which is
+        # NOT mounted inside the namespace — so under bwrap the child could
+        # never open it and every skill failed with "No such file or directory".
+        # Stage the script INTO scratch and execute the in-scratch copy; that
+        # path is valid both outside and inside every isolation tier.
+        run_target = os.path.join(scratch, "skill_main.py")
+        try:
+            shutil.copyfile(code_path, run_target)
+        except OSError as e:
+            return {"ok": False, "tier": tier, "rc": -1, "stdout": "",
+                    "stderr": f"could not stage skill: {e}",
+                    "timed_out": False, "duration": 0.0}
+        py = sys.executable or "/usr/bin/python3"
         if _have("bwrap"):
             tier = "bwrap"
-            argv = _bwrap_argv(scratch, allow_net) + [code_path, args_json]
+            argv = _bwrap_argv(scratch, allow_net) + [run_target, args_json]
             preexec = None
         elif _have("unshare"):
             tier = "unshare"
             net = [] if allow_net else ["-n"]
-            argv = (["unshare", "-m", *net, sys.executable or "python3",
-                     "-I", "-S", code_path, args_json])
+            argv = (["unshare", "-m", *net, py,
+                     "-I", "-S", run_target, args_json])
             preexec = _rlimit_preexec(mem_mb, fsize_mb, DEFAULT_NOFILE)
         else:
             tier = "rlimit"
-            argv = [sys.executable or "python3", "-I", "-S",
-                    code_path, args_json]
+            argv = [py, "-I", "-S", run_target, args_json]
             preexec = _rlimit_preexec(mem_mb, fsize_mb, DEFAULT_NOFILE)
 
         import time as _t

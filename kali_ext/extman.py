@@ -40,6 +40,20 @@ class _State:
 S = _State()
 
 
+def _as_int(v: Any, default: int) -> int:
+    try:
+        return int(float(v))
+    except (TypeError, ValueError):
+        return default
+
+
+def _as_float(v: Any, default: float) -> float:
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return default
+
+
 def _log(msg: str) -> None:
     try:
         S.ext_dir.mkdir(parents=True, exist_ok=True)
@@ -148,42 +162,38 @@ def record_turn(user_text: str, assistant_text: str) -> None:
 
 # ── hook 3: extra tools (merged into the dispatch dict) ───────────────────
 
-def extra_tools(host: Any) -> Dict[str, Callable[[Dict[str, Any]], None]]:
-    """Return {tool_name: fn(args)} to merge into the host dispatch table.
+def extra_tools(host: Any) -> Dict[str, Callable[[Dict[str, Any]], str]]:
+    """Return {tool_name: fn(args) -> result_str} to merge into the host
+    dispatch table.
 
-    `host` is the MainWindow.  Each fn must, exactly like the host's own
-    tool handlers, end by feeding a result back via host._feed_tool_result.
-    We do that through a tiny adapter so the sidecar never needs to know the
-    host's threading model beyond that one call.
+    Each fn just RETURNS its result string.  The host runs it on a background
+    thread and marshals the string back onto its UI loop (exactly how its own
+    tools work).  This matters for skill_run, which launches a sandbox
+    subprocess that can take many seconds: returning a value lets the host keep
+    it off the GTK main thread instead of freezing the app until it finishes.
     """
     if not S.ready:
         return {}
 
-    def _feed(result_text: str) -> None:
-        host._feed_tool_result(result_text)
-
-    out: Dict[str, Callable[[Dict[str, Any]], None]] = {}
+    out: Dict[str, Callable[[Dict[str, Any]], str]] = {}
 
     if S.on("memory_enabled") and S.mem:
-        out["memory_recall"] = lambda a: _feed(
-            S.mem.tool_recall(a.get("query", ""),
-                              int(a.get("k", 8))))
-        out["memory_remember"] = lambda a: _feed(
-            S.mem.tool_remember(a.get("text", ""),
-                                a.get("kind", "fact"),
-                                float(a.get("salience", 0.5))))
-        out["memory_forget"] = lambda a: _feed(
-            S.mem.tool_forget(a.get("query", a.get("id", ""))))
+        out["memory_recall"] = lambda a: S.mem.tool_recall(
+            a.get("query", ""), _as_int(a.get("k", 8), 8))
+        out["memory_remember"] = lambda a: S.mem.tool_remember(
+            a.get("text", ""), a.get("kind", "fact"),
+            _as_float(a.get("salience", 0.5), 0.5))
+        out["memory_forget"] = lambda a: S.mem.tool_forget(
+            a.get("query", a.get("id", "")))
 
     if S.on("skills_enabled") and S.skl:
         # skill_write is registered by the HOST (kali.py), not here, so its
         # save can go through Kali's own confirm dialog before the sidecar
         # validates + sandbox-tests + persists via commit_skill().
-        out["skill_list"] = lambda a: _feed(S.skl.tool_list())
-        out["skill_run"] = lambda a: _feed(
-            S.skl.tool_run(a.get("name", ""),
-                           a.get("args", {}),
-                           timeout=int(a.get("timeout", 20))))
+        out["skill_list"] = lambda a: S.skl.tool_list()
+        out["skill_run"] = lambda a: S.skl.tool_run(
+            a.get("name", ""), a.get("args", {}),
+            timeout=_as_int(a.get("timeout", 20), 20))
 
     return out
 

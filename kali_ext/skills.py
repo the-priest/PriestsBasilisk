@@ -92,10 +92,14 @@ class SkillStore:
         head = (
             "SKILLS: you can author your own Python tools and save them for "
             "reuse.  To create one, call skill_write with: name (snake_case), "
-            "a description, the code (a function `run(args: dict) -> dict` "
-            "that prints JSON to stdout), a test (asserts that exercise run()),"
+            "a description, the code (a function `run(args: dict) -> dict` that "
+            "RETURNS a dict — do NOT print; the runner serialises whatever you "
+            "return), a test (asserts that exercise run()),"
             " and any capabilities it needs (subset of net/fs_write/"
-            "long_running; default none).  skill_write only PROPOSES — the "
+            "long_running; default none).  The skill runs in an isolated "
+            "sandbox with the PYTHON STANDARD LIBRARY ONLY — no third-party "
+            "packages (no requests, numpy, etc.); use urllib for net if the "
+            "skill has the net capability.  skill_write only PROPOSES — the "
             "operator approves it, it is sandbox-tested, and only saved if the "
             "test passes.  Run a saved skill with skill_run{name,args}.  List "
             "them with skill_list.  Write a skill when a task is repeatable; "
@@ -227,12 +231,21 @@ class SkillStore:
                                            "modified after save. Re-create it "
                                            "to re-validate.")}
         allow_net = "net" in manifest.get("capabilities", [])
-        # Wrap: call run(args) and print its JSON.
-        invoker = (code
-                   + "\n\nimport json,sys\n"
-                   + "args = json.loads(sys.argv[1]) if len(sys.argv)>1 else {}\n"
-                   + "result = run(args)\n"
-                   + "print(json.dumps(result, default=str))\n")
+        # Wrap: call run(args) and print its JSON.  Use underscore-prefixed
+        # names so we never collide with a global the skill itself defined, and
+        # turn a run() exception into a structured result the model can read
+        # instead of a bare traceback on stderr with a non-zero exit.
+        invoker = (
+            code
+            + "\n\nimport json as _json, sys as _sys\n"
+            + "_args = _json.loads(_sys.argv[1]) if len(_sys.argv) > 1 else {}\n"
+            + "try:\n"
+            + "    _result = run(_args)\n"
+            + "except Exception as _e:\n"
+            + "    _result = {'error': type(_e).__name__ + ': ' + str(_e)}\n"
+            + "if _result is None:\n"
+            + "    _result = {}\n"
+            + "print(_json.dumps(_result, default=str))\n")
         build = self.dir / f".run-{name}-{int(time.time()*1000)}"
         build.mkdir(parents=True, exist_ok=True)
         try:

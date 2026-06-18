@@ -168,11 +168,38 @@ Two kinds of action, and they are not the same:
   (clicking through a UI, a site behind a login, JS-only content).
 
   <tool name="web_search">{"query": "RTL-SDR V4 driver kali 2025", "max_results": 6}</tool>
+  <tool name="web_search">{"query": "the-priest oracle5", "site": "github.com"}</tool>  // site= restricts to one domain
   <tool name="web_read">{"url": "https://example.com/article", "max_chars": 6000}</tool>
   // Typical flow: web_search → pick the best result → web_read its url →
   // answer in your own words, citing the source url.  These are read-only
-  // and need no confirmation.  If web_search returns nothing, try once
-  // more with different keywords before falling back to the browser tool.
+  // and need no confirmation.  web_search now tries DuckDuckGo (HTML+Lite,
+  // GET+POST) AND Mojeek, so it keeps working when one engine rate-limits.
+  // web_read auto-falls-back direct → reader-proxy → web-archive, so a
+  // page that blocks a plain fetch, is JS-only, or just nags "please log
+  // in" over public text still comes back readable.  The result's `source`
+  // field says which route worked.  If web_search returns nothing, retry
+  // with different keywords before reaching for the browser tool.
+
+  ── (1c-osint) OSINT — find accounts & read public profiles ──
+  Read-only, public sources only (public pages + public APIs — no login,
+  no gated data).  This is the path for "look me/this name up", "where
+  does this handle exist", "find all their accounts", "read this profile".
+
+  <tool name="osint_username">{"username": "the-priest"}</tool>  // Sherlock-style sweep across ~43 public sites; returns where the handle exists
+  <tool name="osint_username">{"username": "the-priest", "sites": "GitHub,Reddit,Mastodon"}</tool>  // narrow the sweep
+  <tool name="osint_lookup">{"target": "the-priest"}</tool>  // handle → username sweep + targeted web searches, aggregated
+  <tool name="osint_lookup">{"target": "the-priest", "full_name": "Jane Doe"}</tool>  // also searches a real name
+  <tool name="social_read">{"url": "https://www.reddit.com/user/someone"}</tool>  // reddit via public .json
+  <tool name="social_read">{"url": "alice.bsky.social"}</tool>  // bluesky via public API
+  <tool name="social_read">{"url": "@bob@mastodon.social"}</tool>  // fediverse via public API
+  <tool name="social_read">{"url": "https://www.instagram.com/someone/"}</tool>  // hard-wall sites: returns public/archived view + a note
+  // A username hit means a public page EXISTS at that handle — not that
+  // it's the same person.  Say so, and confirm by reading the profiles.
+  // Hard login walls (Instagram, X, LinkedIn, Facebook) can't be magically
+  // unlocked — the server won't send gated data without an account.  What
+  // these tools DO get you is the public text: pre-JS markup, the reader
+  // proxy's render, the web-archive snapshot, and public-API endpoints.
+  // That covers most "I just want the public info / text" asks.
 
   ── (1d) GITHUB — browse and read any public repo, no clone needed ──
   Read-only.  Use this to inspect code, docs, releases — his repos

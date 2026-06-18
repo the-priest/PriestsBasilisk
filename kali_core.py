@@ -2640,28 +2640,160 @@ def tool_browser(action: str, target: str = "",
 _WEB_UA = ("Mozilla/5.0 (X11; Linux x86_64; rv:124.0) "
            "Gecko/20100101 Firefox/124.0")
 _WEB_TIMEOUT = 15
+# A public reader that fetches a page server-side and hands back clean text.
+# Used as a fallback when a site blocks a plain fetch, serves JS-only
+# content, or hides the text behind a dismissible "log in" overlay.  No key,
+# best-effort.  The text we want is public; this just renders it for us.
+_READER_PREFIX = "https://r.jina.ai/"
+
+
+def _decompress(raw: bytes, encoding: str) -> bytes:
+    """Inflate a response body per its Content-Encoding (gzip/deflate/br)."""
+    enc = (encoding or "").lower()
+    try:
+        if "gzip" in enc:
+            import gzip
+            return gzip.decompress(raw)
+        if "deflate" in enc:
+            import zlib
+            try:
+                return zlib.decompress(raw)
+            except zlib.error:
+                return zlib.decompress(raw, -zlib.MAX_WBITS)
+        if "br" in enc:
+            try:
+                import brotli  # type: ignore
+                return brotli.decompress(raw)
+            except Exception:
+                return raw
+    except Exception:
+        return raw
+    return raw
 
 
 def _web_get(url: str, timeout: int = _WEB_TIMEOUT,
-             data: Optional[bytes] = None) -> Tuple[int, str, str]:
-    """HTTP GET/POST returning (status, text, final_url).  Decodes the
-    body as utf-8 (lenient) and follows redirects (urllib default)."""
+             data: Optional[bytes] = None,
+             extra_headers: Optional[Dict[str, str]] = None,
+             ) -> Tuple[int, str, str]:
+    """HTTP GET/POST returning (status, text, final_url).  Decodes the body
+    (gzip/deflate aware, lenient utf-8) and follows redirects.  On an HTTP
+    error status the body is STILL returned — many 403/404 pages carry the
+    text we actually want — so callers decide what to do with it."""
     import urllib.parse  # noqa: F401  (ensures submodule is loaded)
     headers = {
         "User-Agent": _WEB_UA,
-        "Accept": "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8",
+        "Accept": ("text/html,application/xhtml+xml,application/xml;q=0.9,"
+                   "application/json;q=0.8,*/*;q=0.7"),
         "Accept-Language": "en-US,en;q=0.9",
+        "Accept-Encoding": "gzip, deflate",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none",
+        "Upgrade-Insecure-Requests": "1",
     }
+    if data is not None:
+        headers["Content-Type"] = "application/x-www-form-urlencoded"
+    if extra_headers:
+        headers.update(extra_headers)
     req = urllib.request.Request(url, data=data, headers=headers,
                                  method="POST" if data else "GET")
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        raw = r.read(2_000_000)  # 2 MB hard cap
-        charset = "utf-8"
+
+    def _read(resp) -> Tuple[int, str, str]:
+        raw = resp.read(3_000_000)  # 3 MB hard cap
         try:
-            charset = r.headers.get_content_charset() or "utf-8"
+            raw = _decompress(raw, resp.headers.get("Content-Encoding", ""))
         except Exception:
             pass
-        return r.getcode(), raw.decode(charset, "replace"), r.geturl()
+        charset = "utf-8"
+        try:
+            charset = resp.headers.get_content_charset() or "utf-8"
+        except Exception:
+            pass
+        return resp.getcode(), raw.decode(charset, "replace"), resp.geturl()
+
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return _read(r)
+    except urllib.error.HTTPError as e:
+        # The error response is itself a file-like object with a body.
+        try:
+            return _read(e)
+        except Exception:
+            return e.code, "", url
+
+
+def _wayback_url(url: str) -> Optional[str]:
+    """Ask the Wayback Machine for the latest archived snapshot of a URL,
+    returning the raw-content variant (no archive chrome) or None."""
+    import urllib.parse
+    try:
+        api = ("https://archive.org/wayback/available?url="
+               + urllib.parse.quote(url, safe=""))
+        _, body, _ = _web_get(api, timeout=12)
+        data = json.loads(body)
+        snap = (data.get("archived_snapshots") or {}).get("closest") or {}
+        if snap.get("available") and snap.get("url"):
+            return snap["url"].replace("/http", "if_/http", 1)
+    except Exception:
+        return None
+    return None
+
+
+def _reader_fetch(url: str, timeout: int = 25) -> Tuple[int, str, str]:
+    """Fetch a page through the reader proxy (renders JS server-side, returns
+    clean text).  Sidesteps JS-only pages and many soft blocks."""
+    try:
+        status, body, _ = _web_get(_READER_PREFIX + url, timeout=timeout,
+                                   extra_headers={"X-Return-Format": "text"})
+        return status, body, url
+    except Exception as e:
+        return 0, f"reader error: {type(e).__name__}: {e}", url
+
+
+def _fetch_readable(url: str, timeout: int = 20) -> Tuple[str, str, str, str]:
+    """Best-effort 'give me the readable text of this page', trying routes in
+    order and stopping at the first that yields real content:
+      1. direct fetch — raw pre-JS HTML.  This alone already gets past most
+         soft 'please log in' overlays, because the text sits in the markup
+         and only a script hides it visually.
+      2. reader proxy — executes JS, dodges many blocks.
+      3. Wayback Machine — the public archived copy.
+    Returns (text, source_label, final_url, title).  Empty text => every
+    route failed (a genuine hard login wall, or offline)."""
+    def _title(h: str) -> str:
+        tm = re.search(r"(?is)<title[^>]*>(.*?)</title>", h)
+        return _html_to_text(tm.group(1))[:200] if tm else ""
+
+    body = ""
+    final = url
+    try:
+        status, body, final = _web_get(url, timeout=timeout)
+        if status == 200 and body:
+            txt = _readable_from_html(body)
+            if len(txt) >= 200:
+                return txt, "direct", final, _title(body)
+    except Exception:
+        body = ""
+        final = url
+
+    rstatus, rbody, _ = _reader_fetch(url, timeout=timeout + 8)
+    if rstatus == 200 and rbody and len(rbody.strip()) >= 200:
+        return rbody.strip(), "reader", url, ""
+
+    wb = _wayback_url(url)
+    if wb:
+        try:
+            status, wbody, _ = _web_get(wb, timeout=timeout)
+            if status == 200 and wbody:
+                txt = _readable_from_html(wbody)
+                if len(txt) >= 200:
+                    return txt, "wayback", wb, _title(wbody)
+        except Exception:
+            pass
+
+    if body:  # thin, but better than nothing
+        return _readable_from_html(body), "direct-thin", final, _title(body)
+    return "", "none", url, ""
 
 
 def _ddg_unwrap(href: str) -> str:
@@ -2706,6 +2838,24 @@ def _html_to_text(html_src: str) -> str:
     s = "\n".join(ln.strip() for ln in s.splitlines())
     s = _NL_RE.sub("\n\n", s)
     return s.strip()
+
+
+def _readable_from_html(html_src: str) -> str:
+    """Like _html_to_text but first drops nav/header/footer/aside/forms and
+    narrows to the <article>/<main> region when present, so we keep the body
+    text and shed the boilerplate.  Falls back to the whole document."""
+    s = html_src
+    for tag in ("script", "style", "noscript", "nav", "header", "footer",
+                "aside", "form", "svg"):
+        s = re.sub(rf"(?is)<{tag}\b.*?</{tag}>", " ", s)
+    pick = None
+    for pat in (r"(?is)<article\b[^>]*>(.*?)</article>",
+                r"(?is)<main\b[^>]*>(.*?)</main>"):
+        m = re.search(pat, s)
+        if m and len(m.group(1)) > 400:
+            pick = m.group(1)
+            break
+    return _html_to_text(pick if pick else s)
 
 
 def _parse_ddg_html(html_src: str, limit: int) -> List[Dict[str, str]]:
@@ -2778,46 +2928,118 @@ def _ddg_instant(query: str) -> Optional[str]:
     return None
 
 
-def tool_web_search(query: str, max_results: int = 6) -> Dict[str, Any]:
-    """Search the web over HTTP and return ranked results as text.
-    No browser, no API key.  Tries DuckDuckGo HTML, then Lite, and always
-    folds in an Instant Answer when DDG has one."""
+def _generic_uddg_links(html_src: str, limit: int) -> List[Dict[str, str]]:
+    """Markup-agnostic DDG extractor: pull every result link DDG wraps as
+    /l/?uddg=… with its anchor text.  Survives result class-name churn,
+    which is the usual reason the strict parser suddenly returns nothing."""
+    import html as _h
+    out: List[Dict[str, str]] = []
+    seen = set()
+    for m in re.finditer(
+            r'<a\b[^>]+href="((?://duckduckgo\.com)?/l/\?[^"]*uddg=[^"]+)"[^>]*>(.*?)</a>',
+            html_src, re.IGNORECASE | re.DOTALL):
+        url = _ddg_unwrap(_h.unescape(m.group(1)))
+        title = _html_to_text(m.group(2))
+        if not url or not title or url in seen or "duckduckgo.com" in url:
+            continue
+        seen.add(url)
+        out.append({"title": title, "url": url, "snippet": ""})
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _parse_mojeek(html_src: str, limit: int) -> List[Dict[str, str]]:
+    """Lenient Mojeek parser (independent index — good when DDG rate-limits).
+    Grabs external result links + titles from the results region."""
+    import html as _h
+    out: List[Dict[str, str]] = []
+    seen = set()
+    region = html_src
+    mi = re.search(r'(?is)<ul[^>]+class="results[^"]*">(.*?)</ul>', html_src)
+    if mi:
+        region = mi.group(1)
+    for m in re.finditer(r'<a\b[^>]+href="(https?://[^"]+)"[^>]*>(.*?)</a>',
+                         region, re.IGNORECASE | re.DOTALL):
+        url = _h.unescape(m.group(1))
+        title = _html_to_text(m.group(2))
+        host = url.split("/")[2] if "://" in url else ""
+        if (not title or len(title) < 3 or "mojeek.com" in host
+                or url in seen):
+            continue
+        seen.add(url)
+        out.append({"title": title, "url": url, "snippet": ""})
+        if len(out) >= limit:
+            break
+    return out
+
+
+def tool_web_search(query: str, max_results: int = 6,
+                    site: str = "") -> Dict[str, Any]:
+    """Search the web over HTTP and return ranked results as text.  No
+    browser, no API key.  Tries DuckDuckGo (HTML then Lite, GET then POST),
+    falls back to Mojeek (a separate index), and always folds in a DDG
+    Instant Answer when one exists.  Pass `site` to restrict to one domain
+    (e.g. site='reddit.com'), or just put 'site:domain' in the query."""
     import urllib.parse
     query = (query or "").strip()
+    site = (site or "").strip().lstrip("@")
+    if site and f"site:{site}" not in query:
+        query = f"{query} site:{site}".strip()
     if not query:
         return {"ok": False, "error": "no query"}
 
-    max_results = max(1, min(int(max_results or 6), 12))
+    max_results = max(1, min(int(max_results or 6), 20))
     q = urllib.parse.quote(query)
+    form = urllib.parse.urlencode({"q": query}).encode()
     results: List[Dict[str, str]] = []
     errors: List[str] = []
+    engine_used = ""
 
-    # 1) DuckDuckGo HTML endpoint (richest: titles + snippets).
-    for endpoint, parser in (
-            (f"https://html.duckduckgo.com/html/?q={q}", _parse_ddg_html),
-            (f"https://lite.duckduckgo.com/lite/?q={q}", _parse_ddg_lite)):
-        if results:
+    attempts = [
+        ("ddg-html", f"https://html.duckduckgo.com/html/?q={q}", None,
+         _parse_ddg_html),
+        ("ddg-html-post", "https://html.duckduckgo.com/html/", form,
+         _parse_ddg_html),
+        ("ddg-lite", f"https://lite.duckduckgo.com/lite/?q={q}", None,
+         _parse_ddg_lite),
+        ("ddg-lite-post", "https://lite.duckduckgo.com/lite/", form,
+         _parse_ddg_lite),
+        ("mojeek", f"https://www.mojeek.com/search?q={q}", None,
+         _parse_mojeek),
+    ]
+    for name, endpoint, data, parser in attempts:
+        if len(results) >= max_results:
             break
         try:
-            status, body, _ = _web_get(endpoint)
-            if status == 200:
-                results = parser(body, max_results)
+            status, body, _ = _web_get(endpoint, data=data)
+            if status == 200 and body:
+                got = parser(body, max_results)
+                if not got and name.startswith("ddg"):
+                    got = _generic_uddg_links(body, max_results)
+                have = {r["url"] for r in results}
+                for r in got:
+                    if r["url"] not in have:
+                        results.append(r)
+                        have.add(r["url"])
+                if got and not engine_used:
+                    engine_used = name
         except Exception as e:
-            errors.append(f"{type(e).__name__}: {str(e)[:120]}")
+            errors.append(f"{name}: {type(e).__name__}: {str(e)[:80]}")
 
     instant = _ddg_instant(query)
 
     if not results and not instant:
         err = "no results"
         if errors:
-            joined = "; ".join(errors[:2])
+            joined = "; ".join(errors[:3])
             err += f" ({joined})"
             if any(t in joined for t in ("URLError", "timed out",
                                          "Connection", "Name or service")):
                 err = f"search failed — likely offline or DNS issue ({joined})"
         return {"ok": False, "error": err, "query": query}
 
-    # Build a compact, model-readable digest.
+    results = results[:max_results]
     lines: List[str] = [f"Search results for: {query}"]
     if instant:
         lines.append(f"\nDirect answer: {instant}")
@@ -2831,6 +3053,7 @@ def tool_web_search(query: str, max_results: int = 6) -> Dict[str, Any]:
     return {
         "ok": True,
         "query": query,
+        "engine": engine_used or ("instant" if instant else ""),
         "instant_answer": instant or "",
         "results": results,
         "text": "\n".join(lines),
@@ -2838,40 +3061,428 @@ def tool_web_search(query: str, max_results: int = 6) -> Dict[str, Any]:
 
 
 def tool_web_read(url: str, max_chars: int = 6000) -> Dict[str, Any]:
-    """Fetch one URL and return its readable text (markup stripped).
+    """Fetch one URL and return its readable text (markup stripped).  Tries a
+    direct fetch first, then a reader proxy, then the Wayback Machine, so a
+    blocked, JS-only, or soft-login-gated page still yields its public text.
+    The reported `source` tells you which route produced the text.
     Pairs with web_search: search → pick a result → read it."""
     url = (url or "").strip()
     if not url:
         return {"ok": False, "error": "no url"}
     if "://" not in url:
         url = "https://" + url
-    max_chars = max(500, min(int(max_chars or 6000), 20000))
-    try:
-        status, body, final_url = _web_get(url, timeout=20)
-    except Exception as e:
-        return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:160]}",
+    max_chars = max(500, min(int(max_chars or 6000), 30000))
+
+    text, source, final_url, title = _fetch_readable(url, timeout=20)
+    if not text:
+        return {"ok": False,
+                "error": ("could not retrieve readable content — the page is "
+                          "likely behind a hard login wall or offline. Tried "
+                          "direct fetch, reader proxy, and web archive."),
                 "url": url}
-    if status != 200:
-        return {"ok": False, "error": f"HTTP {status}", "url": final_url}
 
-    # Title, if present.
-    title = ""
-    tm = re.search(r"(?is)<title[^>]*>(.*?)</title>", body)
-    if tm:
-        title = _html_to_text(tm.group(1))[:200]
-
-    text = _html_to_text(body)
     truncated = len(text) > max_chars
     if truncated:
         text = text[:max_chars].rsplit(" ", 1)[0] + " …"
+    head = f"[via {source}] {final_url}"
+    if title:
+        head = f"{title}\n{head}"
     return {
         "ok": True,
         "url": final_url,
         "title": title,
+        "source": source,
         "truncated": truncated,
-        "text": (f"{title}\n{final_url}\n\n{text}" if title else
-                 f"{final_url}\n\n{text}"),
+        "text": f"{head}\n\n{text}",
     }
+
+
+# ═════════════════════════════════════════════════════════════════════
+# OSINT  — footprint / username discovery across public profile sites,
+#          plus platform-aware public readers.  Read-only; touches only
+#          public pages and public APIs (no login, no scraping of gated
+#          data).  Built for auditing your own footprint and open-source
+#          research on a name.  A hit means a public page exists at that
+#          handle — NOT that it is the same person; always confirm.
+# ═════════════════════════════════════════════════════════════════════
+
+# (name, url template with {u}, kind, marker)
+#   kind="status"  → 200 means found, 404/410 means absent
+#   kind="present" → 200 body containing marker means found
+#   kind="absent"  → 200 body containing marker means NOT found
+_OSINT_SITES: List[Tuple[str, str, str, str]] = [
+    ("GitHub",     "https://github.com/{u}",                          "status",  ""),
+    ("GitLab",     "https://gitlab.com/{u}",                          "status",  ""),
+    ("TikTok",     "https://www.tiktok.com/@{u}",                     "status",  ""),
+    ("YouTube",    "https://www.youtube.com/@{u}",                    "status",  ""),
+    ("Instagram",  "https://www.instagram.com/{u}/",                  "status",  ""),
+    ("Pinterest",  "https://www.pinterest.com/{u}/",                  "status",  ""),
+    ("SoundCloud", "https://soundcloud.com/{u}",                      "status",  ""),
+    ("Vimeo",      "https://vimeo.com/{u}",                           "status",  ""),
+    ("Flickr",     "https://www.flickr.com/people/{u}",               "status",  ""),
+    ("Dribbble",   "https://dribbble.com/{u}",                        "status",  ""),
+    ("Behance",    "https://www.behance.net/{u}",                     "status",  ""),
+    ("DeviantArt", "https://www.deviantart.com/{u}",                  "status",  ""),
+    ("Medium",     "https://medium.com/@{u}",                         "status",  ""),
+    ("Keybase",    "https://keybase.io/{u}",                          "status",  ""),
+    ("Replit",     "https://replit.com/@{u}",                         "status",  ""),
+    ("PyPI",       "https://pypi.org/user/{u}/",                      "status",  ""),
+    ("npm",        "https://www.npmjs.com/~{u}",                      "status",  ""),
+    ("DockerHub",  "https://hub.docker.com/u/{u}",                    "status",  ""),
+    ("HackerOne",  "https://hackerone.com/{u}",                       "status",  ""),
+    ("Bugcrowd",   "https://bugcrowd.com/{u}",                        "status",  ""),
+    ("Kaggle",     "https://www.kaggle.com/{u}",                      "status",  ""),
+    ("LastFM",     "https://www.last.fm/user/{u}",                    "status",  ""),
+    ("Lichess",    "https://lichess.org/@/{u}",                       "status",  ""),
+    ("ChessCom",   "https://www.chess.com/member/{u}",                "status",  ""),
+    ("Codepen",    "https://codepen.io/{u}",                          "status",  ""),
+    ("AboutMe",    "https://about.me/{u}",                            "status",  ""),
+    ("Linktree",   "https://linktr.ee/{u}",                           "status",  ""),
+    ("Gravatar",   "https://en.gravatar.com/{u}",                     "status",  ""),
+    ("Mastodon",   "https://mastodon.social/@{u}",                    "status",  ""),
+    ("Snapchat",   "https://www.snapchat.com/add/{u}",                "status",  ""),
+    ("Wordpress",  "https://{u}.wordpress.com",                       "status",  ""),
+    ("Tumblr",     "https://{u}.tumblr.com",                          "status",  ""),
+    ("Blogspot",   "https://{u}.blogspot.com",                        "status",  ""),
+    ("ItchIo",     "https://itch.io/profile/{u}",                     "status",  ""),
+    ("Trello",     "https://trello.com/{u}",                          "status",  ""),
+    ("Spotify",    "https://open.spotify.com/user/{u}",               "status",  ""),
+    ("Reddit",     "https://www.reddit.com/user/{u}/about.json",      "status",  ""),
+    ("Bluesky",    "https://public.api.bsky.app/xrpc/app.bsky.actor.getProfile?actor={u}.bsky.app", "status", ""),
+    ("Twitch",     "https://www.twitch.tv/{u}",                       "status",  ""),
+    ("Telegram",   "https://t.me/{u}",                                "present", "tgme_page_title"),
+    ("Steam",      "https://steamcommunity.com/id/{u}",               "absent",  "could not be found"),
+    ("HackerNews", "https://news.ycombinator.com/user?id={u}",        "absent",  "No such user."),
+    ("Pastebin",   "https://pastebin.com/u/{u}",                      "absent",  "Not Found"),
+]
+
+
+def _osint_check_one(entry: Tuple[str, str, str, str], username: str,
+                     timeout: int) -> Dict[str, str]:
+    name, tmpl, kind, marker = entry
+    url = tmpl.format(u=username)
+    try:
+        status, body, _ = _web_get(url, timeout=timeout)
+    except Exception as e:
+        return {"site": name, "url": url, "status": "error",
+                "detail": type(e).__name__}
+    if kind == "status":
+        if status == 200:
+            return {"site": name, "url": url, "status": "found"}
+        if status in (404, 410):
+            return {"site": name, "url": url, "status": "absent"}
+        return {"site": name, "url": url, "status": "unknown",
+                "detail": f"HTTP {status}"}
+    if kind == "present":
+        if status == 200 and marker.lower() in body.lower():
+            return {"site": name, "url": url, "status": "found"}
+        return {"site": name, "url": url, "status": "absent"}
+    if kind == "absent":
+        if status != 200:
+            return {"site": name, "url": url, "status": "absent",
+                    "detail": f"HTTP {status}"}
+        if marker.lower() in body.lower():
+            return {"site": name, "url": url, "status": "absent"}
+        return {"site": name, "url": url, "status": "found"}
+    return {"site": name, "url": url, "status": "unknown"}
+
+
+def tool_osint_username(username: str, sites: str = "",
+                        timeout: int = 12) -> Dict[str, Any]:
+    """Check where a username exists across ~43 public profile sites (a
+    Sherlock-style sweep), concurrently.  Requests each site's public profile
+    URL and reports found / absent / inconclusive.  Read-only — only public
+    pages are touched.  `sites` optionally narrows to a comma-list of site
+    names (e.g. 'GitHub,Reddit,Mastodon')."""
+    username = (username or "").strip().lstrip("@")
+    if not username:
+        return {"ok": False, "error": "no username"}
+    if not re.match(r"^[A-Za-z0-9._\-]{1,40}$", username):
+        return {"ok": False,
+                "error": "username has unusual characters; expected letters, "
+                         "digits, dot, underscore or hyphen"}
+    timeout = max(4, min(int(timeout or 12), 25))
+    wanted = {s.strip().lower() for s in sites.split(",") if s.strip()}
+    entries = [e for e in _OSINT_SITES
+               if not wanted or e[0].lower() in wanted]
+
+    found: List[Dict[str, str]] = []
+    absent: List[Dict[str, str]] = []
+    unknown: List[Dict[str, str]] = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=12) as ex:
+        futs = {ex.submit(_osint_check_one, e, username, timeout): e
+                for e in entries}
+        try:
+            for fut in concurrent.futures.as_completed(
+                    futs, timeout=timeout + 25):
+                try:
+                    r = fut.result()
+                except Exception:
+                    continue
+                bucket = (found if r["status"] == "found"
+                          else absent if r["status"] == "absent"
+                          else unknown)
+                bucket.append(r)
+        except concurrent.futures.TimeoutError:
+            pass
+
+    found.sort(key=lambda r: r["site"].lower())
+    unknown.sort(key=lambda r: r["site"].lower())
+
+    lines = [f"Username sweep for: {username}",
+             f"Found on {len(found)} site(s); {len(unknown)} inconclusive; "
+             f"checked {len(entries)}."]
+    if found:
+        lines.append("\nFOUND:")
+        for r in found:
+            lines.append(f"  • {r['site']}: {r['url']}")
+    if unknown:
+        lines.append("\nINCONCLUSIVE (these sites cloak missing profiles — "
+                     "open by hand to confirm):")
+        for r in unknown:
+            d = f" ({r.get('detail')})" if r.get("detail") else ""
+            lines.append(f"  • {r['site']}: {r['url']}{d}")
+    lines.append("\nA hit means a public page exists at that handle, not that "
+                 "it's the same person. Read the profiles to confirm.")
+    return {
+        "ok": True,
+        "username": username,
+        "found": found,
+        "inconclusive": unknown,
+        "checked": len(entries),
+        "text": "\n".join(lines),
+    }
+
+
+def tool_osint_lookup(target: str, full_name: str = "") -> Dict[str, Any]:
+    """Footprint lookup for a person or handle.  If `target` looks like a
+    username it runs a username sweep; in all cases it runs targeted web
+    searches (profiles, mentions, the major platforms) and aggregates what's
+    publicly findable into one report.  Read-only, public sources only —
+    built for auditing your own footprint or open-source research on a name.
+    Pass `full_name` to search a real name alongside a handle."""
+    target = (target or "").strip()
+    if not target:
+        return {"ok": False, "error": "no target"}
+    handle = target.lstrip("@")
+    is_handle = (" " not in target
+                 and bool(re.match(r"^@?[A-Za-z0-9._\-]{1,40}$", target)))
+
+    head = f"OSINT lookup: {target}"
+    if full_name:
+        head += f"  (name: {full_name})"
+    sections = [head]
+
+    sweep = None
+    if is_handle:
+        sweep = tool_osint_username(handle)
+        if sweep.get("ok"):
+            sections.append("\n=== USERNAME SWEEP ===\n" + sweep["text"])
+
+    name_q = (full_name.strip() or target)
+    quoted = f'"{name_q}"' if " " in name_q else name_q
+    queries = [
+        quoted,
+        f'{quoted} profile',
+        f'{quoted} (site:linkedin.com OR site:github.com OR site:twitter.com OR site:x.com)',
+        f'{quoted} (site:reddit.com OR site:medium.com OR site:facebook.com)',
+        f'{handle} (site:github.com OR site:gitlab.com OR site:keybase.io)',
+        f'{quoted} contact OR email',
+    ]
+    seen = set()
+    hits: List[Dict[str, str]] = []
+    for qq in queries:
+        try:
+            r = tool_web_search(qq, max_results=6)
+        except Exception:
+            continue
+        if r.get("ok"):
+            for res in r.get("results", []):
+                u = res.get("url", "")
+                if u and u not in seen:
+                    seen.add(u)
+                    hits.append(res)
+
+    if hits:
+        sections.append("\n=== WEB MENTIONS / PROFILES ===")
+        for i, r in enumerate(hits[:25], 1):
+            line = f"{i}. {r.get('title', '')}\n   {r.get('url', '')}"
+            if r.get("snippet"):
+                line += f"\n   {r['snippet'][:200]}"
+            sections.append(line)
+
+    sections.append("\nAggregates only public, open-source results. Verify "
+                    "identity by reading the actual pages — name and handle "
+                    "collisions are common.")
+    return {
+        "ok": True,
+        "target": target,
+        "sweep": sweep,
+        "web_hits": hits[:25],
+        "text": "\n".join(sections),
+    }
+
+
+def _reddit_json_to_text(body: str, max_chars: int) -> str:
+    try:
+        data = json.loads(body)
+    except Exception:
+        return ""
+    out: List[str] = []
+
+    def walk(node):
+        if isinstance(node, dict):
+            kind = node.get("kind")
+            d = node.get("data", {}) if isinstance(node.get("data"), dict) else {}
+            if kind == "t3":
+                out.append(f"POST: {d.get('title', '')}\n  r/"
+                           f"{d.get('subreddit', '')} · u/{d.get('author', '')}"
+                           f" · score {d.get('score', '')}")
+                if d.get("selftext"):
+                    out.append("  " + d["selftext"][:800])
+                if d.get("url") and not d.get("is_self"):
+                    out.append("  link: " + d["url"])
+            elif kind == "t1":
+                out.append(f"COMMENT by u/{d.get('author', '')} "
+                           f"(score {d.get('score', '')}):\n  "
+                           f"{(d.get('body') or '')[:600]}")
+            if isinstance(d.get("children"), list):
+                for c in d["children"]:
+                    walk(c)
+        elif isinstance(node, list):
+            for c in node:
+                walk(c)
+
+    walk(data)
+    txt = "\n\n".join(out)
+    return txt[:max_chars] if txt else ""
+
+
+def _bsky_public(handle: str, max_chars: int) -> str:
+    import urllib.parse
+    handle = handle.lstrip("@")
+    base = "https://public.api.bsky.app/xrpc/"
+    try:
+        _, pj, _ = _web_get(base + "app.bsky.actor.getProfile?actor="
+                            + urllib.parse.quote(handle), timeout=15)
+        prof = json.loads(pj)
+        if prof.get("error"):
+            return ""
+        head = (f"BLUESKY @{prof.get('handle', '')}  "
+                f"({prof.get('displayName', '')})\n"
+                f"  followers {prof.get('followersCount', '?')} · "
+                f"following {prof.get('followsCount', '?')} · "
+                f"posts {prof.get('postsCount', '?')}\n"
+                f"  {prof.get('description', '') or ''}")
+        _, fj, _ = _web_get(
+            base + "app.bsky.feed.getAuthorFeed?limit=15&actor="
+            + urllib.parse.quote(handle), timeout=15)
+        feed = json.loads(fj).get("feed", [])
+        posts = []
+        for item in feed:
+            rec = (item.get("post", {}).get("record", {}) or {})
+            t = rec.get("text", "")
+            if t:
+                posts.append("• " + t.replace("\n", " ")[:280])
+        body = "\n".join(posts)
+        txt = head + ("\n\nRecent posts:\n" + body if body else "")
+        return txt[:max_chars]
+    except Exception:
+        return ""
+
+
+def _mastodon_public(instance: str, user: str, max_chars: int) -> str:
+    import urllib.parse
+    base = f"https://{instance}/api/v1/"
+    try:
+        _, lj, _ = _web_get(base + "accounts/lookup?acct="
+                            + urllib.parse.quote(user), timeout=15)
+        acct = json.loads(lj)
+        aid = acct.get("id")
+        if not aid:
+            return ""
+        head = (f"MASTODON @{acct.get('acct', '')}@{instance} "
+                f"({acct.get('display_name', '')})\n"
+                f"  followers {acct.get('followers_count', '?')} · "
+                f"following {acct.get('following_count', '?')} · "
+                f"posts {acct.get('statuses_count', '?')}\n"
+                f"  {_html_to_text(acct.get('note', '') or '')}")
+        _, sj, _ = _web_get(base + f"accounts/{aid}/statuses?limit=15",
+                            timeout=15)
+        toots = []
+        for st in json.loads(sj):
+            t = _html_to_text(st.get("content", "") or "")
+            if t:
+                toots.append("• " + t.replace("\n", " ")[:280])
+        body = "\n".join(toots)
+        txt = head + ("\n\nRecent posts:\n" + body if body else "")
+        return txt[:max_chars]
+    except Exception:
+        return ""
+
+
+def tool_social_read(url_or_handle: str,
+                     max_chars: int = 6000) -> Dict[str, Any]:
+    """Read public content from social platforms via each one's public,
+    no-login path where it exists:
+      • Reddit  — appends .json (public)
+      • Bluesky — public AppView API (no auth)
+      • Mastodon/Fediverse (@user@instance) — instance public API
+      • everything else — falls back to web_read (direct→reader→archive)
+    For platforms with a hard login wall (Instagram, X, LinkedIn, Facebook)
+    it returns the public/archived view and says plainly when that's all
+    that's available.  Read-only, public data only."""
+    s = (url_or_handle or "").strip()
+    if not s:
+        return {"ok": False, "error": "no url or handle"}
+    low = s.lower()
+
+    # Reddit → .json
+    if "reddit.com" in low:
+        ju = s.split("?")[0].rstrip("/")
+        if not ju.endswith(".json"):
+            ju += ".json"
+        try:
+            status, body, _ = _web_get(ju, timeout=18)
+            if status == 200:
+                txt = _reddit_json_to_text(body, max_chars)
+                if txt:
+                    return {"ok": True, "platform": "reddit", "url": s,
+                            "text": txt}
+        except Exception:
+            pass  # fall through to generic
+
+    # Bluesky handle or profile URL
+    bsky_handle = ""
+    if "bsky.app/profile/" in low:
+        bsky_handle = s.split("profile/")[1].split("/")[0].split("?")[0]
+    elif re.match(r"^@?[a-z0-9.\-]+\.bsky\.social$", low):
+        bsky_handle = s.lstrip("@")
+    if bsky_handle:
+        out = _bsky_public(bsky_handle, max_chars)
+        if out:
+            return {"ok": True, "platform": "bluesky", "url": s, "text": out}
+
+    # Mastodon / fediverse @user@instance
+    m = re.match(r"^@?([A-Za-z0-9_]+)@([A-Za-z0-9.\-]+\.[A-Za-z]{2,})$", s)
+    if m:
+        out = _mastodon_public(m.group(2), m.group(1), max_chars)
+        if out:
+            return {"ok": True, "platform": "mastodon", "url": s, "text": out}
+
+    # Generic / hard-wall platforms: read public or archived copy.
+    hard = any(h in low for h in ("instagram.com", "x.com", "twitter.com",
+                                  "linkedin.com", "facebook.com"))
+    rd = tool_web_read(s, max_chars=max_chars)
+    if rd.get("ok"):
+        if hard and rd.get("source") in ("reader", "wayback", "direct-thin"):
+            rd["text"] = ("[note: this platform gates live content behind a "
+                          "login; below is the public / archived view, which "
+                          "may be partial]\n\n" + rd["text"])
+        rd["platform"] = "generic"
+        return rd
+    return {"ok": False, "platform": "generic",
+            "error": rd.get("error", "could not read"), "url": s}
 
 
 # ═════════════════════════════════════════════════════════════════════
