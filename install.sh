@@ -100,6 +100,11 @@ OLD_CONFIG_DIR="${HOME}/.config/oracle"
 
 REQUIRED_FILES=(kali.py kali_core.py kali_persona.py kali_voice.py)
 OPTIONAL_FILES=(org.thepriest.kali.svg kali-dragon.svg)
+# kali_ext sidecar modules — fetched in remote (curl|bash) mode so phones
+# and fresh boxes get the full toolset (headroom / verify / pentest plus the
+# memory/skills/foresight extensions), not just the core four files.
+EXT_FILES=(__init__.py extman.py foresight.py headroom.py memory.py \
+           pentest.py sandbox.py skills.py verify.py worker.py)
 GITHUB_REPO="${KALI_REPO:-the-priest/oracle5}"
 GITHUB_BRANCH="${KALI_BRANCH:-main}"
 
@@ -254,6 +259,26 @@ if [ $SKIP_GROQ -eq 0 ]; then
   fi
 else
   warn "skipping groq library (--no-groq)"
+fi
+
+# ── 3b. Headroom (optional context compression) ──────────────────
+#
+# Headroom crushes bulky tool output before it reaches the model, saving
+# context and tokens on long sessions.  Fully optional — Kali ships a
+# built-in pure-Python fallback compressor, so if this won't install she
+# still compresses, just a little less aggressively.
+
+step "Headroom context compression (optional)"
+if python3 -c "import headroom" 2>/dev/null; then
+  ok "headroom already present"
+elif python3 -m pip install --user --quiet headroom-ai 2>/dev/null; then
+  ok "headroom installed (pip --user)"
+elif python3 -m pip install --user --break-system-packages --quiet headroom-ai 2>/dev/null; then
+  ok "headroom installed (pip --user --break-system-packages)"
+else
+  warn "headroom-ai not installed — Kali falls back to her built-in"
+  warn "compressor (still works).  To add it later:"
+  warn "   python3 -m pip install --user --break-system-packages headroom-ai"
 fi
 
 # ── 4. Optional desktop-control helpers ──────────────────────────
@@ -411,6 +436,25 @@ else
     url="https://raw.githubusercontent.com/${GITHUB_REPO}/${GITHUB_BRANCH}/${f}"
     curl -fsSL "$url" -o "${TMP}/${f}" 2>/dev/null || true
   done
+  # Sidecar (kali_ext): fetch the whole package so remote installs get the
+  # headroom / verify / pentest features and the optional extensions, not
+  # just the core.  Best-effort and self-guarding — if the package __init__
+  # can't be fetched we skip the directory entirely, which leaves any
+  # already-installed sidecar untouched (the copy step below is gated on the
+  # directory existing).
+  EXT_URL_BASE="https://raw.githubusercontent.com/${GITHUB_REPO}/${GITHUB_BRANCH}/kali_ext"
+  if curl -fsSL "${EXT_URL_BASE}/__init__.py" -o "${TMP}/.ext_init_probe" 2>/dev/null; then
+    mkdir -p "${TMP}/kali_ext"
+    mv "${TMP}/.ext_init_probe" "${TMP}/kali_ext/__init__.py"
+    for f in "${EXT_FILES[@]}"; do
+      [ "$f" = "__init__.py" ] && continue
+      curl -fsSL "${EXT_URL_BASE}/${f}" -o "${TMP}/kali_ext/${f}" 2>/dev/null || true
+    done
+    ok "fetched kali_ext sidecar"
+  else
+    rm -f "${TMP}/.ext_init_probe" 2>/dev/null || true
+    warn "could not fetch kali_ext sidecar — installing core only"
+  fi
   SRC_DIR="${TMP}"
 fi
 
@@ -735,6 +779,16 @@ if ! echo ":${PATH}:" | grep -q ":${BIN_DIR}:"; then
   echo "      Add to ~/.bashrc:  export PATH=\"\$HOME/.local/bin:\$PATH\""
   echo
 fi
+
+echo "  ${G}New in this version:${X}"
+echo "    • Multi-source verification — ask her to ${G}verify${X} a claim and she"
+echo "      cross-checks several independent sources and flags propaganda/satire."
+echo "    • Pentest support — ask for a ${G}recon plan${X}; she proposes (never auto-runs)."
+echo "      Have her run ${G}tooling_check${X} to see which offensive tools are installed"
+echo "      and get the apt/go line for any that aren't."
+echo "    • Context compression keeps long sessions cheap; click ${G}Thoughts${X} on a"
+echo "      reply to see the model's reasoning when it exposes any."
+echo
 
 echo "  ${D}Update:    re-run this script${X}"
 echo "  ${D}Uninstall: $0 --uninstall${X}"

@@ -294,6 +294,27 @@ DEFAULT_SETTINGS = {
     # reach your private repos and raise the limit to 5000 req/hr.  Also read
     # from the GITHUB_TOKEN env var if this is blank.
     "github_token": "",
+
+    # ── Headroom context compression ──
+    # Crush big <tool_result> dumps (nmap, recon, journal, web reads, JSON)
+    # before they go to the model — same answers, a fraction of the tokens.
+    # Uses the real `headroom-ai` package if installed, else a built-in
+    # stdlib fallback (so it works on every device).  System prompt and your
+    # own messages are NEVER touched; the most-recent N tool results stay
+    # full.  On by default; harmless when there's nothing big to compress.
+    "headroom_enabled":        True,    # master switch for compression
+    "headroom_min_chars":      1200,    # don't compress a block under this size
+    "headroom_keep_recent":    2,       # leave the last N tool results full
+    "headroom_target_ratio":   0.35,    # fallback engine: keep ~this fraction
+
+    # ── Verification / anti-propaganda ──
+    # When she looks something up with web_verify, how many INDEPENDENT
+    # sources to gather and cross-check before answering.
+    "verify_max_sources":      5,
+
+    # Click-to-open "Thoughts" panel on a reply, shown when the model
+    # exposes its reasoning (a reasoning_content stream or inline <think>).
+    "show_thoughts":           True,
 }
 
 # Add a key + model slot for every registered provider so the schema is
@@ -395,7 +416,9 @@ class Backend(Protocol):
                     on_done: Callable[[Dict[str, Any]], None],
                     on_error: Callable[[str], None],
                     options: Optional[Dict[str, Any]] = None,
-                    cancel_event: Optional[threading.Event] = None) -> None: ...
+                    cancel_event: Optional[threading.Event] = None,
+                    on_reasoning: Optional[Callable[[str], None]] = None
+                    ) -> None: ...
 
 
 class GroqBackend:
@@ -429,7 +452,7 @@ class GroqBackend:
         return [{"name": m} for m in self.fallback_chain]
 
     def stream_chat(self, model, messages, on_token, on_done, on_error,
-                    options=None, cancel_event=None) -> None:
+                    options=None, cancel_event=None, on_reasoning=None) -> None:
         if not self._client:
             on_error("groq not configured")
             return
@@ -465,6 +488,10 @@ class GroqBackend:
                                  "model": attempt_model})
                         return
                     delta = chunk.choices[0].delta
+                    rtok = (getattr(delta, "reasoning_content", None)
+                            or getattr(delta, "reasoning", None) or "")
+                    if rtok and on_reasoning:
+                        on_reasoning(rtok)
                     tok = getattr(delta, "content", None) or ""
                     if tok:
                         parts.append(tok)
@@ -577,7 +604,7 @@ class OpenAICompatBackend:
             return []
 
     def stream_chat(self, model, messages, on_token, on_done, on_error,
-                    options=None, cancel_event=None) -> None:
+                    options=None, cancel_event=None, on_reasoning=None) -> None:
         if not self.api_key:
             on_error(f"{self.name} not configured (no API key)")
             return
@@ -631,6 +658,10 @@ class OpenAICompatBackend:
                         if not choices:
                             continue
                         delta = choices[0].get("delta") or {}
+                        rtok = (delta.get("reasoning_content")
+                                or delta.get("reasoning") or "")
+                        if rtok and on_reasoning:
+                            on_reasoning(rtok)
                         tok = delta.get("content") or ""
                         if tok:
                             parts.append(tok)
@@ -758,7 +789,7 @@ class BackendRouter:
         return backend is not None and backend.is_available()
 
     def stream_chat(self, messages, on_token, on_done, on_error,
-                    cancel_event=None) -> Tuple[str, str]:
+                    cancel_event=None, on_reasoning=None) -> Tuple[str, str]:
         backend, model = self.pick()
         opts = {
             "temperature": self.settings.get("temperature", 0.7),
@@ -768,9 +799,18 @@ class BackendRouter:
         if backend is None:
             on_error("No provider configured. Add an API key in Settings.")
             return "none", ""
+        # ── Headroom: compress bulky tool-result envelopes before they hit
+        #    the model. Fully optional, fail-open: any error => original list.
+        #    The module does its own logging of how much it saved.
+        if self.settings.get("headroom_enabled", True):
+            try:
+                from kali_ext import headroom as _headroom
+                messages, _ = _headroom.compress_messages(
+                    messages, self.settings, log)
+            except Exception as _e:
+                log(f"headroom: skipped ({_e})")
         backend.stream_chat(model, messages, on_token, on_done, on_error,
-                            opts, cancel_event)
-        return backend.name, model
+                            opts, cancel_event, on_reasoning=on_reasoning)
         return backend.name, model
 
 
@@ -927,6 +967,15 @@ class ChatStore:
         with self._lock:
             self._db.execute("UPDATE messages SET content=? WHERE id=?",
                              (content, msg_id))
+
+    def update_message_meta(self, msg_id: int,
+                            meta: Optional[Dict[str, Any]]) -> None:
+        """Replace the JSON meta blob for one message (used to attach the
+        model's captured reasoning/'thoughts' once a turn finishes)."""
+        meta_s = json.dumps(meta) if meta else None
+        with self._lock:
+            self._db.execute("UPDATE messages SET meta=? WHERE id=?",
+                             (meta_s, msg_id))
 
     def count_messages_by_role(self, chat_id: int, role: str) -> int:
         """Cheap count for first-message detection — avoids re-fetching all."""
@@ -3098,6 +3147,96 @@ def tool_web_read(url: str, max_chars: int = 6000) -> Dict[str, Any]:
 
 
 # ═════════════════════════════════════════════════════════════════════
+# VERIFICATION & PENTEST  — thin wrappers over the kali_ext sidecar.  They
+#   let the agent (a) cross-check a claim across several INDEPENDENT sources
+#   and flag propaganda / satire before asserting it, and (b) plan recon,
+#   inventory modern offensive tooling, and look up CVEs from NVD.  All are
+#   optional and fail-open: if the sidecar isn't present the tool reports
+#   that cleanly instead of crashing the agent loop.  Nothing here executes
+#   an attack — pentest_plan only *proposes* commands for the normal gate.
+# ═════════════════════════════════════════════════════════════════════
+
+def tool_web_verify(query: str, max_sources: int = 5,
+                    settings: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Cross-check a factual / current / security claim across several
+    INDEPENDENT sources before answering.  Gathers diverse domains, scores
+    each for credibility (primary / reputable / community / state-media /
+    satire), checks whether they corroborate one another, and returns a
+    confidence label plus a briefing that tells the model to cite domains and
+    flag any propaganda or satire.  Use whenever being wrong would matter."""
+    try:
+        from kali_ext import verify as _verify
+    except Exception as e:
+        return {"ok": False,
+                "error": f"verification module unavailable: {e}"}
+    try:
+        return _verify.verify(
+            query, tool_web_search, tool_web_read,
+            settings or {},
+            max_sources=max(2, min(int(max_sources or 5), 8)),
+            log=log)
+    except Exception as e:
+        return {"ok": False, "error": f"verification failed: {e}"}
+
+
+def tool_tooling_check() -> Dict[str, Any]:
+    """Inventory the modern offensive-security toolchain on this box (recon,
+    probing, ports, fuzzing, vuln scanning, creds, AD).  Reports which tools
+    are present and the install line for the ones that aren't.  Read-only —
+    runs nothing but `which`."""
+    try:
+        from kali_ext import pentest as _pentest
+    except Exception as e:
+        return {"ok": False, "error": f"pentest module unavailable: {e}"}
+    try:
+        return _pentest.tooling_check()
+    except Exception as e:
+        return {"ok": False, "error": f"tooling_check failed: {e}"}
+
+
+def tool_pentest_plan(target: str, profile: str = "web") -> Dict[str, Any]:
+    """Build an ordered reconnaissance PLAN for a target (profile = web |
+    network | ad | quick).  Returns each step as a *proposed* command with
+    its risk level and notes — it does NOT run anything; every command still
+    goes through the normal approve-before-run gate.  Marks any step whose
+    tool isn't installed.  Read-only enumeration first; nothing offensive is
+    auto-executed."""
+    try:
+        from kali_ext import pentest as _pentest
+    except Exception as e:
+        return {"ok": False, "error": f"pentest module unavailable: {e}"}
+    try:
+        return _pentest.plan_recon((target or "").strip(),
+                                   (profile or "web").strip().lower())
+    except Exception as e:
+        return {"ok": False, "error": f"pentest_plan failed: {e}"}
+
+
+def tool_cve_lookup(product: str, version: str = "") -> Dict[str, Any]:
+    """Look up known CVEs for a product (optionally a specific version) from
+    NVD, the authoritative source.  Returns findings ranked by severity with
+    a trust caveat.  Use this AFTER a banner / version has been confirmed by
+    a tool — never guess a version from memory."""
+    try:
+        from kali_ext import pentest as _pentest
+    except Exception as e:
+        return {"ok": False, "error": f"pentest module unavailable: {e}"}
+
+    def _fetch_json(url: str) -> Any:
+        status, text, _ = _web_get(url, timeout=25)
+        if not text:
+            raise RuntimeError(f"empty response (HTTP {status})")
+        return json.loads(text)
+
+    try:
+        return _pentest.cve_lookup((product or "").strip(),
+                                   (version or "").strip(),
+                                   fetch_json=_fetch_json)
+    except Exception as e:
+        return {"ok": False, "error": f"cve_lookup failed: {e}"}
+
+
+# ═════════════════════════════════════════════════════════════════════
 # OSINT  — footprint / username discovery across public profile sites,
 #          plus platform-aware public readers.  Read-only; touches only
 #          public pages and public APIs (no login, no scraping of gated
@@ -4427,6 +4566,44 @@ def strip_tool_calls(text: str) -> str:
     # Also remove dangling unclosed <tool ...> ... fragments mid-stream
     out = TOOL_PARTIAL_RE.sub("", out)
     return out.strip()
+
+
+# ── Reasoning / "thoughts" blocks ──
+# Some models (DeepSeek reasoners) put their chain-of-thought inline as
+# <think>...</think> in the content stream.  These regexes pull it out so
+# the visible reply stays clean and the reasoning can live in a collapsible
+# panel instead.  (Other models send it in a separate reasoning_content
+# delta field, captured in the backend.)
+THINK_RE = re.compile(
+    r'<think\b[^>]*>(.*?)</think\s*>', re.DOTALL | re.IGNORECASE)
+# A think block opened but not yet closed (still streaming).
+THINK_PARTIAL_RE = re.compile(
+    r'<think\b[^>]*>(.*)$', re.DOTALL | re.IGNORECASE)
+
+
+def extract_think_blocks(text: str) -> Tuple[str, str]:
+    """Split content into (visible_text, reasoning_text).  Pulls every
+    complete <think>…</think> block out and concatenates their bodies as the
+    reasoning; an unclosed trailing <think>… (mid-stream) is also moved to
+    reasoning so it never flashes in the reply."""
+    thoughts: List[str] = []
+
+    def _grab(m: "re.Match[str]") -> str:
+        thoughts.append((m.group(1) or "").strip())
+        return ""
+
+    visible = THINK_RE.sub(_grab, text)
+    pm = THINK_PARTIAL_RE.search(visible)
+    if pm:
+        thoughts.append((pm.group(1) or "").strip())
+        visible = visible[:pm.start()]
+    reasoning = "\n".join(t for t in thoughts if t).strip()
+    return visible, reasoning
+
+
+def strip_think_blocks(text: str) -> str:
+    """Just the visible text, with all <think> reasoning removed."""
+    return extract_think_blocks(text)[0]
 
 
 # ═════════════════════════════════════════════════════════════════════

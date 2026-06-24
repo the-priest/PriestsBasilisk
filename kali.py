@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-kali — local AI assistant.  GTK4 + libadwaita UI.
+kali — personal AI assistant.  GTK4 + libadwaita UI.
 
 Run:    python3 kali.py
 Or, after install:  kali
@@ -40,11 +40,13 @@ from kali_core import (
     tool_make_dir, tool_copy_path, tool_move_path, tool_delete_path,
     tool_path_info, tool_open_url, tool_browser,
     tool_web_search, tool_web_read, tool_github,
+    tool_web_verify, tool_tooling_check, tool_pentest_plan, tool_cve_lookup,
     tool_osint_username, tool_osint_lookup, tool_social_read,
     quick_facts as tool_quick_facts,
     sudo_cached, detect_urgency, looks_degraded,
     note_command, recent_duplicate,
     parse_tool_calls, strip_tool_calls,
+    extract_think_blocks, strip_think_blocks,
     is_online, is_sensitive_path, command_needs_sudo, Watcher,
     PROVIDERS, PROVIDERS_BY_KEY,
 )
@@ -65,7 +67,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.kali"
 APP_NAME = "Kali"
-VERSION = "1.0.0"
+VERSION = "2.0.0"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -284,6 +286,26 @@ headerbar {
     font-size: 17px;
     font-family: 'JetBrains Mono', monospace;
     opacity: 0.85;
+}
+
+/* Model reasoning ("thoughts") - collapsed by default, click to open */
+.thoughts-expander {
+    margin: 2px 0 4px 0;
+    font-size: 15px;
+    color: #8a93a0;
+}
+.thoughts-expander > title {
+    color: #8a93a0;
+    opacity: 0.9;
+}
+.thoughts-text {
+    color: #9aa4b2;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 15px;
+    background: rgba(125,135,148,0.08);
+    border-left: 2px solid rgba(125,135,148,0.35);
+    padding: 8px 10px;
+    border-radius: 4px;
 }
 
 .msg-system-notice {
@@ -1170,7 +1192,8 @@ class MessageWidget(Gtk.Box):
     def __init__(self, role: str, content: str = "",
                  meta: Optional[Dict[str, Any]] = None,
                  on_run_command: Optional[Callable[[str, str], None]] = None,
-                 on_speak: Optional[Callable[["MessageWidget"], None]] = None):
+                 on_speak: Optional[Callable[["MessageWidget"], None]] = None,
+                 show_thoughts: bool = True):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         self.role = role
         self.meta = meta or {}
@@ -1181,10 +1204,19 @@ class MessageWidget(Gtk.Box):
         self._speak_state = "idle"
         self._blocks_container: Optional[Gtk.Box] = None
         self._streaming_label: Optional[Gtk.Label] = None
+        # Captured model reasoning ("thoughts"): from a reasoning_content
+        # stream field and/or inline <think> blocks.  Shown in a collapsed
+        # expander the operator can click open.
+        self._thoughts: str = (self.meta or {}).get("thoughts", "") or ""
+        self._thoughts_container: Optional[Gtk.Box] = None
+        self._thoughts_label: Optional[Gtk.Label] = None
+        self._show_thoughts: bool = show_thoughts
         self.add_css_class("msg-row")
         self._build_shell()
         if content and role != "tool":
             self.set_content(content)
+        if self._thoughts:
+            self._render_thoughts()
 
     def _build_shell(self):
         if self.role == "user":
@@ -1253,6 +1285,14 @@ class MessageWidget(Gtk.Box):
                     "clicked", lambda *_: self._on_speak(self))
                 header.append(self.speak_btn)
             content_box.append(header)
+            # Thoughts container sits between the header and the reply body.
+            # It stays empty (and invisible) unless the model exposed its
+            # reasoning, in which case _render_thoughts drops a collapsed
+            # expander here.  Kept separate from the blocks container so
+            # streaming/redraw of the reply never wipes it.
+            self._thoughts_container = Gtk.Box(
+                orientation=Gtk.Orientation.VERTICAL, spacing=2)
+            content_box.append(self._thoughts_container)
             inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
             inner.add_css_class("msg-assistant")
             content_box.append(inner)
@@ -1298,8 +1338,16 @@ class MessageWidget(Gtk.Box):
             nxt = child.get_next_sibling()
             self._blocks_container.remove(child)
             child = nxt
-        display_text = (strip_tool_calls(text)
-                        if self.role == "assistant" else text)
+        if self.role == "assistant":
+            visible, think = extract_think_blocks(text)
+            if think and think not in self._thoughts:
+                self._thoughts = ((self._thoughts + "\n" + think).strip()
+                                  if self._thoughts else think)
+            if self._thoughts:
+                self._render_thoughts()
+            display_text = strip_tool_calls(visible)
+        else:
+            display_text = text
         # If the assistant message carries only tool calls, don't show a
         # placeholder when at least one is a proposal — the card speaks for
         # itself.  Only fall back to the placeholder for a bare execution
@@ -1412,7 +1460,10 @@ class MessageWidget(Gtk.Box):
         if self._streaming_label is None:
             self.start_streaming()
         self._content += token
-        display = strip_tool_calls(self._content)
+        # Hide both tool XML and any inline <think> reasoning from the live
+        # reply.  The reasoning (if any) gets captured at finish_streaming /
+        # set_content and shown in the collapsible thoughts panel.
+        display = strip_tool_calls(strip_think_blocks(self._content))
         self._streaming_label.set_text(display)
 
     def finish_streaming(self) -> str:
@@ -1420,6 +1471,41 @@ class MessageWidget(Gtk.Box):
         self._streaming_label = None
         self.set_content(final)
         return final
+
+    # ── thoughts (model reasoning) ─────────────────────────────────
+    def append_thought(self, token: str):
+        """Accumulate a reasoning token (from a reasoning_content stream)
+        and reveal/refresh the collapsed thoughts expander live."""
+        if not token:
+            return
+        self._thoughts += token
+        self._render_thoughts()
+
+    def get_thoughts(self) -> str:
+        return (self._thoughts or "").strip()
+
+    def _render_thoughts(self):
+        """Create (once) and update a collapsed 'Thoughts' expander holding
+        the model's reasoning.  No-op for non-assistant messages."""
+        text = (self._thoughts or "").strip()
+        if not text or self._thoughts_container is None or not self._show_thoughts:
+            return
+        if self._thoughts_label is None:
+            expander = Gtk.Expander(label="💭  Thoughts")
+            expander.set_expanded(False)          # click to open
+            expander.add_css_class("thoughts-expander")
+            lbl = _make_wrap_label()
+            lbl.add_css_class("thoughts-text")
+            lbl.set_margin_top(4)
+            lbl.set_margin_start(6)
+            lbl.set_margin_bottom(4)
+            expander.set_child(lbl)
+            self._thoughts_container.append(expander)
+            self._thoughts_label = lbl
+        try:
+            self._thoughts_label.set_text(text)
+        except Exception:
+            pass
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -1620,6 +1706,49 @@ class SettingsDialog(Adw.PreferencesDialog):
         gen_g.add(max_row)
 
         gen_page.add(gen_g)
+
+        # ── Intelligence & trust ──
+        intel_g = Adw.PreferencesGroup()
+        intel_g.set_title("Intelligence & trust")
+        intel_g.set_description(
+            "Verification, reasoning, and context handling.")
+
+        self.headroom_row = Adw.SwitchRow()
+        self.headroom_row.set_title("Context compression")
+        self.headroom_row.set_subtitle(
+            "Crush bulky tool output before it reaches the model — saves "
+            "context and tokens on long sessions.")
+        self.headroom_row.set_active(
+            bool(parent.settings.get("headroom_enabled", True)))
+        self.headroom_row.connect(
+            "notify::active",
+            lambda r, _ps: self._set("headroom_enabled", r.get_active()))
+        intel_g.add(self.headroom_row)
+
+        self.thoughts_row = Adw.SwitchRow()
+        self.thoughts_row.set_title("Show reasoning panel")
+        self.thoughts_row.set_subtitle(
+            "Add a click-to-open Thoughts panel on a reply when the model "
+            "exposes its reasoning.")
+        self.thoughts_row.set_active(
+            bool(parent.settings.get("show_thoughts", True)))
+        self.thoughts_row.connect(
+            "notify::active",
+            lambda r, _ps: self._set("show_thoughts", r.get_active()))
+        intel_g.add(self.thoughts_row)
+
+        verify_row = Adw.SpinRow.new_with_range(2, 8, 1)
+        verify_row.set_title("Verification sources")
+        verify_row.set_subtitle(
+            "How many independent sources web_verify cross-checks before "
+            "she trusts a claim.")
+        verify_row.set_value(int(parent.settings.get("verify_max_sources", 5)))
+        verify_row.connect(
+            "notify::value",
+            lambda r, *_: self._set("verify_max_sources", int(r.get_value())))
+        intel_g.add(verify_row)
+
+        gen_page.add(intel_g)
         self.add(gen_page)
 
         # ── DISPLAY ────────────────────────────────────────
@@ -2404,7 +2533,7 @@ class MainWindow(Adw.ApplicationWindow):
         title_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         t = Gtk.Label(label=APP_NAME, xalign=0.0)
         t.add_css_class("app-title")
-        st = Gtk.Label(label="local · loyal · yours", xalign=0.0)
+        st = Gtk.Label(label="personal · loyal · yours", xalign=0.0)
         st.add_css_class("app-subtitle")
         title_box.append(t)
         title_box.append(st)
@@ -2953,7 +3082,8 @@ class MainWindow(Adw.ApplicationWindow):
             self.msg_box.remove(first)
         w = MessageWidget(role, content, meta,
                           on_run_command=self._run_proposed_command,
-                          on_speak=self._on_message_speak)
+                          on_speak=self._on_message_speak,
+                          show_thoughts=self.settings.get("show_thoughts", True))
         self.msg_box.append(w)
         # New message → force scroll.  This is when the user sent something
         # or a new assistant turn started; they want to see it.  Mid-stream
@@ -3252,6 +3382,75 @@ class MainWindow(Adw.ApplicationWindow):
             self.working_spinner.stop()
             self.working_row.set_visible(False)
 
+    # Friendly present-tense phrases for the working banner, so a tool chain
+    # reads "searching the web… → reading a page… → cross-checking sources…"
+    # instead of a bare tool name or a flat "working…".
+    _TOOL_STATUS = {
+        "web_search":       "searching the web",
+        "web_read":         "reading a page",
+        "web_verify":       "cross-checking sources",
+        "github":           "browsing GitHub",
+        "osint_username":   "checking public profiles",
+        "osint_lookup":     "checking public profiles",
+        "social_read":      "reading a profile",
+        "tooling_check":    "checking installed tools",
+        "pentest_plan":     "planning recon",
+        "cve_lookup":       "looking up CVEs",
+        "read_file":        "reading a file",
+        "write_file":       "writing a file",
+        "list_dir":         "listing files",
+        "find_file":        "searching files",
+        "path_info":        "checking a path",
+        "make_dir":         "making a folder",
+        "copy_path":        "copying files",
+        "move_path":        "moving files",
+        "delete_path":      "deleting files",
+        "system_info":      "checking the system",
+        "disk_usage":       "checking disk usage",
+        "processes":        "listing processes",
+        "network_status":   "checking the network",
+        "recent_downloads": "checking downloads",
+        "service_status":   "checking a service",
+        "journal_tail":     "reading the journal",
+        "desktop_info":     "checking the desktop",
+        "list_apps":        "listing apps",
+        "list_windows":     "listing windows",
+        "launch_app":       "launching an app",
+        "open_url":         "opening a link",
+        "browser":          "using the browser",
+        "focus_window":     "switching windows",
+        "close_window":     "closing a window",
+        "type_text":        "typing",
+        "press_key":        "pressing keys",
+        "media_control":    "controlling media",
+        "screenshot":       "taking a screenshot",
+        "read_screen":      "reading the screen",
+        "notify":           "sending a notification",
+        "quick_facts":      "checking the system",
+    }
+
+    def _status_for_call(self, call) -> str:
+        """One short human phrase describing what a single tool call does."""
+        n = (getattr(call, "name", "") or "").strip()
+        a = getattr(call, "args", None) or {}
+        if n == "run":
+            cmd = str(a.get("command", "")).strip()
+            head = cmd.split()[0] if cmd else ""
+            return f"running {head}" if head else "running a command"
+        if n.startswith("memory_"):
+            return "checking memory"
+        if n.startswith("skill"):
+            return "using a skill"
+        return self._TOOL_STATUS.get(n, f"running {n}" if n else "working")
+
+    def _status_for_batch(self, calls) -> str:
+        """Summarise what a parallel batch of read-only tools is doing."""
+        if not calls:
+            return "running tools"
+        labels = [self._status_for_call(c) for c in calls]
+        extra = len(labels) - 1
+        return f"{labels[0]} + {extra} more" if extra > 0 else labels[0]
+
     def _ext_complete(self, system: str, user: str) -> str:
         """Short, synchronous, non-streaming completion for the sidecar
         (memory consolidation; the optional foresight model pass).  Routes
@@ -3382,7 +3581,8 @@ class MainWindow(Adw.ApplicationWindow):
             # tokens for finish_streaming, but don't attach it to msg_box.
             self.streaming_msg_widget = MessageWidget(
                 "assistant", "", on_run_command=self._run_proposed_command,
-                on_speak=self._on_message_speak)
+                on_speak=self._on_message_speak,
+                show_thoughts=self.settings.get("show_thoughts", True))
             self.streaming_msg_widget.start_streaming()
 
         self.streaming_msg_db_id = self.store.add_message(
@@ -3396,10 +3596,13 @@ class MainWindow(Adw.ApplicationWindow):
             GLib.idle_add(self._on_stream_done, meta)
         def _on_err(err):
             GLib.idle_add(self._on_stream_error, err)
+        def _on_reason(tok):
+            GLib.idle_add(self._on_stream_reasoning, tok)
 
         def _bg():
             self.router.stream_chat(full, _on_tok, _on_done, _on_err,
-                                    self.streaming_cancel)
+                                    self.streaming_cancel,
+                                    on_reasoning=_on_reason)
 
         self.streaming_thread = threading.Thread(target=_bg, daemon=True)
         self.streaming_thread.start()
@@ -3416,6 +3619,15 @@ class MainWindow(Adw.ApplicationWindow):
             self._feed_tts_stream()
         return False
 
+    def _on_stream_reasoning(self, tok):
+        """Reasoning tokens (model 'thoughts') arrive separately from the
+        reply; route them to the message's collapsible thoughts panel."""
+        if self.streaming_msg_widget:
+            self.streaming_msg_widget.append_thought(tok)
+            if self.streaming_chat_id == self.current_chat_id:
+                self._scroll_to_bottom()
+        return False
+
     def _feed_tts_stream(self):
         """Hand any newly-completed sentences to the speaker as the reply
         streams in.  Suspends for a turn that emits tool tags so we never
@@ -3425,7 +3637,9 @@ class MainWindow(Adw.ApplicationWindow):
             return
         if self._tts_streamer is None or self.streaming_msg_widget is None:
             return
-        content = self.streaming_msg_widget._content or ""
+        # Strip the model's <think> reasoning before speaking — only the
+        # actual reply should be read aloud, never the chain-of-thought.
+        content = strip_think_blocks(self.streaming_msg_widget._content or "")
         if not self._tts_suspended and ("<tool" in content):
             # Model is doing a tool turn — stop streaming this widget's
             # audio.  Drop anything already queued from it.
@@ -3466,6 +3680,18 @@ class MainWindow(Adw.ApplicationWindow):
                 log(f"tts flush error: {e}")
         if self.streaming_msg_db_id:
             self.store.update_message(self.streaming_msg_db_id, final)
+            # Persist any captured reasoning so the thoughts panel survives a
+            # chat reload.  Merge, don't clobber, whatever meta already exists.
+            try:
+                thoughts = self.streaming_msg_widget.get_thoughts()
+                if thoughts:
+                    m = dict(self.streaming_msg_widget.meta or {})
+                    m["thoughts"] = thoughts
+                    self.streaming_msg_widget.meta = m
+                    self.store.update_message_meta(
+                        self.streaming_msg_db_id, m)
+            except Exception as e:
+                log(f"thoughts persist failed: {e}")
         calls = parse_tool_calls(final)
         cancelled = meta.get("cancelled") or self._stop_requested
         self.terminal_log(f"── stream done{' (cancelled)' if cancelled else ''}", "dim")
@@ -3494,14 +3720,15 @@ class MainWindow(Adw.ApplicationWindow):
                 else:
                     break
             if len(batch) >= 2:
-                self._set_working(True, f"running {len(batch)} tools…")
+                self._set_working(True, self._status_for_batch(batch) + "…")
                 self._execute_tool_batch(batch)
             elif batch:
-                self._set_working(True, "running tool…")
+                self._set_working(True, self._status_for_call(batch[0]) + "…")
                 self._execute_tool_calls(batch)
             else:
                 # First executable tool has side effects → one at a time.
-                self._set_working(True, "running tool…")
+                self._set_working(
+                    True, self._status_for_call(executable[0]) + "…")
                 self._execute_tool_calls(executable[:1])
         else:
             # (#7) Degraded-output check: if the model returned junk (empty,
@@ -3612,6 +3839,16 @@ class MainWindow(Adw.ApplicationWindow):
                 a.get("action", ""), a.get("query", ""), a.get("repo", ""),
                 a.get("user", ""), a.get("path", ""),
                 a.get("ref", a.get("branch", "")), i(a.get("limit", 10), 10))
+        # Pentest planning / inventory — pure local work (which-checks and
+        # building a command plan), no network and no execution, so it's safe
+        # to bundle.  web_verify and cve_lookup are deliberately NOT here:
+        # they fan out their own network requests and must stay single-path.
+        if n == "tooling_check":
+            return lambda: tool_tooling_check()
+        if n == "pentest_plan":
+            return lambda: tool_pentest_plan(
+                a.get("target", a.get("host", a.get("url", ""))),
+                a.get("profile", a.get("mode", "web")))
         # Pure system / desktop sensing (independent subprocesses).
         if n == "system_info":
             return tool_system_info
@@ -3717,10 +3954,11 @@ class MainWindow(Adw.ApplicationWindow):
         # one the user might have navigated to.
         chat_id = self.streaming_chat_id or self.current_chat_id
 
-        # Update the working banner with the specific tool name so user
-        # knows what's happening.  Hidden tool indicators in the message
+        # Update the working banner with a human phrase for this tool so the
+        # operator can see what's happening as a chain runs ("searching the
+        # web…", "running nmap…").  Hidden tool indicators in the message
         # stream stay hidden — they're noisy.
-        self._set_working(True, f"running {call.name}…")
+        self._set_working(True, self._status_for_call(call) + "…")
 
         self.store.add_message(chat_id, "tool",
                                 f"⚙ tool: {call.name}({json.dumps(call.args)})",
@@ -3870,6 +4108,34 @@ class MainWindow(Adw.ApplicationWindow):
                     a.get("repo", ""), a.get("user", ""),
                     a.get("path", ""), a.get("ref", a.get("branch", "")),
                     _safe_int(a.get("limit", 10), 10))),
+
+            # ── Verification & anti-propaganda (read-only) ──
+            # Cross-check a claim across several INDEPENDENT sources, score
+            # them for credibility, flag state-media / satire, and report a
+            # confidence label.  The path the model should take before
+            # asserting anything current, factual, or security-relevant.
+            "web_verify":        lambda a: self._tool_simple(
+                lambda: tool_web_verify(
+                    a.get("query", a.get("q", a.get("claim", ""))),
+                    _safe_int(a.get("max_sources",
+                                    self.settings.get("verify_max_sources", 5)),
+                              self.settings.get("verify_max_sources", 5)),
+                    self.settings)),
+
+            # ── Pentest support (read-only / proposing only) ──
+            # tooling_check + pentest_plan + cve_lookup never execute an
+            # attack: plan_recon returns PROPOSED commands that still go
+            # through the approve-before-run gate.
+            "tooling_check":     lambda a: self._tool_simple(
+                lambda: tool_tooling_check()),
+            "pentest_plan":      lambda a: self._tool_simple(
+                lambda: tool_pentest_plan(
+                    a.get("target", a.get("host", a.get("url", ""))),
+                    a.get("profile", a.get("mode", "web")))),
+            "cve_lookup":        lambda a: self._tool_simple(
+                lambda: tool_cve_lookup(
+                    a.get("product", a.get("name", a.get("software", ""))),
+                    a.get("version", a.get("ver", "")))),
         }
         # Merge sidecar tools (memory_*, skill_list, skill_run).  Returns an
         # empty dict unless the matching feature is enabled, so stock Kali is
@@ -4303,7 +4569,10 @@ class MainWindow(Adw.ApplicationWindow):
 
         def run_bg(password=None):
             def _bg():
-                self.terminal_log_and_show(f"$ {command}", "cmd")
+                # Log the command but DON'T force the panel open — the
+                # operator opens the log themselves with the toggle when
+                # they want it.  The command still shows in the status line.
+                self.terminal_log(f"$ {command}", "cmd")
                 r = tool_run_command(command, timeout=timeout,
                                      sudo_password=password)
                 if r.get("ok"):
@@ -4544,7 +4813,13 @@ class MainWindow(Adw.ApplicationWindow):
                     content = self._trim_tool_result(content)
                 out.append({"role": "user", "content": content})
             elif m.role == "assistant":
-                out.append({"role": "assistant", "content": m.content})
+                # Don't replay the model's own chain-of-thought back to it —
+                # reasoning belongs to the turn that produced it, can be huge,
+                # and feeding it back wastes context and can derail the next
+                # turn.  Tool tags stay (the model needs to see its prior
+                # actions); only <think> blocks are removed.
+                out.append({"role": "assistant",
+                            "content": strip_think_blocks(m.content)})
             elif m.role == "tool":
                 if kind == "result":
                     out.append({"role": "user", "content": m.content})
@@ -4576,7 +4851,7 @@ class MainWindow(Adw.ApplicationWindow):
         about.set_version(VERSION)
         about.set_developer_name("The Priest")
         about.set_comments(
-            "Local, loyal AI assistant.\n"
+            "Personal, loyal AI assistant.\n"
             "Multi-provider cloud AI · lives on your hardware.")
         about.set_license_type(Gtk.License.MIT_X11)
         about.present(self)

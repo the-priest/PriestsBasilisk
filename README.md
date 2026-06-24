@@ -1,20 +1,20 @@
 <!--
 title: Oracle5 — Kali AI assistant
-description: A local, loyal AI assistant that lives on your Linux machine. Multi-provider LLM, voice, desktop control, security auditing, self-improving Python skills. Designed for offensive security and power users.
-keywords: ai assistant, kali linux, llm, voice control, ai agent, security audit, openclaw alternative, hermes alternative, local ai, linux agent, nethunter, gtk4, personal assistant, jarvis
+description: A personal, loyal AI assistant that lives on your Linux machine. Multi-provider cloud LLM, voice, desktop control, security auditing, self-improving Python skills. Designed for offensive security and power users.
+keywords: ai assistant, kali linux, llm, voice control, ai agent, security audit, openclaw alternative, hermes alternative, personal ai, linux agent, nethunter, gtk4, personal assistant, jarvis
 -->
 
 <div align="center">
 
-# Kali — local AI assistant for Linux (OpenClaw / Hermes alternative)
+# Kali — personal AI assistant for Linux (OpenClaw / Hermes alternative)
 
-**A local, loyal AI assistant that lives on your machine — and has hands on it.**
+**A personal, loyal AI assistant that lives on your machine — and has hands on it.**
 
 Multi-provider cloud AI (SiliconFlow · Groq · Novita · GitHub Models · Google AI Studio).
 Reads files. Drives your desktop. Searches the web. Browses GitHub. Audits security.
 Talks and listens. Runs commands — with your permission, one at a time.
 
-`v1.0.0` · GTK4 + libadwaita · Linux
+`v2.0.0` · GTK4 + libadwaita · Linux
 
 </div>
 
@@ -27,6 +27,16 @@ Kali is a personal AI assistant in the shape of a GTK4 chat app — named for th
 When something needs to **change** — installing a package, editing a config, anything as root — she does **not** run it on her own. She explains what she'd do and why, then proposes the exact command as a card with a **Run** button and a risk level. Nothing executes until you approve it. Commands that need root show an inline password field; your sudo password is validated, used to cache the credential, and is **never** stored, logged, or shown to her.
 
 She's built for one operator — you — and behaves like it. No corporate guardrails, no boilerplate hedging, no "as an AI language model." Witty, direct, loyal; she reasons things through with you and stays on your side.
+
+---
+
+## New in v2.0
+
+- **Multi-source verification & anti-propaganda.** A `web_verify` tool gathers several *independent* sources, scores each for credibility (primary / reputable / community / state-media / satire), checks whether they actually corroborate one another, and returns a confidence label — flagging state media and satire instead of laundering them into bare fact. She's told to cite the domains a claim rests on and to separate confirmed / inferred / unknown.
+- **Pentest support — propose, never auto-run.** `tooling_check` inventories the modern offensive toolchain (recon, probing, ports, fuzzing, vuln scanning, creds, AD) and gives the install line for anything missing. `pentest_plan` builds an ordered recon plan (passive/enumeration first) where every step is a *proposed* command behind the existing Run gate. `cve_lookup` pulls CVEs from NVD, ranked by severity. Nothing offensive ever executes on its own.
+- **Context compression (headroom).** Bulky tool output is crushed before it reaches the model, so long sessions stay cheap on context and tokens. Findings (errors, open ports, CVEs, creds) are always preserved; if `headroom-ai` isn't installed, a built-in fallback compressor handles it. Toggle in **Settings → Generation → Intelligence & trust**.
+- **Reasoning panel.** When the model exposes its chain-of-thought, each reply gets a collapsed **💭 Thoughts** panel you can click open. Reasoning is kept out of the reply, out of TTS, and out of the history replayed to the model.
+- **Clearer status.** The working banner now says what she's *doing* as a tool chain runs — "searching the web…", "running nmap…", "cross-checking sources…" — instead of a flat "working…". The log panel no longer pops open on its own; open it when you want it.
 
 ---
 
