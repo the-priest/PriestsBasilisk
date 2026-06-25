@@ -345,12 +345,18 @@ class SpeechToText:
         self.get_settings = get_settings
         self._proc: Optional[subprocess.Popen] = None
         self._wav: Optional[str] = None
+        self._errf: Optional[str] = None       # recorder stderr capture file
+        self._err_fh = None                     # open handle while recording
+        self._last_err: Optional[str] = None    # human reason for last failure
         self._recorder = self._detect_recorder()
 
     # ── capability ──
     @staticmethod
     def _detect_recorder() -> Optional[str]:
-        for name in ("parecord", "arecord", "ffmpeg"):
+        # Order matters: parecord/pw-record speak to PipeWire/PulseAudio (the
+        # modern desktop default and the most likely to Just Work); arecord is
+        # raw ALSA; ffmpeg is the last resort.
+        for name in ("parecord", "pw-record", "arecord", "ffmpeg"):
             if shutil.which(name):
                 return name
         return None
@@ -393,7 +399,8 @@ class SpeechToText:
     def unavailable_reason(self) -> Optional[str]:
         if not self._recorder:
             return ("No microphone recorder found.  Install pulseaudio-utils "
-                    "(parecord) or alsa-utils (arecord).")
+                    "(parecord), pipewire-utils (pw-record), or alsa-utils "
+                    "(arecord).")
         if not self.has_key():
             return ("No transcription key set.  Voice input needs a "
                     "SiliconFlow or Groq key — add one in Settings → "
@@ -405,6 +412,11 @@ class SpeechToText:
         if self._recorder == "parecord":
             return ["parecord", "--channels=1", "--rate=16000",
                     "--format=s16le", "--file-format=wav", path]
+        if self._recorder == "pw-record":
+            # Native PipeWire recorder — works where parecord can't (no
+            # pipewire-pulse shim installed).
+            return ["pw-record", "--rate=16000", "--channels=1",
+                    "--format=s16", path]
         if self._recorder == "arecord":
             return ["arecord", "-q", "-f", "S16_LE", "-c", "1",
                     "-r", "16000", "-t", "wav", path]
@@ -417,20 +429,32 @@ class SpeechToText:
         if self._proc is not None:
             return False
         if not self._recorder:
+            self._last_err = "no recorder installed"
             return False
         fd, path = tempfile.mkstemp(prefix="kali_rec_", suffix=".wav")
         os.close(fd)
         self._wav = path
+        efd, epath = tempfile.mkstemp(prefix="kali_rec_", suffix=".err")
+        os.close(efd)
+        self._errf = epath
+        self._last_err = None
         cmd = self._build_record_cmd(path)
         try:
+            # Keep the recorder's stderr — a dead/muted mic, a missing
+            # PulseAudio/PipeWire source, or a permission block all show up
+            # here.  Discarding it (the old behaviour) made every failure
+            # look identical to "no audio captured".
+            self._err_fh = open(epath, "wb")
             self._proc = subprocess.Popen(
                 cmd, stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                stdout=subprocess.DEVNULL, stderr=self._err_fh)
             _log(f"recording via {self._recorder} -> {path}")
             return True
         except Exception as e:
             _log(f"record start failed: {e}")
+            self._last_err = str(e)
             self._proc = None
+            self._close_err_fh()
             self._cleanup()
             return False
 
@@ -438,7 +462,8 @@ class SpeechToText:
         return self._proc is not None
 
     def stop(self) -> Optional[str]:
-        """Stop recording; return the WAV path (or None on failure)."""
+        """Stop recording; return the WAV path (or None on failure).  On
+        failure, self._last_err carries the recorder's own reason."""
         p = self._proc
         self._proc = None
         if p is None:
@@ -456,9 +481,26 @@ class SpeechToText:
                     p.kill()
         except Exception as e:
             _log(f"record stop hiccup: {e}")
+        self._close_err_fh()
+        err_txt = self._read_err()
         path = self._wav
-        if path and os.path.exists(path) and os.path.getsize(path) > 44:
+        size = os.path.getsize(path) if (path and os.path.exists(path)) else 0
+        if size > 44:
+            # Real WAV.  Stash any stderr anyway (could explain a silent clip),
+            # but hand the file back for transcription.
+            self._last_err = err_txt or None
+            self._discard_err()
             return path
+        # No usable audio — keep the recorder's reason so the caller can show
+        # the operator WHY instead of a generic "no audio".
+        if err_txt:
+            self._last_err = err_txt
+        elif size == 0:
+            self._last_err = "recorder produced no file"
+        else:
+            self._last_err = "recorder produced an empty clip"
+        _log(f"no audio: {self._last_err}")
+        self._discard_err()
         self._cleanup()
         return None
 
@@ -475,6 +517,8 @@ class SpeechToText:
                     p.kill()
                 except Exception:
                     pass
+        self._close_err_fh()
+        self._discard_err()
         self._cleanup()
 
     def _cleanup(self) -> None:
@@ -485,6 +529,87 @@ class SpeechToText:
                 pass
         self._wav = None
 
+    # ── recorder-stderr plumbing (so a dead mic isn't a silent mystery) ──
+    def _close_err_fh(self) -> None:
+        if self._err_fh is not None:
+            try:
+                self._err_fh.close()
+            except Exception:
+                pass
+            self._err_fh = None
+
+    def _read_err(self) -> str:
+        """Read + condense the recorder's stderr into a one-line reason."""
+        if not self._errf or not os.path.exists(self._errf):
+            return ""
+        try:
+            with open(self._errf, "rb") as f:
+                raw = f.read().decode("utf-8", "replace")
+        except Exception:
+            return ""
+        lines = [ln.strip() for ln in raw.splitlines() if ln.strip()]
+        if not lines:
+            return ""
+        # Last non-empty line is usually the actual error; keep it short.
+        msg = lines[-1]
+        low = raw.lower()
+        # Add a plain-English hint for the common culprits.
+        if "connection refused" in low or "connect" in low and "refused" in low:
+            msg += "  (audio server not reachable — is PipeWire/PulseAudio running in this session?)"
+        elif "permission denied" in low or "access denied" in low:
+            msg += "  (permission denied — your user may not have audio access)"
+        elif "no such" in low and ("device" in low or "file" in low):
+            msg += "  (the chosen input source doesn't exist — wrong default device?)"
+        elif "busy" in low:
+            msg += "  (device busy — another app is holding the mic)"
+        return msg[:240]
+
+    def _discard_err(self) -> None:
+        if self._errf and os.path.exists(self._errf):
+            try:
+                os.remove(self._errf)
+            except Exception:
+                pass
+        self._errf = None
+
+    def last_error(self) -> Optional[str]:
+        """The reason the last recording produced no audio, if any."""
+        return self._last_err
+
+    @staticmethod
+    def probe_inputs() -> str:
+        """Best-effort list of real capture sources, for diagnostics.  Filters
+        out .monitor sources (output loopbacks, not microphones)."""
+        if shutil.which("pactl"):
+            try:
+                out = subprocess.run(
+                    ["pactl", "list", "short", "sources"],
+                    capture_output=True, text=True, timeout=4)
+                names = []
+                for ln in out.stdout.splitlines():
+                    ln = ln.strip()
+                    if not ln or "monitor" in ln.lower():
+                        continue
+                    parts = ln.split("\t")
+                    names.append(parts[1] if len(parts) > 1 else ln)
+                if names:
+                    return ", ".join(names[:4])
+                return ""   # pactl worked but found only monitors / nothing
+            except Exception:
+                pass
+        if shutil.which("arecord"):
+            try:
+                out = subprocess.run(
+                    ["arecord", "-l"], capture_output=True, text=True,
+                    timeout=4)
+                cards = [ln.strip() for ln in out.stdout.splitlines()
+                         if ln.strip().startswith("card ")]
+                if cards:
+                    return "; ".join(cards[:3])
+            except Exception:
+                pass
+        return ""
+
     def test_capture(self, seconds: float = 4.0) -> Tuple[str, Optional[str]]:
         """Record for a fixed duration then transcribe, returning
         (text, error).  Used by the Settings 'Test microphone' button so the
@@ -492,13 +617,25 @@ class SpeechToText:
         if self.is_recording():
             return "", "already recording — stop first"
         if not self.start():
-            return "", "couldn't start the microphone (no recorder?)"
+            why = self._last_err or "no recorder?"
+            return "", f"couldn't start the microphone ({why})"
         import time as _t
         _t.sleep(max(1.0, min(float(seconds), 15.0)))
         wav = self.stop()
         if not wav:
-            return "", ("no audio captured — recorder produced an empty file. "
-                        "Check the default input source / mic permissions.")
+            reason = self._last_err
+            probe = self.probe_inputs()
+            msg = "no audio captured — "
+            msg += (f"recorder said: {reason}. " if reason
+                    else "the recorder produced an empty file. ")
+            if probe:
+                msg += f"Detected input sources: {probe}. "
+                msg += "If one of those is your mic, set it as the default input (or unmute it)."
+            else:
+                msg += ("No usable input sources detected — your mic isn't "
+                        "visible to PipeWire/PulseAudio. Check it's plugged in, "
+                        "unmuted, and that this session has audio access.")
+            return "", msg
         return self.transcribe(wav)
 
     # ── transcription ──

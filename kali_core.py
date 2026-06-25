@@ -4659,6 +4659,39 @@ def _loads_lenient(json_src: str) -> Any:
         return None
 
 
+# Models sometimes hallucinate a tool name for writing a file (the classic is
+# "write_text_file", which exists nowhere) — or pick a reasonable-but-wrong
+# synonym.  Route every one of them to the real write path so the diff card
+# actually renders instead of silently vanishing as an unknown tool.  All of
+# these render as a propose-style diff card and write nothing until Apply.
+_TOOL_NAME_ALIASES = {
+    "write_text_file": "write_file",
+    "writetextfile":   "write_file",
+    "writefile":       "write_file",
+    "save_file":       "write_file",
+    "savefile":        "write_file",
+    "save_text_file":  "write_file",
+    "create_file":     "write_file",
+    "createfile":      "write_file",
+    "new_file":        "write_file",
+    "write_to_file":   "write_file",
+    "save_to_file":    "write_file",
+    "save":            "write_file",
+    "save_document":   "write_file",
+    "make_file":       "write_file",
+    "edit_file":       "propose_edit",
+    "editfile":        "propose_edit",
+    "propose_file":    "propose_edit",
+    "propose_write":   "propose_edit",
+    "apply_edit":      "propose_edit",
+}
+
+# Field aliases for the write path: the model may put the body under any of
+# these instead of "content".  Fold them in so the card never comes up empty.
+_CONTENT_FIELD_ALIASES = ("text", "body", "contents", "data",
+                          "file_text", "file_content", "filecontent")
+
+
 def parse_tool_calls(text: str) -> List[ToolCall]:
     calls: List[ToolCall] = []
     for m in TOOL_TAG_RE.finditer(text):
@@ -4699,11 +4732,25 @@ def parse_tool_calls(text: str) -> List[ToolCall]:
                 if key in parsed:
                     name = parsed.pop(key)
                     break
+        # Map invented / synonym tool names to their real handler (e.g. the
+        # hallucinated "write_text_file" → "write_file") so the proposal still
+        # renders instead of being dropped as unknown.
+        if name:
+            name = _TOOL_NAME_ALIASES.get(str(name).strip().lower(), name)
         # Unwrap common nested arg containers
         if isinstance(parsed, dict):
             for inner_key in ("arguments", "args", "parameters", "params"):
                 if isinstance(parsed.get(inner_key), dict):
                     parsed = parsed[inner_key]
+                    break
+        # For the write path, accept the body under a few aliases too, so a
+        # propose_edit/write_file never renders empty just because the model
+        # called the field "text" or "body" instead of "content".
+        if isinstance(parsed, dict) and name in ("propose_edit", "write_file") \
+                and "content" not in parsed:
+            for alt in _CONTENT_FIELD_ALIASES:
+                if alt in parsed:
+                    parsed["content"] = parsed.pop(alt)
                     break
         # Default-to-run when there's a cmd/command and no name
         if not name and isinstance(parsed, dict) and (

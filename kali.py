@@ -69,7 +69,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.kali"
 APP_NAME = "Kali"
-VERSION = "2.1.1"
+VERSION = "2.1.3"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -592,6 +592,15 @@ passwordentry {
     color: #aeb6c2;
     font-size: 16px;
     margin-bottom: 12px;
+}
+.card-warn {
+    background-color: rgba(229, 72, 77, 0.10);
+    border: 1px solid rgba(229, 72, 77, 0.45);
+    border-radius: 8px;
+    color: #f3b0b2;
+    font-size: 15px;
+    padding: 10px 14px;
+    margin: 6px 0;
 }
 .cmd-run-btn {
     background: linear-gradient(135deg, #367bf0, #4a9eff);
@@ -1391,13 +1400,23 @@ class MessageWidget(Gtk.Box):
                         cmd = (call.args.get("command")
                                or call.args.get("cmd") or "").strip()
                         if not cmd:
-                            continue
-                        self._blocks_container.append(ProposedCommandWidget(
-                            cmd,
-                            explanation=str(call.args.get("explanation", "")),
-                            risk=str(call.args.get("risk", "medium")),
-                            on_run=self._on_run_command))
-                        _rendered = True
+                            self._append_card_warn(
+                                "Kali tried to propose a command but the call "
+                                "had no command text — nothing to run.")
+                            break
+                        try:
+                            self._blocks_container.append(ProposedCommandWidget(
+                                cmd,
+                                explanation=str(call.args.get("explanation", "")),
+                                risk=str(call.args.get("risk", "medium")),
+                                on_run=self._on_run_command))
+                            _rendered = True
+                        except Exception as e:
+                            log(f"command card build failed: {e}")
+                            self._append_card_warn(
+                                f"Kali proposed a command but the card failed "
+                                f"to render ({e}). Nothing was run.")
+                            break
                     elif call.name in ("propose_edit", "write_file"):
                         # An edit proposal renders as a diff card.  It NEVER
                         # writes on its own — the operator's Apply click is
@@ -1405,28 +1424,66 @@ class MessageWidget(Gtk.Box):
                         # the parse-check + backup + immutable-guardrail net.
                         epath = (call.args.get("path") or "").strip()
                         econtent = call.args.get("content")
-                        if not epath or econtent is None:
-                            continue
+                        # The tag WAS emitted but the args are unusable — say
+                        # WHY in the chat instead of silently drawing nothing
+                        # and letting Kali claim a card that isn't there.
+                        if "_raw" in call.args or not epath or econtent is None:
+                            if "_raw" in call.args:
+                                why = ("the file contents couldn't be parsed — "
+                                       "most likely an unescaped \" or a stray "
+                                       "control character in the JSON")
+                            elif not epath:
+                                why = "no target path was given"
+                            else:
+                                why = "no file content was given"
+                            self._append_card_warn(
+                                f"⚠ Kali tried to write a file but {why}, so no "
+                                f"diff card could be drawn and nothing was "
+                                f"written. Ask it to re-send the change.")
+                            break
                         econtent = str(econtent)
                         try:
                             d = make_edit_diff(epath, econtent)
                         except Exception:
                             d = {"ok": False}
-                        self._blocks_container.append(ProposedEditWidget(
-                            epath, econtent,
-                            diff_lines=d.get("diff") if d.get("ok") else None,
-                            added=d.get("added", 0), removed=d.get("removed", 0),
-                            is_new=d.get("is_new", False),
-                            truncated=d.get("truncated", False),
-                            explanation=str(call.args.get("explanation", "")),
-                            on_apply=self._run_proposed_edit))
-                        _rendered = True
+                        try:
+                            self._blocks_container.append(ProposedEditWidget(
+                                epath, econtent,
+                                diff_lines=d.get("diff") if d.get("ok") else None,
+                                added=d.get("added", 0),
+                                removed=d.get("removed", 0),
+                                is_new=d.get("is_new", False),
+                                truncated=d.get("truncated", False),
+                                explanation=str(call.args.get("explanation", "")),
+                                on_apply=self._run_proposed_edit))
+                            _rendered = True
+                        except Exception as e:
+                            log(f"edit card build failed: {e}")
+                            self._append_card_warn(
+                                f"⚠ Kali proposed an edit to {epath} but the "
+                                f"diff card failed to render ({e}). Nothing was "
+                                f"written.")
+                            break
                     # One command at a time: only the first proposal becomes a
                     # card.  Anything past it is ignored at render time.
                     if _rendered:
                         break
             except Exception as e:
                 log(f"propose render failed: {e}")
+
+    def _append_card_warn(self, msg: str):
+        """Show a visible, in-chat diagnostic when a proposal/edit tag was
+        emitted but no card could be drawn.  Without this the failure is
+        silent and Kali looks like it's lying about a card that isn't there."""
+        if self._blocks_container is None:
+            return
+        try:
+            lbl = _make_wrap_label()
+            lbl.set_text(msg)
+            lbl.add_css_class("card-warn")
+            self._blocks_container.append(lbl)
+        except Exception as e:
+            log(f"card-warn render failed: {e}")
 
     def set_speak_state(self, state: str):
         """state: 'idle' | 'speaking' | 'paused'."""
@@ -3340,15 +3397,28 @@ class MainWindow(Adw.ApplicationWindow):
             self._recording = True
             self._set_mic_visual("recording")
         else:
-            self._show_toast("Couldn't start the microphone.")
+            why = self.stt.last_error()
+            self._show_toast(
+                f"Couldn't start the microphone — {why}." if why
+                else "Couldn't start the microphone.", timeout=5)
 
     def _transcribe_worker(self):
         """Runs off the UI thread: stop the recorder, send to Groq, hand
         the result back to the UI thread."""
         wav = self.stt.stop()
         if not wav:
-            GLib.idle_add(self._apply_transcript, "",
-                          "No audio captured.")
+            reason = self.stt.last_error()
+            probe = self.stt.probe_inputs()
+            if reason:
+                msg = f"No audio — {reason}"
+                if not probe:
+                    msg += " (no mic visible to PipeWire/PulseAudio)"
+            elif probe:
+                msg = f"No audio captured. Inputs seen: {probe}"
+            else:
+                msg = ("No audio — no mic visible to PipeWire/PulseAudio. "
+                       "Check it's plugged in and unmuted.")
+            GLib.idle_add(self._apply_transcript, "", msg)
             return
         text, err = self.stt.transcribe(wav)
         GLib.idle_add(self._apply_transcript, text, err)

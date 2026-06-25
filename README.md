@@ -21,7 +21,7 @@ curl -fsSL https://raw.githubusercontent.com/the-priest/oracle5/main/install.sh 
 *Drives your desktop · runs your shell (only with your OK) · audits & pentests · reads your files · searches & verifies the web · writes and tests its own tools · talks and listens.*
 
 **Multi-provider cloud AI** — SiliconFlow · Groq · Novita · GitHub Models · Google AI Studio
-**`v2.1.1`** · GTK4 + libadwaita · X11 & Wayland · desktop + NetHunter mobile
+**`v2.1.3`** · GTK4 + libadwaita · X11 & Wayland · desktop + NetHunter mobile
 
 </div>
 
