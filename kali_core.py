@@ -3198,29 +3198,36 @@ def tool_tooling_check() -> Dict[str, Any]:
         return {"ok": False, "error": f"tooling_check failed: {e}"}
 
 
-def tool_pentest_plan(target: str, profile: str = "web") -> Dict[str, Any]:
+def tool_pentest_plan(target: str, profile: str = "web",
+                      intensity: str = "normal") -> Dict[str, Any]:
     """Build an ordered reconnaissance PLAN for a target (profile = web |
-    network | ad | quick).  Returns each step as a *proposed* command with
-    its risk level and notes — it does NOT run anything; every command still
-    goes through the normal approve-before-run gate.  Marks any step whose
-    tool isn't installed.  Read-only enumeration first; nothing offensive is
-    auto-executed."""
+    network | ad | api | full | quick).  `intensity` = stealth | normal |
+    aggressive tunes scan timing / rate-limits / thread counts.  Returns each
+    step as a *proposed* command with its risk level and notes — it does NOT
+    run anything; every command still goes through the normal approve-before-
+    run gate.  Marks any step whose tool isn't installed.  Read-only
+    enumeration first; nothing offensive is auto-executed."""
     try:
         from kali_ext import pentest as _pentest
     except Exception as e:
         return {"ok": False, "error": f"pentest module unavailable: {e}"}
     try:
         return _pentest.plan_recon((target or "").strip(),
-                                   (profile or "web").strip().lower())
+                                   (profile or "web").strip().lower(),
+                                   (intensity or "normal").strip().lower())
     except Exception as e:
         return {"ok": False, "error": f"pentest_plan failed: {e}"}
 
 
-def tool_cve_lookup(product: str, version: str = "") -> Dict[str, Any]:
+def tool_cve_lookup(product: str, version: str = "",
+                    limit: int = 8, enrich: bool = True) -> Dict[str, Any]:
     """Look up known CVEs for a product (optionally a specific version) from
-    NVD, the authoritative source.  Returns findings ranked by severity with
+    NVD, the authoritative source, then enrich each hit with CISA KEV (is it
+    exploited in the wild?) and EPSS (exploit-probability score) and rank by
+    real-world risk — KEV first, then EPSS, then CVSS.  Returns findings with
     a trust caveat.  Use this AFTER a banner / version has been confirmed by
-    a tool — never guess a version from memory."""
+    a tool — never guess a version from memory.  `enrich=False` skips the
+    KEV/EPSS calls for a quick NVD-only lookup."""
     try:
         from kali_ext import pentest as _pentest
     except Exception as e:
@@ -3235,9 +3242,100 @@ def tool_cve_lookup(product: str, version: str = "") -> Dict[str, Any]:
     try:
         return _pentest.cve_lookup((product or "").strip(),
                                    (version or "").strip(),
-                                   fetch_json=_fetch_json)
+                                   fetch_json=_fetch_json,
+                                   limit=max(1, min(int(limit or 8), 20)),
+                                   enrich=bool(enrich))
     except Exception as e:
         return {"ok": False, "error": f"cve_lookup failed: {e}"}
+
+
+def tool_parse_output(tool: str, raw: str) -> Dict[str, Any]:
+    """Turn raw scanner output into clean structured data.  Feed it the tool
+    name (nmap, httpx, nuclei, naabu, masscan, subfinder, ffuf, feroxbuster,
+    gobuster, katana, gau, whatweb, wpscan, sslscan, testssl, smbmap, netexec,
+    nikto, gitleaks, trufflehog, dalfox, arjun, …) and the stdout you captured,
+    and it returns a normalised list of hosts / ports / endpoints / findings.
+    Read-only — pure text parsing, runs nothing."""
+    try:
+        from kali_ext import pentest as _pentest
+    except Exception as e:
+        return {"ok": False, "error": f"pentest module unavailable: {e}"}
+    try:
+        return _pentest.parse_output((tool or "").strip().lower(),
+                                     raw or "")
+    except Exception as e:
+        return {"ok": False, "error": f"parse_output failed: {e}"}
+
+
+def tool_methodology(area: str = "", phase: str = "") -> Dict[str, Any]:
+    """Return a phased testing checklist for an engagement area (web, network,
+    ad, api, mobile, wifi, recon, priv-esc, cloud).  Grounded in PTES / OWASP
+    WSTG / the AD kill-chain.  Optionally narrow to one `phase`.  Reference
+    knowledge only — proposes no commands and runs nothing; use it to make
+    sure a test is methodical and nothing gets skipped.  Call with no args to
+    list the areas."""
+    try:
+        from kali_ext import pentest as _pentest
+    except Exception as e:
+        return {"ok": False, "error": f"pentest module unavailable: {e}"}
+    try:
+        return _pentest.methodology((area or "").strip().lower(),
+                                    (phase or "").strip().lower())
+    except Exception as e:
+        return {"ok": False, "error": f"methodology failed: {e}"}
+
+
+def tool_wordlist_find(kind: str = "") -> Dict[str, Any]:
+    """Locate wordlists actually installed on this box (dir, subdomain,
+    password, api, param, username, lfi, …) under /usr/share/wordlists,
+    seclists and /opt/SecLists.  Returns a canonical pick plus alternatives,
+    and an install hint if nothing matching is present.  Read-only — only
+    looks at the filesystem.  Call with no args to list the kinds."""
+    try:
+        from kali_ext import pentest as _pentest
+    except Exception as e:
+        return {"ok": False, "error": f"pentest module unavailable: {e}"}
+    try:
+        return _pentest.wordlist_find((kind or "").strip().lower())
+    except Exception as e:
+        return {"ok": False, "error": f"wordlist_find failed: {e}"}
+
+
+def tool_cheatsheet(topic: str = "") -> Dict[str, Any]:
+    """Return correct command-line *syntax* for a tool (nmap, ffuf, nuclei,
+    httpx, netexec, hydra, hashcat, john, sqlmap, smbmap, kerbrute, ssh-tunnel,
+    curl, …) — the flags and invocation patterns you actually use, as a quick
+    reference.  Documentation only: no exploit code or payloads, runs nothing.
+    Call with no args to list the topics."""
+    try:
+        from kali_ext import pentest as _pentest
+    except Exception as e:
+        return {"ok": False, "error": f"pentest module unavailable: {e}"}
+    try:
+        return _pentest.cheatsheet((topic or "").strip().lower())
+    except Exception as e:
+        return {"ok": False, "error": f"cheatsheet failed: {e}"}
+
+
+def tool_report_findings(findings: Any, target: str = "",
+                         scope_note: str = "",
+                         title: str = "") -> Dict[str, Any]:
+    """Aggregate a list of structured findings into a clean markdown
+    engagement report — severity rollup, a sorted findings table, and a
+    per-finding detail section.  Each finding can carry title, severity,
+    host/url, description, evidence and remediation; missing fields are
+    handled gracefully.  Read-only — formats text, runs nothing."""
+    try:
+        from kali_ext import pentest as _pentest
+    except Exception as e:
+        return {"ok": False, "error": f"pentest module unavailable: {e}"}
+    try:
+        return _pentest.report_findings(findings,
+                                        (target or "").strip(),
+                                        (scope_note or "").strip(),
+                                        (title or "").strip())
+    except Exception as e:
+        return {"ok": False, "error": f"report_findings failed: {e}"}
 
 
 # ═════════════════════════════════════════════════════════════════════

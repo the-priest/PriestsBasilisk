@@ -14,7 +14,7 @@ Multi-provider cloud AI (SiliconFlow · Groq · Novita · GitHub Models · Googl
 Reads files. Drives your desktop. Searches the web. Browses GitHub. Audits security.
 Talks and listens. Runs commands — with your permission, one at a time.
 
-`v2.0.1` · GTK4 + libadwaita · Linux
+`v2.1.0` · GTK4 + libadwaita · Linux
 
 </div>
 
@@ -27,6 +27,21 @@ Kali is a personal AI assistant in the shape of a GTK4 chat app — named for th
 When something needs to **change** — installing a package, editing a config, anything as root — she does **not** run it on her own. She explains what she'd do and why, then proposes the exact command as a card with a **Run** button and a risk level. Nothing executes until you approve it. Commands that need root show an inline password field; your sudo password is validated, used to cache the credential, and is **never** stored, logged, or shown to her.
 
 She's built for one operator — you — and behaves like it. No corporate guardrails, no boilerplate hedging, no "as an AI language model." Witty, direct, loyal; she reasons things through with you and stays on your side.
+
+---
+
+## New in v2.1
+
+The pentest support from v2.0 grew into a full read-only / propose-only offensive workflow — eight tools that cover an engagement end to end without ever attacking anything themselves.
+
+- **Bigger toolchain inventory.** `tooling_check` now knows **59** tools across recon, probing, port scanning, fuzzing, vuln scanning, secrets, creds and AD — with install lines (apt / go / pipx), common aliases (`nxc` → `netexec`), and freshness nudges (nuclei templates, SecLists/rockyou presence).
+- **Tunable recon plans.** `pentest_plan` gains an **intensity** knob — `stealth` / `normal` / `aggressive` tunes nmap timing, nuclei rate-limits and ffuf threads — plus two new profiles, `api` and `full` (joining `web`, `network`, `ad`, `quick`). Every step is still a *proposed* command behind the Run gate.
+- **Output parsing.** `parse_output` turns raw scanner stdout into clean structured data — hosts, ports, services, versions, endpoints, findings — for **20+ tools** (nmap incl. NSE hits, httpx, nuclei, naabu, masscan, subfinder, ffuf, feroxbuster, gobuster, katana, whatweb, wpscan, sslscan/testssl, smbmap, netexec, nikto, gitleaks, dalfox, arjun, …).
+- **Real-world CVE ranking.** `cve_lookup` now enriches every NVD hit with **CISA KEV** (is it exploited in the wild?) and **EPSS** (exploit-probability score), then re-ranks **KEV → EPSS → CVSS** so the dangerous ones surface first — not just the highest CVSS.
+- **Methodology, wordlists, syntax.** Three reference tools (knowledge only — no commands, no payloads): `methodology` gives phased checklists grounded in PTES / OWASP WSTG / the AD kill-chain (web, network, ad, api, mobile, wifi, recon, priv-esc, cloud); `wordlist_find` locates the wordlists actually installed on your box (SecLists included); `cheatsheet` returns correct command syntax for the tools you reach for (nmap, ffuf, nuclei, httpx, netexec, hydra, hashcat, john, sqlmap, kerbrute, …).
+- **Write-ups.** `report_findings` aggregates structured findings into a clean markdown engagement report — severity rollup, sorted findings table, per-finding detail.
+
+All eight either read the box, build a plan, parse text, look something up, or format a report. Nothing here runs an exploit, generates a payload, or attacks a target — real recon/attack commands still go through the same approve-before-run gate, one at a time, against scope you set.
 
 ---
 

@@ -41,6 +41,8 @@ from kali_core import (
     tool_path_info, tool_open_url, tool_browser,
     tool_web_search, tool_web_read, tool_github,
     tool_web_verify, tool_tooling_check, tool_pentest_plan, tool_cve_lookup,
+    tool_parse_output, tool_methodology, tool_wordlist_find,
+    tool_cheatsheet, tool_report_findings,
     tool_osint_username, tool_osint_lookup, tool_social_read,
     quick_facts as tool_quick_facts,
     sudo_cached, detect_urgency, looks_degraded,
@@ -67,7 +69,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.kali"
 APP_NAME = "Kali"
-VERSION = "2.0.1"
+VERSION = "2.1.0"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -3396,6 +3398,11 @@ class MainWindow(Adw.ApplicationWindow):
         "tooling_check":    "checking installed tools",
         "pentest_plan":     "planning recon",
         "cve_lookup":       "looking up CVEs",
+        "parse_output":     "parsing scan output",
+        "methodology":      "pulling up methodology",
+        "wordlist_find":    "finding wordlists",
+        "cheatsheet":       "pulling up syntax",
+        "report_findings":  "building the report",
         "read_file":        "reading a file",
         "write_file":       "writing a file",
         "list_dir":         "listing files",
@@ -3839,8 +3846,9 @@ class MainWindow(Adw.ApplicationWindow):
                 a.get("action", ""), a.get("query", ""), a.get("repo", ""),
                 a.get("user", ""), a.get("path", ""),
                 a.get("ref", a.get("branch", "")), i(a.get("limit", 10), 10))
-        # Pentest planning / inventory — pure local work (which-checks and
-        # building a command plan), no network and no execution, so it's safe
+        # Pentest planning / inventory / reference — pure local work (which-
+        # checks, building a command plan, text parsing, reading the
+        # filesystem, formatting), no network and no execution, so it's safe
         # to bundle.  web_verify and cve_lookup are deliberately NOT here:
         # they fan out their own network requests and must stay single-path.
         if n == "tooling_check":
@@ -3848,7 +3856,28 @@ class MainWindow(Adw.ApplicationWindow):
         if n == "pentest_plan":
             return lambda: tool_pentest_plan(
                 a.get("target", a.get("host", a.get("url", ""))),
-                a.get("profile", a.get("mode", "web")))
+                a.get("profile", a.get("mode", "web")),
+                a.get("intensity", a.get("speed", "normal")))
+        if n == "parse_output":
+            return lambda: tool_parse_output(
+                a.get("tool", a.get("name", "")),
+                a.get("raw", a.get("output", a.get("text", ""))))
+        if n == "methodology":
+            return lambda: tool_methodology(
+                a.get("area", a.get("topic", "")),
+                a.get("phase", ""))
+        if n == "wordlist_find":
+            return lambda: tool_wordlist_find(
+                a.get("kind", a.get("type", a.get("category", ""))))
+        if n == "cheatsheet":
+            return lambda: tool_cheatsheet(
+                a.get("topic", a.get("tool", a.get("name", ""))))
+        if n == "report_findings":
+            return lambda: tool_report_findings(
+                a.get("findings", a.get("items", [])),
+                a.get("target", a.get("host", a.get("url", ""))),
+                a.get("scope_note", a.get("scope", "")),
+                a.get("title", ""))
         # Pure system / desktop sensing (independent subprocesses).
         if n == "system_info":
             return tool_system_info
@@ -4123,19 +4152,44 @@ class MainWindow(Adw.ApplicationWindow):
                     self.settings)),
 
             # ── Pentest support (read-only / proposing only) ──
-            # tooling_check + pentest_plan + cve_lookup never execute an
-            # attack: plan_recon returns PROPOSED commands that still go
-            # through the approve-before-run gate.
+            # None of these execute an attack: pentest_plan returns PROPOSED
+            # commands that still go through the approve-before-run gate; the
+            # rest are inventory, text parsing, filesystem lookups, reference
+            # knowledge and report formatting.  cve_lookup is the only one
+            # that touches the network (NVD + KEV + EPSS).
             "tooling_check":     lambda a: self._tool_simple(
                 lambda: tool_tooling_check()),
             "pentest_plan":      lambda a: self._tool_simple(
                 lambda: tool_pentest_plan(
                     a.get("target", a.get("host", a.get("url", ""))),
-                    a.get("profile", a.get("mode", "web")))),
+                    a.get("profile", a.get("mode", "web")),
+                    a.get("intensity", a.get("speed", "normal")))),
             "cve_lookup":        lambda a: self._tool_simple(
                 lambda: tool_cve_lookup(
                     a.get("product", a.get("name", a.get("software", ""))),
-                    a.get("version", a.get("ver", "")))),
+                    a.get("version", a.get("ver", "")),
+                    _safe_int(a.get("limit", 8), 8),
+                    a.get("enrich", True) not in (False, "false", "0", 0))),
+            "parse_output":      lambda a: self._tool_simple(
+                lambda: tool_parse_output(
+                    a.get("tool", a.get("name", "")),
+                    a.get("raw", a.get("output", a.get("text", ""))))),
+            "methodology":       lambda a: self._tool_simple(
+                lambda: tool_methodology(
+                    a.get("area", a.get("topic", "")),
+                    a.get("phase", ""))),
+            "wordlist_find":     lambda a: self._tool_simple(
+                lambda: tool_wordlist_find(
+                    a.get("kind", a.get("type", a.get("category", ""))))),
+            "cheatsheet":        lambda a: self._tool_simple(
+                lambda: tool_cheatsheet(
+                    a.get("topic", a.get("tool", a.get("name", ""))))),
+            "report_findings":   lambda a: self._tool_simple(
+                lambda: tool_report_findings(
+                    a.get("findings", a.get("items", [])),
+                    a.get("target", a.get("host", a.get("url", ""))),
+                    a.get("scope_note", a.get("scope", "")),
+                    a.get("title", ""))),
         }
         # Merge sidecar tools (memory_*, skill_list, skill_run).  Returns an
         # empty dict unless the matching feature is enabled, so stock Kali is
