@@ -4599,6 +4599,66 @@ class ToolCall:
     raw: str
 
 
+def _escape_raw_ctrl_in_strings(s: str) -> str:
+    """Escape raw control characters (newlines, tabs, CRs) that appear INSIDE
+    a JSON string literal.
+
+    This is the single biggest reason a model-emitted tool call fails to
+    parse: a multi-line value — most often a `content` field holding a whole
+    document or a block of code — is written with literal newlines instead of
+    \\n.  Strict json.loads rejects that, the call collapses to {"_raw": ...},
+    and a propose_edit / write_file then renders NO diff card while the model
+    believes one is waiting.  Walk the text tracking string state and
+    backslash escapes, and rewrite only the control chars that sit inside a
+    string; structural whitespace between tokens is left exactly as-is."""
+    out: List[str] = []
+    in_str = False
+    esc = False
+    for ch in s:
+        if in_str:
+            if esc:
+                out.append(ch)
+                esc = False
+            elif ch == "\\":
+                out.append(ch)
+                esc = True
+            elif ch == '"':
+                out.append(ch)
+                in_str = False
+            elif ch == "\n":
+                out.append("\\n")
+            elif ch == "\r":
+                out.append("\\r")
+            elif ch == "\t":
+                out.append("\\t")
+            elif ch < " ":
+                out.append("\\u%04x" % ord(ch))
+            else:
+                out.append(ch)
+        else:
+            out.append(ch)
+            if ch == '"':
+                in_str = True
+    return "".join(out)
+
+
+def _loads_lenient(json_src: str) -> Any:
+    """json.loads, but forgiving of the one mistake models make most: literal
+    control characters inside string values.  Tries a strict parse first, then
+    one repaired parse.  Returns the parsed object, or None if it still can't
+    be made sense of (caller falls back to {"_raw": ...})."""
+    if not json_src:
+        return {}
+    try:
+        return json.loads(json_src)
+    except json.JSONDecodeError:
+        pass
+    try:
+        return json.loads(_escape_raw_ctrl_in_strings(json_src))
+    except json.JSONDecodeError:
+        return None
+
+
 def parse_tool_calls(text: str) -> List[ToolCall]:
     calls: List[ToolCall] = []
     for m in TOOL_TAG_RE.finditer(text):
@@ -4625,7 +4685,12 @@ def parse_tool_calls(text: str) -> List[ToolCall]:
         try:
             parsed = json.loads(json_src) if json_src else {}
         except json.JSONDecodeError:
-            parsed = {"_raw": json_src}
+            # Literal newlines / unescaped control chars in a string value are
+            # the usual cause (a multi-line `content` for propose_edit).  Try
+            # a repaired parse before giving up so the call still carries real
+            # path/content and its diff card actually renders.
+            recovered = _loads_lenient(json_src)
+            parsed = recovered if recovered is not None else {"_raw": json_src}
 
         # Resolve tool name
         name = name_attr

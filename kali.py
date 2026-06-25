@@ -69,7 +69,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.kali"
 APP_NAME = "Kali"
-VERSION = "2.1.0"
+VERSION = "2.1.1"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -3190,6 +3190,9 @@ class MainWindow(Adw.ApplicationWindow):
             return
         # Fresh turn — clear any leftover stop flag.
         self._stop_requested = False
+        # Fresh turn — reset the guard that stops a malformed propose/edit
+        # from being bounced back to the model forever.
+        self._bad_propose_retries = 0
         buf = self.input_view.get_buffer()
         text = buf.get_text(buf.get_start_iter(), buf.get_end_iter(),
                             False).strip()
@@ -3977,6 +3980,46 @@ class MainWindow(Adw.ApplicationWindow):
         # They never execute here; if one slips through, end the turn so
         # the card stands on its own.
         if call.name in ("propose", "propose_edit", "write_file"):
+            # …but ONLY if the card actually had the data to render.  A
+            # propose_edit whose JSON couldn't be parsed (e.g. unescaped
+            # quotes inside `content` that the lenient parser can't safely
+            # repair) arrives here with no path/content and renders NOTHING —
+            # and silently finishing the turn would leave the model believing
+            # a diff card is waiting when the screen is empty.  Catch that,
+            # tell the model plainly, and let it re-emit instead of lying to
+            # the operator about a card that doesn't exist.
+            if call.name == "propose":
+                card_ok = bool((call.args.get("command")
+                                or call.args.get("cmd") or "").strip())
+                what = "command proposal"
+            else:
+                card_ok = (bool((call.args.get("path") or "").strip())
+                           and call.args.get("content") is not None)
+                what = "file proposal (diff card)"
+            if not card_ok:
+                retries = getattr(self, "_bad_propose_retries", 0)
+                if retries < 2:
+                    self._bad_propose_retries = retries + 1
+                    self.terminal_log(
+                        f"✗ {call.name} did not render (unparseable args) — "
+                        f"asking model to re-emit", "error")
+                    self._feed_tool_result(
+                        f"Your {call.name} did NOT render — its arguments "
+                        f"could not be parsed (most likely an unescaped \" or "
+                        f"a stray control character inside the \"content\" "
+                        f"string). NO {what} is on screen and NOTHING was "
+                        f"written or proposed. Re-send it now as a single "
+                        f"well-formed tool call: the JSON must be valid — "
+                        f"escape every \" inside content as \\\" and use \\n "
+                        f"for newlines. Until the card actually renders, do "
+                        f"not tell the operator that a proposal or diff card "
+                        f"exists.")
+                    return
+                # Gave it two honest shots; stop bouncing and let the turn end
+                # so we don't loop.  The error is in context for next turn.
+                self.terminal_log(
+                    f"✗ {call.name} still unparseable after retries — "
+                    f"ending turn", "error")
             self._finish_turn_cleanup()
             return
         # Always write to the chat this turn was started in, not whichever
