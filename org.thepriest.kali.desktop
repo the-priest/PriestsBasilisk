@@ -2,11 +2,11 @@
 Type=Application
 Name=Kali
 GenericName=AI Assistant
-Comment=Local, loyal AI assistant with full OS access
+Comment=Personal, loyal AI assistant with full OS access
 Exec=kali
 Icon=org.thepriest.kali
 Terminal=false
 Categories=Utility;Network;Development;
-Keywords=ai;assistant;groq;ollama;chat;jarvis;
+Keywords=ai;assistant;groq;chat;jarvis;
 StartupWMClass=org.thepriest.kali
 StartupNotify=true

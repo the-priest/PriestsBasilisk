@@ -390,7 +390,11 @@ def is_online(timeout: float = 1.0, max_age: float = 8.0) -> bool:
         if now - _online_cache["ts"] < max_age:
             return bool(_online_cache["value"])
     result = False
-    for host, port in (("1.1.1.1", 53), ("8.8.8.8", 53)):
+    # Try DNS (53) first, then HTTPS (443) on the same resolvers — some
+    # restrictive networks block outbound 53 but allow 443, and a 53-only
+    # check would wrongly report "offline" there.
+    for host, port in (("1.1.1.1", 53), ("8.8.8.8", 53),
+                       ("1.1.1.1", 443), ("8.8.8.8", 443)):
         try:
             with socket.create_connection((host, port), timeout=timeout):
                 result = True

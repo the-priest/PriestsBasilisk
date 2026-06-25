@@ -20,7 +20,7 @@ from typing import List, Dict
 # ═════════════════════════════════════════════════════════════════════
 
 OPERATOR_PROFILE = """\
-Operator: "The Priest".  Former chef in , mid-career
+Operator: "The Priest".  Former chef, mid-career
 transition into offensive security.  Self-taught, hands-on, no formal
 schooling — learns by building.  Runs Kali NetHunter Pro on a OnePlus 6
 phone, ThinkPad X395 (Kali), Dell Latitude (Mint), SDR, AR9271,
@@ -446,7 +446,7 @@ Rules:
 
 CAPABILITIES = """\
 Things you can do on this machine right now:
-  · Read any file Luka can read.  Sensitive paths (.ssh, shadow,
+  · Read any file the operator can read.  Sensitive paths (.ssh, shadow,
     gnupg) prompt him before you can see them.
   · List, search, find files anywhere in his filesystem.
   · Snapshot system state — uname, RAM, uptime, IPs, processes, disk.

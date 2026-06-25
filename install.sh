@@ -68,7 +68,11 @@ done
 # ── pretty printing ───────────────────────────────────────────────
 
 if [ -t 1 ]; then
-  Y="\033[33m"; G="\033[32m"; R="\033[31m"; B="\033[36m"; M="\033[35m"; D="\033[90m"; X="\033[0m"
+  # ANSI-C quoting ($'...') so these hold REAL escape bytes, not the literal
+  # text \033.  Literal-text colours only render via printf (which interprets
+  # backslash escapes); the banner heredoc and the summary `echo` lines print
+  # them verbatim, which is why they used to show "\033[35m" on screen.
+  Y=$'\033[33m'; G=$'\033[32m'; R=$'\033[31m'; B=$'\033[36m'; M=$'\033[35m'; D=$'\033[90m'; X=$'\033[0m'
 else
   Y=""; G=""; R=""; B=""; M=""; D=""; X=""
 fi
@@ -107,6 +111,16 @@ EXT_FILES=(__init__.py extman.py foresight.py headroom.py memory.py \
            pentest.py sandbox.py skills.py verify.py worker.py)
 GITHUB_REPO="${KALI_REPO:-the-priest/oracle5}"
 GITHUB_BRANCH="${KALI_BRANCH:-main}"
+
+# How to re-invoke this installer in the hints we print.  Under `curl|bash`
+# $0 is just "bash" (the script came down a pipe, it's not a file on disk),
+# so fall back to the canonical one-liner so "Uninstall: …" is copy-pasteable.
+_self_src="${BASH_SOURCE[0]:-$0}"
+if [ -f "${_self_src}" ] && [ "${_self_src##*/}" != "bash" ] && [ "${_self_src##*/}" != "sh" ]; then
+  SELF_CMD="${_self_src}"
+else
+  SELF_CMD="curl -fsSL https://raw.githubusercontent.com/${GITHUB_REPO}/${GITHUB_BRANCH}/install.sh | bash -s --"
+fi
 
 # The desktop entry, the icon theme name, and the Wayland app-id / X11
 # WM_CLASS must all share ONE name for the window/taskbar icon to resolve
@@ -167,9 +181,9 @@ remove_oracle() {
 
 cat <<EOF
 
-${M}╔════════════════════════════════════╗${X}
-${M}║${X}  ${B}Kali${X} — local, loyal AI assistant   ${M}║${X}
-${M}╚════════════════════════════════════╝${X}
+${M}╔═══════════════════════════════════════╗${X}
+${M}║${X}  ${B}Kali${X} — personal, loyal AI assistant  ${M}║${X}
+${M}╚═══════════════════════════════════════╝${X}
 
   repo:            ${GITHUB_REPO}@${GITHUB_BRANCH}
   install dir:     ${INSTALL_DIR}
@@ -183,7 +197,7 @@ if [ -f "${DESKTOP_DIR}/oracle.desktop" ] || [ -f "${BIN_DIR}/oracle" ] \
    || [ -f "${SYSTEMD_DIR}/oracle-ollama.service" ]; then
   echo
   warn "previous Oracle installation detected"
-  echo "      To remove it:  $0 --remove-oracle"
+  echo "      To remove it:  ${SELF_CMD} --remove-oracle"
   echo "      (your chat history will be preserved)"
   echo
 fi
@@ -631,7 +645,7 @@ cat > "${DESKTOP_DIR}/${APP_ID}.desktop" <<EOF
 Type=Application
 Name=Kali
 GenericName=AI Assistant
-Comment=Local, loyal AI assistant with full OS access
+Comment=Personal, loyal AI assistant with full OS access
 Exec=${BIN_DIR}/kali
 Icon=${APP_ID}
 Terminal=false
@@ -791,5 +805,5 @@ echo "      reply to see the model's reasoning when it exposes any."
 echo
 
 echo "  ${D}Update:    re-run this script${X}"
-echo "  ${D}Uninstall: $0 --uninstall${X}"
+echo "  ${D}Uninstall: ${SELF_CMD} --uninstall${X}"
 echo

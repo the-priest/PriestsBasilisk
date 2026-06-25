@@ -14,7 +14,7 @@ Multi-provider cloud AI (SiliconFlow · Groq · Novita · GitHub Models · Googl
 Reads files. Drives your desktop. Searches the web. Browses GitHub. Audits security.
 Talks and listens. Runs commands — with your permission, one at a time.
 
-`v2.0.0` · GTK4 + libadwaita · Linux
+`v2.0.1` · GTK4 + libadwaita · Linux
 
 </div>
 
