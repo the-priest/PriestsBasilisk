@@ -149,7 +149,10 @@ class ProviderSpec:
         return self.chain[0] if self.chain else ""
 
 
-# Ordered: Groq first (the established default), then the rest.
+# UI display order only.  Groq is listed first for historical familiarity,
+# but the DEFAULT active provider is SiliconFlow/DeepSeek-V4-Flash — set in
+# DEFAULT_SETTINGS["active_provider"] and locked by tests.  Groq is the
+# fallback chain, not the default.
 PROVIDERS: List[ProviderSpec] = [
     ProviderSpec(
         key="groq", label="Groq", engine="groq",
@@ -1399,91 +1402,21 @@ def command_needs_sudo(command: str) -> bool:
     return bool(_SUDO_RE.search(command))
 
 
-# ── Catastrophic-command backstop ────────────────────────────────────
-# These patterns describe commands that destroy a system or its storage
-# irreversibly and are essentially NEVER something to run unattended — a
-# wiped disk, a nuked filesystem, a fork bomb.  The auto-run path consults
-# this and ALWAYS forces an explicit confirm for a match, regardless of the
-# "confirm every command" setting.  It exists for exactly one reason: a
-# model is not perfect and it ingests untrusted text (web pages, scan
-# output) that can try to steer it, so the one class of mistake that can't
-# be undone keeps a human in the loop.  It is intentionally narrow — normal
-# offensive-security work (nmap, nuclei, sqlmap, hydra, file ops in your own
-# dirs) does not match — so it doesn't add friction to real work.
-_CATASTROPHIC_PATTERNS = [
-    # recursive rm (-r / -rf / -fr / -R / --recursive, in any order, with or
-    # without quotes around the target) whose target is the filesystem root
-    # or bare $HOME — but NOT a subdirectory like ~/engagements/old.
-    # Two lookaheads: one proves recursion, one proves a root/home target.
-    r'\brm\b'
-    r'(?=[^\n;|&]*\s(?:-[a-zA-Z]*[rR][a-zA-Z]*|--recursive)\b)'
-    r'(?=[^\n;|&]*\s["\']?(?:/|/\*|~/\*|~/|~|\$\{?HOME\}?)["\']?(?:\s|$|;|\*))',
-    # recursive rm whose target is a top-level system directory
-    r'\brm\b'
-    r'(?=[^\n;|&]*\s(?:-[a-zA-Z]*[rR][a-zA-Z]*|--recursive)\b)'
-    r'(?=[^\n;|&]*\s["\']?/(?:bin|boot|dev|etc|lib\w*|proc|root|sbin|srv|sys|usr|var)\b)',
-    # writing straight to a block device (dd / redirection / tee)
-    r'\bdd\b[^\n]*\bof=\s*["\']?/dev/(?:sd|nvme|mmcblk|vd|hd|loop|disk)',
-    r'(?:^|[\s|>])>\s*["\']?/dev/(?:sd|nvme|mmcblk|vd|hd)',
-    r'\btee\b[^\n]*\s["\']?/dev/(?:sd|nvme|mmcblk|vd|hd)',
-    # filesystem / partition destroyers
-    r'\bmkfs(?:\.\w+)?\b',
-    r'\bwipefs\b',
-    r'\bshred\b[^\n]*\s/dev/',
-    r'\bblkdiscard\b',
-    r'\b(?:sg|hd)parm\b[^\n]*--(?:security-erase|trim-sector-ranges)',
-    r'\b(?:parted|sfdisk|sgdisk)\b[^\n]*(?:--zap-all|mklabel|-Z|--delete)',
-    # fork bomb
-    r':\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:',
-    # recursive permission/ownership nuke on a system root
-    r'\bchmod\b[^\n]*\s-[a-zA-Z]*R[a-zA-Z]*\s+[0-7]{3,4}\s+["\']?/(?:\s|$|bin|etc|usr|lib|boot|var)',
-    r'\bchown\b[^\n]*\s-[a-zA-Z]*R[a-zA-Z]*\s+\S+\s+["\']?/(?:\s|$|bin|etc|usr|lib|boot)',
-    # overwrite-everything cipher / crypto-shred of a mount
-    r'\bcryptsetup\b[^\n]*\b(?:erase|luksErase)\b',
-]
-_CATASTROPHIC_RE = re.compile("|".join(_CATASTROPHIC_PATTERNS), re.IGNORECASE)
-
-
-def is_catastrophic_command(command: str) -> bool:
-    """True if a command looks like it would irreversibly destroy the system
-    or its storage (disk wipe, filesystem nuke, recursive root delete, fork
-    bomb).  Used as a hard confirm-always backstop on the auto-run path — it
-    can lower trust but is never bypassed by a setting.  Deliberately narrow:
-    ordinary pentest and file work does not trip it."""
-    if not command:
-        return False
-    return bool(_CATASTROPHIC_RE.search(command))
-
-
-# ── Self-source tamper backstop ──────────────────────────────────────
-# Edits to Kali's own source are supposed to go through the guarded file-
-# edit path (ast parse-check + the immutable GUARDRAIL block protection in
-# _check_protected_regions).  A raw shell write to one of those files —
-# `sed -i` over the guardrail, `> kali_persona.py`, `tee`, etc. — would
-# sidestep that entirely.  The auto-run gate treats such a write like a
-# destructive command: it always stops for an explicit confirm, even in
-# auto-run mode, so the safety block can't be silently shell-stripped.
-_PROT_SRC = r'(?:kali_persona|kali_core|kali_voice|kali)\.py'
-_SELF_WRITE_RE = re.compile(
-    r'(?:'
-    r'>>?\s*[^\n|;&]*?' + _PROT_SRC +                       # > file / >> file
-    r'|\btee\b\s+[^\n|;&]*?' + _PROT_SRC +                  # tee file
-    r'|\bsed\b\s+[^\n]*?-[a-zA-Z]*i[^\n]*?' + _PROT_SRC +   # sed -i ... file
-    r'|\bperl\b\s+[^\n]*?-[a-zA-Z]*i[^\n]*?' + _PROT_SRC +  # perl -i ... file
-    r'|\bdd\b\s+[^\n]*?of=\s*[^\n|;&]*?' + _PROT_SRC +      # dd of=...file
-    r'|\btruncate\b\s+[^\n]*?' + _PROT_SRC +
-    r'|\b(?:rm|chmod|chown|ln|install|patch)\b\s+[^\n]*?' + _PROT_SRC +
-    r')', re.IGNORECASE)
-
-
-def command_tampers_self(command: str) -> bool:
-    """True if a shell command appears to WRITE to / modify one of Kali's own
-    source files, bypassing the guarded edit path.  The auto-run gate force-
-    confirms these so the immutable guardrail can't be stripped via a raw
-    shell redirect / sed.  Reading the files (cat, grep) does NOT trip it."""
-    if not command:
-        return False
-    return bool(_SELF_WRITE_RE.search(command))
+# ── Catastrophic-command & self-tamper backstops ─────────────────────
+# These two hard, setting-independent floors on the auto-run gate now live in
+# kali_safety.py, where they are *structural* (shlex-tokenised, $IFS/quote
+# normalised, recursing into `sh -c` / eval payloads) rather than a raw-string
+# regex — so trivial obfuscation (rm '-rf' /, rm${IFS}-rf${IFS}/, cd / && rm
+# -rf *, find / -delete, bash -c "...", base64|sh) can't slip a system-
+# destroying or guardrail-stripping command through.  They are imported and
+# re-exported here so every existing `from kali_core import ...` keeps working.
+# Both stay deliberately narrow: normal offensive-security work (nmap, nuclei,
+# sqlmap, hydra) and file ops in your own dirs do not trip them.  See the full
+# catch/ignore matrix in tests/test_kali.py.
+from kali_safety import (              # noqa: E402
+    is_catastrophic_command,
+    command_tampers_self,
+)
 
 
 # Same matcher, but capturing the leading boundary so we can inject an

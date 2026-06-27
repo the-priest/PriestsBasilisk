@@ -21,7 +21,7 @@ curl -fsSL https://raw.githubusercontent.com/the-priest/oracle5/main/install.sh 
 *Drives your desktop · runs your shell (only with your OK) · audits & pentests · reads your files · searches & verifies the web · writes and tests its own tools · talks and listens.*
 
 **Multi-provider cloud AI** — SiliconFlow · Groq · Novita · GitHub Models · Google AI Studio
-**`v2.3.1`** · GTK4 + libadwaita · X11 & Wayland · desktop + NetHunter mobile
+**`v3.1.0`** · GTK4 + libadwaita · X11 & Wayland · desktop + NetHunter mobile
 
 </div>
 
@@ -41,7 +41,7 @@ It is, in one app:
 - a **toolsmith** that writes, tests and saves its own Python tools in a sandbox;
 - and a **voice interface** that listens and talks back.
 
-All of it on one machine, under one operator — you — with a hard rule that **nothing with side effects ever runs without your explicit, one-at-a-time approval.**
+All of it on one machine, under one operator — you. By default Kali is **decisive**: when you ask it to do something, it runs the command, reads the output, and runs the next one — no card-clicking for routine work. What it *cannot* do behind your back is the irreversible stuff: **disk/filesystem destruction, recursive root deletes, and edits to its own safety guardrail always stop for an explicit confirm**, even in auto-run mode, even if the model was steered by something it read. And if you want maximum control, one setting (**Confirm every command**) turns *every* side-effecting action into a card you approve one at a time.
 
 ---
 
@@ -62,12 +62,13 @@ The honest version. Kali doesn't claim to out-think a frontier model on a riddle
 | Choose your **own** LLM provider | ✅ 5 providers | ❌ OpenAI only | ❌ Anthropic only | ⚠️ | ⚠️ |
 | Your data leaves the box | **only the model call** | ✅ to OpenAI | ✅ to Anthropic | depends | depends |
 | Voice in **and** out | ✅ STT + TTS | ⚠️ app only | ❌ | ❌ | ❌ |
-| Destructive action without asking | **impossible** | n/a | possible in CLI | by design | by design |
+| **Irreversible** destruction (disk/FS wipe, recursive root delete) without a confirm | **always blocked** | n/a | possible in CLI | by design | by design |
+| Routine commands run for you without a click | ✅ (or full-confirm, opt-in) | ⚠️ sandbox only | ✅ CLI | ✅ unattended | ✅ unattended |
 | Cost | your API key, pennies | subscription | subscription | infra + keys | infra + keys |
 
 **Versus ChatGPT / Claude.** They're hosted brains owned by one company, wrapped in guardrails that will refuse half of real security work and ship every prompt to a datacenter you don't control. Their agent modes (Operator, Code Interpreter, Claude Code, Computer Use) are real and good — but they're cloud-bound, single-vendor, and not built for an operator who wants a private, security-literate partner on their own hardware. Kali keeps your data on the box, lets you pick the model, never moralizes at you over a port scan, and drives the *actual* desktop instead of a sandboxed clone.
 
-**Versus Hermes / OpenClaw.** These chase **unattended 24/7 autonomy** on a server. That's the opposite bet, and the wrong one for irreversible work — one bad `dd` or `rm -rf` from an unsupervised agent is unrecoverable. OpenClaw also got publicly burned for sloppy local trust (keys in `.bak` files, a websocket any browser tab could reach, plugins with too little isolation). Kali's entire posture is a trust boundary: read-only sensing runs free, **everything with consequences is proposed and approved one command at a time**, self-written code runs only in a bubblewrap jail after passing its own test, and an optional **foresight** gate can hard-block catastrophes outright.
+**Versus Hermes / OpenClaw.** These chase **unattended 24/7 autonomy** on a server. That's the opposite bet, and the wrong one for irreversible work — one bad `dd` or `rm -rf` from an unsupervised agent is unrecoverable. OpenClaw also got publicly burned for sloppy local trust (keys in `.bak` files, a websocket any browser tab could reach, plugins with too little isolation). Kali's posture is different: it's decisive on routine work (it runs commands for you) but draws a hard line at the irreversible — a **structural** detector (not a fragile regex; it sees through quoting, `$IFS`, `cd /` then `rm -rf *`, `find / -delete`, `bash -c`, and base64-pipe-to-shell) **forces an explicit confirm on any disk/FS-destroying or guardrail-stripping command**, even in auto-run. Self-written code runs only in a bubblewrap jail after passing its own test, an optional **foresight** gate can hard-block catastrophes outright, and **Confirm every command** is one toggle away when you want a card for everything.
 
 **Where Kali is deliberately different:** it is *not* a fire-and-forget fleet daemon and it will *not* auto-learn skills or act behind your back. That restraint is the product. Want an unsupervised swarm? Run Hermes. Want a private, sharp, security-native assistant that lives on your machine and never nukes your disk without you? **Run Kali.**
 
@@ -75,7 +76,7 @@ The honest version. Kali doesn't claim to out-think a frontier model on a riddle
 
 ## Everything Kali can do
 
-A complete map. Read-only **sensing** runs freely, no permission needed. Anything that **changes state** is proposed as a card with a risk level and a **Run/Apply** button — approved by you, one at a time.
+A complete map. Read-only **sensing** runs freely, no permission needed. State-changing actions either **run** directly (the default, for routine work) or are surfaced as a **card** with a risk level and a **Run/Apply** button — and the irreversible class (disk/FS destruction, recursive root deletes, self-source edits) *always* stops for that card, no matter the setting. Flip on **Confirm every command** and *everything* with side effects becomes a card you approve one at a time.
 
 ### 🛡️ Offensive security (the bread and butter)
 - **`audit`** — local security posture scan: firewall, SSH hardening, open listeners, world-writable files, failed logins, pending updates, and more, scored by severity. Read-only.
@@ -107,7 +108,7 @@ A complete map. Read-only **sensing** runs freely, no permission needed. Anythin
 `launch_app` · `list_apps` · `list_windows` · `focus_window` · `close_window` · `type_text` · `press_key` · `open_url` · `screenshot` · `read_screen` (on-screen **OCR**) · `media_control` · `notify`. Auto-detects **X11 vs Wayland** and picks the right backend (xdotool/wmctrl/scrot vs wtype/wlrctl/grim); prefers Spectacle/kdialog on KDE Plasma. `desktop_info` shows what's available on your box.
 
 ### 📁 Files & shell (gated for anything that changes)
-`read_file` · `list_dir` · `find_file` (size & mtime filters) · `make_dir` · `copy_path` · `move_path` · `delete_path` · **`run`** any shell command (proposed as a card, approved by you, one at a time, with sudo handled safely). **Write/create any file** — a document, report, script or config — via a **diff card** you Apply; multi-line content is parsed robustly and shown as a real diff before a byte hits disk.
+`read_file` · `list_dir` · `find_file` (size & mtime filters) · `make_dir` · `copy_path` · `move_path` · `delete_path` · **`run`** any shell command (executed directly in the default decisive mode, or as an approve-first card under **Confirm every command** — and always force-confirmed for the catastrophic class, with sudo handled safely). **Write/create any file** — a document, report, script or config — via a **diff card** you Apply; multi-line content is parsed robustly and shown as a real diff before a byte hits disk.
 
 ### 🧠 Memory (optional, local)
 `memory_remember` · `memory_recall` · `memory_forget` — relevance-scoped recall (FTS5/keyword + recency + salience, optional embeddings) that injects only the **top-k** memories per turn, never the whole store. Nothing leaves the box.
@@ -139,15 +140,19 @@ A `systemd --user` service for the genuinely-headless jobs: periodic system chec
 
 ## The safety model (why you can hand it root)
 
-Kali's restraint is the feature. The trust boundary:
+Kali is built to be **decisive by default and un-catastrophic by construction**. The trust boundary:
 
-- **Read-only sensing runs free; everything with consequences is proposed and approved — one command at a time, every time.**
+- **Two speeds, you pick.** *Default (decisive):* read-only sensing runs free, and when you ask for something Kali runs the command, reads the result, and keeps going — no clicking through routine work. *Confirm every command (one toggle):* every side-effecting action becomes a card you approve one at a time. Either way, the floor below holds.
+- **The irreversible class always stops for a confirm — even in auto-run, even if the model was steered.** A *structural* detector (shlex-tokenised, `$IFS`/quote-normalised, recursing into `sh -c`/`eval`) force-confirms disk/filesystem wipes, recursive root/`$HOME` deletes, fork bombs, and raw block-device writes. It sees through the obfuscations a regex misses — `rm '-rf' /`, `rm${IFS}-rf${IFS}/`, `cd / && rm -rf *`, `find / -delete`, `bash -c "…"`, `echo … | base64 -d | sh` — and is a strict superset of the old backstop. It stays narrow: `nmap`, `nuclei`, `sqlmap`, and `rm -rf ~/loot` don't trip it. (The full catch/ignore contract is pinned in `tests/test_kali.py`.)
+- **Kali's own source can't be shell-stripped.** A raw `>`, `sed -i`, `tee`, or `dd of=` aimed at `kali*.py` is force-confirmed too, so the immutable guardrail can't be edited out from under the guarded path.
 - **Your sudo password is never stored, logged, or shown to the model.** It's collected in a dialog, validated, and used to cache the credential for the session only.
 - **API keys live only in `~/.config/kali/settings.json`** — never logged, never sent anywhere but the provider's own API.
-- **Self-written code never runs in Kali's process.** It's `ast`-parsed, statically screened, and executed in a **bubblewrap-isolated** child that must pass its own test before it can be saved.
+- **Self-written code never runs in Kali's process.** It's `ast`-parsed, statically screened, and executed in a **bubblewrap-isolated** child (read-only system, no `$HOME`, network off) that must pass its own test before it can be saved.
 - **Optional foresight gate** predicts a command's blast radius and can hard-block catastrophic, irreversible actions even in auto mode.
-- **The persona guardrail block is immutable** — Kali can edit everything else about itself, but not that.
+- **The persona guardrail block is immutable** — Kali can edit everything else about itself, but the write path refuses any edit that drops or alters that block (enforced in code, not just asked of the model).
 - **Robust tool parsing** — a multi-line document or a stray character in a tool call can't silently vanish: it's recovered and rendered as a real diff card, or you're told it didn't, so Kali never claims an action happened when it didn't.
+
+> **Honest framing:** the default is *not* a babysat, approve-everything daemon — it runs routine commands for you, which is the point. What it guarantees is narrower and more important than "asks every time": the one class of mistake that can't be undone keeps a human in the loop no matter what, and you can dial friction up to full-confirm whenever you want.
 
 ---
 
@@ -162,7 +167,7 @@ curl -fsSL https://raw.githubusercontent.com/the-priest/oracle5/main/install.sh 
 Run it the first time to install; run the exact same line any time later to update. It's idempotent and smart about it:
 
 - Detects Python 3.10+ (fails fast if missing) and installs GTK4 + libadwaita bindings (apt / pacman / dnf, auto-detected).
-- Fetches the four modules (`kali.py`, `kali_core.py`, `kali_persona.py`, `kali_voice.py`) plus the optional `kali_ext/` sidecar.
+- Fetches the five core modules (`kali.py`, `kali_core.py`, `kali_safety.py`, `kali_persona.py`, `kali_voice.py`) plus the optional `kali_ext/` sidecar.
 - **Parse-checks every incoming file before it overwrites anything** — a syntax error in a download can never replace your working install.
 - **Backs up your chat database** before each update, and reports the version it's moving you to (e.g. `updating Kali 0.7.0 → 0.8.0`).
 - Installs optional desktop-control helpers (xdotool/wmctrl/scrot on X11; wtype/wlrctl/grim on Wayland; tesseract-ocr, libnotify-bin, playerctl), voice packages (espeak-ng, a recorder, a player, best-effort Piper + a neural voice), and optionally Playwright + Chromium for browser automation.
@@ -239,13 +244,19 @@ Keys are stored locally in `~/.config/kali/settings.json` only — never anywher
       │  kali_core.py    │     │  kali_persona.py │   │ kali_voice.py│
       │                  │     │                  │   │              │
       │ providers/router │     │ system prompt    │   │ STT (record  │
-      │ 47+ tools        │     │ + capabilities   │   │  + provider- │
+      │ 49 agent tools   │     │ + capabilities   │   │  + provider- │
       │ web / github     │     │ + rules          │   │  aware ASR)  │
       │ chat DB · audit  │     └──────────────────┘   │ TTS (Piper / │
       │ watcher · sudo   │                            │  espeak)     │
-      └─────────┬────────┘                            └──────────────┘
-                │
-      ┌─────────┴─────────────────────────────────────┐
+      └────┬────────┬────┘                            └──────────────┘
+           │        │
+           │   ┌────┴───────────────┐
+           │   │  kali_safety.py    │  hard auto-run floor:
+           │   │  catastrophic +    │  structural (shlex), evasion-
+           │   │  self-tamper gate  │  resistant, setting-independent
+           │   └────────────────────┘
+           │
+      ┌────┴──────────────────────────────────────────┐
       │  kali_ext/  (optional sidecar — off by default)│
       │  memory · skills · sandbox · foresight · worker│
       └───────────────────────────────────────────────┘
@@ -275,7 +286,7 @@ Conversations are stored in a local SQLite DB (`~/.local/share/kali/chats.db`). 
 
 ## What Kali can NOT do
 
-- **Run anything destructive without you.** Side-effecting commands are always proposed and approved; never auto-run. One at a time.
+- **Destroy your system or its storage on its own.** Disk/FS wipes, recursive root/`$HOME` deletes, fork bombs and raw block-device writes are *always* force-confirmed — even in decisive auto-run, even via quoting/`$IFS`/`bash -c` tricks. (Routine side-effecting commands *do* run for you by default; flip on **Confirm every command** to gate every one.)
 - **Be an always-on autonomous fleet agent.** A deliberate non-goal — Kali keeps you in the loop. (Want unattended autonomy? That's Hermes/OpenClaw territory.)
 - **See your sudo password.** Collected in a dialog, validated, never stored or shown to the model.
 - **Reach private/authenticated content it hasn't been given access to.** Public web and public GitHub, yes; private repos only with a token you set.
@@ -287,7 +298,7 @@ Conversations are stored in a local SQLite DB (`~/.local/share/kali/chats.db`). 
 
 ```
 ~/.local/share/kali/           code + data
-  kali.py  kali_core.py  kali_persona.py  kali_voice.py
+  kali.py  kali_core.py  kali_safety.py  kali_persona.py  kali_voice.py
   kali_ext/                    optional sidecar
   chats.db                     conversation history
   backups/                     pre-update DB snapshots
@@ -313,7 +324,7 @@ git clone https://github.com/the-priest/oracle5.git kali && cd kali
 python3 kali.py
 
 # syntax check
-python3 -m py_compile kali.py kali_core.py kali_persona.py kali_voice.py
+python3 -m py_compile kali.py kali_core.py kali_safety.py kali_persona.py kali_voice.py
 
 # run the offline test suite (stdlib only — no display, no keys, no network)
 python3 tests/test_kali.py

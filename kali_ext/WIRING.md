@@ -2,9 +2,16 @@
 
 Two ways. Pick one. Read both first.
 
-The sidecar depends only on stdlib + two callables you inject. It imports
-nothing from `kali.py` / `kali_core.py` / `kali_persona.py`. So your core
-stays authoritative and the whole thing deletes cleanly.
+The sidecar's **hook modules** — the ones core calls into (`headroom`,
+`verify`, `pentest`, `memory`, `skills`, `sandbox`, `foresight`) — depend only
+on stdlib + two callables you inject, and import nothing from `kali.py` /
+`kali_core.py` / `kali_persona.py`. That one-way dependency is what keeps the
+sidecar optional and null-safe: core lazily imports these at call time, so a
+missing or broken sidecar can never break startup, and the whole thing deletes
+cleanly. (The sole exception is `worker.py`, the standalone `systemd --user`
+background **entry point** — it runs as its own process, *off* the core→ext
+call path, and may `import kali_core` to do headless jobs. It never imports back
+into the UI.)
 
 ---
 
