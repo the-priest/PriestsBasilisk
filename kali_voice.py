@@ -191,7 +191,7 @@ def clean_for_speech(text: str) -> str:
 
 _ABBREV = {
     "mr", "mrs", "ms", "dr", "prof", "sr", "jr", "st", "vs", "etc",
-    "e.g", "i.e", "no", "fig", "al", "inc", "ltd", "co",
+    "e.g", "i.e", "no", "fig", "al", "inc", "ltd", "co", "a.m", "p.m",
 }
 _SENT_BOUNDARY = re.compile(r"([.!?…]+[\"')\]]?)(\s+|$)")
 _MAX_CHUNK = 240

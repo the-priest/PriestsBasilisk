@@ -1952,7 +1952,7 @@ class SettingsDialog(Adw.PreferencesDialog):
         self.active_provider_row.set_title("Active provider")
         prov_labels = [p.label for p in PROVIDERS]
         self.active_provider_row.set_model(Gtk.StringList.new(prov_labels))
-        cur_key = parent.settings.get("active_provider", "groq")
+        cur_key = parent.settings.get("active_provider", "siliconflow")
         prov_keys = [p.key for p in PROVIDERS]
         if cur_key in prov_keys:
             self.active_provider_row.set_selected(prov_keys.index(cur_key))

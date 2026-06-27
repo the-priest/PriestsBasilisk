@@ -724,41 +724,54 @@ SETTINGS_FILE="${CONFIG_DIR}/settings.json"
 
 SETTINGS_FILE_PATH="${SETTINGS_FILE}" \
 NEW_GROQ_KEY="${GROQ_KEY_TO_WRITE}" \
+INSTALL_DIR_PATH="${INSTALL_DIR}" \
 python3 - <<'PYEOF'
-import json, os
+import json, os, sys
 settings_file = os.environ['SETTINGS_FILE_PATH']
 new_groq_key  = os.environ.get('NEW_GROQ_KEY', '')
+install_dir   = os.environ.get('INSTALL_DIR_PATH', '')
 
-# Cloud-only defaults.  Per-provider key+model slots are added below so
-# the schema matches kali_core.DEFAULT_SETTINGS.
-providers = {
-    "groq":        "llama-3.3-70b-versatile",
-    "siliconflow": "deepseek-ai/DeepSeek-V3",
-    "novita":      "qwen/qwen3-coder-480b-a35b-instruct",
-    "github":      "openai/gpt-4.1",
-    "google":      "gemini-2.5-pro",
-}
-defaults = {
-    "active_provider": "groq",
-    "temperature": 0.7,
-    "top_p": 0.9,
-    "max_tokens": 2048,
-    "system_prompt": "",
-    "agent_mode_default": True,
-    "confirm_all_commands": True,
-    "watcher_enabled": False,
-    "watcher_check_updates": True,
-    "watcher_check_downloads": True,
-    "watcher_check_journal": False,
-    "watcher_interval_minutes": 60,
-    "theme": "mocha",
-    "ui_scale": 0,  # 0 = auto-detect (must match kali_core DEFAULT_SETTINGS)
-    "show_token_count": False,
-    "show_provider_pill": True,
-}
-for key, model in providers.items():
-    defaults[f"{key}_api_key"] = ""
-    defaults[f"{key}_model"] = model
+# Source of truth: kali_core.DEFAULT_SETTINGS from the freshly-installed code.
+# Importing it here means the written settings.json can never drift from the
+# app's own defaults (active provider, per-provider models, theme, …) — which
+# is exactly how the old hardcoded copy fell out of sync.  kali_core is pure
+# stdlib (no GTK), so this import is safe at install time.  If it can't be
+# imported for any reason, fall back to a minimal set and let the app backfill
+# the rest from its own DEFAULT_SETTINGS on first launch.
+defaults = None
+if install_dir and os.path.isdir(install_dir):
+    sys.path.insert(0, install_dir)
+    try:
+        import kali_core
+        defaults = dict(kali_core.DEFAULT_SETTINGS)
+    except Exception as e:
+        print(f"  (note: kali_core defaults unavailable, using fallback — "
+              f"{type(e).__name__})")
+
+if defaults is None:
+    # Minimal fallback only.  load_settings() merges the full DEFAULT_SETTINGS
+    # over whatever is on disk at launch, so the rest is filled in then.
+    providers = {
+        "groq":        "llama-3.3-70b-versatile",
+        "siliconflow": "deepseek-ai/DeepSeek-V4-Flash",
+        "novita":      "qwen/qwen3-coder-480b-a35b-instruct",
+        "github":      "openai/gpt-4.1",
+        "google":      "gemini-2.5-pro",
+    }
+    defaults = {
+        "active_provider": "siliconflow",
+        "temperature": 0.7,
+        "top_p": 0.9,
+        "max_tokens": 2048,
+        "system_prompt": "",
+        "agent_mode_default": True,
+        "confirm_all_commands": True,
+        "theme": "kali",
+        "ui_scale": 0,
+    }
+    for key, model in providers.items():
+        defaults[f"{key}_api_key"] = ""
+        defaults[f"{key}_model"] = model
 
 if os.path.exists(settings_file):
     try:

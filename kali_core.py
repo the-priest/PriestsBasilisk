@@ -212,7 +212,8 @@ def log(msg: str) -> None:
 DEFAULT_SETTINGS = {
     # ── Provider routing ──
     # Which cloud provider to use.  Cloud-only build — no local model.
-    "active_provider": "groq",
+    # SiliconFlow/DeepSeek is the primary; Groq is the fallback chain.
+    "active_provider": "siliconflow",
 
     # Per-provider API key + selected model.  One pair per registered
     # provider; populated from DEFAULT_SETTINGS so a fresh install has
@@ -351,13 +352,17 @@ def _migrate_settings(merged: Dict[str, Any], raw: Dict[str, Any]) -> None:
     operator's existing Groq config."""
     # Older builds may carry prefer_groq / prefer_cloud / local-model keys;
     # they're harmless leftovers now (cloud-only) and simply ignored.
-    # If active_provider is missing, keep Groq as the default.
+    # If active_provider is missing entirely, this is a pre-multi-provider
+    # (Groq-only) install — keep Groq so the operator's working setup isn't
+    # disrupted on upgrade.  A genuinely fresh install never reaches here; it
+    # gets the SiliconFlow default straight from DEFAULT_SETTINGS.
     if "active_provider" not in raw:
         merged["active_provider"] = "groq"
     # Guard against an active_provider that no longer exists in the
-    # registry (e.g. a renamed/removed provider) — fall back to groq.
+    # registry (e.g. a renamed/removed provider) — fall back to the locked
+    # primary, SiliconFlow.
     if merged.get("active_provider") not in PROVIDERS_BY_KEY:
-        merged["active_provider"] = "groq"
+        merged["active_provider"] = "siliconflow"
 
 
 def save_settings(settings: Dict[str, Any]) -> None:
@@ -773,12 +778,16 @@ class BackendRouter:
 
     def active_cloud(self) -> Tuple[Optional[Backend], str]:
         """Return (backend, provider_key) for the configured active
-        provider, falling back to groq if the configured one is missing."""
-        key = self.settings.get("active_provider", "groq")
+        provider, falling back to the locked primary (SiliconFlow) if the
+        configured one is missing."""
+        key = self.settings.get("active_provider", "siliconflow")
         backend = self.cloud.get(key)
         if backend is None:
-            backend = self.cloud.get("groq")
-            key = "groq"
+            key = "siliconflow"
+            backend = self.cloud.get(key)
+            if backend is None:        # SiliconFlow somehow absent — last resort
+                backend = self.cloud.get("groq")
+                key = "groq"
         return backend, key
 
     def pick(self) -> Tuple[Optional[Backend], str]:
