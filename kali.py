@@ -12,7 +12,9 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("Pango", "1.0")
-from gi.repository import Gtk, Adw, GLib, Gdk, Gio, Pango, GObject  # noqa
+gi.require_version("GdkPixbuf", "2.0")
+from gi.repository import (Gtk, Adw, GLib, Gdk, Gio, Pango, GObject,  # noqa
+                          GdkPixbuf)
 
 import sys
 import os
@@ -70,7 +72,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.kali"
 APP_NAME = "Kali"
-VERSION = "2.3.0"
+VERSION = "2.3.1"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -1297,6 +1299,28 @@ def _find_dragon_svg() -> Optional[str]:
 _DRAGON_SVG_PATH = _find_dragon_svg()
 
 
+def _svg_texture(path: str, px: int):
+    """Rasterise an SVG file to a px-by-px Gdk.Texture using the pixbuf SVG
+    loader (CPU / cairo).  Returns None on any failure.
+
+    Why this exists: handing GTK a live SVG paintable (Gtk.Image.new_from_file
+    on an .svg) lets the SVG's own structure become a tree of Gsk render nodes.
+    A complex emblem — many hundreds of fill paths behind a feGaussianBlur —
+    forces the GL renderer to allocate an offscreen blur surface for the whole
+    group, which can exceed the GL texture-size limit and SEGFAULT the entire
+    process at draw time.  Flattening to a fixed-size bitmap first means GTK
+    only ever composites one small texture, so any emblem is safe and it still
+    looks identical at avatar scale."""
+    try:
+        pb = GdkPixbuf.Pixbuf.new_from_file_at_size(path, px, px)
+        if pb is None:
+            return None
+        return Gdk.Texture.new_for_pixbuf(pb)
+    except Exception as e:
+        log(f"emblem rasterise failed: {e}")
+        return None
+
+
 def Avatar(kind: str = "user") -> Gtk.Widget:
     """Square avatar.  Kali shows the dragon emblem; the user shows an
     initial.  Falls back to a letter if the emblem SVG can't be loaded so
@@ -1306,7 +1330,16 @@ def Avatar(kind: str = "user") -> Gtk.Widget:
     size = _scaled(52, floor=28)
     if kind == "kali" and _DRAGON_SVG_PATH:
         try:
-            img = Gtk.Image.new_from_file(_DRAGON_SVG_PATH)
+            # Rasterise to a bounded bitmap instead of a live SVG paintable —
+            # see _svg_texture: a filtered, many-path emblem rendered live can
+            # overflow the GL surface limit and crash the process.  2x the
+            # display size keeps it crisp on HiDPI; capped so it stays bounded.
+            px = min(max(size * 2, 96), 256)
+            tex = _svg_texture(_DRAGON_SVG_PATH, px)
+            if tex is not None:
+                img = Gtk.Image.new_from_paintable(tex)
+            else:
+                img = Gtk.Image.new_from_file(_DRAGON_SVG_PATH)
             img.set_pixel_size(size)
             img.set_valign(Gtk.Align.START)
             img.add_css_class("avatar")
