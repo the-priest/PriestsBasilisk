@@ -1506,9 +1506,12 @@ _DRAGON_SVG_PATH = _find_dragon_svg()
 
 
 def _find_watermark_svg() -> Optional[str]:
-    """Locate the transparent penguin watermark for the chat background.
-    Falls back to the emblem SVG, then None (no watermark)."""
+    """Locate the dragon watermark for the chat background (PNG preferred,
+    then SVG).  Falls back to the emblem SVG, then None (no watermark)."""
     candidates = [
+        os.path.expanduser("~/.local/share/kali/kali-watermark.png"),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                     "kali-watermark.png"),
         os.path.expanduser("~/.local/share/kali/kali-watermark.svg"),
         os.path.join(os.path.dirname(os.path.abspath(__file__)),
                      "kali-watermark.svg"),
@@ -3221,14 +3224,25 @@ class MainWindow(Adw.ApplicationWindow):
         return main
 
     def _build_chat_watermark(self):
-        """A large, faint menacing-penguin watermark for behind the chat.
-        Non-interactive (never grabs touch/clicks), scaled to fit, low opacity
-        so it sets the mood without fighting the text.  Returns None if the
-        watermark art isn't on disk, in which case the chat has no watermark."""
-        if not _WATERMARK_SVG_PATH:
+        """A large, faint dragon watermark for behind the chat.  Loads either a
+        PNG (the dragon emblem, already alpha-baked) or an SVG.  Non-interactive
+        (never grabs touch/clicks), scaled to fit, low opacity so it sets the
+        mood without fighting the text.  Returns None if the art isn't on disk."""
+        path = _WATERMARK_SVG_PATH
+        if not path:
             return None
         try:
-            tex = _svg_texture(_WATERMARK_SVG_PATH, 720)
+            if path.lower().endswith(".png"):
+                tex = None
+                try:
+                    tex = Gdk.Texture.new_from_filename(path)
+                except Exception:
+                    from gi.repository import Gio
+                    tex = Gdk.Texture.new_from_file(Gio.File.new_for_path(path))
+                opacity = 0.6          # PNG alpha is pre-baked subtle
+            else:
+                tex = _svg_texture(path, 720)
+                opacity = 0.09
             if tex is None:
                 return None
             pic = Gtk.Picture.new_for_paintable(tex)
@@ -3237,7 +3251,7 @@ class MainWindow(Adw.ApplicationWindow):
             pic.set_vexpand(True)
             pic.set_halign(Gtk.Align.FILL)
             pic.set_valign(Gtk.Align.FILL)
-            pic.set_opacity(0.085)
+            pic.set_opacity(opacity)
             try:
                 pic.set_content_fit(Gtk.ContentFit.CONTAIN)
             except Exception:

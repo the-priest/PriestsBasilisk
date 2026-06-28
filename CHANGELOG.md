@@ -1,23 +1,22 @@
 # Changelog
 
-## v3.4.0 — Menacing makeover (red/green/black + fire penguin)
+## v3.4.0 — Dragon makeover (red/green/black)
 
 A visual overhaul of the look.
 
-- **New menacing fire-penguin emblem.** Replaced the muted traced penguin with
-  an angular black penguin with glowing red eyes, a green plasma rim, a sharp
-  beak, and red flames (with green plasma licks) rising around it. Used as the
-  app/taskbar icon and the chat avatar.
-- **Penguin watermark behind the chat.** A large, faint version of the penguin
-  now sits behind the conversation (a transparent `kali-watermark.svg`, drawn
-  via a `Gtk.Overlay` so messages render over it). Non-interactive and low
-  opacity, so it sets the mood without fighting the text.
+- **Dragon emblem icon.** A simple low-poly SVG traced from the Kali dragon
+  logo (coiled body, spread wings, circle ring) in a blackout style with a green
+  accent ring. Used as the app/taskbar icon and the chat avatar.
+- **Dragon watermark behind the chat.** The dragon logo now sits faintly behind
+  the conversation (`kali-watermark.png`, black made transparent so it blends on
+  the dark bg), drawn via a `Gtk.Overlay` so messages render over it. The
+  watermark loader handles PNG or SVG.
 - **Red / green / black theme.** Swapped the old blue accent for toxic green as
   the primary accent (links, focus, online, the operator label) and red for
-  Kali's identity — the Kali label, the emblem glow, alerts/destructive — tying
-  the UI to the penguin's red eyes. All backgrounds stay black.
-- **Plumbing:** `install.sh` now ships `kali-watermark.svg` and places it (and
-  the emblem) in the install dir so the watermark works on a fresh install.
+  Kali's identity (the Kali label, the emblem glow, alerts). All backgrounds
+  stay black.
+- **Plumbing:** `install.sh` ships `kali-watermark.png` and places it (and the
+  emblem) in the install dir so the watermark works on a fresh install.
 
 ---
 
