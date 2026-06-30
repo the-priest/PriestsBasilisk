@@ -2672,6 +2672,61 @@ def tool_open_url(url: str) -> Dict[str, Any]:
 import queue as _queue
 
 
+def _find_brave() -> Optional[str]:
+    """Locate a Brave binary.  Brave is Chromium under the hood, so Playwright
+    can drive it directly — and its built-in Shields kill ads and trackers, so
+    pages load clean instead of buried under consent walls and adtech."""
+    for name in ("brave-browser", "brave", "brave-browser-stable"):
+        p = shutil.which(name)
+        if p:
+            return p
+    for p in ("/usr/bin/brave-browser", "/usr/bin/brave",
+              "/snap/bin/brave", "/opt/brave.com/brave/brave-browser",
+              "/opt/brave.com/brave-beta/brave-browser-beta"):
+        if os.path.exists(p):
+            return p
+    return None
+
+
+# Consent-management, ad and tracker hosts.  Aborting their requests means the
+# cookie/consent banner script never loads, so it can't block reading the page.
+_BLOCK_HOSTS = (
+    "onetrust.com", "cookielaw.org", "consensu.org", "cookiebot.com",
+    "trustarc.com", "usercentrics.eu", "cookie-script.com", "cookieyes.com",
+    "termly.io", "iubenda.com", "quantcast.com", "sourcepoint.com",
+    "privacy-mgmt.com", "doubleclick.net", "googlesyndication.com",
+    "google-analytics.com", "googletagmanager.com", "adservice.google.com",
+    "adnxs.com", "scorecardresearch.com", "moatads.com", "amazon-adsystem.com",
+)
+
+
+# Injected after navigation: click the common "accept" buttons and strip the
+# leftover consent/cookie modals so the real content is reachable.
+_CONSENT_JS = r"""
+(() => {
+  try {
+    const yes = /^(accept all|accept|i agree|agree|got it|allow all|allow|ok|i accept|accept cookies|allow cookies|continue|yes)$/i;
+    document.querySelectorAll(
+      'button, a, [role=button], input[type=button], input[type=submit]'
+    ).forEach(el => {
+      const t = (el.innerText || el.value || '').trim();
+      if (t && yes.test(t)) { try { el.click(); } catch (e) {} }
+    });
+    ['#onetrust-banner-sdk','#onetrust-consent-sdk','.onetrust-pc-dark-filter',
+     '#cmpbox','.qc-cmp2-container','.cmp-container','#usercentrics-root',
+     '[id*="cookie"]','[class*="cookie-banner"]','[class*="cookie-consent"]',
+     '[id*="consent"]','[class*="consent-banner"]','[id*="gdpr"]',
+     '[class*="gdpr"]','[aria-modal="true"][class*="cookie"]'
+    ].forEach(s => document.querySelectorAll(s).forEach(e => {
+      try { e.remove(); } catch (x) {}
+    }));
+    document.documentElement.style.overflow = 'auto';
+    if (document.body) document.body.style.overflow = 'auto';
+  } catch (e) {}
+})();
+"""
+
+
 class _BrowserWorker:
     def __init__(self):
         self._cmds: "_queue.Queue" = _queue.Queue()
@@ -2692,14 +2747,41 @@ class _BrowserWorker:
                "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
 
         def _new_browser():
+            brave = _find_brave()
+            args = ["--no-first-run", "--no-default-browser-check",
+                    "--disable-blink-features=AutomationControlled",
+                    "--disable-features=Translate"]
+            kw = {"args": args}
+            if brave:
+                kw["executable_path"] = brave
+            # Visible first (so the operator can watch), then headless, then —
+            # if a Brave binary turned out unusable — fall back to bundled
+            # Chromium so browsing still works.
+            for attempt in ({"headless": False}, {"headless": True}):
+                try:
+                    return pw.chromium.launch(**kw, **attempt)
+                except Exception:
+                    continue
+            return pw.chromium.launch(headless=True, args=args)
+
+        def _route(route):
             try:
-                return pw.chromium.launch(headless=False)
+                if any(h in route.request.url for h in _BLOCK_HOSTS):
+                    return route.abort()
+                return route.continue_()
             except Exception:
-                return pw.chromium.launch(headless=True)
+                try:
+                    route.continue_()
+                except Exception:
+                    pass
 
         def _new_page(b):
-            ctx = b.new_context(user_agent=_UA,
+            ctx = b.new_context(user_agent=_UA, locale="en-US",
                                 viewport={"width": 1280, "height": 800})
+            try:
+                ctx.route("**/*", _route)   # drop ad / consent / tracker hosts
+            except Exception:
+                pass
             return ctx.new_page()
 
         try:
@@ -2881,8 +2963,16 @@ def tool_browser(action: str, target: str = "",
             if "://" not in url:
                 url = "https://" + url
             page.goto(url, timeout=30000, wait_until="domcontentloaded")
+            try:
+                page.evaluate(_CONSENT_JS)   # accept/strip cookie banners
+            except Exception:
+                pass
             return {"ok": True, "url": page.url, "title": page.title()}
         if action in ("read", "text"):
+            try:
+                page.evaluate(_CONSENT_JS)
+            except Exception:
+                pass
             return {"ok": True, "text": page.inner_text("body")[:8000],
                     "url": page.url, "title": page.title()}
         if action == "click":

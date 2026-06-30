@@ -1,5 +1,39 @@
 # Changelog
 
+## v4.0.0
+
+Milestone release. Everything from the 3.8.x line — provider trim to Groq +
+SiliconFlow, the honesty hardening (machine facts read, never guessed), the
+de-paused voice, the redesigned composer, Brave browsing with ad/consent
+handling, the self-test bug sweep, and the kali_ext update hardening — rolled up
+into 4.0.
+
+This release:
+- **Composer is one unit.** The text field and the Send button now fill to the
+  same height and sit level inside a single rounded bubble, so they read as one
+  control instead of a field with a button floating beside it.
+
+---
+
+## v3.8.4 — Brave browsing + bulletproof updates
+
+- **The browser drives Brave when it's installed.** Brave is Chromium underneath,
+  so Playwright runs it directly — and its Shields block ads and trackers, so
+  pages load clean. Falls back to bundled Chromium if Brave isn't present.
+- **Cookie/consent walls no longer stop browsing.** After a page loads, Kali
+  auto-clicks the common "Accept all / I agree" buttons and strips leftover
+  consent/cookie modals, and the most common consent-management, ad and tracker
+  hosts are blocked at the network layer so their banners never load. This
+  applies whether or not Brave is installed.
+- **Installer can fetch Brave** with `WITH_BRAVE=1` (otherwise it just detects an
+  existing Brave and tells you it'll be used).
+- **Updates now verify the whole sidecar arrived.** Re-running the installer
+  already replaces every file and the full kali_ext, but the remote fetch could
+  silently drop a module; it now checks all 11 modules landed, retries any that
+  didn't, and refuses to install a partial sidecar over a working one.
+
+---
+
 ## v3.8.3 — Self-test bug sweep (6 fixes)
 
 Fixes from a full on-device self-test (62 tool calls, ThinkPad X395):

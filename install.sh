@@ -340,6 +340,23 @@ if [ $SKIP_HELPERS -eq 0 ] && command -v apt-get >/dev/null; then
       warn "Playwright not installed — the browser tool will tell you how"
       warn "to enable it later:  pip install playwright && playwright install chromium"
     fi
+
+    # Brave: Kali's browser tool drives Brave when present (its Shields block
+    # ads/trackers, so pages load without consent walls).  Opt in with
+    # WITH_BRAVE=1; otherwise we just detect an existing install.
+    if command -v brave-browser >/dev/null 2>&1 || [ -x /usr/bin/brave-browser ] \
+       || [ -x /opt/brave.com/brave/brave-browser ]; then
+      ok "Brave detected — the browser tool will use it"
+    elif [ "${WITH_BRAVE:-0}" = "1" ]; then
+      say "installing Brave (WITH_BRAVE=1) …"
+      if curl -fsS https://dl.brave.com/install.sh | sh >/dev/null 2>&1; then
+        ok "Brave installed — browsing will use it (ad/tracker Shields on)"
+      else
+        warn "Brave install failed — browsing falls back to bundled Chromium"
+      fi
+    else
+      say "tip: for ad/tracker-free browsing, install Brave (re-run with WITH_BRAVE=1)"
+    fi
   fi
 else
   [ $SKIP_HELPERS -eq 1 ] && warn "skipping desktop helpers (--no-helpers)"
@@ -565,7 +582,29 @@ else
       [ "$f" = "__init__.py" ] && continue
       curl -fsSL "${EXT_URL_BASE}/${f}" -o "${TMP}/kali_ext/${f}" 2>/dev/null || true
     done
-    ok "fetched kali_ext sidecar"
+    # Verify every module arrived non-empty.  A partial sidecar silently
+    # disables features, so retry anything missing, and if it still can't be
+    # completed, drop the directory so a half-install can't overwrite a good one.
+    _ext_missing=""
+    for f in "${EXT_FILES[@]}"; do
+      [ -s "${TMP}/kali_ext/${f}" ] || _ext_missing="${_ext_missing} ${f}"
+    done
+    if [ -n "${_ext_missing}" ]; then
+      warn "kali_ext incomplete, retrying:${_ext_missing}"
+      for f in ${_ext_missing}; do
+        curl -fsSL "${EXT_URL_BASE}/${f}" -o "${TMP}/kali_ext/${f}" 2>/dev/null || true
+      done
+      _ext_missing=""
+      for f in "${EXT_FILES[@]}"; do
+        [ -s "${TMP}/kali_ext/${f}" ] || _ext_missing="${_ext_missing} ${f}"
+      done
+    fi
+    if [ -n "${_ext_missing}" ]; then
+      warn "kali_ext still missing:${_ext_missing} — skipping sidecar (keeping any existing copy)"
+      rm -rf "${TMP}/kali_ext"
+    else
+      ok "fetched kali_ext sidecar (all ${#EXT_FILES[@]} modules present)"
+    fi
   else
     rm -f "${TMP}/.ext_init_probe" 2>/dev/null || true
     warn "could not fetch kali_ext sidecar — installing core only"

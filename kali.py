@@ -77,7 +77,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.kali"
 APP_NAME = "Kali"
-VERSION = "3.8.3"
+VERSION = "4.0.0"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -892,9 +892,9 @@ link, button.link, *:link { color: #2ee65f; }
     background-color: #0d0f12;
     border: 1px solid #1c2229;
     border-radius: 16px;
-    min-width: 62px;
-    min-height: 62px;
+    min-width: 60px;
     padding: 8px;
+    margin: 0;
     box-shadow: none;
 }
 .send-button:hover {
@@ -3935,10 +3935,11 @@ class MainWindow(Adw.ApplicationWindow):
 
         in_scroll = Gtk.ScrolledWindow()
         in_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        in_scroll.set_min_content_height(_scaled(88, floor=64))
-        in_scroll.set_max_content_height(_scaled(300, floor=170))
+        in_scroll.set_min_content_height(_scaled(64, floor=52))
+        in_scroll.set_max_content_height(_scaled(200, floor=150))
         in_scroll.set_propagate_natural_height(True)
         in_scroll.set_hexpand(True)
+        in_scroll.set_valign(Gtk.Align.FILL)
 
         self.input_view = Gtk.TextView()
         self.input_view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
@@ -3961,7 +3962,8 @@ class MainWindow(Adw.ApplicationWindow):
         # working (a tap then stops her) rather than turning into a stop icon.
         self.send_btn = Gtk.Button()
         self.send_btn.add_css_class("send-button")
-        self.send_btn.set_valign(Gtk.Align.END)
+        self.send_btn.set_valign(Gtk.Align.FILL)
+        self.send_btn.set_vexpand(False)
         self.send_btn.set_tooltip_text("Send")
         if _AVATAR_PNG_PATH:
             _send_img = Gtk.Image.new_from_file(_AVATAR_PNG_PATH)
