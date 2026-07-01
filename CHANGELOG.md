@@ -1,5 +1,35 @@
 # Changelog
 
+## v4.1.0 — code auditing, exploitation write-ups, silver theme
+
+The offensive workflow was strong on *live hosts*; this release adds the other
+half — auditing **code, dependencies and secrets** — plus the report section
+that documents how access was obtained, and a visual refresh.
+
+- **Code &amp; dependency audit (new `kali_ext/codescan.py`).** Five propose-only /
+  read-only tools that drive the standard scanners and make sense of them:
+  `code_tooling_check` (SAST/SCA/secrets/IaC inventory), `code_scan_plan`
+  (auto-detects languages/lockfiles/IaC and builds an ordered, proposed scan
+  plan — runs nothing), `parse_scan` (normalises Semgrep / Bandit / gitleaks /
+  trufflehog / OSV-Scanner / Trivy / pip-audit / npm audit / retire.js / Nuclei
+  JSON into one schema), `triage_findings` (**cross-scanner dedup** — two tools
+  agreeing on a CVE+package or `file:line` collapse to one corroborated finding;
+  one severity scale; flags the low-confidence ones), and `remediation_hint`
+  (standard non-exploit fix pointers by CWE class).
+- **`attack_writeup` — the exploitation narrative.** Turns the tamper-evident
+  evidence ledger into the reproducible "how access was obtained" report
+  section: the step sequence is backed by the actual hash-verified commands that
+  ran, and secrets are auto-redacted. Documents an authorised, already-executed
+  path; writes no exploit code.
+- **Silver theme.** Kali's chat bubble and name label move from red to a
+  metallic silver that matches her icon.
+- **Coverage.** New offline suites (`tests/test_codescan.py`, plus write-up and
+  headroom checks) — the code-audit parsers, cross-tool triage, secret
+  redaction, and the context-compression savings are all pinned by tests. The
+  installer now fetches and verifies **12** `kali_ext` modules.
+
+---
+
 ## v4.0.0
 
 Milestone release. Everything from the 3.8.x line — provider trim to Groq +

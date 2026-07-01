@@ -49,6 +49,8 @@ from kali_core import (
     tool_parse_output, tool_methodology, tool_wordlist_find,
     tool_cheatsheet, tool_report_findings,
     tool_nuclei_template, tool_reflect_findings,
+    tool_attack_writeup, tool_code_tooling_check, tool_code_scan_plan,
+    tool_parse_scan, tool_triage_findings, tool_remediation_hint,
     tool_osint_username, tool_osint_lookup, tool_social_read,
     quick_facts as tool_quick_facts,
     sudo_cached, detect_urgency, looks_degraded,
@@ -77,7 +79,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.kali"
 APP_NAME = "Kali"
-VERSION = "4.0.0"
+VERSION = "4.1.0"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -316,16 +318,17 @@ headerbar {
     border: 1px solid rgba(46, 230, 95, 0.22);
 }
 
-/* Assistant: left-aligned, translucent RED bubble (contrast to user green) */
+/* Assistant: left-aligned, translucent SILVER bubble (matches Kali's icon;
+   contrasts the user's green) */
 .msg-assistant {
-    background-color: rgba(255, 58, 71, 0.09);
-    color: #f1eaea;
+    background-color: rgba(196, 202, 212, 0.10);
+    color: #eef1f5;
     padding: 16px 20px;
     margin: 8px 60px 8px 12px;
     font-size: 30px;
     line-height: 1.55;
     border-radius: 12px 12px 12px 4px;
-    border: 1px solid rgba(255, 58, 71, 0.26);
+    border: 1px solid rgba(196, 202, 212, 0.30);
 }
 
 /* Compact tool indicator (replaces visible JSON dump) */
@@ -399,7 +402,7 @@ headerbar {
     margin: 0 0 5px 0;
 }
 .role-label.user { color: #2ee65f; }
-.role-label.kali { color: #ff3a47; }
+.role-label.kali { color: #c4cad4; }
 
 /* ===== Code blocks ===== */
 
@@ -4510,6 +4513,12 @@ class MainWindow(Adw.ApplicationWindow):
         "report_findings":  "building the report",
         "nuclei_template":  "writing a nuclei template",
         "reflect_findings": "double-checking the findings",
+        "attack_writeup":     "writing the exploitation narrative",
+        "code_tooling_check": "checking code scanners",
+        "code_scan_plan":     "planning the code scan",
+        "parse_scan":         "parsing scanner output",
+        "triage_findings":    "triaging findings",
+        "remediation_hint":   "looking up the fix",
         "read_file":        "reading a file",
         "write_file":       "writing a file",
         "list_dir":         "listing files",
@@ -4988,6 +4997,32 @@ class MainWindow(Adw.ApplicationWindow):
                 a.get("target", a.get("host", a.get("url", ""))),
                 a.get("scope_note", a.get("scope", "")),
                 a.get("title", ""))
+        if n == "attack_writeup":
+            return lambda: tool_attack_writeup(
+                a.get("access", a.get("summary", "")),
+                a.get("steps", a.get("path_steps", None)),
+                a.get("target", a.get("host", a.get("url", ""))),
+                a.get("scope_note", a.get("scope", "")),
+                a.get("impact", ""), a.get("remediation", a.get("fix", "")),
+                a.get("root_cause", a.get("cause", "")),
+                a.get("ledger_events", a.get("events", None)))
+        if n == "code_tooling_check":
+            return lambda: tool_code_tooling_check()
+        if n == "code_scan_plan":
+            return lambda: tool_code_scan_plan(
+                a.get("path", a.get("dir", a.get("target", "."))),
+                a.get("kind", a.get("type", "auto")),
+                a.get("intensity", a.get("depth", "normal")))
+        if n == "parse_scan":
+            return lambda: tool_parse_scan(
+                a.get("tool", a.get("scanner", a.get("name", ""))),
+                a.get("raw", a.get("output", a.get("json", a.get("text", "")))))
+        if n == "triage_findings":
+            return lambda: tool_triage_findings(
+                a.get("findings", a.get("items", [])))
+        if n == "remediation_hint":
+            return lambda: tool_remediation_hint(
+                a.get("finding", a.get("item", a)))
         # Pure system / desktop sensing (independent subprocesses).
         if n == "system_info":
             return tool_system_info
@@ -5374,6 +5409,32 @@ class MainWindow(Adw.ApplicationWindow):
             "reflect_findings":  lambda a: self._tool_simple(
                 lambda: tool_reflect_findings(
                     a.get("findings", a.get("items", a)))),
+            "attack_writeup":    lambda a: self._tool_simple(
+                lambda: tool_attack_writeup(
+                    a.get("access", a.get("summary", "")),
+                    a.get("steps", a.get("path_steps", None)),
+                    a.get("target", a.get("host", a.get("url", ""))),
+                    a.get("scope_note", a.get("scope", "")),
+                    a.get("impact", ""), a.get("remediation", a.get("fix", "")),
+                    a.get("root_cause", a.get("cause", "")),
+                    a.get("ledger_events", a.get("events", None)))),
+            "code_tooling_check": lambda a: self._tool_simple(
+                lambda: tool_code_tooling_check()),
+            "code_scan_plan":     lambda a: self._tool_simple(
+                lambda: tool_code_scan_plan(
+                    a.get("path", a.get("dir", a.get("target", "."))),
+                    a.get("kind", a.get("type", "auto")),
+                    a.get("intensity", a.get("depth", "normal")))),
+            "parse_scan":         lambda a: self._tool_simple(
+                lambda: tool_parse_scan(
+                    a.get("tool", a.get("scanner", a.get("name", ""))),
+                    a.get("raw", a.get("output", a.get("json", a.get("text", "")))))),
+            "triage_findings":    lambda a: self._tool_simple(
+                lambda: tool_triage_findings(
+                    a.get("findings", a.get("items", [])))),
+            "remediation_hint":   lambda a: self._tool_simple(
+                lambda: tool_remediation_hint(
+                    a.get("finding", a.get("item", a)))),
         }
         # Merge sidecar tools (memory_*, skill_list, skill_run).  Returns an
         # empty dict unless the matching feature is enabled, so stock Kali is

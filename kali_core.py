@@ -4046,6 +4046,113 @@ def tool_reflect_findings(findings: Any) -> Dict[str, Any]:
         return {"ok": False, "error": f"reflect_findings failed: {e}"}
 
 
+def tool_attack_writeup(access: Any = "", steps: Any = None, target: str = "",
+                        scope_note: str = "", impact: str = "",
+                        remediation: str = "", root_cause: str = "",
+                        ledger_events: Any = None) -> Dict[str, Any]:
+    """Write the exploitation narrative: a clear, REPRODUCIBLE account of how
+    access was obtained, as the standard pentest report section.  If
+    ledger_events aren't passed, pulls the current engagement's evidence ledger
+    automatically so the 'how we got in' steps are backed by the actual
+    hash-verified commands that ran.  Documents an authorised, already-executed
+    path; writes no exploit code.  Secrets are lightly redacted."""
+    try:
+        from kali_ext import pentest as _pentest
+    except Exception as e:
+        return {"ok": False, "error": f"pentest module unavailable: {e}"}
+    # Auto-supply ledger events from the active engagement when the caller
+    # didn't pass any — this is what makes the writeup evidence-backed.
+    if not ledger_events:
+        try:
+            _lg = get_ledger()
+            ledger_events = _lg.read_events() if _lg else None
+        except Exception:
+            ledger_events = None
+    try:
+        return _pentest.attack_writeup(
+            access=access, steps=steps, target=(target or "").strip(),
+            scope_note=(scope_note or "").strip(), impact=(impact or "").strip(),
+            remediation=(remediation or "").strip(),
+            root_cause=(root_cause or "").strip(), ledger_events=ledger_events)
+    except Exception as e:
+        return {"ok": False, "error": f"attack_writeup failed: {e}"}
+
+
+def tool_code_tooling_check() -> Dict[str, Any]:
+    """Inventory the code-security scanners installed on this box (SAST / SCA /
+    secrets / IaC / container / web-DAST), with install lines for the gaps.
+    Read-only — runs nothing but `which`."""
+    try:
+        from kali_ext import codescan as _cs
+    except Exception as e:
+        return {"ok": False, "error": f"codescan module unavailable: {e}"}
+    try:
+        return _cs.code_tooling_check()
+    except Exception as e:
+        return {"ok": False, "error": f"code_tooling_check failed: {e}"}
+
+
+def tool_code_scan_plan(path: str = ".", kind: str = "auto",
+                        intensity: str = "normal") -> Dict[str, Any]:
+    """Build an ordered, PROPOSED scan plan for a code path/app (kind = auto |
+    python | node | go | deps | secrets | iac | container | web).  Auto-detects
+    languages/lockfiles/IaC and sets JSON-output flags so results feed
+    parse_scan.  Runs NOTHING — every step goes through the approve gate."""
+    try:
+        from kali_ext import codescan as _cs
+    except Exception as e:
+        return {"ok": False, "error": f"codescan module unavailable: {e}"}
+    try:
+        return _cs.scan_plan((path or ".").strip(),
+                             (kind or "auto").strip().lower(),
+                             (intensity or "normal").strip().lower())
+    except Exception as e:
+        return {"ok": False, "error": f"code_scan_plan failed: {e}"}
+
+
+def tool_parse_scan(tool: str, raw: str) -> Dict[str, Any]:
+    """Normalise raw scanner JSON (semgrep, bandit, gitleaks, trufflehog,
+    osv-scanner, trivy, pip-audit, npm audit, retire.js, nuclei) into one
+    unified finding schema.  Read-only text parsing."""
+    try:
+        from kali_ext import codescan as _cs
+    except Exception as e:
+        return {"ok": False, "error": f"codescan module unavailable: {e}"}
+    try:
+        return _cs.parse_scan((tool or "").strip().lower(), raw or "")
+    except Exception as e:
+        return {"ok": False, "error": f"parse_scan failed: {e}"}
+
+
+def tool_triage_findings(findings: Any) -> Dict[str, Any]:
+    """Merge findings from any number of scanners: dedup across tools (same
+    CVE+package or file:line:rule collapse to one, recording which scanners
+    agreed), one severity scale (highest wins), sort worst-first, and flag the
+    low-confidence / needs-manual-confirmation ones.  Pure offline heuristics."""
+    try:
+        from kali_ext import codescan as _cs
+    except Exception as e:
+        return {"ok": False, "error": f"codescan module unavailable: {e}"}
+    try:
+        return _cs.triage(findings)
+    except Exception as e:
+        return {"ok": False, "error": f"triage_findings failed: {e}"}
+
+
+def tool_remediation_hint(finding: Any) -> Dict[str, Any]:
+    """Short, standard, NON-EXPLOIT remediation pointer for a normalised
+    finding: fixed-version upgrade (SCA), else the CWE-class fix, else a generic
+    pointer.  Reference knowledge only."""
+    try:
+        from kali_ext import codescan as _cs
+    except Exception as e:
+        return {"ok": False, "error": f"codescan module unavailable: {e}"}
+    try:
+        return _cs.remediation_hint(finding)
+    except Exception as e:
+        return {"ok": False, "error": f"remediation_hint failed: {e}"}
+
+
 # ═════════════════════════════════════════════════════════════════════
 # OSINT  — footprint / username discovery across public profile sites,
 #          plus platform-aware public readers.  Read-only; touches only

@@ -1,6 +1,6 @@
 <!--
 title: Kali — AI security assistant for Linux (Oracle5)
-description: Kali is an open-source AI security assistant that runs as a native GTK4 app on your own Linux machine. It drives your desktop, runs your shell behind a hard structural safety floor, automates recon and pentest workflows, keeps a tamper-evident evidence ledger, browses the real web through Brave, connects external tools over MCP, writes and sandbox-tests its own Python tools, and talks and listens. Bring your own cloud model (SiliconFlow, Groq). A private, security-native, self-hosted alternative to ChatGPT, Claude, Hermes and OpenClaw.
+description: Kali is an open-source AI security assistant that runs as a native GTK4 app on your own Linux machine. It drives your desktop, runs your shell behind a hard structural safety floor, automates recon and pentest workflows, audits code and dependencies (SAST/SCA/secrets), keeps a tamper-evident evidence ledger, browses the real web through Brave, connects external tools over MCP, writes and sandbox-tests its own Python tools, and talks and listens. Bring your own cloud model (SiliconFlow, Groq). A private, security-native, self-hosted alternative to ChatGPT, Claude, Hermes and OpenClaw.
 keywords: ai security assistant, kali linux ai, pentest ai, offensive security ai, llm agent, ai pentest tool, security automation, evidence ledger, model context protocol, mcp client, linux ai agent, nethunter ai, gtk4 assistant, self-hosted ai, local ai agent, cve enrichment, openclaw alternative, hermes alternative, voice ai agent, deepseek, siliconflow, brave automation
 -->
 
@@ -27,13 +27,13 @@ keywords: ai security assistant, kali linux ai, pentest ai, offensive security a
 
 <br>
 
-![version](https://img.shields.io/badge/version-4.0.0-ff3a47?style=for-the-badge&labelColor=0d0f12)
+![version](https://img.shields.io/badge/version-4.1.0-c4cad4?style=for-the-badge&labelColor=0d0f12)
 ![license](https://img.shields.io/badge/license-MIT-2ee65f?style=for-the-badge&labelColor=0d0f12)
 ![platform](https://img.shields.io/badge/Linux-X11%20%7C%20Wayland-9aa4b2?style=for-the-badge&logo=linux&logoColor=white&labelColor=0d0f12)
 ![python](https://img.shields.io/badge/python-3.10+-3776ab?style=for-the-badge&logo=python&logoColor=white&labelColor=0d0f12)
 
 ![toolkit](https://img.shields.io/badge/GTK4-libadwaita-4a86cf?style=for-the-badge&labelColor=0d0f12)
-![mobile](https://img.shields.io/badge/runs%20on-NetHunter-ff3a47?style=for-the-badge&labelColor=0d0f12)
+![mobile](https://img.shields.io/badge/runs%20on-NetHunter-c4cad4?style=for-the-badge&labelColor=0d0f12)
 ![ledger](https://img.shields.io/badge/evidence-tamper--evident-2ee65f?style=for-the-badge&labelColor=0d0f12)
 ![cloud](https://img.shields.io/badge/cloud%20lock--in-none-9aa4b2?style=for-the-badge&labelColor=0d0f12)
 
@@ -51,11 +51,11 @@ your chat history, and drops a launcher in your app grid. Sixty seconds from cur
 
 <br>
 
-`offensive-security toolkit` · `drives your desktop` · `runs your shell (with a hard floor)` · `tamper-evident evidence ledger`
+`offensive-security toolkit` · `code & dependency vuln scanning` · `drives your desktop` · `runs your shell (with a hard floor)` · `tamper-evident evidence ledger`
 `MCP client` · `reads files` · `browses the real web through Brave` · `searches & fact-checks the web` · `writes & sandbox-tests its own tools` · `talks & listens`
 
 **Bring your own model** — SiliconFlow · Groq
-**`v4.0.0`** · GTK4 + libadwaita · X11 &amp; Wayland · desktop **and** NetHunter mobile · MIT
+**`v4.1.0`** · GTK4 + libadwaita · X11 &amp; Wayland · desktop **and** NetHunter mobile · MIT
 
 </div>
 
@@ -128,7 +128,14 @@ red-team platforms charge five and six figures for, here, local and free.
 exact install lines, scanner-output parsing for **20+ tools** that **auto-chains into CVE intel** (NVD + CISA
 KEV + EPSS, ranked so the exploited-in-the-wild ones surface first), methodology checklists, Nuclei template
 generation/validation, a findings self-check that flags false positives *before* they reach a report, and
-clean markdown reporting. It **plans, parses, enriches and documents** — and keeps a human on the trigger.
+clean markdown reporting. It also does the **other half of the job — auditing code, not just live hosts**:
+it drives the standard SAST/SCA/secrets scanners (**Semgrep, Bandit, gitleaks, OSV-Scanner, Trivy, pip-audit,
+npm audit, retire.js…**), normalises ten tools' output into one schema, and **triages across them** — two
+scanners agreeing on the same CVE or the same `file:line` collapse to one *corroborated* finding, weak ones
+get flagged for review. And when you get in, **`attack_writeup`** turns the evidence ledger into the
+reproducible "how access was obtained" report section — the step sequence backed by the **actual hash-verified
+commands that ran**, not a freeform retelling. It **plans, parses, enriches, triages and documents** — and
+keeps a human on the trigger.
 
 **3. It runs where you are.** A native desktop app **and** a tool that runs on a **NetHunter phone** — something
 no hosted swarm can ever be. Your data stays on the box; the only thing that leaves is the single model call
@@ -223,11 +230,32 @@ Read-only **sensing** runs freely. State-changing actions **run** directly (defa
   get the exact list of problems before you run `nuclei -t`.
 - **`reflect_findings`** — a self-check that flags unsupported, over-rated, hedged, host-less or duplicate
   findings *before* they reach a report. Cuts false positives.
+- **`attack_writeup`** — the **exploitation narrative**: a clear, **reproducible** account of how access was
+  obtained, formatted as the standard report section. Pulls the engagement's evidence ledger automatically, so
+  the step sequence is backed by the **real hash-verified commands** that ran; secrets are auto-redacted. It
+  documents an authorised, already-executed path — it writes no exploit code.
 - **`methodology`** · **`wordlist_find`** · **`cheatsheet`** · **`report_findings`** — PTES/OWASP/AD-killchain
   checklists, installed-wordlist finder, correct tool syntax, and clean markdown engagement reports.
 
 > All security tooling is **propose-only / read-only**. Kali plans, inventories, parses, enriches and
 > documents — it writes no exploit code and attacks nothing on its own.
+
+### 🔍 Code &amp; dependency audit (SAST · SCA · secrets)
+The static half of the job — finding vulns in **source, dependencies, secrets and IaC**, not just live hosts.
+Safe on your own code: it drives standard installed scanners, then structures and triages what they find.
+- **`code_tooling_check`** — inventories the code-security stack on this box (SAST / SCA / secrets / IaC /
+  container / web-DAST) with exact install lines for the gaps.
+- **`code_scan_plan`** — auto-detects the languages, lockfiles and IaC in a path and builds an **ordered,
+  proposed** scan plan (Semgrep, Bandit, OSV-Scanner, gitleaks, pip-audit, `npm audit`…) with JSON-output
+  flags already set. Runs nothing — every step still goes through the approve gate.
+- **`parse_scan`** — normalises raw scanner JSON from **Semgrep, Bandit, gitleaks, trufflehog, OSV-Scanner,
+  Trivy, pip-audit, npm audit, retire.js and Nuclei** into one unified finding schema.
+- **`triage_findings`** — the differentiator: **dedups across scanners** (two tools flagging the same
+  CVE+package or `file:line:rule` collapse into one *corroborated* finding that records which scanners agreed),
+  maps every tool's severity dialect onto one scale (highest wins), sorts worst-first, and **flags the
+  low-confidence / needs-manual-confirmation** ones so nothing weak reaches a report unchecked.
+- **`remediation_hint`** — a short, standard, **non-exploit** fix pointer per finding (upgrade to the fixed
+  version, or the CWE-class fix). Dependency findings carry their CVE, so the KEV/EPSS ranking chain applies.
 
 ### 🧾 Evidence &amp; engagement record
 - **`evidence_engagement`** — name/switch the case you're working; commands file under it.
@@ -315,11 +343,11 @@ Run it once to install; run the **exact same line** any time to update. The inst
 genuinely careful — it treats your machine like you'd want it treated:
 
 - 🐍 Detects **Python 3.10+** and installs **GTK4 + libadwaita** (apt / pacman / dnf, auto-detected).
-- 📦 Fetches the core modules **plus** the optional `kali_ext/` sidecar — and **verifies every one of the 11
+- 📦 Fetches the core modules **plus** the optional `kali_ext/` sidecar — and **verifies every one of the 12
   sidecar modules arrived**, retrying any that didn't, refusing to install a half-broken update over a working one.
 - 🛟 **Parse-checks every incoming file before it overwrites anything** — a corrupted download can never replace
   your working install.
-- 💾 **Backs up your chat database** before each update and reports the version move (`3.x → 4.0.0`).
+- 💾 **Backs up your chat database** before each update and reports the version move (`4.0.x → 4.1.0`).
 - 🧩 Installs optional desktop-control helpers, voice packages, and optionally Playwright + Chromium.
 - 🦁 **`WITH_BRAVE=1`** installs Brave for ad/tracker-free browsing (otherwise it just detects an existing one).
 - 🚀 Drops a `kali` launcher in `~/.local/bin/` and a `.desktop` entry in your app grid.
@@ -397,8 +425,8 @@ Keys live only in `~/.config/kali/settings.json` — they never go anywhere but 
    └─────────┘
          │
    ┌─────┴───────────────────────────────────────────────────────┐
-   │  kali_ext/  (optional sidecar — off by default, 11 modules)  │
-   │  memory · skills · sandbox · foresight · mcp · verify · worker│
+   │  kali_ext/  (optional sidecar — off by default, 12 modules)  │
+   │  memory · skills · sandbox · foresight · mcp · verify · worker · codescan│
    └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -427,13 +455,16 @@ git clone https://github.com/the-priest/oracle5.git kali && cd kali
 
 python3 kali.py                       # run from source
 
-# offline test suite (stdlib only — no display, no keys, no network)
-python3 tests/test_kali.py
-#   covers: the structural safety floor (catastrophic + self-tamper, incl.
-#   evasions), settings round-trip, the self-edit write path, the ChatStore
-#   SQLite layer, the CVE auto-chain, the evidence ledger (incl. tamper
-#   detection), Nuclei build/validate, findings reflection, smarter memory
-#   recall, and the MCP argument safety screen.
+# offline test suites (stdlib only — no display, no keys, no network)
+python3 tests/test_kali.py        # core: safety floor, settings, self-edit, ChatStore, ledger, CVE chain, Nuclei, reflection, memory, MCP screen
+python3 tests/test_codescan.py    # code audit: every scanner parser, cross-tool triage/dedup, secret redaction, robustness
+python3 tests/test_writeup.py     # exploitation narrative: ledger-grounded steps, secret redaction, honesty on thin input
+python3 tests/test_headroom.py    # token savings: protocol safety, signal preservation, real compression ratio, fail-safe
+#   The core suite covers the structural safety floor (catastrophic + self-
+#   tamper, incl. evasions), settings round-trip, the self-edit write path, the
+#   ChatStore SQLite layer, the CVE auto-chain, the evidence ledger (incl.
+#   tamper detection), Nuclei build/validate, findings reflection, smarter
+#   memory recall, and the MCP argument safety screen.
 ```
 
 For light, per-machine persona tweaks that survive upgrades, use **Settings → Persona → Custom addendum** —

@@ -386,6 +386,26 @@ Two kinds of action, and they are not the same:
   <tool name="report_findings">{"target": "example.com", "findings": [{"title": "…", "severity": "high", "host": "…", "description": "…", "evidence": "…", "remediation": "…"}]}</tool>  // → clean markdown report with severity rollup + sorted table
   <tool name="reflect_findings">{"findings": [ … ]}</tool>  // self-check findings for false positives BEFORE reporting: flags no-evidence, over-rated, hedged, host-less, or duplicate findings. Run this before report_findings on anything non-trivial.
   <tool name="nuclei_template">{"spec": {"name": "Exposed .git", "severity": "medium", "path": ["{{BaseURL}}/.git/config"], "matchers": [{"type": "word", "words": ["[core]"]}, {"type": "status", "status": [200]}]}}</tool>  // build a structurally-valid nuclei YAML template (or {"mode":"validate","yaml":"…"} to check one). Produces the template; you still run `nuclei -t` yourself.
+  <tool name="attack_writeup">{"access": {"level": "authenticated admin", "host": "10.0.0.5", "account": "admin", "vector": "default credentials"}, "target": "acme-web", "impact": "…", "remediation": "…", "root_cause": "…"}</tool>  // the "how access was obtained" report section — a REPRODUCIBLE attack narrative. Pulls the engagement's evidence ledger automatically, so the step sequence is backed by the real hash-verified commands that ran. Documents what actually happened on an authorised target; writes no exploit code. Use once you've achieved access, before final reporting.
+
+  ── (1f) CODE & DEPENDENCY AUDIT — find vulns in source, not just live hosts ──
+  The static/dependency half of the job. SAFE on his OWN code: SAST reads
+  source, SCA reads lockfiles, secrets scans code+history. Nothing here attacks
+  anything or writes exploits — it drives standard installed scanners, then
+  structures and triages what they find. The DAST scanners it can PLAN
+  (nuclei/nikto) touch a running target and are authorised-targets-only, same
+  approve gate.
+  <tool name="code_tooling_check">{}</tool>  // which code scanners are installed (SAST/SCA/secrets/IaC/container/DAST) + install lines for the gaps
+  <tool name="code_scan_plan">{"path": ".", "kind": "auto"}</tool>  // ordered PROPOSED scan commands (auto-detects python/node/go/lockfiles/IaC); kind: auto|python|node|go|deps|secrets|iac|container|web. Runs nothing — each step still goes through approve-before-run.
+  <tool name="parse_scan">{"tool": "semgrep", "raw": "<scanner JSON you captured>"}</tool>  // normalise semgrep|bandit|gitleaks|trufflehog|osv-scanner|trivy|pip-audit|npm|retire|nuclei JSON → one finding schema
+  <tool name="triage_findings">{"findings": [ … normalised findings … ]}</tool>  // dedup across scanners (2 tools agreeing on a CVE+pkg or file:line = sturdier & recorded), one severity scale (highest wins), sort worst-first, flag the ones needing manual confirmation
+  <tool name="remediation_hint">{"finding": { … one normalised finding … }}</tool>  // standard NON-exploit fix pointer (upgrade to the fixed version / the CWE-class fix)
+
+  // Code-audit workflow: code_tooling_check → code_scan_plan (propose each
+  // scan, approve, run) → parse_scan each tool's JSON → triage_findings to
+  // merge+dedup → reflect_findings → report_findings. For dependency findings,
+  // parse_output/enrich adds KEV/EPSS ranking (each carries its CVE). Only scan
+  // code he owns or is authorised to assess.
 
   // EVIDENCE LEDGER — every command you run is recorded automatically to a
   // tamper-evident JSONL ledger (timestamp, command, exit code, output hash).
@@ -537,7 +557,9 @@ Rules:
     processes, network_status, recent_downloads, service_status, journal_tail,
     desktop_info, list_apps, list_windows, tooling_check, pentest_plan,
     parse_output, methodology, wordlist_find, cheatsheet, report_findings,
-    reflect_findings, nuclei_template,
+    reflect_findings, nuclei_template, attack_writeup,
+    code_tooling_check, code_scan_plan, parse_scan, triage_findings,
+    remediation_hint,
     evidence_engagement, evidence_report, evidence_verify.
     Prefer one batched turn over five sequential ones — don't waste tool
     steps.  EXCEPTION: web_verify and cve_lookup each do their own network
