@@ -584,6 +584,24 @@ Two kinds of action, and they are not the same:
 
   <tool name="run">{"command": "ss -tlnp", "reason": "see what's listening"}</tool>
 
+  COMMAND RUNTIME AWARENESS. Kali auto-sets a sane timeout per command (quick
+  ~30s, scans/builds up to 30 min, servers capped at 25s). Two things you must
+  handle yourself:
+  • STARTING A SERVER/DAEMON (a dev server, database, listener — anything that
+    runs until killed): NEVER run it in the plain foreground; it blocks until
+    the timeout whether or not it actually came up. Start it in the BACKGROUND
+    and then PROVE it started by probing:
+        nohup <server cmd> >/tmp/srv.log 2>&1 &
+    then, after a moment, run  ss -tlnp | grep <port>  (or  curl -s -o /dev/null
+    -w '%{http_code}' http://localhost:<port>  ). If the port isn't listening or
+    the log shows an error, the server FAILED — read /tmp/srv.log, fix the cause,
+    retry. Do not sit waiting for a foreground start.
+  • A TIMEOUT (result rc 124 / timed_out) means the command did NOT finish and
+    was terminated — it is not going to complete as-is. React: read the error,
+    diagnose why (crashed? wrong flag? needs backgrounding?), and change
+    something before retrying. Never re-run the identical command hoping it
+    finishes, and never assume "still running" — a terminated command is done.
+
   With his setting (auto-run, default), this executes immediately and the
   output comes back to you — chain straight into the next step.  A sudo
   password field appears only if the command needs root and there's no cached

@@ -1517,8 +1517,8 @@ def _run_sudo_inline(command: str, password: str, timeout: int,
                     "auth_rejected": True}
         return _format_run_result(command, p, needs_sudo=True)
     except subprocess.TimeoutExpired:
-        return {"ok": False, "command": command,
-                "error": f"timeout after {timeout}s", "needs_sudo": True}
+        return {"ok": False, "command": command, "rc": 124, "timed_out": True,
+                "error": _timeout_note(command, timeout), "needs_sudo": True}
     except FileNotFoundError:
         return {"ok": False, "command": command,
                 "error": "bash or sudo not found", "needs_sudo": True}
@@ -1550,14 +1550,137 @@ def _run_sudo_askpass(command: str, password: str, timeout: int,
             timeout=timeout, text=True, errors="replace", env=env)
         return _format_run_result(command, p, needs_sudo=True)
     except subprocess.TimeoutExpired:
-        return {"ok": False, "command": command,
-                "error": f"timeout after {timeout}s", "needs_sudo": True}
+        return {"ok": False, "command": command, "rc": 124, "timed_out": True,
+                "error": _timeout_note(command, timeout), "needs_sudo": True}
     except Exception as e:
         return {"ok": False, "command": command,
                 "error": f"{type(e).__name__}: {e}", "needs_sudo": True}
     finally:
         # Drop the secret from our env copy promptly.
         env["KALI_SUDO_PW"] = ""
+
+
+# ── command runtime awareness: how long should this take, and when to give up ──
+_QUICK_CMDS = {
+    "ls", "cat", "echo", "whoami", "id", "pwd", "cd", "head", "tail", "grep",
+    "which", "whereis", "type", "stat", "file", "wc", "date", "uname",
+    "hostname", "env", "printenv", "ps", "df", "du", "free", "ping", "dig",
+    "host", "nslookup", "cut", "awk", "sed", "sort", "uniq", "tr", "chmod",
+    "chown", "mkdir", "touch", "rm", "cp", "mv", "ln", "kill", "pkill",
+    "export", "readlink", "basename", "dirname", "test", "true", "false",
+    "sleep", "systemctl", "service", "ss", "netstat", "ip", "ifconfig",
+}
+_LONG_CMDS = {
+    "apt", "apt-get", "dpkg", "aptitude", "yum", "dnf", "pacman", "zypper",
+    "make", "cmake", "gcc", "g++", "clang", "cargo", "go", "pip", "pip3",
+    "pipx", "npm", "yarn", "pnpm", "docker", "podman", "docker-compose",
+    "rsync", "dd", "wget", "curl", "git", "gem", "bundle", "mvn", "gradle",
+    "msfconsole", "msfdb", "searchsploit", "nikto", "wpscan", "sqlmap",
+    "hydra", "medusa", "gobuster", "feroxbuster", "ffuf", "dirb", "dirbuster",
+    "masscan", "nmap", "nuclei", "subfinder", "amass", "katana", "hashcat",
+    "john", "hashid", "aircrack-ng", "wfuzz", "testssl",
+}
+_LONG_WORDS = {"upgrade", "dist-upgrade", "install", "update", "build",
+               "compile", "pull", "clone", "download"}
+# Long-running servers / daemons — these do NOT return on their own.
+_SERVER_CMDS = {
+    "flask", "uvicorn", "gunicorn", "hypercorn", "daphne", "waitress-serve",
+    "node", "nodemon", "deno", "bun", "rails", "puma", "unicorn", "thin",
+    "streamlit", "gradio", "jekyll", "hugo", "http-server", "serve", "ng",
+    "next", "nuxt", "vite", "webpack-dev-server", "php-fpm", "nginx",
+    "apache2", "httpd", "caddy", "mongod", "mysqld", "mariadbd", "postgres",
+    "redis-server", "memcached", "ncat", "socat",
+}
+
+
+def estimate_runtime(command: str) -> Dict[str, Any]:
+    """Estimate how long a shell command should take and the hard timeout to
+    enforce, so a hung command (classically: a server that won't start) is
+    terminated fast instead of blocking for the full default window.
+
+    Returns {kind, expected_seconds, hard_timeout_seconds, is_server,
+    backgrounded, rationale}. kind ∈ quick | long | server | background |
+    unknown. Pure heuristic — runs nothing."""
+    cmd = (command or "").strip()
+    low = cmd.lower()
+    backgrounded = bool(re.search(r"(?<!&)&\s*$", cmd)) or "nohup " in low \
+        or " disown" in low
+
+    heads: List[str] = []
+    server_hit = False
+    for seg in re.split(r"[\n;|]+|&&|\|\|", low):
+        words = seg.split()
+        i = 0
+        while i < len(words) and ("=" in words[i] or
+                                  words[i] in ("sudo", "nohup", "time", "env",
+                                               "exec", "setsid", "stdbuf")):
+            i += 1
+        if i >= len(words):
+            continue
+        head = os.path.basename(words[i])
+        heads.append(head)
+        rest = words[i + 1:]
+        joined = " ".join(rest)
+        if head in _SERVER_CMDS:
+            server_hit = True
+        elif head in ("python", "python3", "py") and (
+                "runserver" in joined or "http.server" in joined
+                or "manage.py runserver" in joined):
+            server_hit = True
+        elif head in ("php",) and "-s" in rest:
+            server_hit = True
+        elif head in ("npm", "yarn", "pnpm") and any(
+                w in ("start", "dev", "serve", "preview", "watch") for w in rest):
+            server_hit = True
+        elif head == "manage.py" and "runserver" in rest:
+            server_hit = True
+
+    if server_hit and not backgrounded:
+        return {"kind": "server", "expected_seconds": 8,
+                "hard_timeout_seconds": 25, "is_server": True,
+                "backgrounded": False,
+                "rationale": "long-running server/daemon — it won't return on "
+                "its own. Background it (nohup CMD >/tmp/srv.log 2>&1 &) and then "
+                "verify it came up by probing the port/URL; a foreground start "
+                "is capped at 25s so a failed start is caught fast, not after "
+                "the full window."}
+    if backgrounded:
+        return {"kind": "background", "expected_seconds": 3,
+                "hard_timeout_seconds": 15, "is_server": server_hit,
+                "backgrounded": True,
+                "rationale": "backgrounded — the shell returns immediately."}
+    is_long = any(h in _LONG_CMDS for h in heads) or \
+        any(w in _LONG_WORDS for w in low.split())
+    if is_long:
+        return {"kind": "long", "expected_seconds": 300,
+                "hard_timeout_seconds": 1800, "is_server": False,
+                "backgrounded": False,
+                "rationale": "package/build/scan/clone — can legitimately take "
+                "several minutes; capped at 30 min."}
+    if heads and all(h in _QUICK_CMDS for h in heads):
+        return {"kind": "quick", "expected_seconds": 5,
+                "hard_timeout_seconds": 30, "is_server": False,
+                "backgrounded": False,
+                "rationale": "quick local command — should return in seconds."}
+    return {"kind": "unknown", "expected_seconds": 30,
+            "hard_timeout_seconds": 120, "is_server": False,
+            "backgrounded": False,
+            "rationale": "unclassified — default 2-minute cap."}
+
+
+def _timeout_note(command: str, timeout: int) -> str:
+    """An informative timeout message so Kali knows the command didn't complete
+    (and, if it's a server, what to do about it) instead of silently waiting."""
+    est = estimate_runtime(command)
+    note = (f"timed out after {timeout}s (expected ~{est['expected_seconds']}s "
+            f"for a {est['kind']} command). The command did not complete and was "
+            f"terminated — do not just wait for it; it is not going to finish as-is.")
+    if est["is_server"] and not est["backgrounded"]:
+        note += (" This looks like a server/daemon: start it in the BACKGROUND "
+                 "(nohup CMD >/tmp/srv.log 2>&1 &), then confirm it started by "
+                 "probing the port/URL — running it in the foreground blocks "
+                 "until timeout whether or not it actually came up.")
+    return note
 
 
 def tool_run_command(command: str, timeout: int = 30,
@@ -1598,8 +1721,8 @@ def tool_run_command(command: str, timeout: int = 30,
             timeout=timeout, text=True, errors="replace")
         return _format_run_result(command, p, needs_sudo)
     except subprocess.TimeoutExpired:
-        return {"ok": False, "command": command,
-                "error": f"timeout after {timeout}s", "needs_sudo": needs_sudo}
+        return {"ok": False, "command": command, "rc": 124, "timed_out": True,
+                "error": _timeout_note(command, timeout), "needs_sudo": needs_sudo}
     except Exception as e:
         return {"ok": False, "command": command,
                 "error": f"{type(e).__name__}: {e}", "needs_sudo": needs_sudo}

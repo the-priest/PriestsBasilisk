@@ -29,7 +29,8 @@ from kali_core import (
     GroqBackend, OpenAICompatBackend, BackendRouter,
     ChatStore, Chat,
     load_settings, save_settings, log,
-    tool_read_file, tool_list_dir, tool_run_command, tool_system_info,
+    tool_read_file, tool_list_dir, tool_run_command, estimate_runtime,
+    tool_system_info,
     tool_write_file, make_edit_diff,
     tool_check_updates, tool_recent_downloads, tool_service_status,
     tool_journal_tail, tool_disk_usage, tool_processes,
@@ -84,7 +85,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.kali"
 APP_NAME = "Kali"
-VERSION = "4.2.0"
+VERSION = "4.2.1"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -1962,6 +1963,13 @@ class MessageWidget(Gtk.Box):
             content_box.append(self._thoughts_container)
             inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
             inner.add_css_class("msg-assistant")
+            # Hug the content: without this the bubble fills the whole row
+            # width (content_box hexpands for avatar layout, and the body label
+            # hexpands), so a two-word reply drew a full-screen bubble. START +
+            # no-expand makes the bubble size to its text and sit left; the
+            # label's max-width-chars cap still wraps long replies.
+            inner.set_halign(Gtk.Align.START)
+            inner.set_hexpand(False)
             content_box.append(inner)
             # Read-aloud control sits UNDERNEATH the message (left-aligned),
             # where it's easy to reach, rather than off on the far right.
@@ -5987,34 +5995,16 @@ class MainWindow(Adw.ApplicationWindow):
         except Exception:
             pass
 
-        # Long-running ops (package work, scans, builds) need more than the
-        # old hard 60s or they time out mid-apt and look broken.  Match on
-        # the actual COMMAND TOKENS, not raw substrings — the old `k in low`
-        # check false-matched "make" inside "cmake", "install" inside any
-        # path containing it, "dd " inside "add ", etc., handing trivial
-        # commands a needless 30-min window.
-        long_cmds = {"apt", "apt-get", "dpkg", "nmap", "make", "pip", "pip3",
-                     "rsync", "dd", "git", "wget", "curl", "docker"}
-        long_words = {"upgrade", "dist-upgrade", "install"}  # subcommands
-        # Split on shell separators, then take the leading token of each
-        # simple command (skipping leading VAR=val assignments and sudo).
-        tokens = re.split(r'[\n;&|]+', command.lower())
-        is_long = False
-        for seg in tokens:
-            words = seg.split()
-            i = 0
-            while i < len(words) and ("=" in words[i] or words[i] == "sudo"):
-                i += 1
-            if i >= len(words):
-                continue
-            head = os.path.basename(words[i])   # strip any path prefix
-            if head in long_cmds:
-                is_long = True
-                break
-            if any(w in long_words for w in words[i:]):
-                is_long = True
-                break
-        timeout = 1800 if is_long else 120
+        # How long should this command take, and when do we give up? The
+        # estimator knows a quick command from a build from a server that will
+        # NEVER return on its own — so a hung start is terminated in ~25s
+        # instead of blocking for the full window.
+        _est = estimate_runtime(command)
+        timeout = _est["hard_timeout_seconds"]
+        if _est.get("is_server") and not _est.get("backgrounded"):
+            self._show_toast(
+                "That's a server — capping the start at 25s. Background it "
+                "(append ' &') so it doesn't block.", timeout=6)
 
         def run_bg(password=None):
             def _bg():

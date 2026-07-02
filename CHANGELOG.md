@@ -1,5 +1,22 @@
 # Changelog
 
+## v4.2.1 — command runtime awareness + tighter bubbles
+
+- **Kali knows how long a command should take, and stops waiting on a hung one.**
+  A new runtime estimator sets the timeout per command instead of a blunt
+  120s/1800s: quick commands ~30s, scans/builds up to 30 min, and — the real
+  fix — **servers/daemons capped at 25s**. Starting a server in the foreground
+  used to block for the full window whether or not it actually came up; now a
+  failed start is caught in seconds. A timeout returns rc 124 with an
+  informative message (expected vs actual, and "background it + probe the port"
+  for servers), and the persona teaches Kali to background servers and verify
+  they started rather than sit waiting. Covered by tests/test_runtime.py.
+- **Chat bubbles hug their text.** A short reply no longer draws a full-width
+  bubble — the assistant bubble sizes to its content and left-aligns, while long
+  replies still wrap at the width cap.
+
+---
+
 ## v4.2.0 — benchmarking: prove it with a number
 
 You can't out-benchmark the field on vibes. This release adds the instrument

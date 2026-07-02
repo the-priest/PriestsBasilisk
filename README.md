@@ -25,7 +25,7 @@ keywords: ai security operator, kali linux ai, ai pentest tool, offensive securi
 
 <br>
 
-![version](https://img.shields.io/badge/version-4.2.0-c4cad4?style=for-the-badge&labelColor=0d0f12)
+![version](https://img.shields.io/badge/version-4.2.1-c4cad4?style=for-the-badge&labelColor=0d0f12)
 ![license](https://img.shields.io/badge/license-MIT-2ee65f?style=for-the-badge&labelColor=0d0f12)
 ![platform](https://img.shields.io/badge/Linux-X11%20%7C%20Wayland-9aa4b2?style=for-the-badge&logo=linux&logoColor=white&labelColor=0d0f12)
 ![python](https://img.shields.io/badge/python-3.10+-3776ab?style=for-the-badge&logo=python&logoColor=white&labelColor=0d0f12)
