@@ -86,7 +86,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.kali"
 APP_NAME = "Kali"
-VERSION = "4.4.0"
+VERSION = "4.4.1"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -95,7 +95,12 @@ VERSION = "4.4.0"
 # end — it takes one final, tool-free turn to answer with what it gathered.
 # The y/n confirmation gate and the catastrophic-command hard block still
 # fire independently, so a high budget never means an unsupervised risky run.
-MAX_TOOL_CHAIN = 50
+# Raised to 150 so a full multi-step assessment (e.g. a Juice Shop benchmark)
+# finishes in a single turn; overridable per-user via the "max_tool_steps"
+# setting. It resets every turn, so sending another message ("keep going")
+# always grants a fresh budget — the cap only stops a runaway WITHIN one turn,
+# which protects the token bill.
+MAX_TOOL_CHAIN = 150
 # Parallel workers when several read-only tools fire in one turn.
 TOOL_BATCH_MAX_WORKERS = 6
 # Keep this many most-recent tool_result blocks at full length in the
@@ -4683,7 +4688,8 @@ class MainWindow(Adw.ApplicationWindow):
         # with whatever was gathered.  The directive below tells the model
         # to stop calling tools; _after_stream ignores any it emits anyway.
         self._tool_chain_depth += 1
-        if self._tool_chain_depth > MAX_TOOL_CHAIN and not self._tools_locked:
+        _budget = self.settings.get("max_tool_steps", MAX_TOOL_CHAIN)
+        if self._tool_chain_depth > _budget and not self._tools_locked:
             self._tools_locked = True
             self.terminal_log("── tool budget reached; finalizing answer", "dim")
             try:
@@ -6397,6 +6403,14 @@ class MainWindow(Adw.ApplicationWindow):
             kind = (m.meta or {}).get("kind")
             if m.role == "user":
                 content = m.content
+                # The "tool-step budget reached" note is only meant to make the
+                # model finalize the turn it was raised in (and the runtime lock
+                # enforces that regardless). Never replay it into later turns —
+                # otherwise the model keeps seeing "don't call tools" and refuses
+                # to continue when the operator says "keep going", even though the
+                # budget already reset. Drop it from history.
+                if "[system note: tool-step budget reached" in content:
+                    continue
                 if kind == "tool_result" and i not in keep_full:
                     content = self._trim_tool_result(content)
                 out.append({"role": "user", "content": content})

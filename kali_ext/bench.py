@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 # ── canonical vulnerability classes, and the maps onto them ──
 # One label per class so a finding and a ground-truth item can be compared even

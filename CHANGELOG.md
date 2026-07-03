@@ -1,5 +1,28 @@
 # Changelog
 
+## v4.4.1 — "keep going" actually keeps going
+
+Fixes the bug where, after a long run hit the tool-step budget, Kali would
+refuse to continue on the next message and claim the budget was "per session."
+
+- **The budget resets per turn — now genuinely.** It always reset the counter,
+  but the "tool-step budget reached, don't call tools" note was left in the
+  conversation history, so on the next message the model kept reading it and
+  refused to continue (inventing the "per session" explanation). That note is
+  now stripped from replayed history — it only applies to the turn it's raised
+  in (where the runtime lock enforces it anyway). Sending another message
+  ("keep going") now reliably grants a fresh budget.
+- **Bigger default budget: 50 → 150 tool steps per turn**, so a full multi-step
+  assessment (a Juice Shop benchmark, say) finishes in one turn instead of
+  dead-ending mid-run. Now overridable via the new **`max_tool_steps`** setting.
+- **The cap stays (high) on purpose.** It resets every turn, so you can continue
+  indefinitely by messaging — but a hard ceiling within a single turn stops a
+  runaway loop from billing you for hundreds of back-to-back calls. Raise
+  `max_tool_steps` as high as you like; removing the guard entirely is the one
+  thing that turns a stuck loop into a surprise bill.
+
+---
+
 ## v4.4.0 — lazy tool groups (opt-in): pay for the tools you use
 
 The system prompt re-ships every call, and the tool catalog is the bulk of it.

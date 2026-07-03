@@ -317,6 +317,12 @@ DEFAULT_SETTINGS = {
                                         # specialist group on demand with
                                         # load_tools. Off by default — test it
                                         # against your model before relying on it
+    "max_tool_steps":          150,     # tool round-trips allowed per turn
+                                        # before Kali finalizes. Resets every
+                                        # turn (send another message to continue).
+                                        # Raise for very long autonomous runs; a
+                                        # cap still guards against a runaway loop
+                                        # billing you for hundreds of calls.
     "headroom_min_chars":      1200,    # don't compress a block under this size
     "headroom_keep_recent":    2,       # leave the last N tool results full
     "headroom_target_ratio":   0.35,    # fallback engine: keep ~this fraction
