@@ -6,18 +6,7 @@ keywords: ai security operator, kali linux ai, ai pentest tool, offensive securi
 
 <div align="center">
 
-```
-              ⟁      ⟁      ⟁
-██████╗  █████╗ ███████╗██╗██╗     ██╗███████╗██╗  ██╗
-██╔══██╗██╔══██╗██╔════╝██║██║     ██║██╔════╝██║ ██╔╝
-██████╔╝███████║███████╗██║██║     ██║███████╗█████╔╝ 
-██╔══██╗██╔══██║╚════██║██║██║     ██║╚════██║██╔═██╗ 
-██████╔╝██║  ██║███████║██║███████╗██║███████║██║  ██╗
-╚═════╝ ╚═╝  ╚═╝╚══════╝╚═╝╚══════╝╚═╝╚══════╝╚═╝  ╚═╝
-     t h e   s e r p e n t   o n   y o u r   m a c h i n e
-```
-
-# ⟁ BASILISK
+<img src="banner.png" alt="BASILISK — the serpent on your machine" width="820">
 
 ### An AI security operator that lives on **your** machine — not someone else's cloud.
 
@@ -25,15 +14,15 @@ keywords: ai security operator, kali linux ai, ai pentest tool, offensive securi
 
 <br>
 
-![version](https://img.shields.io/badge/version-4.8.2-c4cad4?style=for-the-badge&labelColor=0d0f12)
-![license](https://img.shields.io/badge/license-MIT-2ee65f?style=for-the-badge&labelColor=0d0f12)
-![platform](https://img.shields.io/badge/Linux-X11%20%7C%20Wayland-9aa4b2?style=for-the-badge&logo=linux&logoColor=white&labelColor=0d0f12)
-![python](https://img.shields.io/badge/python-3.10+-3776ab?style=for-the-badge&logo=python&logoColor=white&labelColor=0d0f12)
+![version](https://img.shields.io/badge/version-4.8.3-7d121b?style=for-the-badge&labelColor=08090b)
+![license](https://img.shields.io/badge/license-MIT-7d121b?style=for-the-badge&labelColor=08090b)
+![platform](https://img.shields.io/badge/Linux-X11%20%7C%20Wayland-6d7680?style=for-the-badge&logo=linux&logoColor=white&labelColor=08090b)
+![python](https://img.shields.io/badge/python-3.10+-6d7680?style=for-the-badge&logo=python&logoColor=white&labelColor=08090b)
 
-![toolkit](https://img.shields.io/badge/GTK4-libadwaita-4a86cf?style=for-the-badge&labelColor=0d0f12)
-![mobile](https://img.shields.io/badge/runs%20on-NetHunter-c4cad4?style=for-the-badge&labelColor=0d0f12)
-![ledger](https://img.shields.io/badge/evidence-tamper--evident-2ee65f?style=for-the-badge&labelColor=0d0f12)
-![lock-in](https://img.shields.io/badge/cloud%20lock--in-none-9aa4b2?style=for-the-badge&labelColor=0d0f12)
+![toolkit](https://img.shields.io/badge/GTK4-libadwaita-6d7680?style=for-the-badge&labelColor=08090b)
+![mobile](https://img.shields.io/badge/runs%20on-NetHunter-6d7680?style=for-the-badge&labelColor=08090b)
+![ledger](https://img.shields.io/badge/evidence-tamper--evident-7d121b?style=for-the-badge&labelColor=08090b)
+![benchmark](https://img.shields.io/badge/Juice%20Shop-40%2F113%20autonomous-7d121b?style=for-the-badge&labelColor=08090b)
 
 </div>
 
@@ -72,6 +61,16 @@ That distinction is the whole point:
 Where a hosted assistant refuses half of real security work and ships every prompt to a datacenter you don't control, Basilisk keeps your work local, doesn't moralize over a scan you're authorized to run, and leaves a tamper-evident record you can put in front of a client.
 
 > **In one sentence:** every "AI hacking tool" is a chatbot behind a prompt. Basilisk is the opposite — a disciplined, auditable operator's tool that runs on your hardware, draws a hard line at the one mistake you can't undo, and never forgets what it touched.
+
+<br>
+
+<div align="center">
+
+<img src="dragon.png" alt="Basilisk" width="360">
+
+*A dragon that lives on your machine, answers only to you,<br>and never forgets where the bodies are buried.*
+
+</div>
 
 <br>
 
