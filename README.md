@@ -137,10 +137,10 @@ Read-only **sensing** runs freely. Anything that changes your system either runs
 - **`cve_lookup`** — NVD CVEs enriched with **CISA KEV** (exploited in the wild?) and **EPSS** (exploit probability), re-ranked **KEV → EPSS → CVSS**.
 - **`nuclei_template`** — generate a structurally-valid Nuclei template from a simple spec, or validate one and get the exact list of problems before you run it.
 - **`reflect_findings`** — a false-positive self-check that flags unsupported, over-rated, hedged, host-less or duplicate findings *before* they reach a report.
-- **`attack_writeup`** — the **exploitation narrative**: a reproducible account of how access was obtained, pulled straight from the evidence ledger so the steps are backed by real hashed commands; secrets auto-redacted. Documents an authorized, already-executed path — it writes no exploit code.
+- **`attack_writeup`** — the **exploitation narrative**: a reproducible account of how access was obtained, pulled straight from the evidence ledger so the steps are backed by real hashed commands; secrets auto-redacted. This tool *documents* an authorized, already-executed path (the exploiting happens through the run gate; this writes it up).
 - **`methodology` · `wordlist_find` · `cheatsheet` · `report_findings`** — PTES / OWASP / AD-killchain checklists, installed-wordlist finder, correct tool syntax, and clean markdown engagement reports.
 
-*All offensive tooling is propose-only / read-only. Basilisk plans, inventories, parses, enriches, and documents — it writes no exploit code and attacks nothing on its own.*
+*Offensive tooling runs behind the approval gate, against scope you set. Basilisk plans, inventories, parses, enriches, **writes and runs real exploits**, and documents the results — you approve the actions and stay on the trigger. The line it holds isn't "no exploits" (that's the whole job) — it's no **standalone weaponized malware** (reverse-shell binaries, self-propagating implants, ransomware, persistent backdoors) and no firing of irreversible/destructive actions on its own.*
 
 </details>
 
@@ -235,7 +235,7 @@ Basilisk is **decisive by default and un-catastrophic by construction.**
 - **The irreversible class always stops for a confirm** — even in auto-run, even if the model was steered by something it read on a webpage. A **structural** detector (shlex-tokenized, `$IFS`/quote-normalized, recursing into `sh -c` / `eval`) force-confirms disk/filesystem wipes, recursive root/`$HOME` deletes, fork bombs, and raw block-device writes. It sees through tricks a regex misses — `rm '-rf' /`, `rm${IFS}-rf${IFS}/`, `cd / && rm -rf *`, `find / -delete`, `echo … | base64 -d | sh` — while staying narrow enough that `nmap`, `nuclei`, `sqlmap` and `rm -rf ~/loot` never trip it. The full catch/ignore contract is **pinned in the test suite.**
 - **Basilisk's own safety code can't be shell-stripped**, your **sudo password is never stored or shown to the model**, and self-written code runs only in a **bubblewrap jail** after passing its own test.
 - **It can't lie about your machine.** Hardware and system facts are read live with a tool, never guessed.
-- **No exploit generation, ever.** Security tooling is propose-only / read-only; you drive the trigger, against scope you set.
+- **Exploitation is the job — with you on the trigger.** Basilisk writes and runs real exploits (SQLi, XSS, JWT forgery, SSRF, sqlmap-driven attacks, and more) against targets you're authorized to test, within scope you set, and you approve each action. The line it holds: no **standalone weaponized malware** (reverse shells, implants, ransomware, backdoors), and the irreversible/destructive class never fires autonomously.
 
 > The guarantee isn't "asks every time" — it's that the one mistake that can't be undone keeps a human in the loop no matter what, and you can dial friction to full-confirm whenever you want.
 
@@ -433,7 +433,7 @@ For per-machine persona tweaks that survive upgrades, use **Settings → Persona
 - **Be an always-on autonomous fleet agent.** A deliberate non-goal — Basilisk keeps you in the loop for the irreversible.
 - **See your sudo password**, or reach private content it hasn't been given a token for.
 - **Invent facts about your machine.** Hardware and system state are read with a tool, not guessed.
-- **Write exploit code or attack a target on its own.** Security tooling is propose-only / read-only; you drive the trigger, against scope you set.
+- **Generate standalone weaponized malware, or fire destructive actions on its own.** Writing and running exploits against *authorized, in-scope* targets is the whole point, and it does exactly that — but it won't churn out reverse-shell binaries, self-propagating implants, ransomware or persistent backdoors, and the irreversible class (disk wipes, etc.) always keeps you on the trigger.
 
 <br>
 
