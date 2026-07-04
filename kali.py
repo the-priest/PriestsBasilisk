@@ -88,7 +88,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.kali"
 APP_NAME = "Basilisk"
-VERSION = "4.7.5"
+VERSION = "4.7.6"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -203,12 +203,12 @@ headerbar {
 /* ===== App branding ===== */
 
 .app-title {
-    font-size: 26px;
+    font-size: 27px;
     font-weight: 900;
     font-family: 'JetBrains Mono', 'Fira Code', monospace;
-    color: #ff3a47;
-    letter-spacing: 4px;
-    text-shadow: 0 0 12px rgba(255, 58, 71, 0.45);
+    color: #dfe4ea;
+    letter-spacing: 3px;
+    text-shadow: 0 2px 3px rgba(0, 0, 0, 0.9), 0 0 11px rgba(150, 162, 178, 0.32);
 }
 /* Connectivity dot beside BASILISK: green online, red offline */
 .online-dot {
@@ -269,21 +269,21 @@ headerbar {
     border-left-color: rgba(46, 230, 95, 0.55);
 }
 .chat-row.selected, .chat-row:selected {
-    background: linear-gradient(90deg, rgba(255, 58, 71, 0.16),
-                rgba(46, 230, 95, 0.05) 55%, rgba(13, 15, 18, 0) 90%);
-    border-left: 3px solid #ff3a47;
-    box-shadow: inset 0 0 0 1px rgba(255, 58, 71, 0.10);
-    animation: emberglow 2.6s ease-in-out infinite;
+    background: linear-gradient(90deg, rgba(200, 210, 222, 0.10),
+                rgba(120, 130, 142, 0.04) 55%, rgba(13, 15, 18, 0) 90%);
+    border-left: 3px solid #c8d0da;
+    box-shadow: inset 0 0 0 1px rgba(200, 210, 222, 0.10);
+    animation: metalglow 3s ease-in-out infinite;
 }
-@keyframes emberglow {
-    0%   { border-left-color: #ff3a47; box-shadow: inset 0 0 0 1px rgba(255,58,71,0.10), -2px 0 10px rgba(255,58,71,0.20); }
-    50%  { border-left-color: #ff8a2f; box-shadow: inset 0 0 0 1px rgba(255,138,47,0.14), -2px 0 14px rgba(255,138,47,0.30); }
-    100% { border-left-color: #ff3a47; box-shadow: inset 0 0 0 1px rgba(255,58,71,0.10), -2px 0 10px rgba(255,58,71,0.20); }
+@keyframes metalglow {
+    0%   { border-left-color: #7f8892; box-shadow: inset 0 0 0 1px rgba(200,210,222,0.08), -2px 0 12px rgba(190,200,214,0.16); }
+    50%  { border-left-color: #eff3f8; box-shadow: inset 0 0 0 1px rgba(232,238,244,0.18), -2px 0 17px rgba(220,230,240,0.30); }
+    100% { border-left-color: #7f8892; box-shadow: inset 0 0 0 1px rgba(200,210,222,0.08), -2px 0 12px rgba(190,200,214,0.16); }
 }
 .chat-row .title-line {
     color: #e8ebef;
-    font-weight: 650;
-    font-size: 16px;
+    font-weight: 700;
+    font-size: 17px;
 }
 .chat-row .meta-line {
     color: #6d7680;
@@ -2336,10 +2336,8 @@ class ChatRow(Gtk.ListBoxRow):
                 stamp = dt.strftime("%d %b")
         except Exception:
             stamp = ""
-        model_short = (chat.model or "").split(":", 1)[0].split("/")[-1]
-        if model_short and stamp:
-            return f"{stamp}   ·   {model_short}"
-        return stamp or model_short or ""
+        # Chat row shows just the time — the model isn't useful clutter here.
+        return stamp or ""
 
 
 # ═════════════════════════════════════════════════════════════════════
