@@ -1,5 +1,5 @@
 <!--
-title: Basilisk — the AI security operator that runs on your own machine (Oracle5)
+title: Basilisk — the AI security operator that runs on your own machine
 description: Basilisk is an open-source AI security operator that runs as a native GTK4 desktop app on your own Linux box. You bring a large language model (SiliconFlow, Groq); Basilisk gives it hands — a full offensive-security toolchain, code & dependency auditing, a tamper-evident evidence ledger, real web browsing through Brave, external tools over MCP, a memory, and a voice — all behind a hard structural safety floor and under your control. A private, security-native, self-hosted alternative to cloud AI assistants.
 keywords: ai security operator, kali linux ai, ai pentest tool, offensive security ai, llm security agent, self-hosted ai, local ai agent, evidence ledger, sast sca ai, cve enrichment, kev epss, model context protocol, mcp client, nethunter ai, gtk4 app, deepseek, siliconflow, brave automation, red team assistant
 -->
@@ -25,7 +25,7 @@ keywords: ai security operator, kali linux ai, ai pentest tool, offensive securi
 
 <br>
 
-![version](https://img.shields.io/badge/version-4.8.0-c4cad4?style=for-the-badge&labelColor=0d0f12)
+![version](https://img.shields.io/badge/version-4.8.2-c4cad4?style=for-the-badge&labelColor=0d0f12)
 ![license](https://img.shields.io/badge/license-MIT-2ee65f?style=for-the-badge&labelColor=0d0f12)
 ![platform](https://img.shields.io/badge/Linux-X11%20%7C%20Wayland-9aa4b2?style=for-the-badge&logo=linux&logoColor=white&labelColor=0d0f12)
 ![python](https://img.shields.io/badge/python-3.10+-3776ab?style=for-the-badge&logo=python&logoColor=white&labelColor=0d0f12)
@@ -48,7 +48,7 @@ keywords: ai security operator, kali linux ai, ai pentest tool, offensive securi
 </div>
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/the-priest/oracle5/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/the-priest/Basilisk/main/install.sh | bash
 ```
 
 No Docker. No daemon. No account. No cloud. Paste it once to install; paste the **exact same line** any time to update. It auto-detects your distro, installs what it needs, parse-checks every file before it touches your disk, backs up your chat history, and drops a launcher in your app grid. About a minute from `curl` to a dragon on your desktop.
@@ -246,7 +246,7 @@ Basilisk is **decisive by default and un-catastrophic by construction.**
 ## Install &amp; update
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/the-priest/oracle5/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/the-priest/Basilisk/main/install.sh | bash
 ```
 
 Run it once to install; run the **exact same line** any time to update. The installer is idempotent and genuinely careful — it treats your machine the way you'd want it treated:
@@ -259,7 +259,7 @@ Run it once to install; run the **exact same line** any time to update. The inst
 - 🦁 **`WITH_BRAVE=1`** installs Brave for ad/tracker-free browsing.
 - 🚀 Drops a `kali` launcher in `~/.local/bin/` and a `.desktop` entry in your app grid.
 
-**Manual install:** `git clone https://github.com/the-priest/oracle5.git kali && cd kali && ./install.sh`
+**Manual install:** `git clone https://github.com/the-priest/Basilisk.git kali && cd kali && ./install.sh`
 **Uninstall:** `~/.local/share/kali/install.sh --uninstall` (chat history kept).
 
 <details>
@@ -409,7 +409,7 @@ Provider stack: **SiliconFlow / DeepSeek** primary with a **Groq** fallback. The
 <br>
 
 ```bash
-git clone https://github.com/the-priest/oracle5.git kali && cd kali
+git clone https://github.com/the-priest/Basilisk.git kali && cd kali
 python3 kali.py                    # run from source
 
 # offline test suites (stdlib only — no display, no keys, no network)

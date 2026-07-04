@@ -88,7 +88,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.kali"
 APP_NAME = "Basilisk"
-VERSION = "4.8.0"
+VERSION = "4.8.2"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -124,15 +124,15 @@ HISTORY_TRIM_HEAD_CHARS = 600
 CSS = b"""
 /* =====================================================================
    BASILISK THEME - modelled on the official Kali Linux desktop palette:
-   near-black surfaces, the Basilisk dragon-blue accent (#7a2028 / #b0303a),
+   near-black surfaces, the Basilisk dragon-blue accent (#4a0a11 / #7d121b),
    red for danger, monospace for headers and machine output.  Built to
    read like a first-party Basilisk tool, not a pastel toy.
    GTK CSS has no variables across rules, so the palette is inlined.
 
    Palette:
-     bg base    #0d0f12   surfaces  #14171c / #1b1f26   line  #262b33
+     bg base    #08090b   surfaces  #0d0f12 / #12151a   line  #1b1f26
      text       #d6dbe2   dim       #7d8794
-     accent     #7a2028   accent-hi #b0303a   accent-dim rgba(176, 48, 58,.15)
+     accent     #4a0a11   accent-hi #7d121b   accent-dim rgba(125, 18, 27,.15)
      ok/green   #2ecc71   warn      #f0a500   danger #e5484d
    ===================================================================== */
 
@@ -143,8 +143,8 @@ CSS = b"""
    the user's Plasma accent - which is exactly what made the UI look
    inconsistent.  Retint them ALL to the Basilisk palette in one place. */
 
-@define-color accent_color              #b0303a;
-@define-color accent_bg_color           #7a2028;
+@define-color accent_color              #7d121b;
+@define-color accent_bg_color           #4a0a11;
 @define-color accent_fg_color           #ffffff;
 
 @define-color destructive_color         #e5484d;
@@ -153,51 +153,51 @@ CSS = b"""
 
 @define-color success_color             #2ecc71;
 @define-color success_bg_color          #2ecc71;
-@define-color success_fg_color          #0d0f12;
+@define-color success_fg_color          #08090b;
 @define-color warning_color             #f0a500;
 @define-color warning_bg_color          #f0a500;
-@define-color warning_fg_color          #0d0f12;
+@define-color warning_fg_color          #08090b;
 @define-color error_color               #e5484d;
 @define-color error_bg_color            #e5484d;
 @define-color error_fg_color            #ffffff;
 
-@define-color window_bg_color           #0d0f12;
+@define-color window_bg_color           #08090b;
 @define-color window_fg_color           #d6dbe2;
-@define-color view_bg_color             #14171c;
+@define-color view_bg_color             #0d0f12;
 @define-color view_fg_color             #d6dbe2;
-@define-color headerbar_bg_color        #14171c;
+@define-color headerbar_bg_color        #0d0f12;
 @define-color headerbar_fg_color        #d6dbe2;
-@define-color headerbar_border_color    #262b33;
-@define-color popover_bg_color          #14171c;
+@define-color headerbar_border_color    #1b1f26;
+@define-color popover_bg_color          #0d0f12;
 @define-color popover_fg_color          #d6dbe2;
-@define-color dialog_bg_color           #14171c;
+@define-color dialog_bg_color           #0d0f12;
 @define-color dialog_fg_color           #d6dbe2;
-@define-color card_bg_color             #1b1f26;
+@define-color card_bg_color             #12151a;
 @define-color card_fg_color             #d6dbe2;
 @define-color sidebar_bg_color          #0a0c0f;
 @define-color sidebar_fg_color          #d6dbe2;
 
-@define-color borders                   #262b33;
+@define-color borders                   #1b1f26;
 
 /* ===== Base ===== */
 
 window, .background {
-    background-color: #0d0f12;
+    background-color: #08090b;
     color: #d6dbe2;
     font-family: 'Inter', 'Cantarell', 'SF Pro Text', sans-serif;
 }
 
 headerbar {
-    background-color: #14171c;
+    background-color: #0d0f12;
     color: #d6dbe2;
-    border-bottom: 1px solid #262b33;
+    border-bottom: 1px solid #1b1f26;
     min-height: 56px;
     padding: 4px 8px;
 }
 
 .sidebar {
     background-color: #0a0c0f;
-    border-right: 1px solid #262b33;
+    border-right: 1px solid #1b1f26;
 }
 
 /* ===== App branding ===== */
@@ -216,8 +216,8 @@ headerbar {
     margin-top: 2px;
 }
 .online-dot.online {
-    color: #b0303a;
-    text-shadow: 0 0 7px rgba(176, 48, 58, 0.7);
+    color: #7d121b;
+    text-shadow: 0 0 7px rgba(125, 18, 27, 0.7);
 }
 .online-dot.offline {
     color: #6b737d;
@@ -238,14 +238,14 @@ headerbar {
 /* Composer input as a rounded bubble so it reads as a contained field
    instead of bleeding into the bottom edge. */
 .input-frame {
-    background-color: #14181d;
+    background-color: #0e1013;
     border: 1px solid #232a32;
     border-radius: 20px;
     padding: 4px 8px;
     margin-bottom: 8px;
 }
 .input-frame:focus-within {
-    border-color: #b0303a;
+    border-color: #7d121b;
     background-color: #161b21;
 }
 .chat-subtitle {
@@ -265,8 +265,8 @@ headerbar {
     transition: background-color 160ms ease, border-color 160ms ease;
 }
 .chat-row:hover {
-    background-color: #14171c;
-    border-left-color: rgba(176, 48, 58, 0.55);
+    background-color: #0d0f12;
+    border-left-color: rgba(125, 18, 27, 0.55);
 }
 .chat-row.selected, .chat-row:selected {
     background: linear-gradient(90deg, rgba(200, 210, 222, 0.10),
@@ -322,27 +322,27 @@ headerbar {
 
 /* User: right-aligned bubble */
 .msg-user {
-    background-color: rgba(176, 48, 58, 0.08);
+    background-color: rgba(64, 20, 96, 0.14);
     color: #eef2f6;
     border-radius: 12px 12px 4px 12px;
     padding: 18px 22px;
     margin: 8px 12px 8px 60px;
     font-size: 30px;
     line-height: 1.45;
-    border: 1px solid rgba(176, 48, 58, 0.22);
+    border: 1px solid rgba(64, 20, 96, 0.40);
 }
 
 /* Assistant: left-aligned, translucent SILVER bubble (matches Basilisk's icon;
    contrasts the user's green) */
 .msg-assistant {
-    background-color: rgba(196, 202, 212, 0.10);
+    background-color: rgba(125, 18, 27, 0.13);
     color: #eef1f5;
     padding: 16px 20px;
     margin: 8px 60px 8px 12px;
     font-size: 30px;
     line-height: 1.55;
     border-radius: 12px 12px 12px 4px;
-    border: 1px solid rgba(196, 202, 212, 0.30);
+    border: 1px solid rgba(125, 18, 27, 0.36);
 }
 
 /* Compact tool indicator (replaces visible JSON dump) */
@@ -390,18 +390,18 @@ headerbar {
     border-radius: 6px;
     min-width: 52px;
     min-height: 52px;
-    background-color: #1b1f26;
+    background-color: #12151a;
     font-weight: bold;
     font-size: 22px;
     color: #d6dbe2;
 }
 .avatar-user {
-    background-color: #262b33;
+    background-color: #1b1f26;
     color: #d6dbe2;
 }
 .avatar-kali {
     background: linear-gradient(135deg, #8b0010, #ff2d3a);
-    color: #0d0f12;
+    color: #08090b;
     border: 1px solid #ff5566;
     box-shadow: 0 0 10px rgba(255, 45, 58, 0.55);
 }
@@ -415,14 +415,14 @@ headerbar {
     text-transform: uppercase;
     margin: 0 0 5px 0;
 }
-.role-label.user { color: #b0303a; }
+.role-label.user { color: #7d121b; }
 .role-label.kali { color: #c4cad4; }
 
 /* ===== Code blocks ===== */
 
 .code-block {
     background-color: #0a0c0f;
-    border: 1px solid #262b33;
+    border: 1px solid #1b1f26;
     border-radius: 6px;
     padding: 0;
     margin: 8px 4px;
@@ -431,7 +431,7 @@ headerbar {
     margin: 8px 4px;
 }
 .chat-image {
-    border: 1px solid #262b33;
+    border: 1px solid #1b1f26;
     border-radius: 8px;
     background-color: #0a0c0f;
 }
@@ -441,12 +441,12 @@ headerbar {
     margin: 2px 2px;
 }
 .code-block-header {
-    background-color: #14171c;
+    background-color: #0d0f12;
     color: #7d8794;
     font-size: 11px;
     font-family: 'JetBrains Mono', monospace;
     padding: 6px 12px;
-    border-bottom: 1px solid #262b33;
+    border-bottom: 1px solid #1b1f26;
     border-radius: 6px 6px 0 0;
 }
 .code-block textview {
@@ -460,7 +460,7 @@ headerbar {
 /* ===== Status pills ===== */
 
 .status-pill {
-    background-color: #1b1f26;
+    background-color: #12151a;
     color: #7d8794;
     border-radius: 6px;
     padding: 8px 16px;
@@ -469,16 +469,16 @@ headerbar {
     font-family: 'JetBrains Mono', monospace;
     letter-spacing: 0.5px;
 }
-.status-pill.online   { background-color: #2ecc71; color: #0d0f12; }
-.status-pill.offline  { background-color: #262b33; color: #d6dbe2; }
+.status-pill.online   { background-color: #2ecc71; color: #08090b; }
+.status-pill.offline  { background-color: #1b1f26; color: #d6dbe2; }
 .status-pill.error    { background-color: #e5484d; color: #ffffff; }
-.status-pill.groq     { background: linear-gradient(135deg, #7a2028, #b0303a);
+.status-pill.groq     { background: linear-gradient(135deg, #4a0a11, #7d121b);
                         color: #ffffff; }
 
 /* ===== Settings ===== */
 
 .settings-section-title {
-    color: #b0303a;
+    color: #7d121b;
     font-weight: bold;
     font-size: 17px;
     font-family: 'JetBrains Mono', monospace;
@@ -491,12 +491,12 @@ headerbar {
 
 .confirm-cmd {
     background-color: #0a0c0f;
-    color: #b0303a;
+    color: #7d121b;
     font-family: 'JetBrains Mono', monospace;
     font-size: 20px;
     padding: 16px;
     border-radius: 6px;
-    border: 1px solid #262b33;
+    border: 1px solid #1b1f26;
     margin: 10px 0;
 }
 
@@ -509,35 +509,35 @@ scrollbar slider {
     min-height: 50px;
 }
 scrollbar slider:hover { background-color: #3d4651; }
-scrollbar slider:active { background-color: #7a2028; }
+scrollbar slider:active { background-color: #4a0a11; }
 
 /* ===== Entry ===== */
 
 entry {
-    background-color: #1b1f26;
+    background-color: #12151a;
     color: #d6dbe2;
     border-radius: 6px;
     padding: 12px 16px;
-    border: 1px solid #262b33;
+    border: 1px solid #1b1f26;
     font-size: 20px;
 }
-entry:focus-within { outline: 2px solid #7a2028; border-color: #7a2028; }
+entry:focus-within { outline: 2px solid #4a0a11; border-color: #4a0a11; }
 
 passwordentry {
-    background-color: #1b1f26;
+    background-color: #12151a;
     color: #d6dbe2;
     border-radius: 6px;
     padding: 12px 16px;
-    border: 1px solid #262b33;
+    border: 1px solid #1b1f26;
     font-size: 20px;
 }
 
 /* ===== Quick-action chips in empty state ===== */
 
 .quick-chip {
-    background-color: #1b1f26;
+    background-color: #12151a;
     color: #d6dbe2;
-    border: 1px solid #262b33;
+    border: 1px solid #1b1f26;
     border-radius: 6px;
     padding: 14px 24px;
     font-size: 19px;
@@ -545,26 +545,26 @@ passwordentry {
 }
 .quick-chip:hover {
     background-color: #1f2530;
-    color: #b0303a;
-    border-color: #7a2028;
+    color: #7d121b;
+    border-color: #4a0a11;
 }
 
 /* ===== Terminal log panel ===== */
 
 .terminal-panel {
     background-color: #07080a;
-    border-top: 2px solid #262b33;
+    border-top: 2px solid #1b1f26;
 }
 
 .terminal-panel-header {
     background-color: #0a0c0f;
-    border-bottom: 1px solid #262b33;
+    border-bottom: 1px solid #1b1f26;
     padding: 6px 12px;
     min-height: 40px;
 }
 
 .terminal-panel-title {
-    color: #b0303a;
+    color: #7d121b;
     font-family: 'JetBrains Mono', monospace;
     font-size: 14px;
     font-weight: bold;
@@ -580,7 +580,7 @@ passwordentry {
 }
 
 .terminal-toggle-btn {
-    background-color: #14171c;
+    background-color: #0d0f12;
     color: #7d8794;
     border-radius: 6px;
     padding: 6px 10px;
@@ -588,13 +588,13 @@ passwordentry {
     min-height: 32px;
 }
 .terminal-toggle-btn:hover {
-    background-color: #1b1f26;
-    color: #b0303a;
+    background-color: #12151a;
+    color: #7d121b;
 }
 .terminal-toggle-btn.active {
     background-color: #0a0c0f;
-    color: #b0303a;
-    border: 1px solid #7a2028;
+    color: #7d121b;
+    border: 1px solid #4a0a11;
 }
 
 /* ===== Banner for watcher events ===== */
@@ -610,19 +610,19 @@ passwordentry {
 }
 
 .working-row {
-    background-color: rgba(176, 48, 58, 0.15);
+    background-color: rgba(125, 18, 27, 0.15);
     border-radius: 8px;
     padding: 10px 22px;
 }
 .working-label {
-    color: #b0303a;
+    color: #7d121b;
     font-size: 18px;
     font-style: italic;
     font-weight: bold;
     letter-spacing: 0.5px;
 }
 .working-spinner {
-    color: #b0303a;
+    color: #7d121b;
     min-width: 24px;
     min-height: 24px;
 }
@@ -630,9 +630,9 @@ passwordentry {
 /* ===== Proposed-command card (advisory flow) ===== */
 
 .cmd-card {
-    background-color: #14171c;
-    border: 1px solid #262b33;
-    border-left: 4px solid #7a2028;
+    background-color: #0d0f12;
+    border: 1px solid #1b1f26;
+    border-left: 4px solid #4a0a11;
     border-radius: 8px;
     padding: 14px 16px;
     margin: 8px 0;
@@ -641,7 +641,7 @@ passwordentry {
     margin-bottom: 8px;
 }
 .cmd-card-title {
-    color: #b0303a;
+    color: #7d121b;
     font-weight: bold;
     font-size: 15px;
     font-family: 'JetBrains Mono', monospace;
@@ -655,17 +655,17 @@ passwordentry {
     font-family: 'JetBrains Mono', monospace;
     letter-spacing: 0.5px;
 }
-.risk-badge.low    { background-color: #2ecc71; color: #0d0f12; }
-.risk-badge.medium { background-color: #f0a500; color: #0d0f12; }
+.risk-badge.low    { background-color: #2ecc71; color: #08090b; }
+.risk-badge.medium { background-color: #f0a500; color: #08090b; }
 .risk-badge.high   { background-color: #e5484d; color: #ffffff; }
 .cmd-text {
     background-color: #0a0c0f;
-    color: #b0303a;
+    color: #7d121b;
     font-family: 'JetBrains Mono', monospace;
     font-size: 18px;
     padding: 12px 14px;
     border-radius: 6px;
-    border: 1px solid #262b33;
+    border: 1px solid #1b1f26;
     margin-bottom: 8px;
 }
 .cmd-explain {
@@ -683,24 +683,24 @@ passwordentry {
     margin: 6px 0;
 }
 .cmd-run-btn {
-    background: linear-gradient(135deg, #7a2028, #b0303a);
+    background: linear-gradient(135deg, #4a0a11, #7d121b);
     color: #ffffff;
     border-radius: 6px;
     padding: 10px 22px;
     font-weight: bold;
     font-size: 16px;
 }
-.cmd-run-btn:hover { background: linear-gradient(135deg, #b0303a, #7a2028); }
-.cmd-run-btn:disabled { background: #262b33; color: #5a626d; }
+.cmd-run-btn:hover { background: linear-gradient(135deg, #7d121b, #4a0a11); }
+.cmd-run-btn:disabled { background: #1b1f26; color: #5a626d; }
 .cmd-copy-btn {
-    background-color: #1b1f26;
+    background-color: #12151a;
     color: #d6dbe2;
     border-radius: 6px;
     padding: 10px 18px;
     font-size: 16px;
-    border: 1px solid #262b33;
+    border: 1px solid #1b1f26;
 }
-.cmd-copy-btn:hover { background-color: #1f2530; border-color: #7a2028; }
+.cmd-copy-btn:hover { background-color: #1f2530; border-color: #4a0a11; }
 
 /* ===== libadwaita rows / settings / dialogs =====
    Force the Basilisk surfaces on the built-in widgets so Settings and
@@ -708,27 +708,27 @@ passwordentry {
    grey. */
 
 preferencespage, preferencesgroup {
-    background-color: #0d0f12;
+    background-color: #08090b;
 }
 row, .row, list.boxed-list > row {
-    background-color: #14171c;
+    background-color: #0d0f12;
     color: #d6dbe2;
 }
 list.boxed-list {
-    background-color: #14171c;
-    border: 1px solid #262b33;
+    background-color: #0d0f12;
+    border: 1px solid #1b1f26;
     border-radius: 8px;
 }
-row:hover { background-color: #1b1f26; }
+row:hover { background-color: #12151a; }
 row > box { background-color: transparent; }
 
 /* Switches: blue when on, dark track when off */
 switch {
-    background-color: #262b33;
+    background-color: #1b1f26;
     border-radius: 14px;
 }
 switch:checked {
-    background-color: #7a2028;
+    background-color: #4a0a11;
 }
 switch > slider {
     background-color: #d6dbe2;
@@ -737,49 +737,49 @@ switch > slider {
 
 /* SpinRow / spinbuttons */
 spinbutton, spinbutton entry {
-    background-color: #1b1f26;
+    background-color: #12151a;
     color: #d6dbe2;
     border-radius: 6px;
 }
 spinbutton button {
-    background-color: #1b1f26;
-    color: #b0303a;
+    background-color: #12151a;
+    color: #7d121b;
 }
-spinbutton button:hover { background-color: #262b33; }
+spinbutton button:hover { background-color: #1b1f26; }
 
 /* ComboRow dropdown */
 comborow, dropdown {
-    background-color: #1b1f26;
+    background-color: #12151a;
     color: #d6dbe2;
 }
 dropdown > button {
-    background-color: #1b1f26;
+    background-color: #12151a;
     color: #d6dbe2;
     border-radius: 6px;
 }
 popover > contents, popover > arrow {
-    background-color: #14171c;
+    background-color: #0d0f12;
     color: #d6dbe2;
-    border: 1px solid #262b33;
+    border: 1px solid #1b1f26;
 }
 popover row:selected, dropdown listview > row:selected {
-    background-color: #7a2028;
+    background-color: #4a0a11;
     color: #ffffff;
 }
 
 /* Dialogs (AlertDialog / PreferencesDialog) */
 window.dialog, dialog, .messagedialog, .dialog-content {
-    background-color: #14171c;
+    background-color: #0d0f12;
     color: #d6dbe2;
 }
 .messagedialog .response-area button {
-    background-color: #1b1f26;
+    background-color: #12151a;
     color: #d6dbe2;
     border-radius: 6px;
     margin: 4px;
 }
 .messagedialog .response-area button.suggested-action {
-    background: linear-gradient(135deg, #7a2028, #b0303a);
+    background: linear-gradient(135deg, #4a0a11, #7d121b);
     color: #ffffff;
 }
 .messagedialog .response-area button.destructive-action {
@@ -789,34 +789,34 @@ window.dialog, dialog, .messagedialog, .dialog-content {
 
 /* Search entry in the sidebar */
 .sidebar-search, searchentry, searchentry text {
-    background-color: #1b1f26;
+    background-color: #12151a;
     color: #d6dbe2;
     border-radius: 6px;
-    border: 1px solid #262b33;
+    border: 1px solid #1b1f26;
 }
-searchentry:focus-within { border-color: #7a2028; }
+searchentry:focus-within { border-color: #4a0a11; }
 
 /* Menu button / popover menu */
 menubutton > button, .menu-button {
     color: #d6dbe2;
 }
 .popover-menu, menu, .menu {
-    background-color: #14171c;
+    background-color: #0d0f12;
     color: #d6dbe2;
 }
 
 /* Generic buttons inherit the dark surface unless given a role class */
 button {
-    background-color: #1b1f26;
+    background-color: #12151a;
     color: #d6dbe2;
-    border: 1px solid #262b33;
+    border: 1px solid #1b1f26;
     border-radius: 11px;
 }
-button:hover { background-color: #1f2530; border-color: #7a2028; }
+button:hover { background-color: #1f2530; border-color: #4a0a11; }
 button.flat { background-color: transparent; border: none; }
-button.flat:hover { background-color: #1b1f26; }
+button.flat:hover { background-color: #12151a; }
 button.suggested-action {
-    background: linear-gradient(135deg, #7a2028, #b0303a);
+    background: linear-gradient(135deg, #4a0a11, #7d121b);
     color: #ffffff;
     border: none;
 }
@@ -825,12 +825,17 @@ button.suggested-action {
 .avatar-dragon {
     border-radius: 8px;
     background-color: #000000;
-    box-shadow: 0 0 10px rgba(255, 45, 58, 0.5), 0 0 4px rgba(176, 48, 58, 0.4);
+    box-shadow: 0 0 10px rgba(255, 45, 58, 0.5), 0 0 4px rgba(125, 18, 27, 0.4);
 }
 .avatar-cross {
     border-radius: 8px;
     background-color: #0a0c0e;
-    box-shadow: 0 0 8px rgba(176, 48, 58, 0.35);
+    box-shadow: 0 0 8px rgba(125, 18, 27, 0.35);
+}
+.avatar-priest {
+    border-radius: 10px;
+    background-color: #0a0c0e;
+    box-shadow: 0 0 10px rgba(64, 20, 96, 0.45), 0 0 4px rgba(64, 20, 96, 0.35);
 }
 /* let the penguin watermark show through the chat */
 .chat-scroll,
@@ -842,16 +847,16 @@ button.suggested-action {
 .chat-watermark { background: transparent; }
 
 /* Links (e.g. 'Get an API key') in Basilisk blue */
-link, button.link, *:link { color: #b0303a; }
+link, button.link, *:link { color: #7d121b; }
 
 /* Voice: mic button + active recording state */
 .mic-button {
-    background-color: #1b1f26;
+    background-color: #12151a;
     color: #d6dbe2;
-    border: 1px solid #262b33;
+    border: 1px solid #1b1f26;
     border-radius: 11px;
 }
-.mic-button:hover { background-color: #1f2530; border-color: #7a2028; }
+.mic-button:hover { background-color: #1f2530; border-color: #4a0a11; }
 .mic-recording {
     background: linear-gradient(135deg, #e5484d, #ff5c61);
     color: #ffffff;
@@ -868,7 +873,7 @@ link, button.link, *:link { color: #b0303a; }
 .msg-speak-btn {
     padding: 4px 13px;
     color: #9aa3ad;
-    background-color: #14181d;
+    background-color: #0e1013;
     border: 1px solid #20262d;
     border-radius: 11px;
     font-size: 12px;
@@ -876,18 +881,18 @@ link, button.link, *:link { color: #b0303a; }
 }
 .msg-speak-btn:hover {
     background-color: #1b2128;
-    color: #b0303a;
-    border-color: #7a2028;
+    color: #7d121b;
+    border-color: #4a0a11;
 }
 .msg-speak-btn.speaking {
-    color: #b0303a;
-    border-color: #7a2028;
-    background-color: rgba(176, 48, 58, 0.12);
+    color: #7d121b;
+    border-color: #4a0a11;
+    background-color: rgba(125, 18, 27, 0.12);
 }
 
 /* Composer action icons (attach, audit, scan, mic) - subtle + rounded */
 .icon-button {
-    background-color: #14181d;
+    background-color: #0e1013;
     border: 1px solid #20262d;
     border-radius: 11px;
     color: #9aa3ad;
@@ -913,18 +918,18 @@ link, button.link, *:link { color: #b0303a; }
 .notif-time { color: #6b737d; font-size: 11px; }
 .icon-button:hover {
     background-color: #1b2128;
-    color: #b0303a;
-    border-color: #7a2028;
+    color: #7d121b;
+    border-color: #4a0a11;
 }
 .icon-button.toggled {
-    color: #b0303a;
-    border-color: #7a2028;
-    background-color: rgba(176, 48, 58, 0.12);
+    color: #7d121b;
+    border-color: #4a0a11;
+    background-color: rgba(125, 18, 27, 0.12);
 }
 /* Send button - blends into the background; only the silver dragon pops.
    Glows softly while working; still acts as Stop when pressed. */
 .send-button {
-    background-color: #0d0f12;
+    background-color: #08090b;
     border: 1px solid #1c2229;
     border-radius: 16px;
     min-width: 60px;
@@ -960,16 +965,16 @@ link, button.link, *:link { color: #b0303a; }
     padding: 6px;
 }
 .header-icon-button:hover {
-    background-color: rgba(176, 48, 58, 0.10);
-    color: #b0303a;
+    background-color: rgba(125, 18, 27, 0.10);
+    color: #7d121b;
     box-shadow: none;
 }
 .header-icon-button:active {
-    background-color: rgba(176, 48, 58, 0.16);
+    background-color: rgba(125, 18, 27, 0.16);
 }
 /* Model / provider switcher in the composer */
 .model-switch-btn {
-    background-color: #14181d;
+    background-color: #0e1013;
     border: 1px solid #20262d;
     border-radius: 10px;
     color: #9aa3ad;
@@ -979,8 +984,8 @@ link, button.link, *:link { color: #b0303a; }
 }
 .model-switch-btn:hover {
     background-color: #1b2128;
-    color: #b0303a;
-    border-color: #7a2028;
+    color: #7d121b;
+    border-color: #4a0a11;
 }
 .model-group-header {
     color: #ff3a47;
@@ -1001,12 +1006,12 @@ link, button.link, *:link { color: #b0303a; }
     font-weight: 500;
 }
 .model-pick-row:hover {
-    background-color: rgba(176, 48, 58, 0.10);
-    color: #b0303a;
+    background-color: rgba(125, 18, 27, 0.10);
+    color: #7d121b;
 }
 .model-pick-active {
-    background-color: rgba(176, 48, 58, 0.16);
-    color: #b0303a;
+    background-color: rgba(125, 18, 27, 0.16);
+    color: #7d121b;
     font-weight: 700;
 }
 
@@ -1055,27 +1060,27 @@ button:disabled {
     opacity: 0.55;
 }
 button:focus-visible {
-    outline: 2px solid rgba(176, 48, 58,0.65);
+    outline: 2px solid rgba(125, 18, 27,0.65);
     outline-offset: 1px;
 }
 button.suggested-action {
-    box-shadow: 0 2px 8px rgba(176, 48, 58,0.35),
+    box-shadow: 0 2px 8px rgba(125, 18, 27,0.35),
                 inset 0 1px 0 rgba(255,255,255,0.15);
 }
 button.suggested-action:hover {
-    box-shadow: 0 3px 14px rgba(176, 48, 58,0.45),
+    box-shadow: 0 3px 14px rgba(125, 18, 27,0.45),
                 inset 0 1px 0 rgba(255,255,255,0.20);
 }
 
 /* ---- Primary action buttons (Run / Apply) ---- */
 .cmd-run-btn {
-    box-shadow: 0 2px 10px rgba(176, 48, 58,0.40),
+    box-shadow: 0 2px 10px rgba(125, 18, 27,0.40),
                 inset 0 1px 0 rgba(255,255,255,0.18);
     padding: 11px 26px;
     letter-spacing: 0.2px;
 }
 .cmd-run-btn:hover {
-    box-shadow: 0 4px 16px rgba(176, 48, 58,0.50),
+    box-shadow: 0 4px 16px rgba(125, 18, 27,0.50),
                 inset 0 1px 0 rgba(255,255,255,0.22);
 }
 .cmd-run-btn:active {
@@ -1106,12 +1111,12 @@ entry {
 }
 entry:focus-within {
     box-shadow: inset 0 1px 3px rgba(0,0,0,0.35),
-                0 0 0 3px rgba(176, 48, 58,0.22);
+                0 0 0 3px rgba(125, 18, 27,0.22);
 }
 
 /* ---- Message bubbles: quiet depth so they sit above the canvas ---- */
 .msg-user {
-    box-shadow: 0 2px 10px rgba(176, 48, 58,0.18);
+    box-shadow: 0 2px 10px rgba(125, 18, 27,0.18);
 }
 .msg-assistant {
     box-shadow: 0 2px 10px rgba(0,0,0,0.28);
@@ -1130,7 +1135,7 @@ entry:focus-within {
     padding: 7px 15px;
 }
 .quick-chip:hover {
-    box-shadow: 0 2px 8px rgba(176, 48, 58,0.25);
+    box-shadow: 0 2px 8px rgba(125, 18, 27,0.25);
 }
 
 /* ---- Mic recording: gentle pulse-ready glow already set; deepen it ---- */
@@ -1142,8 +1147,8 @@ entry:focus-within {
 /* ---- Working row: a soft active surface ---- */
 .working-row {
     background-image: linear-gradient(90deg,
-                      rgba(176, 48, 58,0.10), rgba(176, 48, 58,0.0));
-    box-shadow: inset 0 0 0 1px rgba(176, 48, 58,0.15);
+                      rgba(125, 18, 27,0.10), rgba(125, 18, 27,0.0));
+    box-shadow: inset 0 0 0 1px rgba(125, 18, 27,0.15);
 }
 
 /* ---- Slim, themed scrollbars ---- */
@@ -1155,7 +1160,7 @@ scrollbar slider {
     min-height: 7px;
 }
 scrollbar slider:hover { background-color: #3a4250; }
-scrollbar slider:active { background-color: #b0303a; }
+scrollbar slider:active { background-color: #7d121b; }
 
 /* ---- Boxed settings lists: a touch of depth ---- */
 list.boxed-list {
@@ -1781,6 +1786,22 @@ def _find_cross_svg() -> Optional[str]:
 _CROSS_SVG_PATH = _find_cross_svg()
 
 
+def _find_priest_png() -> Optional[str]:
+    """Locate the operator's portrait (shown as the user avatar)."""
+    candidates = [
+        os.path.expanduser("~/.local/share/kali/basilisk-priest.png"),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                     "basilisk-priest.png"),
+    ]
+    for p in candidates:
+        if os.path.isfile(p):
+            return p
+    return None
+
+
+_PRIEST_PNG_PATH = _find_priest_png()
+
+
 def _svg_texture(path: str, px: int):
     """Rasterise an SVG file to a px-by-px Gdk.Texture using the pixbuf SVG
     loader (CPU / cairo).  Returns None on any failure.
@@ -1842,6 +1863,18 @@ def Avatar(kind: str = "user") -> Gtk.Widget:
             return img
         except Exception as e:
             log(f"dragon avatar load failed: {e}")
+
+    if kind == "user" and _PRIEST_PNG_PATH:
+        try:
+            img = Gtk.Image.new_from_file(_PRIEST_PNG_PATH)
+            img.set_pixel_size(size)
+            img.set_valign(Gtk.Align.START)
+            img.add_css_class("avatar")
+            img.add_css_class("avatar-priest")
+            img.set_size_request(size, size)
+            return img
+        except Exception as e:
+            log(f"priest avatar load failed: {e}")
 
     if kind == "user" and _CROSS_SVG_PATH:
         try:
@@ -3895,12 +3928,12 @@ class MainWindow(Adw.ApplicationWindow):
         self.terminal_log_buf = self.terminal_log_view.get_buffer()
 
         # Colour tags
-        self.terminal_log_buf.create_tag("cmd",    foreground="#b0303a", weight=700)
+        self.terminal_log_buf.create_tag("cmd",    foreground="#7d121b", weight=700)
         self.terminal_log_buf.create_tag("stdout", foreground="#9aa3ad")
         self.terminal_log_buf.create_tag("stderr", foreground="#e5484d")
-        self.terminal_log_buf.create_tag("info",   foreground="#b0303a")
+        self.terminal_log_buf.create_tag("info",   foreground="#7d121b")
         self.terminal_log_buf.create_tag("error",  foreground="#e5484d", weight=700)
-        self.terminal_log_buf.create_tag("ok",     foreground="#b0303a", weight=700)
+        self.terminal_log_buf.create_tag("ok",     foreground="#7d121b", weight=700)
         self.terminal_log_buf.create_tag("dim",    foreground="#7d8794")
 
         sw.set_child(self.terminal_log_view)
