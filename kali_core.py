@@ -3117,8 +3117,13 @@ def tool_browser(action: str, target: str = "",
     def op(page) -> Dict[str, Any]:
         if action == "goto":
             url = target.strip()
+            if not url:
+                return {"ok": False, "error": "no URL given to goto. Pass the "
+                        "address as 'target' (or 'url'), e.g. "
+                        "{\"action\":\"goto\",\"target\":\"http://localhost:3000\"}"}
             if "://" not in url:
-                url = "https://" + url
+                url = "http://" + url if url.startswith(("localhost", "127.")) \
+                    else "https://" + url
             page.goto(url, timeout=30000, wait_until="domcontentloaded")
             try:
                 page.evaluate(_CONSENT_JS)   # accept/strip cookie banners

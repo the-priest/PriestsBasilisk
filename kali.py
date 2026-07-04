@@ -88,7 +88,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.kali"
 APP_NAME = "Basilisk"
-VERSION = "4.7.4"
+VERSION = "4.7.5"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -5505,8 +5505,11 @@ class MainWindow(Adw.ApplicationWindow):
             # browser side-effects come from the page, not the tool.
             "browser":           lambda a: self._tool_simple(
                 lambda: tool_browser(
-                    a.get("action", ""), a.get("target", ""),
-                    a.get("value", ""))),
+                    a.get("action", ""),
+                    a.get("target") or a.get("url") or a.get("href")
+                    or a.get("link") or a.get("address") or a.get("selector")
+                    or a.get("query") or "",
+                    a.get("value") or a.get("text") or a.get("keys") or "")),
 
             # ── Web search & read (read-only: simple, headless) ──
             # Fast HTTP search/read — no GUI browser, no API key.  This is
