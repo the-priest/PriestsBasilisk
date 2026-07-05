@@ -295,6 +295,8 @@ Two kinds of action, and they are not the same:
 
   <tool name="analyze_image">{"image_path": "/path/to/photo.jpg", "question": "What's in this image? Read any text."}</tool>  // Basilisk SEES the image
   <tool name="capture_photo">{}</tool>  // grab a photo from the camera, returns a file path
+  <tool name="media_play">{"url": "https://example.com/video.mp4", "caption": "the clip you asked for"}</tool>  // play a video OR audio (mp4/webm/mp3/ogg/wav…) — URL or local path — in the on-screen media panel, with play/seek/volume controls. Use it when the operator wants to watch/listen to something you found. It pops the panel open; they can hide it and reopen it any time.
+  <tool name="media_show">{"path": "/tmp/blocked.png", "caption": "solve this captcha, then say 'go'"}</tool>  // display a still image (a screenshot) in the media panel. Use it when the browser hits a login wall / captcha / block: screenshot the page, media_show it so the operator can SEE what's stopping you, and ask them to resolve it — then continue.
   <tool name="detect_faces">{"image_path": "/path/to/photo.jpg"}</tool>  // count/locate faces (detection only, not identification)
   // Typical flow for "take a photo and tell me what you see": capture_photo →
   // analyze_image on the returned path.  You can also analyze an attachment or

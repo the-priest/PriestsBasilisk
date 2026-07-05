@@ -583,6 +583,27 @@ passwordentry {
     padding: 8px 12px;
 }
 
+.media-panel {
+    background-color: #07080a;
+    border-top: 2px solid #1b1f26;
+    min-height: 260px;
+}
+.media-body {
+    background-color: #050607;
+    padding: 6px;
+}
+.media-caption {
+    color: #d1434f;
+    font-size: 12px;
+    margin-right: 8px;
+}
+.media-placeholder {
+    color: #4b5563;
+    font-size: 13px;
+    font-style: italic;
+    padding: 40px 12px;
+}
+
 .terminal-toggle-btn {
     background-color: #0d0f12;
     color: #7d8794;
@@ -590,6 +611,32 @@ passwordentry {
     padding: 6px 10px;
     font-size: 13px;
     min-height: 32px;
+}
+.status-pill {
+    background-color: #0a0c0f;
+    border: 1px solid #1a1d22;
+    border-radius: 10px;
+    padding: 3px 10px;
+    margin-left: 4px;
+    min-height: 26px;
+}
+.status-pill-label {
+    color: #6b7280;
+    font-size: 12px;
+    font-style: italic;
+}
+.status-pill.busy {
+    border-color: #7d121b;
+    background-color: #140a0c;
+}
+.status-pill.busy .status-pill-label {
+    color: #d1434f;
+    font-style: normal;
+}
+.status-pill-spinner {
+    min-width: 12px;
+    min-height: 12px;
+    color: #7d121b;
 }
 .terminal-toggle-btn:hover {
     background-color: #12151a;
@@ -1494,6 +1541,12 @@ class CodeBlockWidget(Gtk.Box):
 # instead, for operators who don't want the chat reaching out to image hosts.
 _RENDER_IMAGES = True
 
+# The live "what Basilisk is doing right now" phrase (e.g. "forging a JWT").
+# Empty when idle. Set by _set_working; read by the permanent status pill in
+# the button row and by the in-chat in-progress placeholder so both show the
+# action title instead of a generic "working".
+_CURRENT_ACTION = ""
+
 
 class ImageWidget(Gtk.Box):
     """An image rendered inline in chat from a URL (http/https/file/local path).
@@ -2265,7 +2318,13 @@ class MessageWidget(Gtk.Box):
                                   for c in parse_tool_calls(text))
             except Exception:
                 pass
-            display_text = "" if has_propose else "_(working…)_"
+            if has_propose:
+                display_text = ""
+            else:
+                # Show what Basilisk is actually doing ("forging a JWT…")
+                # instead of a generic "working…". Falls back if nothing's set.
+                _act = (_CURRENT_ACTION or "").strip()
+                display_text = f"_({_act})_" if _act else "_(working…)_"
 
         blocks = split_message_into_blocks(display_text) if display_text else []
         for b in blocks:
@@ -4135,6 +4194,21 @@ class MainWindow(Adw.ApplicationWindow):
         self.terminal_panel.set_visible(False)
         main.append(self.terminal_panel)
 
+        # Media panel — video/audio player + blocked-page viewer. Toggles like
+        # the terminal log. Built defensively: if the media widgets aren't
+        # available on this box (e.g. no GStreamer), the panel is simply absent
+        # and everything else runs normally.
+        self._media_visible = False
+        self.media_video = None
+        self.media_panel = None
+        try:
+            self.media_panel = self._build_media_panel()
+            self.media_panel.set_visible(False)
+            main.append(self.media_panel)
+        except Exception as e:
+            log(f"media panel unavailable, continuing without it: {e}")
+            self.media_panel = None
+
         return main
 
     def _build_chat_watermark(self):
@@ -4327,6 +4401,161 @@ class MainWindow(Adw.ApplicationWindow):
         if pop is not None:
             pop.popdown()
 
+    def _build_media_panel(self):
+        """Media player + blocked-page viewer. A Gtk.Video (plays video AND
+        audio, with its own transport controls) plus a Gtk.Picture for showing
+        screenshots of pages the browser got blocked on. Toggled like the log."""
+        panel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        panel.add_css_class("media-panel")
+
+        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        header.add_css_class("terminal-panel-header")
+        title = Gtk.Label(label="Media")
+        title.add_css_class("terminal-panel-title")
+        title.set_hexpand(True)
+        title.set_xalign(0.0)
+        header.append(title)
+        self.media_caption_lbl = Gtk.Label(label="")
+        self.media_caption_lbl.add_css_class("media-caption")
+        self.media_caption_lbl.set_ellipsize(Pango.EllipsizeMode.END)
+        self.media_caption_lbl.set_max_width_chars(48)
+        header.append(self.media_caption_lbl)
+        stop_btn = Gtk.Button.new_from_icon_name("media-playback-stop-symbolic")
+        stop_btn.add_css_class("terminal-toggle-btn")
+        stop_btn.set_tooltip_text("Stop playback")
+        stop_btn.connect("clicked", lambda *_: self._media_stop())
+        header.append(stop_btn)
+        close_btn = Gtk.Button.new_from_icon_name("window-close-symbolic")
+        close_btn.add_css_class("terminal-toggle-btn")
+        close_btn.set_tooltip_text("Hide media panel")
+        close_btn.connect("clicked", self._toggle_media_panel)
+        header.append(close_btn)
+        panel.append(header)
+
+        self.media_stack = Gtk.Stack()
+        self.media_stack.set_vexpand(True)
+        self.media_stack.add_css_class("media-body")
+
+        # Video/audio player (Gtk.Video shows its own play/seek/volume controls).
+        self.media_video = Gtk.Video()
+        try:
+            self.media_video.set_autoplay(True)
+        except Exception:
+            pass
+        self.media_video.set_vexpand(True)
+        self.media_stack.add_named(self.media_video, "player")
+
+        # Blocked-page / screenshot viewer.
+        img_scroll = Gtk.ScrolledWindow()
+        img_scroll.set_vexpand(True)
+        self.media_image = Gtk.Picture()
+        self.media_image.set_can_shrink(True)
+        try:
+            self.media_image.set_content_fit(Gtk.ContentFit.CONTAIN)
+        except Exception:
+            pass
+        img_scroll.set_child(self.media_image)
+        self.media_stack.add_named(img_scroll, "image")
+
+        ph = Gtk.Label(
+            label="Nothing here yet. Basilisk drops videos, audio, and\n"
+                  "blocked pages (login / captcha) into this panel.")
+        ph.add_css_class("media-placeholder")
+        ph.set_justify(Gtk.Justification.CENTER)
+        self.media_stack.add_named(ph, "empty")
+        self.media_stack.set_visible_child_name("empty")
+
+        panel.append(self.media_stack)
+        return panel
+
+    def _toggle_media_panel(self, *_):
+        if self.media_panel is None:
+            self._show_toast("Media panel unavailable on this system.")
+            return
+        self._media_visible = not self._media_visible
+        self.media_panel.set_visible(self._media_visible)
+        if hasattr(self, "media_toggle_btn"):
+            if self._media_visible:
+                self.media_toggle_btn.add_css_class("active")
+            else:
+                self.media_toggle_btn.remove_css_class("active")
+
+    def _media_stop(self):
+        try:
+            if self.media_video is not None:
+                ms = self.media_video.get_media_stream()
+                if ms is not None:
+                    ms.pause()
+            self.media_stack.set_visible_child_name("empty")
+            self.media_caption_lbl.set_text("")
+        except Exception as e:
+            log(f"media stop failed: {e}")
+
+    def media_load(self, uri: str, caption: str = ""):
+        """Play a video/audio URL or local path in the media panel, and reveal
+        it. Safe to call from any thread. mp3/mp4/webm/ogg/wav/etc — whatever
+        GStreamer can decode on this box."""
+        def _do():
+            if self.media_panel is None or self.media_video is None:
+                self._show_toast(
+                    "Media player unavailable (is GStreamer installed?).")
+                return False
+            try:
+                u = (uri or "").strip()
+                if u.startswith(("http://", "https://")):
+                    f = Gio.File.new_for_uri(u)
+                else:
+                    f = Gio.File.new_for_path(u)
+                self.media_video.set_file(f)
+                self.media_stack.set_visible_child_name("player")
+                self.media_caption_lbl.set_text(caption or "")
+                if not self._media_visible:
+                    self._toggle_media_panel()
+                self.terminal_log(f"media: playing {uri}", "dim")
+            except Exception as e:
+                self._show_toast(f"Couldn't load media: {e}")
+            return False
+        GLib.idle_add(_do)
+
+    def media_show_image(self, path: str, caption: str = ""):
+        """Show a still image (e.g. a screenshot of a blocked login/captcha
+        page) in the media panel so you can see what's stopping Basilisk."""
+        def _do():
+            if self.media_panel is None:
+                self._show_toast("Media panel unavailable on this system.")
+                return False
+            try:
+                self.media_image.set_filename(path)
+                self.media_stack.set_visible_child_name("image")
+                self.media_caption_lbl.set_text(caption or "")
+                if not self._media_visible:
+                    self._toggle_media_panel()
+            except Exception as e:
+                self._show_toast(f"Couldn't show image: {e}")
+            return False
+        GLib.idle_add(_do)
+
+    def _tool_media_play(self, a: Dict[str, Any]) -> Dict[str, Any]:
+        """Dispatch handler for the media_play tool — plays a URL/path in the
+        panel. Runs on the UI thread via media_load."""
+        url = a.get("url", a.get("uri", a.get("path", ""))) or ""
+        if not url:
+            return {"ok": False, "error": "media_play needs a url or path"}
+        self.media_load(url, a.get("caption", a.get("title", "")))
+        return {"ok": True, "playing": url,
+                "note": "Loaded into the media panel (bottom). Tap the media "
+                        "button to show/hide it."}
+
+    def _tool_media_show(self, a: Dict[str, Any]) -> Dict[str, Any]:
+        """Dispatch handler for the media_show tool — display a local image
+        (e.g. a screenshot of a blocked page) in the panel."""
+        path = a.get("path", a.get("image", a.get("file", ""))) or ""
+        if not path:
+            return {"ok": False, "error": "media_show needs an image path"}
+        self.media_show_image(path, a.get("caption", a.get("title", "")))
+        return {"ok": True, "showing": path,
+                "note": "Displayed in the media panel for the operator to see."}
+
     def _build_input_area(self):
         area = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         area.add_css_class("input-area")
@@ -4406,6 +4635,15 @@ class MainWindow(Adw.ApplicationWindow):
         self.terminal_toggle_btn.connect("clicked", self._toggle_terminal_panel)
         actions.append(self.terminal_toggle_btn)
 
+        # Media panel toggle — video/audio player + blocked-page viewer.
+        self.media_toggle_btn = Gtk.Button.new_from_icon_name(
+            "applications-multimedia-symbolic")
+        self.media_toggle_btn.add_css_class("icon-button")
+        self.media_toggle_btn.set_tooltip_text(
+            "Show/hide the media player (videos, audio, blocked pages)")
+        self.media_toggle_btn.connect("clicked", self._toggle_media_panel)
+        actions.append(self.media_toggle_btn)
+
         # The chips live in a horizontal scroller so a phone too narrow to fit
         # them all can't be forced wider than the screen — they scroll instead.
         actions.set_margin_start(0)
@@ -4423,6 +4661,29 @@ class MainWindow(Adw.ApplicationWindow):
         actions_row.set_margin_start(4)
         actions_row.set_margin_end(4)
         actions_row.append(chips_scroll)
+
+        # Permanent status pill — lives in the button row, always visible. Shows
+        # "idle" when nothing's running and the live action title while working.
+        # chips_scroll (above) is hexpand, so this sits pinned at the right edge;
+        # the label is ellipsized to a fixed width so its text changing can NEVER
+        # reflow the toolbar buttons. Non-interactive (can't be pressed).
+        self.status_pill_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
+                                       spacing=6)
+        self.status_pill_box.add_css_class("status-pill")
+        self.status_pill_box.set_valign(Gtk.Align.CENTER)
+        self.status_pill_box.set_can_target(False)
+        self.status_pill_spinner = Gtk.Spinner()
+        self.status_pill_spinner.add_css_class("status-pill-spinner")
+        self.status_pill_spinner.set_visible(False)
+        self.status_pill_label = Gtk.Label(label="idle")
+        self.status_pill_label.add_css_class("status-pill-label")
+        self.status_pill_label.set_ellipsize(Pango.EllipsizeMode.END)
+        self.status_pill_label.set_max_width_chars(22)
+        self.status_pill_label.set_width_chars(6)
+        self.status_pill_label.set_xalign(1.0)
+        self.status_pill_box.append(self.status_pill_spinner)
+        self.status_pill_box.append(self.status_pill_label)
+        actions_row.append(self.status_pill_box)
 
         area.append(actions_row)
 
@@ -4975,16 +5236,26 @@ class MainWindow(Adw.ApplicationWindow):
         return False
 
     def _set_working(self, working: bool, label: str = "working…"):
-        """Show or hide the 'working' spinner banner.  Called from the
-        UI thread."""
+        """Update the permanent status pill in the button row (and the shared
+        action phrase). Called from the UI thread. The pill lives in the bottom
+        button row, always visible — it reads the action title while working and
+        'idle' when not, and never reflows the other buttons."""
+        global _CURRENT_ACTION
         if working:
-            self.working_label.set_text(label)
-            self.working_spinner.start()
-            self.working_row.set_visible(True)
+            _CURRENT_ACTION = label
+            if hasattr(self, "status_pill_label"):
+                self.status_pill_label.set_text(label)
+                self.status_pill_spinner.set_visible(True)
+                self.status_pill_spinner.start()
+                self.status_pill_box.add_css_class("busy")
             self.terminal_log(f"── {label}", "dim")
         else:
-            self.working_spinner.stop()
-            self.working_row.set_visible(False)
+            _CURRENT_ACTION = ""
+            if hasattr(self, "status_pill_label"):
+                self.status_pill_label.set_text("idle")
+                self.status_pill_spinner.stop()
+                self.status_pill_spinner.set_visible(False)
+                self.status_pill_box.remove_css_class("busy")
 
     # Friendly present-tense phrases for the working banner, so a tool chain
     # reads "searching the web… → reading a page… → cross-checking sources…"
@@ -5037,7 +5308,8 @@ class MainWindow(Adw.ApplicationWindow):
         "juiceshop_next":     "picking the next targets",
         "juiceshop_diff":     "confirming what solved",
         "juiceshop_source":   "reading the source",
-        "jwt_forge":          "forging a JWT",
+        "media_play":         "loading the media player",
+        "media_show":         "showing the page",        "jwt_forge":          "forging a JWT",
         "nosql_injection":    "building a NoSQL payload",
         "xxe_payload":        "building an XXE payload",
         "coupon_forge":       "forging a coupon",
@@ -6217,6 +6489,10 @@ class MainWindow(Adw.ApplicationWindow):
                     a.get("pattern", a.get("query", "")),
                     a.get("container", "juiceshop"),
                     a.get("base", a.get("base_path", "/juice-shop")))),
+            "media_play":         lambda a: self._tool_simple(
+                lambda: self._tool_media_play(a)),
+            "media_show":         lambda a: self._tool_simple(
+                lambda: self._tool_media_show(a)),
             "jwt_forge":          lambda a: self._tool_simple(
                 lambda: tool_jwt_forge(
                     a.get("token", ""), a.get("mode", "none"),

@@ -461,6 +461,8 @@ Basilisk can **read replies aloud** — Piper (neural) or espeak, auto-selected.
 - **Stream reliability** — a stalled provider stream aborts on a short idle timeout and self-heals to the next model, instead of freezing the UI on "thinking…". (New in 5.x.)
 - **Urgency fast-path** — when you're clearly in a hurry, Basilisk skips preamble.
 - **Notification inbox** — a bell with a persistent store; `notify` posts here as well as to the desktop.
+- **Status pill** — a permanent indicator in the button row: it reads **"idle"** when nothing's running and the **live action title** ("forging a JWT…", "reading the source…") while Basilisk works. It never moves the other buttons, and it can't be pressed. In-chat, an in-progress reply shows the same action title instead of a generic "working".
+- **Media panel** — a toggleable bottom panel (the multimedia button, next to the terminal-log button) with a built-in **video/audio player** (play/seek/volume). Basilisk drops media into it with `media_play` — a video or audio URL/path (mp4, webm, mp3, ogg, wav, …) it found for you — and you can hide the panel and reopen it any time. It also shows **blocked pages**: when the browser hits a login wall or captcha, Basilisk screenshots the page and `media_show`s it here so you can see what's stopping it. (Playback needs GStreamer codecs installed; the panel degrades gracefully if they're absent.)
 - **Ephemeral chats** — fresh chat per launch, auto-retention, empty-placeholder cleanup — all tunable.
 - **Theme & scale** — the "hellfire" charcoal-and-blood-red theme; UI scale auto-detects (down to a ~540px mobile width for NetHunter) or can be pinned.
 

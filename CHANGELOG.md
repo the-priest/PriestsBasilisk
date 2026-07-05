@@ -22,6 +22,16 @@ The capability jump that defines 5.0:
   memory consolidation, the model foresight pass, the background worker, and the
   provider-pill/token-count display switches. No more editing a config to flip a
   behaviour.
+- **UI: status pill + media panel.** The working indicator is now a permanent,
+  non-pressable pill in the button row that reads "idle" when nothing's running
+  and the live action title while working — it no longer pops in and shoves the
+  other buttons around, and in-chat an in-progress reply shows the action title
+  instead of a bare "working". New toggleable **media panel** (multimedia button
+  next to the terminal-log button) with a built-in video/audio player: `media_play`
+  drops a video or audio URL/path into it (mp4/webm/mp3/ogg/wav…), and `media_show`
+  displays a screenshot there — so when the browser hits a login/captcha wall,
+  Basilisk shows you the page. Built defensively: if media widgets aren't
+  available (no GStreamer) the panel is simply absent and nothing else breaks.
 - **The closed loop.** Basilisk no longer solves one-shot. `juiceshop_next` reads
   the live board and returns what's unsolved, easiest-first, each mapped to the
   tool that cracks its class; `juiceshop_diff` confirms a hit by diffing the
