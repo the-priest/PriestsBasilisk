@@ -3161,6 +3161,21 @@ def tool_browser(action: str, target: str = "",
                 url = "http://" + url if url.startswith(("localhost", "127.")) \
                     else "https://" + url
             page.goto(url, timeout=30000, wait_until="domcontentloaded")
+            # SPA settle: domcontentloaded fires before Angular/React bootstraps
+            # and renders, so a bare goto leaves read/click looking at a
+            # skeleton. Wait (bounded, best-effort) for the XHR storm to quiet
+            # and for the app root to actually have content. Never fatal —
+            # a busy/polling app just hits the cap and we proceed.
+            try:
+                page.wait_for_load_state("networkidle", timeout=4000)
+            except Exception:
+                pass
+            try:
+                page.wait_for_function(
+                    "document.body && document.body.innerText.trim().length > 0",
+                    timeout=3000)
+            except Exception:
+                pass
             try:
                 page.evaluate(_CONSENT_JS)   # accept/strip cookie banners
             except Exception:
@@ -3178,6 +3193,12 @@ def tool_browser(action: str, target: str = "",
                 page.click(target, timeout=8000)
             except Exception:
                 page.get_by_text(target, exact=False).first.click(timeout=8000)
+            # let an SPA route change / XHR-driven render land before the
+            # next read (bounded, best-effort).
+            try:
+                page.wait_for_load_state("networkidle", timeout=3000)
+            except Exception:
+                pass
             return {"ok": True, "clicked": target, "url": page.url}
         if action in ("fill", "type"):
             try:
@@ -3200,7 +3221,15 @@ def tool_browser(action: str, target: str = "",
                     page.get_by_placeholder(target).first.fill(
                         value, timeout=6000)
             page.keyboard.press("Enter")
-            page.wait_for_load_state("domcontentloaded", timeout=15000)
+            # SPA submits fire XHR, not a full navigation — domcontentloaded
+            # won't re-fire, so wait for the request to settle instead.
+            try:
+                page.wait_for_load_state("networkidle", timeout=6000)
+            except Exception:
+                try:
+                    page.wait_for_load_state("domcontentloaded", timeout=8000)
+                except Exception:
+                    pass
             return {"ok": True, "submitted": True, "url": page.url}
         if action == "scroll":
             v = (value or "down").lower()
@@ -4385,6 +4414,230 @@ def tool_juiceshop_report(scored: Any = None) -> Dict[str, Any]:
         return _js.juiceshop_report(scored)
     except Exception as e:
         return {"ok": False, "error": f"juiceshop_report failed: {e}"}
+
+
+def tool_juiceshop_next(base_url: str = "http://localhost:3000",
+                        max_difficulty: Any = 0, limit: Any = 0) -> Dict[str, Any]:
+    """CLOSED-LOOP driver: read the live scoreboard and return the still-UNSOLVED
+    challenges, easiest-first, each annotated with the Basilisk tool that solves
+    its class. This is the 'what's left and how do I hit it' signal — call it
+    between attempts, work top-down, re-score after each solve."""
+    import json as _json
+    base = (base_url or "http://localhost:3000").strip().rstrip("/")
+    url = base + "/api/Challenges"
+    try:
+        req = urllib.request.Request(url, headers={"Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            payload = _json.loads(r.read())
+    except Exception as e:
+        return {"ok": False, "error": f"could not read the scoreboard at {url}: "
+                f"{e}. Is Juice Shop running there?"}
+    try:
+        from kali_ext import juiceshop as _js
+        return _js.next_targets(payload, limit=_safe_int(limit, 0),
+                                max_difficulty=_safe_int(max_difficulty, 0))
+    except Exception as e:
+        return {"ok": False, "error": f"next_targets failed: {e}"}
+
+
+def tool_juiceshop_diff(base_url: str = "http://localhost:3000",
+                        since: Any = None) -> Dict[str, Any]:
+    """CONFIRM-A-HIT: read the live scoreboard now and diff against the set of
+    challenge names that were solved before your last attempt (`since` — pass
+    the solved_names from an earlier juiceshop_score). Tells you exactly what
+    just flipped to solved, so the loop confirms an exploit worked instead of
+    guessing."""
+    import json as _json
+    base = (base_url or "http://localhost:3000").strip().rstrip("/")
+    url = base + "/api/Challenges"
+    try:
+        req = urllib.request.Request(url, headers={"Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            payload = _json.loads(r.read())
+    except Exception as e:
+        return {"ok": False, "error": f"could not read the scoreboard at {url}: {e}"}
+    prev = since if isinstance(since, list) else (
+        since.get("solved_names") if isinstance(since, dict) else [])
+    before = {"data": [{"name": n, "solved": True} for n in (prev or [])]}
+    try:
+        from kali_ext import juiceshop as _js
+        return _js.diff_solved(before, payload)
+    except Exception as e:
+        return {"ok": False, "error": f"diff_solved failed: {e}"}
+
+
+def _safe_int(v: Any, default: int = 0) -> int:
+    """Coerce to int, falling back to default (mirrors kali.py's helper so the
+    exploit/benchmark wrappers here don't depend on the UI layer)."""
+    try:
+        return int(float(v))
+    except (TypeError, ValueError):
+        return default
+
+
+def _exploits_mod():
+    from kali_ext import exploits as _x
+    return _x
+
+
+def tool_jwt_forge(token: str = "", mode: str = "none", email: str = "",
+                   role: str = "", public_key: str = "",
+                   payload_overrides: Any = None) -> Dict[str, Any]:
+    """Forge a JWT for an authorised target (mode=none for alg:none, mode=hs256
+    for RS256->HS256 key confusion). Operates on a token you already hold and
+    returns the forged string — you send it through the gate. email/role are
+    shortcuts for common payload overrides."""
+    try:
+        _x = _exploits_mod()
+    except Exception as e:
+        return {"ok": False, "error": f"exploits module unavailable: {e}"}
+    ov: Dict[str, Any] = {}
+    if isinstance(payload_overrides, dict):
+        ov.update(payload_overrides)
+    if email:
+        ov["email"] = email
+    if role:
+        ov["role"] = role
+    try:
+        return _x.jwt_forge(token=token, mode=mode, payload_overrides=ov or None,
+                            public_key=public_key)
+    except Exception as e:
+        return {"ok": False, "error": f"jwt_forge failed: {e}"}
+
+
+def tool_nosql_injection(mode: str = "auth_bypass", field: str = "email",
+                         target: str = "") -> Dict[str, Any]:
+    """Build a MongoDB operator-injection body (auth_bypass | manipulation | dos
+    | exfiltration) for an authorised target. Returns the JSON body + endpoint
+    hint; you fire it through the gate."""
+    try:
+        _x = _exploits_mod()
+    except Exception as e:
+        return {"ok": False, "error": f"exploits module unavailable: {e}"}
+    try:
+        return _x.nosql_injection(mode=mode, field=field, target=target)
+    except Exception as e:
+        return {"ok": False, "error": f"nosql_injection failed: {e}"}
+
+
+def tool_xxe_payload(mode: str = "file_read",
+                     file_path: str = "/etc/passwd") -> Dict[str, Any]:
+    """Build an XXE XML body (file_read external-entity, or dos billion-laughs)
+    for an authorised target. Returns the XML + the upload sink hint."""
+    try:
+        _x = _exploits_mod()
+    except Exception as e:
+        return {"ok": False, "error": f"exploits module unavailable: {e}"}
+    try:
+        return _x.xxe_payload(mode=mode, file_path=file_path)
+    except Exception as e:
+        return {"ok": False, "error": f"xxe_payload failed: {e}"}
+
+
+def tool_coupon_forge(discount: Any = 20, campaign: str = "") -> Dict[str, Any]:
+    """Forge a Juice Shop discount coupon: z85(campaign+discount). The campaign
+    prefix is version-specific — read it from the target's main*.js and pass it
+    as campaign=. Without it you get the discount fragment only (honest, not a
+    guessed code)."""
+    try:
+        _x = _exploits_mod()
+    except Exception as e:
+        return {"ok": False, "error": f"exploits module unavailable: {e}"}
+    try:
+        return _x.coupon_forge(discount=_safe_int(discount, 20), campaign=campaign)
+    except Exception as e:
+        return {"ok": False, "error": f"coupon_forge failed: {e}"}
+
+
+def tool_captcha_solve(base_url: str = "http://localhost:3000") -> Dict[str, Any]:
+    """Auto-read the arithmetic CAPTCHA: GET {base_url}/rest/captcha and return
+    the answer + captchaId to submit. Juice Shop serves the captcha in plaintext
+    — reading it is the intended anti-automation bypass. Non-eval arithmetic
+    parser, so target text is never executed."""
+    import json as _json
+    base = (base_url or "http://localhost:3000").strip().rstrip("/")
+    url = base + "/rest/captcha"
+    try:
+        req = urllib.request.Request(url, headers={"Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=20) as r:
+            payload = _json.loads(r.read())
+    except Exception as e:
+        return {"ok": False, "error": f"could not read the captcha at {url}: {e}"}
+    try:
+        _x = _exploits_mod()
+        return _x.captcha_solve(payload)
+    except Exception as e:
+        return {"ok": False, "error": f"captcha_solve failed: {e}"}
+
+
+def tool_reset_password(email: str = "",
+                        new_password: str = "Pwned123!") -> Dict[str, Any]:
+    """Plan a security-question password reset for a Juice Shop DEMO account
+    (the reset-password CTF challenges). Bound to the published demo accounts
+    only — it won't fabricate an answer for an arbitrary email. Returns the
+    reset endpoint + body; you send it through the gate."""
+    try:
+        _x = _exploits_mod()
+    except Exception as e:
+        return {"ok": False, "error": f"exploits module unavailable: {e}"}
+    try:
+        return _x.reset_password_plan(email=email, new_password=new_password)
+    except Exception as e:
+        return {"ok": False, "error": f"reset_password_plan failed: {e}"}
+
+
+def tool_webapp_recon(base_url: str = "http://localhost:3000",
+                      extra_paths: Any = None,
+                      max_paths: Any = 40) -> Dict[str, Any]:
+    """Read-only web-app recon sweep: GET a curated catalog of high-signal paths
+    against the target (exposed files, backups, keys, config, logs, the SPA
+    bundle) and report which exist + a short peek. This is the enumeration that
+    feeds the leaked-key / backup / vulnerable-library / access-log challenges —
+    they fail on missed recon, not exploitation. Sensing only (bounded GETs);
+    the operator pointed at this target."""
+    import json as _json
+    base = (base_url or "http://localhost:3000").strip().rstrip("/")
+    try:
+        from kali_ext import pentest as _pentest
+        catalog = _pentest.webapp_recon_paths(
+            extra_paths if isinstance(extra_paths, list) else None)
+    except Exception as e:
+        return {"ok": False, "error": f"pentest module unavailable: {e}"}
+    cap = max(1, _safe_int(max_paths, 40))
+    hits: List[Dict[str, Any]] = []
+    checked = 0
+    for entry in catalog[:cap]:
+        checked += 1
+        url = base + entry["path"]
+        try:
+            req = urllib.request.Request(url, headers={
+                "Accept": "*/*",
+                "User-Agent": "Mozilla/5.0 (Basilisk recon)"})
+            with urllib.request.urlopen(req, timeout=8) as r:
+                code = r.getcode()
+                body = r.read(1200)
+        except urllib.error.HTTPError as e:
+            code, body = e.code, b""
+        except Exception:
+            continue  # unreachable / timeout — skip quietly
+        if code and code < 400:
+            peek = ""
+            try:
+                peek = body.decode("utf-8", "replace").strip().replace("\n", " ")[:180]
+            except Exception:
+                pass
+            hits.append({"path": entry["path"], "status": code,
+                         "why": entry["why"], "peek": peek})
+    hits.sort(key=lambda h: h["status"])
+    return {"ok": True, "target": base, "checked": checked,
+            "found": len(hits), "hits": hits,
+            "note": (f"{len(hits)} of {checked} high-signal paths responded. "
+                     "These are the leak surface — pull the interesting ones "
+                     "(web_read / run curl) and grep for keys, versions, tokens. "
+                     "For a full brute, drive ffuf + seclists via pentest_plan.")
+            if hits else
+            "no catalog paths responded < 400 — try a full ffuf brute via "
+            "pentest_plan, or confirm the target/base_url."}
 
 
 def tool_submit_flag(flag: str = "", challenge: str = "") -> Dict[str, Any]:

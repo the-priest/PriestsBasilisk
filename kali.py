@@ -57,6 +57,10 @@ from kali_core import (
     tool_graph_ingest, tool_sqlmap_plan, tool_load_tools,
     tool_submit_flag, tool_xbow_score, tool_xbow_report,
     tool_juiceshop_score, tool_juiceshop_report,
+    tool_juiceshop_next, tool_juiceshop_diff,
+    tool_jwt_forge, tool_nosql_injection, tool_xxe_payload,
+    tool_coupon_forge, tool_captcha_solve, tool_reset_password,
+    tool_webapp_recon,
     tool_benchmark_targets, tool_benchmark_score, tool_benchmark_report,
     tool_benchmark_compare,
     tool_osint_username, tool_osint_lookup, tool_social_read,
@@ -88,7 +92,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.kali"
 APP_NAME = "Basilisk"
-VERSION = "4.9.0"
+VERSION = "4.10.0"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -4879,6 +4883,15 @@ class MainWindow(Adw.ApplicationWindow):
         "load_tools":         "loading tools",
         "juiceshop_score":    "reading the scoreboard",
         "juiceshop_report":   "building the scorecard",
+        "juiceshop_next":     "picking the next targets",
+        "juiceshop_diff":     "confirming what solved",
+        "jwt_forge":          "forging a JWT",
+        "nosql_injection":    "building a NoSQL payload",
+        "xxe_payload":        "building an XXE payload",
+        "coupon_forge":       "forging a coupon",
+        "captcha_solve":      "reading the captcha",
+        "reset_password":     "planning a reset",
+        "webapp_recon":       "sweeping the app",
         "submit_flag":        "submitting the flag",
         "xbow_score":         "scoring the benchmark",
         "xbow_report":        "building the scorecard",
@@ -5510,6 +5523,45 @@ class MainWindow(Adw.ApplicationWindow):
                       "http://localhost:3000"))))
         if n == "juiceshop_report":
             return lambda: tool_juiceshop_report(a.get("scored", a.get("result", a)))
+        if n == "juiceshop_next":
+            return lambda: tool_juiceshop_next(
+                a.get("base_url", a.get("url", "http://localhost:3000")),
+                a.get("max_difficulty", a.get("max_stars", 0)),
+                a.get("limit", 0))
+        if n == "juiceshop_diff":
+            return lambda: tool_juiceshop_diff(
+                a.get("base_url", a.get("url", "http://localhost:3000")),
+                a.get("since", a.get("solved_names", a.get("previous"))))
+        if n == "jwt_forge":
+            return lambda: tool_jwt_forge(
+                a.get("token", ""), a.get("mode", "none"),
+                a.get("email", ""), a.get("role", ""),
+                a.get("public_key", a.get("pubkey", "")),
+                a.get("payload_overrides", a.get("overrides")))
+        if n == "nosql_injection":
+            return lambda: tool_nosql_injection(
+                a.get("mode", "auth_bypass"), a.get("field", "email"),
+                a.get("target", ""))
+        if n == "xxe_payload":
+            return lambda: tool_xxe_payload(
+                a.get("mode", "file_read"),
+                a.get("file_path", a.get("file", "/etc/passwd")))
+        if n == "coupon_forge":
+            return lambda: tool_coupon_forge(
+                a.get("discount", 20), a.get("campaign", ""))
+        if n == "captcha_solve":
+            return lambda: tool_captcha_solve(
+                a.get("base_url", a.get("url", "http://localhost:3000")))
+        if n == "reset_password":
+            return lambda: tool_reset_password(
+                a.get("email", ""),
+                a.get("new_password", a.get("password", "Pwned123!")))
+        if n == "webapp_recon":
+            return lambda: tool_webapp_recon(
+                a.get("base_url", a.get("url", a.get("target",
+                      "http://localhost:3000"))),
+                a.get("extra_paths", a.get("paths")),
+                a.get("max_paths", 40))
         if n == "xbow_score":
             return lambda: tool_xbow_score(
                 a.get("results", a.get("records", a.get("items", []))))
@@ -5992,6 +6044,45 @@ class MainWindow(Adw.ApplicationWindow):
                           "http://localhost:3000"))))),
             "juiceshop_report":   lambda a: self._tool_simple(
                 lambda: tool_juiceshop_report(a.get("scored", a.get("result", a)))),
+            "juiceshop_next":     lambda a: self._tool_simple(
+                lambda: tool_juiceshop_next(
+                    a.get("base_url", a.get("url", "http://localhost:3000")),
+                    a.get("max_difficulty", a.get("max_stars", 0)),
+                    a.get("limit", 0))),
+            "juiceshop_diff":     lambda a: self._tool_simple(
+                lambda: tool_juiceshop_diff(
+                    a.get("base_url", a.get("url", "http://localhost:3000")),
+                    a.get("since", a.get("solved_names", a.get("previous"))))),
+            "jwt_forge":          lambda a: self._tool_simple(
+                lambda: tool_jwt_forge(
+                    a.get("token", ""), a.get("mode", "none"),
+                    a.get("email", ""), a.get("role", ""),
+                    a.get("public_key", a.get("pubkey", "")),
+                    a.get("payload_overrides", a.get("overrides")))),
+            "nosql_injection":    lambda a: self._tool_simple(
+                lambda: tool_nosql_injection(
+                    a.get("mode", "auth_bypass"), a.get("field", "email"),
+                    a.get("target", ""))),
+            "xxe_payload":        lambda a: self._tool_simple(
+                lambda: tool_xxe_payload(
+                    a.get("mode", "file_read"),
+                    a.get("file_path", a.get("file", "/etc/passwd")))),
+            "coupon_forge":       lambda a: self._tool_simple(
+                lambda: tool_coupon_forge(
+                    a.get("discount", 20), a.get("campaign", ""))),
+            "captcha_solve":      lambda a: self._tool_simple(
+                lambda: tool_captcha_solve(
+                    a.get("base_url", a.get("url", "http://localhost:3000")))),
+            "reset_password":     lambda a: self._tool_simple(
+                lambda: tool_reset_password(
+                    a.get("email", ""),
+                    a.get("new_password", a.get("password", "Pwned123!")))),
+            "webapp_recon":       lambda a: self._tool_simple(
+                lambda: tool_webapp_recon(
+                    a.get("base_url", a.get("url", a.get("target",
+                          "http://localhost:3000"))),
+                    a.get("extra_paths", a.get("paths")),
+                    a.get("max_paths", 40))),
             "xbow_score":         lambda a: self._tool_simple(
                 lambda: tool_xbow_score(
                     a.get("results", a.get("records", a.get("items", []))))),

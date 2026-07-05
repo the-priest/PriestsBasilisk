@@ -14,7 +14,7 @@ keywords: ai security operator, kali linux ai, ai pentest tool, offensive securi
 
 <br>
 
-![version](https://img.shields.io/badge/version-4.8.3-7d121b?style=for-the-badge&labelColor=08090b)
+![version](https://img.shields.io/badge/version-4.10.0-7d121b?style=for-the-badge&labelColor=08090b)
 ![license](https://img.shields.io/badge/license-MIT-7d121b?style=for-the-badge&labelColor=08090b)
 ![platform](https://img.shields.io/badge/Linux-X11%20%7C%20Wayland-6d7680?style=for-the-badge&logo=linux&logoColor=white&labelColor=08090b)
 ![python](https://img.shields.io/badge/python-3.10+-6d7680?style=for-the-badge&logo=python&logoColor=white&labelColor=08090b)
@@ -267,7 +267,7 @@ curl -fsSL https://raw.githubusercontent.com/the-priest/Basilisk/main/install.sh
 Run it once to install; run the **exact same line** any time to update. The installer is idempotent and genuinely careful — it treats your machine the way you'd want it treated:
 
 - 🐍 Detects **Python 3.10+** and installs **GTK4 + libadwaita** (apt / pacman / dnf, auto-detected).
-- 📦 Fetches the core modules **plus** the optional `kali_ext/` sidecar — and **verifies every one of the 14 sidecar modules arrived**, retrying any that didn't, refusing to install a half-broken update over a working one.
+- 📦 Fetches the core modules **plus** the optional `kali_ext/` sidecar — and **verifies every one of the 16 sidecar modules arrived**, retrying any that didn't, refusing to install a half-broken update over a working one.
 - 🛟 **Parse-checks every incoming file before it overwrites anything** — a corrupted download can't replace your working install.
 - 💾 **Backs up your chat database** before each update and reports the version move.
 - 🧩 Installs optional desktop helpers, voice packages, and optionally Playwright + Chromium.
@@ -356,6 +356,40 @@ Then ask Basilisk to work the board and call `juiceshop_score`, which reads the
 live scoreboard (`/api/Challenges`) and reports solved/available by difficulty.
 Full scorecard: [`benchmarks/juice-shop-scoreboard-2026-07-04.txt`](benchmarks/juice-shop-scoreboard-2026-07-04.txt).
 
+#### What changed in v4.10.0 — closing the loop (target: mid-60s, pending re-run)
+
+The 40/113 above was one-shot: attack, then score once at the end, with no way
+for the agent to tell whether an attempt landed, which to retry, or what was
+still red. v4.10.0 adds the missing feedback loop plus per-class exploit
+builders for the vuln types plain curl-improv couldn't reliably hit:
+
+- **Closed-loop harness** — `juiceshop_next` (what's still unsolved, easiest-first,
+  each mapped to the tool that solves it) and `juiceshop_diff` (confirm a hit by
+  diffing the live board). The agent now works the board → tries the easiest
+  target → confirms → moves on, instead of firing blind.
+- **Class exploit builders** — `jwt_forge` (alg:none + RS256→HS256 confusion),
+  `nosql_injection`, `xxe_payload`, `coupon_forge` (z85), `captcha_solve`
+  (auto-reads the arithmetic CAPTCHA), `reset_password` (security-question flow,
+  demo accounts only). Same model as `sqlmap_plan`: each **builds** the exploit
+  for an in-scope target; the operator fires it through the gate. Nothing
+  autonomous, no reverse shells — that line is unchanged.
+- **Recon sweep** — `webapp_recon` enumerates the high-signal leak surface
+  (`/ftp`, `/encryptionkeys/jwt.pub`, exposed config/logs/backups, the SPA
+  bundle) so the leaked-key / backup / vulnerable-library challenges stop
+  failing on missed recon.
+- **Browser reliability** — `goto`/`submit`/`click` now wait (bounded) for the
+  Angular SPA to actually render before reading, fixing the browser-dependent
+  challenges that leaked because the page wasn't ready.
+
+**Honest status:** these are engineered to make the mid-60s reachable, and the
+math is transparent — the builders + recon + browser fixes map to roughly +18–28
+specific currently-unsolved challenges (CAPTCHA Bypass, the NoSQL/XXE/JWT/coupon
+set, several ★3 access-control and business-logic ones, and the recon-gated
+leaks). That puts the ceiling in the high-50s to high-60s **on paper**. It has
+**not been re-measured on a live board yet** — the number that counts is the one
+you get from an actual `NODE_ENV=unsafe` run, and until that's rerun, 40/113
+remains the measured result above. Run it and the scorecard will tell the truth.
+
 ### The methodology check: OWASP vuln-class coverage — 14 / 14 (F1 0.95)
 
 A separate, easier run confirms the workflow end to end: Basilisk found and
@@ -410,9 +444,10 @@ Keys live only in `~/.config/kali/settings.json` — they never go anywhere but 
    └─────────┘
          │
    ┌─────┴───────────────────────────────────────────────────────┐
-   │  kali_ext/  (optional sidecar — off by default, 14 modules)  │
-   │  memory · skills · sandbox · foresight · mcp · verify ·       │
-   │  worker · headroom · pentest · codescan · engage · bench                      │
+   │  kali_ext/  (optional sidecar — off by default, 16 modules)  │
+   │  memory · skills · sandbox · foresight · mcp · verify · reach │
+   │  worker · headroom · pentest · codescan · engage · bench ·    │
+   │  extman · juiceshop · xbow                                    │
    └─────────────────────────────────────────────────────────────┘
 ```
 

@@ -380,8 +380,22 @@ Two kinds of action, and they are not the same:
   Vuln enrichment (run AFTER a banner/version is confirmed by a tool):
   <tool name="cve_lookup">{"product": "OpenSSH", "version": "9.6"}</tool>  // NVD → CISA KEV (exploited in the wild) + EPSS, re-ranked KEV→EPSS→CVSS, with a trust caveat
 
+  <tool name="webapp_recon">{"base_url": "http://localhost:3000"}</tool>  // read-only sweep of a curated high-signal path catalog (exposed files, backups, /encryptionkeys, config, logs, the SPA bundle) — reports what responds + a peek. Run this EARLY: the leaked-key / backup / vulnerable-library / access-log challenges fail on missed recon, not exploitation. Then pull the interesting hits and grep for secrets.
+
   Active testing — invocation builders (scope-checked, PROPOSED, you approve+run):
   <tool name="sqlmap_plan">{"target": "http://site/item?id=1", "mode": "detect", "level": 1, "risk": 1}</tool>  // build the correct sqlmap command (mode: detect|enumerate|dump). ENFORCES scope — refuses if the target isn't authorised. Proposes the command; you approve it through the gate. Ladder: detect → enumerate (--dbs / -D db --tables / -D db -T tbl --columns) → dump (-D db -T tbl, minimum to prove impact). It does NOT build SQLi-to-RCE (--os-shell/--os-pwn) — drive that yourself.
+
+  CLASS EXPLOIT BUILDERS — same model as sqlmap_plan: each BUILDS the exploit
+  for an authorised, in-scope target and hands it back; YOU fire it through the
+  run/browser gate (scope is enforced there on the active request). They cover
+  the vuln classes plain curl-improv can't reliably hit. Pure builders — they
+  send nothing except captcha_solve (a read-only GET of the target's own captcha):
+  <tool name="jwt_forge">{"token": "<jwt you hold>", "mode": "none", "email": "admin@juice-sh.op"}</tool>  // forge a JWT. mode=none → alg:none + empty sig. mode=hs256 → RS256->HS256 key confusion (fetch the server's public key first, pass public_key). email/role are payload override shortcuts. Returns the forged token to send.
+  <tool name="nosql_injection">{"mode": "auth_bypass"}</tool>  // build a MongoDB operator-injection body. mode: auth_bypass ($ne) | manipulation (update pipeline) | dos ($where spin) | exfiltration ($regex oracle). POST it as JSON.
+  <tool name="xxe_payload">{"mode": "file_read", "file_path": "/etc/passwd"}</tool>  // build an XML+DTD body. mode: file_read (external-entity file/SSRF) | dos (billion-laughs, capped). POST as XML to the upload sink.
+  <tool name="captcha_solve">{"base_url": "http://localhost:3000"}</tool>  // auto-read the arithmetic CAPTCHA (GET /rest/captcha) and return the answer + captchaId to submit — the intended anti-automation bypass. Non-eval parser.
+  <tool name="coupon_forge">{"discount": 20, "campaign": "<code from main*.js>"}</tool>  // forge a Juice Shop coupon: z85(campaign+discount). The campaign prefix is version-specific — read it from the target's main*.js first; without it you get the discount fragment only (never a guessed code).
+  <tool name="reset_password">{"email": "jim@juice-sh.op"}</tool>  // plan a security-question password reset for a Juice Shop DEMO account (reset-password challenges). Bound to the published demo accounts only — refuses an arbitrary email rather than inventing an answer. Returns the reset request to send.
 
   Reference (knowledge only — no commands, no payloads):
   <tool name="methodology">{"area": "web"}</tool>  // phased checklist · area: web|network|ad|api|mobile|wifi|recon|priv-esc|cloud · optional "phase" to narrow
@@ -433,6 +447,16 @@ Two kinds of action, and they are not the same:
   Work the app to solve as many challenges as you can, then:
   <tool name="juiceshop_score">{"base_url": "http://localhost:3000"}</tool>  // read the LIVE scoreboard and score yourself: solved/available by difficulty. Run the target with NODE_ENV=unsafe for the full set (Docker disables the dangerous ones).
   <tool name="juiceshop_report">{"scored": { … juiceshop_score result … }}</tool>  // render the scoreboard scorecard
+  <tool name="juiceshop_next">{"base_url": "http://localhost:3000", "max_difficulty": 0}</tool>  // CLOSED LOOP: read the live board and return the still-UNSOLVED challenges easiest-first, each with the class tool that solves it. Call it between attempts. max_difficulty caps the tier (clear ★1-2 before ★3+).
+  <tool name="juiceshop_diff">{"base_url": "http://localhost:3000", "since": [ … solved_names from an earlier juiceshop_score … ]}</tool>  // CONFIRM A HIT: diff the live board against what was solved before your last attempt — tells you exactly what just flipped to solved, so you KNOW the exploit worked instead of guessing.
+
+  WORK THE BOARD (the loop that gets the number up): juiceshop_score (baseline)
+  → juiceshop_next (what's red + how) → take the easiest target, build its
+  exploit (the class builder above, or sqlmap_plan / browser), fire it through
+  the gate → juiceshop_diff (did it land?) → if solved, next target; if not,
+  retry with a variation before moving on. Clear a tier (max_difficulty) then
+  climb. Re-score after each solve. This closed loop — not one-shot firing — is
+  what moves you off the easy tiers.
 
   FLAG CAPTURE (XBOW-style CTF benchmarks). When you're solving a capture-the-flag
   challenge, the goal is to exploit it and retrieve the hidden FLAG. The instant
@@ -625,7 +649,9 @@ Rules:
     code_tooling_check, code_scan_plan, parse_scan, triage_findings,
     remediation_hint, scope_set, scope_check, scope_show, asset_record,
     engagement_graph, loot_record, loot_list, loot_reuse, graph_ingest,
-    sqlmap_plan, benchmark_targets, benchmark_score, benchmark_report,
+    sqlmap_plan, webapp_recon, jwt_forge, nosql_injection, xxe_payload,
+    coupon_forge, captcha_solve, reset_password, juiceshop_next, juiceshop_diff,
+    benchmark_targets, benchmark_score, benchmark_report,
     benchmark_compare,
     evidence_engagement, evidence_report, evidence_verify.
     Prefer one batched turn over five sequential ones — don't waste tool

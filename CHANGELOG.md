@@ -1,5 +1,57 @@
 # Changelog
 
+## v4.10.0 — closing the loop: exploit builders + solve harness
+
+Basilisk could score itself on the Juice Shop board but solved one-shot — fire,
+then check once at the end, with no signal about what landed or what to try
+next. This release adds the feedback loop and the per-class exploit builders for
+the vuln types plain curl-improv couldn't reliably reach. Nine new tools, all
+wired, tested, and gated the same way `sqlmap_plan` already is.
+
+- **Closed-loop harness.** `juiceshop_next` reads the live board and returns the
+  still-unsolved challenges easiest-first, each mapped to the exact tool that
+  solves its class; `juiceshop_diff` confirms a hit by diffing the board against
+  what was solved before the last attempt. The agent now works the board →
+  easiest target → confirm → next, and climbs a tier at a time instead of firing
+  blind. This is the single biggest lever — it turns "23 still red" into "here's
+  each one and how."
+- **Class exploit builders (new `kali_ext/exploits.py`, stdlib-only).**
+  `jwt_forge` (alg:none and RS256→HS256 key confusion, pure hmac/hashlib),
+  `nosql_injection` (Mongo `$ne`/`$where`/`$regex` for bypass/manipulation/
+  dos/exfil), `xxe_payload` (external-entity file read + capped billion-laughs),
+  `coupon_forge` (correct Z85 codec — verified against the ZeroMQ spec vector),
+  `captcha_solve` (auto-reads the arithmetic CAPTCHA via a non-`eval` parser),
+  and `reset_password` (security-question flow, **bound to the published demo
+  accounts only** — it refuses an arbitrary email rather than inventing an
+  answer). Same model as `sqlmap_plan`: each *builds* the exploit for an in-scope
+  target; the operator fires it through the gate. No autonomous firing, no
+  reverse shells — that line is unchanged.
+- **Recon sweep.** `webapp_recon` enumerates a curated high-signal leak surface
+  (`/ftp`, `/encryptionkeys/jwt.pub`, exposed config/logs/backups, the SPA
+  bundle) read-only, so the leaked-key / backup / vulnerable-library / access-log
+  challenges stop failing on missed recon instead of missed exploitation.
+- **Browser reliability for SPAs.** `goto`, `submit`, and `click` now wait
+  (bounded, best-effort) for the Angular app to actually render and its XHR to
+  settle before the next read — fixing the browser-dependent challenges that
+  leaked because `read` was hitting a skeleton page.
+- **Install fix.** `exploits.py` added to `install.sh`'s `EXT_FILES` so remote
+  `curl | bash` installs fetch it (same silent-import-failure class as the
+  `reach.py` omission fixed last pass). Verified: the array now matches the 18
+  sidecars on disk exactly.
+- **Tests.** New `tests/test_exploits.py` — 45 offline checks covering the Z85
+  spec vector + roundtrip, the non-`eval` arithmetic parser rejecting code, JWT
+  none/HS256 (signature self-verifies under the confusion bug), payload shapes,
+  the demo-account refusal, and the harness ordering/diff logic. Full suite:
+  13/13 files green, zero regressions.
+
+**Benchmark, honestly.** The last *measured* score is still 40/113 (2026-07-04).
+The new capability is engineered to make the mid-60s reachable and the math is
+transparent — the builders + recon + browser fixes map to ~+18–28 specific
+currently-unsolved challenges — but it has **not been re-run on a live board
+yet**. The number that counts is the one an actual `NODE_ENV=unsafe` run
+produces; until then 40/113 stands as the measured result. Rerun it and the
+scorecard tells the truth.
+
 ## v4.9.0 — hellfire, adaptive effort, and native reach
 
 Three things landed together.

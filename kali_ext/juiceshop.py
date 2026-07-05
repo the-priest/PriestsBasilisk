@@ -157,3 +157,114 @@ def juiceshop_report(scored: Any) -> Dict[str, Any]:
               "and tool numbers on the same version._")
     return {"ok": True, "report_markdown": "\n".join(md) + "\n",
             "solved": scored["solved"], "pct": scored["pct"]}
+
+
+# ═════════════════════════════════════════════════════════════════════
+# CLOSED-LOOP HARNESS — the feedback signal that was missing.
+#
+# Solving used to be fire-and-forget: attack, then score once at the end,
+# with no way for the agent to tell whether an attempt worked, which to
+# retry, or what's still red.  These two pure functions supply that signal.
+# The agent works the board -> score -> next_targets (what's left + how) ->
+# attempt through the normal builder+scope+gate flow -> diff_solved (did it
+# land?) -> repeat.  Read-only planning; no autonomous firing.
+# ═════════════════════════════════════════════════════════════════════
+
+# Map a challenge's category/name to the Basilisk capability that solves its
+# class.  Keys are matched as case-insensitive substrings against the
+# challenge category first, then its name.  This is what turns "23 still red"
+# into "here's the tool for each."
+_TECHNIQUE_HINTS = [
+    ("nosql",              "nosql_injection — Mongo operator injection ($ne/$where/$regex; pick the mode for bypass/manipulation/dos/exfil)"),
+    ("xxe",                "xxe_payload — DTD external-entity (file_read) or billion-laughs (dos), POST as XML to the upload sink"),
+    ("captcha",            "captcha_solve — read /rest/captcha and submit the computed answer (auto-read; defeats the anti-automation gate)"),
+    ("anti automation",    "captcha_solve + scripted repetition through the run loop (rate-limit / captcha bypass)"),
+    ("unsigned jwt",       "jwt_forge mode=none — alg:none + empty signature"),
+    ("jwt",                "jwt_forge — mode=none (alg:none) or mode=hs256 (RS256->HS256 confusion; fetch /encryptionkeys/jwt.pub first)"),
+    ("coupon",             "coupon_forge — z85(campaign+discount); read the campaign code from main*.js first"),
+    ("cryptographic",      "jwt_forge / coupon_forge / hashcat — depends on the primitive; inspect what token or code is checked"),
+    ("injection",          "sqlmap_plan for SQLi; nosql_injection for Mongo. Confirm the DBMS from an error first"),
+    ("xss",                "browser tool — drive a real JS-executing page; for stored/DOM inject via the review/search sink and confirm execution"),
+    ("broken access",      "run/browser — IDOR: change the id/role in the request; hit admin-only endpoints directly with a forged/elevated token"),
+    ("broken authentication", "sqlmap_plan (login SQLi) / jwt_forge / reset_password_plan (security-question reset for demo accounts)"),
+    ("improper input",     "run — send the malformed/over-long/edge value the validator misses"),
+    ("security misconfiguration", "run/web_read — hit exposed config (/rest/admin/application-configuration), CORS, directory listing (/ftp/)"),
+    ("sensitive data",     "web_read/run — pull exposed files (/ftp/), leaked keys, backup files; grep responses for secrets"),
+    ("vulnerable components", "run — enumerate versions (package.json, response headers), map to a known CVE, prove the specific issue"),
+    ("forgery",            "run — craft the request the server trusts (CSRF token reuse / forged review/feedback with another user's id)"),
+    ("miscellaneous",      "recon-driven — read the challenge hint; often an exposed path, easter egg, or metadata leak"),
+]
+
+
+def _hint_for(cat: str, name: str) -> str:
+    hay_cat = (cat or "").lower()
+    hay_name = (name or "").lower()
+    for key, hint in _TECHNIQUE_HINTS:
+        if key in hay_cat or key in hay_name:
+            return hint
+    return "recon-first — read the challenge hint, enumerate the relevant endpoint, then pick the class tool"
+
+
+def next_targets(payload: Any, limit: int = 0,
+                 max_difficulty: int = 0) -> Dict[str, Any]:
+    """From a live /api/Challenges response, return the still-UNSOLVED,
+    available challenges ordered easiest-first, each annotated with the
+    Basilisk capability that solves its class.  This is the 'what's still red
+    and how do I hit it' signal that drives the loop.
+
+    limit          — cap the list (0 = all).
+    max_difficulty — only challenges up to this star rating (0 = all); useful
+                     to clear a tier before moving up.
+    Pure: reads the payload the wrapper fetched; sends nothing.
+    """
+    rows = _challenges_list(payload)
+    if not rows:
+        return {"ok": False, "error": "no challenges found — is Juice Shop up "
+                "and did you hit /api/Challenges?"}
+    todo: List[Dict[str, Any]] = []
+    for c in rows:
+        if c.get("solved"):
+            continue
+        if bool(c.get("disabledEnv")) or c.get("available") is False:
+            continue  # disabled by safe mode — unsolvable, don't suggest it
+        try:
+            diff = int(c.get("difficulty", 0) or 0)
+        except (TypeError, ValueError):
+            diff = 0
+        if max_difficulty and diff > max_difficulty:
+            continue
+        name = c.get("name", "?")
+        cat = c.get("category", "")
+        todo.append({"name": name, "difficulty": diff, "stars": "*" * diff,
+                     "category": cat, "approach": _hint_for(cat, name)})
+    todo.sort(key=lambda r: (r["difficulty"], r["category"], r["name"]))
+    if limit and limit > 0:
+        todo = todo[:limit]
+    by_star: Dict[int, int] = {}
+    for r in todo:
+        by_star[r["difficulty"]] = by_star.get(r["difficulty"], 0) + 1
+    return {"ok": True, "remaining": len(todo),
+            "remaining_by_star": {("*" * k): v for k, v in sorted(by_star.items())},
+            "targets": todo,
+            "note": "Ordered easiest-first with the class tool for each. Work "
+                    "top-down, re-score after each solve, and use diff_solved to "
+                    "confirm a hit before moving on."}
+
+
+def diff_solved(before: Any, after: Any) -> Dict[str, Any]:
+    """Diff two /api/Challenges snapshots.  Returns which challenges went from
+    unsolved to solved (your last attempt landed), and any that regressed.
+    This is how the loop CONFIRMS an exploit worked instead of guessing.
+    Pure."""
+    def _solved_set(payload: Any) -> set:
+        return {c.get("name", "?") for c in _challenges_list(payload)
+                if c.get("solved")}
+    b = _solved_set(before)
+    a = _solved_set(after)
+    newly = sorted(a - b)
+    regressed = sorted(b - a)
+    return {"ok": True, "newly_solved": newly, "newly_solved_count": len(newly),
+            "regressed": regressed, "total_solved_now": len(a),
+            "note": ("solved this round: " + ", ".join(newly)) if newly
+                    else "no new solves since the last snapshot — retry with a "
+                         "variation or move to the next target"}
