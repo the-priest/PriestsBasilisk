@@ -5679,7 +5679,7 @@ class MainWindow(Adw.ApplicationWindow):
             return lambda: tool_juiceshop_next(
                 a.get("base_url", a.get("url", "http://localhost:3000")),
                 a.get("max_difficulty", a.get("max_stars", 0)),
-                a.get("limit", 0))
+                a.get("limit", 0), a.get("per_tier", a.get("per_star", 0)))
         if n == "juiceshop_diff":
             return lambda: tool_juiceshop_diff(
                 a.get("base_url", a.get("url", "http://localhost:3000")),
@@ -6206,7 +6206,7 @@ class MainWindow(Adw.ApplicationWindow):
                 lambda: tool_juiceshop_next(
                     a.get("base_url", a.get("url", "http://localhost:3000")),
                     a.get("max_difficulty", a.get("max_stars", 0)),
-                    a.get("limit", 0))),
+                    a.get("limit", 0), a.get("per_tier", a.get("per_star", 0)))),
             "juiceshop_diff":     lambda a: self._tool_simple(
                 lambda: tool_juiceshop_diff(
                     a.get("base_url", a.get("url", "http://localhost:3000")),

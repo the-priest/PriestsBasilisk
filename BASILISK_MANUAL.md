@@ -262,6 +262,8 @@ Juice Shop is the industry-standard deliberately-vulnerable web app. Run it (`do
 
 **The white-box workflow (fastest, and how a real white-box test works):** `juiceshop_score` for the baseline → `juiceshop_next` (each unsolved target comes with its live objective, hint, and source key) → when a challenge isn't obvious, `juiceshop_source grep=<the key>` to land on the exact vulnerable code, read it → build the exploit with the matching builder → fire it through the gate → `juiceshop_diff` to confirm → next. Clear a tier, then climb. You have the source — the model reads it instead of burning turns black-box guessing. Run in **decisive mode** so exploits fire without a manual click each time. The loop stays planner-plus-feedback: every actual exploit still goes builder → scope check → gate → run.
 
+**Focused 30-challenge run.** For a quicker, high-yield pass, `juiceshop_next` with **`per_tier: 5`** returns a curated ~30-challenge board — 5 unsolved challenges from each star level (★1–★6), and within each tier the ones Basilisk has a direct builder for (JWT, NoSQL, XXE, CAPTCHA, coupon, SQLi, recon) come first, so they're the fastest to fall. A smaller, high-probability target set to work top-to-bottom instead of the full board.
+
 ## 7.2 Generic benchmarks & XBOW
 
 - **`benchmark_targets` / `benchmark_score` / `benchmark_report` / `benchmark_compare`** — the generic harness for scoring runs and comparing them across attempts.

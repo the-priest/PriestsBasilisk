@@ -206,8 +206,20 @@ def _hint_for(cat: str, name: str) -> str:
     return "recon-first — read the challenge hint, enumerate the relevant endpoint, then pick the class tool"
 
 
+# Challenges whose suggested approach names one of these has a DIRECT Basilisk
+# builder — so it's the fastest to fall and sorts first within its star tier.
+_TOOLED = ("nosql_injection", "jwt_forge", "xxe_payload", "captcha_solve",
+           "coupon_forge", "sqlmap_plan", "reset_password", "webapp_recon")
+
+
+def _has_tool(approach: str) -> int:
+    """0 if Basilisk has a direct builder for this class (rank first), else 1."""
+    a = (approach or "").lower()
+    return 0 if any(t in a for t in _TOOLED) else 1
+
+
 def next_targets(payload: Any, limit: int = 0,
-                 max_difficulty: int = 0) -> Dict[str, Any]:
+                 max_difficulty: int = 0, per_tier: int = 0) -> Dict[str, Any]:
     """From a live /api/Challenges response, return the still-UNSOLVED,
     available challenges ordered easiest-first, each annotated with the
     Basilisk capability that solves its class.  This is the 'what's still red
@@ -216,6 +228,12 @@ def next_targets(payload: Any, limit: int = 0,
     limit          — cap the list (0 = all).
     max_difficulty — only challenges up to this star rating (0 = all); useful
                      to clear a tier before moving up.
+    per_tier       — focused subset: return up to this many UNSOLVED challenges
+                     from EACH star level (1-6). per_tier=5 gives the 5-per-tier,
+                     ~30-challenge board. Within a tier the picks are ordered by
+                     Basilisk's tooling advantage (challenges it has a direct
+                     builder for come first), so the subset is the set most
+                     likely to fall fast.
     Pure: reads the payload the wrapper fetched; sends nothing.
     """
     rows = _challenges_list(payload)
@@ -254,18 +272,41 @@ def next_targets(payload: Any, limit: int = 0,
         if c.get("key"):
             entry["key"] = c.get("key")   # stable id — grep the source for it
         todo.append(entry)
-    todo.sort(key=lambda r: (r["difficulty"], r["category"], r["name"]))
+
+    subset = False
+    if per_tier and per_tier > 0:
+        # Focused subset: up to per_tier from EACH star level, ordered within a
+        # tier by tooling advantage so the picks are the fastest to fall.
+        by_diff: Dict[int, List[Dict[str, Any]]] = {}
+        for r in todo:
+            by_diff.setdefault(r["difficulty"], []).append(r)
+        picked: List[Dict[str, Any]] = []
+        for d in sorted(by_diff):
+            tier = sorted(by_diff[d], key=lambda r: (_has_tool(r["approach"]),
+                                                     r["category"], r["name"]))
+            picked.extend(tier[:per_tier])
+        todo = picked
+        subset = True
+
+    # easiest-first, tooled-first within a tier
+    todo.sort(key=lambda r: (r["difficulty"], _has_tool(r["approach"]),
+                             r["category"], r["name"]))
     if limit and limit > 0:
         todo = todo[:limit]
     by_star: Dict[int, int] = {}
     for r in todo:
         by_star[r["difficulty"]] = by_star.get(r["difficulty"], 0) + 1
+    note = ("Ordered easiest-first, and within each tier the challenges Basilisk "
+            "has a direct builder for come first. Work top-down, re-score after "
+            "each solve, and use diff_solved to confirm a hit before moving on.")
+    if subset:
+        note = (f"FOCUSED SUBSET — up to {per_tier} unsolved per star level "
+                f"({len(todo)} total), the fastest-to-fall first. " + note)
     return {"ok": True, "remaining": len(todo),
             "remaining_by_star": {("*" * k): v for k, v in sorted(by_star.items())},
+            "subset": subset,
             "targets": todo,
-            "note": "Ordered easiest-first with the class tool for each. Work "
-                    "top-down, re-score after each solve, and use diff_solved to "
-                    "confirm a hit before moving on."}
+            "note": note}
 
 
 def diff_solved(before: Any, after: Any) -> Dict[str, Any]:

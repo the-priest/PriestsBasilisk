@@ -4442,11 +4442,15 @@ def tool_juiceshop_report(scored: Any = None) -> Dict[str, Any]:
 
 
 def tool_juiceshop_next(base_url: str = "http://localhost:3000",
-                        max_difficulty: Any = 0, limit: Any = 0) -> Dict[str, Any]:
+                        max_difficulty: Any = 0, limit: Any = 0,
+                        per_tier: Any = 0) -> Dict[str, Any]:
     """CLOSED-LOOP driver: read the live scoreboard and return the still-UNSOLVED
     challenges, easiest-first, each annotated with the Basilisk tool that solves
     its class. This is the 'what's left and how do I hit it' signal — call it
-    between attempts, work top-down, re-score after each solve."""
+    between attempts, work top-down, re-score after each solve.
+
+    per_tier — focused subset: up to this many unsolved per star level (set 5 for
+    the ~30-challenge, 5-per-tier board), fastest-to-fall first."""
     import json as _json
     base = (base_url or "http://localhost:3000").strip().rstrip("/")
     url = base + "/api/Challenges"
@@ -4460,7 +4464,8 @@ def tool_juiceshop_next(base_url: str = "http://localhost:3000",
     try:
         from kali_ext import juiceshop as _js
         return _js.next_targets(payload, limit=_safe_int(limit, 0),
-                                max_difficulty=_safe_int(max_difficulty, 0))
+                                max_difficulty=_safe_int(max_difficulty, 0),
+                                per_tier=_safe_int(per_tier, 0))
     except Exception as e:
         return {"ok": False, "error": f"next_targets failed: {e}"}
 
