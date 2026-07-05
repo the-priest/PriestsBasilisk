@@ -46,6 +46,24 @@ No Docker. No daemon. No account. No cloud. Paste it once to install; paste the 
 
 ---
 
+<div align="center">
+
+## ▶ See it in action
+
+*Model in the loop, tools on the target, a receipt for every move.*
+
+<br>
+
+<video src="https://github.com/user-attachments/assets/7df7b6a9-744d-46ec-9ce6-c8ae924fc786" controls></video>
+
+<video src="https://github.com/user-attachments/assets/5462d36d-f649-4684-9e09-500a4afe98f5" controls></video>
+
+</div>
+
+<br>
+
+---
+
 ## What Basilisk is
 
 Basilisk is a **native Linux desktop application** that turns a large language model into a working **security operator** — one that runs entirely on your own hardware and answers only to you.
