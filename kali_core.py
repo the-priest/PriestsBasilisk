@@ -77,6 +77,15 @@ def get_ledger():
     return _LEDGER
 
 HTTP_TIMEOUT_S    = 600
+# Per-read socket timeout for STREAMING responses. urllib applies `timeout` to
+# each socket read, so on a live stream this acts as a dead-air/idle timeout:
+# if the provider stops sending tokens (but doesn't close the connection) for
+# this long, the read aborts instead of blocking for the full HTTP_TIMEOUT_S.
+# 600s there meant a stalled stream hung the UI on "thinking…" for ten minutes;
+# 60s means it gives up (and self-heals to the next model) fast. Healthy
+# streaming never trips this — tokens keep arriving well under 60s apart, and
+# even a slow reasoning model's time-to-first-token is comfortably inside it.
+STREAM_IDLE_TIMEOUT_S = 60
 HEALTH_TIMEOUT_S  = 1.5
 
 GROQ_DEFAULT_MODEL = "llama-3.3-70b-versatile"
@@ -519,6 +528,7 @@ class GroqBackend:
                     top_p=top_p,
                     max_tokens=max_tokens,
                     stream=True,
+                    timeout=STREAM_IDLE_TIMEOUT_S,
                 )
                 parts: List[str] = []
                 for chunk in resp:
@@ -682,7 +692,7 @@ class OpenAICompatBackend:
                 req = urllib.request.Request(
                     url, data=data, headers=self._headers())
                 parts: List[str] = []
-                with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_S) as r:
+                with urllib.request.urlopen(req, timeout=STREAM_IDLE_TIMEOUT_S) as r:
                     for raw in r:
                         if cancel_event and cancel_event.is_set():
                             on_done({"cancelled": True,
@@ -786,6 +796,21 @@ class OpenAICompatBackend:
                 # Anything else: report and stop.
                 on_error(f"{self.name}: {last_err}")
                 return
+            except (socket.timeout, TimeoutError) as e:
+                # Stream went dead-air: the provider opened the connection and
+                # then stopped sending tokens for STREAM_IDLE_TIMEOUT_S. This is
+                # what used to hang the UI on "thinking…". If nothing streamed
+                # yet, self-heal by trying the next model in the chain; if it
+                # died mid-reply we can't cleanly resume (splice risk), so stop
+                # with a clear, retryable message.
+                last_err = f"stream stalled (no data for {STREAM_IDLE_TIMEOUT_S}s)"
+                if any_tokens_emitted:
+                    on_error(f"{self.name}: {attempt_model} stalled mid-reply "
+                             f"— stopped responding. Tap send to retry.")
+                    return
+                log(f"{self.name} {attempt_model} stalled with no tokens, "
+                    f"trying next model")
+                continue
             except urllib.error.URLError as e:
                 # Network/DNS/SSL failure — applies to every model equally,
                 # so retrying the chain is pointless.  Stop and report.
@@ -4604,30 +4629,48 @@ def tool_webapp_recon(base_url: str = "http://localhost:3000",
     except Exception as e:
         return {"ok": False, "error": f"pentest module unavailable: {e}"}
     cap = max(1, _safe_int(max_paths, 40))
-    hits: List[Dict[str, Any]] = []
-    checked = 0
-    for entry in catalog[:cap]:
-        checked += 1
+    targets = catalog[:cap]
+
+    def _probe(entry):
         url = base + entry["path"]
         try:
             req = urllib.request.Request(url, headers={
                 "Accept": "*/*",
                 "User-Agent": "Mozilla/5.0 (Basilisk recon)"})
-            with urllib.request.urlopen(req, timeout=8) as r:
+            with urllib.request.urlopen(req, timeout=5) as r:
                 code = r.getcode()
                 body = r.read(1200)
         except urllib.error.HTTPError as e:
             code, body = e.code, b""
         except Exception:
-            continue  # unreachable / timeout — skip quietly
-        if code and code < 400:
-            peek = ""
-            try:
-                peek = body.decode("utf-8", "replace").strip().replace("\n", " ")[:180]
-            except Exception:
-                pass
-            hits.append({"path": entry["path"], "status": code,
-                         "why": entry["why"], "peek": peek})
+            return None  # unreachable / timeout — skip quietly
+        if not code or code >= 400:
+            return None
+        peek = ""
+        try:
+            peek = body.decode("utf-8", "replace").strip().replace("\n", " ")[:180]
+        except Exception:
+            pass
+        return {"path": entry["path"], "status": code,
+                "why": entry["why"], "peek": peek}
+
+    # Fetch the whole catalog CONCURRENTLY — these are independent read-only
+    # GETs, so a thread pool turns a sequential seconds-per-path sweep into
+    # roughly one path's latency. Bounded worker count keeps it polite.
+    hits: List[Dict[str, Any]] = []
+    try:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=min(12, len(targets) or 1)) as ex:
+            for res in ex.map(_probe, targets):
+                if res:
+                    hits.append(res)
+    except Exception:
+        # Fall back to sequential if the pool can't spin up — still correct.
+        for entry in targets:
+            res = _probe(entry)
+            if res:
+                hits.append(res)
+    checked = len(targets)
     hits.sort(key=lambda h: h["status"])
     return {"ok": True, "target": base, "checked": checked,
             "found": len(hits), "hits": hits,

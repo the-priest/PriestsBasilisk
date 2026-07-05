@@ -1,5 +1,63 @@
 # Changelog
 
+## v5.0.0 — the operator release
+
+Major version. 5.0 consolidates the closed-loop offensive capability added across
+the 4.10 line into a headline release, and ships a full rewrite of the user
+manual documenting every one of Basilisk's 119 tool entries in detail.
+
+The capability jump that defines 5.0:
+
+- **The closed loop.** Basilisk no longer solves one-shot. `juiceshop_next` reads
+  the live board and returns what's unsolved, easiest-first, each mapped to the
+  tool that cracks its class; `juiceshop_diff` confirms a hit by diffing the
+  board. Score → next → build → fire through the gate → diff → repeat, climbing a
+  tier at a time. It stays planner-plus-feedback: every actual exploit still goes
+  builder → scope check → gate → run, so you're always on the trigger.
+- **Real exploit builders.** A new stdlib exploit-builder suite for the vuln
+  classes command-improv couldn't reliably hit — `jwt_forge` (alg:none +
+  RS256→HS256 confusion), `nosql_injection`, `xxe_payload`, `coupon_forge` (Z85),
+  `captcha_solve`, `reset_password` — plus `webapp_recon` for the leak surface.
+  Same model as `sqlmap_plan`: build for an in-scope target, you fire it. No
+  autonomous attack, no malware/reverse-shells/persistence — those non-goals are
+  unchanged and held in code.
+- **Reliability.** Stalled provider streams abort on a short idle timeout and
+  self-heal to the next model instead of freezing on "thinking…"; the web-app
+  recon sweep runs concurrently (a full catalog in ~one path's latency).
+- **The manual.** `BASILISK_MANUAL.md` rewritten end to end for 5.0 — 26 parts
+  covering sensing, the offensive toolkit, the exploit builders, engagement &
+  scope, code scanning, the benchmarking loop, evidence, MCP, research, vision,
+  desktop, files, memory, skills, self-modification, voice, the full safety
+  model, and a settings/architecture/troubleshooting reference.
+
+Everything below is the detailed history of the 4.10 line that fed into this.
+
+## v4.10.1 — no more "thinking…" hang, faster recon
+
+Two performance fixes on top of 4.10.0, both hit during live benchmarking.
+
+- **Fixed the stream hang.** A stalled provider stream (connection stays open,
+  tokens stop arriving) blocked the streaming read for the full 600s HTTP
+  timeout — so the UI sat on "thinking…" for up to ten minutes with nothing
+  happening. Streaming reads now use a dedicated 60s idle timeout: dead air
+  aborts fast, and if nothing had streamed yet it **self-heals to the next
+  model** in the chain instead of erroring. If it stalls mid-reply it stops
+  cleanly with a retryable message rather than hanging. Healthy streaming never
+  trips this — reasoning/content tokens keep the socket active well under the
+  cap. The Groq fallback SDK got the same timeout.
+- **Parallelized `webapp_recon`.** The recon sweep fetched its ~26 catalog paths
+  one at a time; against a slow or partly-unreachable target that stacked up to
+  minutes of blocking. It now probes the whole catalog concurrently through a
+  bounded thread pool with a shorter per-path timeout — a full sweep drops from
+  tens of seconds to roughly one path's latency (measured: 26 unreachable paths
+  in 0.4s vs ~130s before). Falls back to sequential if the pool can't start.
+
+Note: read-only tool batches already run concurrently, and tool-result context
+is already compressed by the headroom module — those paths were fine. If you
+want the fastest possible grind on the easy tiers, `adaptive_effort: False`
+keeps every turn on fast Flash instead of escalating to the heavier reasoning
+model deep in a chain.
+
 ## v4.10.0 — closing the loop: exploit builders + solve harness
 
 Basilisk could score itself on the Juice Shop board but solved one-shot — fire,
