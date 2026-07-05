@@ -8,7 +8,7 @@ keywords: private ai security operator, self-hosted ai, local ai agent, kali lin
 
 <img src="banner.png" alt="BASILISK — the serpent on your machine" width="820">
 
-# An AI security operator that lives on **your** machine — not someone else's cloud.
+# There are more things in heaven and earth, than are dreamt of in your philosophy.
 
 **You bring the model. Basilisk brings the body — the hands, the toolchain, the discipline, and the paper trail.**
 
