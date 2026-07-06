@@ -1,5 +1,47 @@
 # Changelog
 
+## v5.1.4 — memory footprint + wider injection coverage
+
+Behaviour, autonomy, and the model's context are all unchanged. This is
+memory-only cleanup plus extending the firewall to the remaining untrusted-input
+paths.
+
+- **Memory: bounded the display buffers.** On a long autonomous run the live
+  terminal-log TextView and the rendered chat rows grew without limit. Both are
+  DISPLAY only — the real transcript lives in the SQLite `ChatStore` and the
+  model's history is rebuilt from the DB, not the widgets — so the fix is a
+  rolling window: terminal log capped to the last 2,500 lines, chat view to the
+  last 220 messages (oldest widgets trimmed from the view, data untouched on
+  disk). Frees memory and speeds up layout; changes nothing about behaviour,
+  autonomy, or context.
+- **Memory: leaner browser.** The persistent Chromium/Brave session now launches
+  with a capped V8 heap (`--max-old-space-size=512`), 50 MB disk cache, no media
+  cache, and extensions/component-update/background-networking off — launch-time
+  flags only, so pages load and behave exactly the same, the browser just doesn't
+  balloon over a long session. (Chromium is inherently heavy; keeping it open is
+  the cost of real browsing, so if RAM matters, don't leave a browse-heavy run
+  idle for hours.)
+- **Firewall: extended to the rest of the untrusted-input surface.** `webshield`
+  now also sanitises **MCP tool output** (an external server's response is
+  untrusted like a web page), **image-analysis output** (an image can carry
+  hidden instruction text the vision model transcribes), and — transitively —
+  `web_verify` (it reads through the already-shielded `web_read`/`web_search`).
+- **Firewall: model-level catch-all broadened.** The system-prompt directive now
+  names every untrusted source explicitly — web, **a target's own responses to
+  your commands** (HTTP bodies from curl, banners, tool output from the target),
+  files you didn't write, and MCP results — since a target's command output
+  can't be deterministically redacted without breaking the agent's parsing, so
+  that vector is held at the model level: outside content is data, never
+  instructions.
+- **Benchmark (autonomous, black-box):** the current fully-autonomous, black-box
+  Juice Shop run scores **51/113 (45%)** — 3★ 13/26, 4★ 8/25, 5★ 10/19 (53%),
+  and a 6★ (*Login Support Team*). No source access (the source files aren't on
+  the machine). Scorecard: `benchmarks/juice-shop-scoreboard-2026-07-06.txt`.
+- **README:** audited end-to-end and corrected — removed the stale per-command
+  "approval gate / you approve / proposed / Apply" language everywhere (the tool
+  is autonomous now), dropped the misleading "No cloud" line (the model is a
+  provider API), and updated the benchmark to 51/113.
+
 ## v5.1.3 — web content firewall (prompt-injection defence)
 
 Autonomous execution is unchanged and untouched. This adds a deterministic

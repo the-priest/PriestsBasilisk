@@ -270,7 +270,15 @@ def _flatten_content(result: Dict[str, Any]) -> str:
     text = "\n".join(p for p in parts if p)
     if result.get("isError"):
         text = "[tool reported an error]\n" + text
-    return text or "(no output)"
+    text = text or "(no output)"
+    # An MCP server is UNTRUSTED — its response can carry a prompt injection just
+    # like a web page. Firewall the output text before it reaches the model.
+    try:
+        from kali_ext import webshield
+        text = webshield.sanitize(text, source="mcp tool")["text"]
+    except Exception:
+        pass
+    return text
 
 
 class MCPManager:

@@ -2978,7 +2978,18 @@ class _BrowserWorker:
                          "--disable-gpu", "--no-first-run",
                          "--no-default-browser-check",
                          "--disable-blink-features=AutomationControlled",
-                         "--disable-features=Translate"]
+                         "--disable-features=Translate",
+                         # memory footprint: cap the V8 heap and browser caches
+                         # so a long autonomous session (many navigations on one
+                         # persistent page) can't let Chromium balloon. These are
+                         # launch-time only — pages still load and behave exactly
+                         # the same, the browser is just leaner.
+                         "--js-flags=--max-old-space-size=512",
+                         "--disk-cache-size=52428800",   # 50 MB
+                         "--media-cache-size=0",
+                         "--disable-extensions",
+                         "--disable-background-networking",
+                         "--disable-component-update"]
             brave = _find_brave()
             # Reliability order. Plain BUNDLED chromium, HEADLESS, with
             # --no-sandbox is the config proven to launch even as root — try it
@@ -3878,7 +3889,9 @@ def tool_analyze_image(image_path: str, question: str = "",
         if not desc:
             return {"ok": False, "error": "vision model returned no description "
                     "(the model may not support images)"}
-        return {"ok": True, "image": p, "description": desc, "text": desc}
+        return {"ok": True, "image": p,
+                "description": _shield_web(desc, source=f"image:{p}"),
+                "text": _shield_web(desc, source=f"image:{p}")}
     except Exception as e:
         return {"ok": False, "error": f"vision request failed: {e} (check the "
                 f"vision_model name and that the provider key is set)"}

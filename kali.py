@@ -92,7 +92,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.kali"
 APP_NAME = "Basilisk"
-VERSION = "5.1.3"
+VERSION = "5.1.4"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -120,6 +120,14 @@ TOOL_BATCH_MAX_WORKERS = 6
 # outputs every turn.
 HISTORY_KEEP_FULL_TOOL_RESULTS = 2
 HISTORY_TRIM_HEAD_CHARS = 600
+# Memory: the live terminal-log TextView and the rendered chat rows are DISPLAY
+# only (the real transcript lives in the SQLite ChatStore, and the model's
+# history is rebuilt from the DB, not these widgets). Left uncapped they grow
+# without bound across a long autonomous run. Cap the *view* to a rolling window
+# — trimming old widgets frees memory and speeds up layout, and changes nothing
+# about behaviour, autonomy, or the model's context.
+MAX_TERMINAL_LINES = 2500
+MAX_CHAT_ROWS = 220
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -5011,12 +5019,35 @@ class MainWindow(Adw.ApplicationWindow):
                           on_speak=self._on_message_speak,
                           show_thoughts=self.settings.get("show_thoughts", True))
         self.msg_box.append(w)
+        # Rolling window: keep only the most recent MessageWidgets in the view.
+        # The full transcript is in the SQLite ChatStore and the model's history
+        # is rebuilt from there — these widgets are display only, so trimming the
+        # oldest frees GTK memory (and speeds layout) without touching context,
+        # autonomy, or behaviour. Only trims from the FRONT, never the live tail.
+        try:
+            extra = self._count_msg_rows() - MAX_CHAT_ROWS
+            while extra > 0:
+                old = self.msg_box.get_first_child()
+                if old is None or old is w:
+                    break
+                self.msg_box.remove(old)
+                extra -= 1
+        except Exception:
+            pass
         # New message → force scroll.  This is when the user sent something
         # or a new assistant turn started; they want to see it.  Mid-stream
         # token updates use the smart _scroll_to_bottom that respects
         # the user reading history above.
         GLib.idle_add(self._force_scroll_to_bottom)
         return w
+
+    def _count_msg_rows(self) -> int:
+        n = 0
+        c = self.msg_box.get_first_child()
+        while c is not None:
+            n += 1
+            c = c.get_next_sibling()
+        return n
 
     def _scroll_to_bottom(self):
         adj = self.msg_scroll.get_vadjustment()
@@ -7726,6 +7757,13 @@ class MainWindow(Adw.ApplicationWindow):
                 buf = self.terminal_log_buf
                 end = buf.get_end_iter()
                 buf.insert_with_tags_by_name(end, text + "\n", kind)
+                # Rolling window: drop the oldest lines so a long run can't grow
+                # this buffer without bound. Display-only; nothing else reads it.
+                n = buf.get_line_count()
+                if n > MAX_TERMINAL_LINES:
+                    ok, cut = buf.get_iter_at_line(n - MAX_TERMINAL_LINES)
+                    if ok:
+                        buf.delete(buf.get_start_iter(), cut)
                 self.terminal_status_lbl.set_text(text[:40].strip() or "…")
                 GLib.idle_add(self._terminal_scroll_to_bottom)
             except Exception:

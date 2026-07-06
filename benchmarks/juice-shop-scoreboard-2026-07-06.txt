@@ -1,6 +1,6 @@
 ======================================================================
   OWASP JUICE SHOP BENCHMARK — FINAL SCORECARD
-  Basilisk v5.1.2 — fully autonomous
+  Basilisk — fully autonomous engine (v5.1.2, unchanged through v5.1.4)
 ======================================================================
 
   DATE: 2026-07-06
@@ -8,14 +8,14 @@
   MODE: autonomous, BLACK-BOX (no source access — source files not on the
         machine; model = DeepSeek via SiliconFlow)
 
-  TOTAL SOLVED: 43/113
-  PERCENTAGE: 38.1%
+  TOTAL SOLVED: 51/113
+  PERCENTAGE: 45.1%
 
   BREAKDOWN BY DIFFICULTY:
     1★:  9/13 █████████░░░░
     2★: 10/18 ██████████░░░░░░░░
-    3★:  9/26 █████████░░░░░░░░░░░░░░░░░
-    4★:  4/25 ████░░░░░░░░░░░░░░░░░░░░░
+    3★: 13/26 █████████████░░░░░░░░░░░░░
+    4★:  8/25 ████████░░░░░░░░░░░░░░░░░
     5★: 10/19 ██████████░░░░░░░░░
     6★:  1/12 █░░░░░░░░░░░
 

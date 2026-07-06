@@ -2,7 +2,7 @@
 
 *The full reference for Basilisk, the AI security operator that lives on your Linux machine.*
 
-**Version 5.1.3** · GTK4 + libadwaita · X11 & Wayland · desktop and NetHunter mobile
+**Version 5.1.4** · GTK4 + libadwaita · X11 & Wayland · desktop and NetHunter mobile
 
 ---
 
@@ -577,4 +577,4 @@ The rule of thumb: **sensing is free and instant; acting waits for your Apply (o
 
 ---
 
-*⟁ Basilisk v5.1.3 — built by The Priest. Powerful on purpose, safe by construction.*
+*⟁ Basilisk v5.1.4 — built by The Priest. Powerful on purpose, safe by construction.*
