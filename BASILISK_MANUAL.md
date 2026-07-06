@@ -409,7 +409,7 @@ Create or overwrite any file — document, report, script, config — via a **di
 
 # Part 15 — Memory (optional, local)
 
-Off by default. When on, Basilisk remembers across sessions — **locally, nothing leaves the box**.
+Off by default. When on, Basilisk remembers across sessions. The memory **files are stored on your machine** (nothing is uploaded to a memory service); recalled snippets are injected into the prompt as context only when relevant, so — like everything else — they travel to your chosen model provider (SiliconFlow/DeepSeek) as part of that turn.
 
 - **`memory_remember`** — store a fact, with a kind and a salience.
 - **`memory_recall`** — retrieve relevant memories. Recall is **relevance-scoped**: keyword match + recency + salience (optionally embeddings), injecting only the **top-k** per turn, never the whole store. It connects **security paraphrases** — "SQL injection" finds a memory stored as "SQLi", across a couple dozen synonym groups (XSS, RCE, LFI, SSRF, privesc, recon…).

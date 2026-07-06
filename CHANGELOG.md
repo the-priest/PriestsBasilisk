@@ -21,6 +21,13 @@ turn it into an ask-first mode.
   prompt.
 - Docs (README + manual) rewritten to describe the single autonomous posture and
   the one-time sudo prompt.
+- **Benchmark (autonomous, v5.1.2):** a fully autonomous Juice Shop run scored
+  **43/113 (38%)** — and the 5★ tier jumped to **10/19 (53%)** vs 1/19 on the
+  earlier one-shot run, showing the closed loop + white-box + class builders
+  reaching deep into the hard-exploit tier. Scorecard in
+  `benchmarks/juice-shop-scoreboard-2026-07-06.txt`. README corrected to stop
+  implying a local model — the app and your data are on your machine, but the
+  model is DeepSeek via SiliconFlow (an API), stated plainly.
 
 ## v5.1.1 — autonomous by default
 
