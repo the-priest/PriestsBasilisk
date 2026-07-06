@@ -90,7 +90,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.kali"
 APP_NAME = "Basilisk"
-VERSION = "5.1.5"
+VERSION = "5.2.0"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -1600,6 +1600,16 @@ def _img_url_is_fetchable(url: str) -> bool:
     return True
 
 
+class _ImgSafeRedirect(urllib.request.HTTPRedirectHandler):
+    """Follows an image redirect only if the new host also clears the SSRF
+    guard — stops a public image host from bouncing the fetch to an internal /
+    cloud-metadata address."""
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if not _img_url_is_fetchable(newurl):
+            return None
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
 class ImageWidget(Gtk.Box):
     """An image rendered inline in chat from a URL (http/https/file/local path).
 
@@ -1657,7 +1667,11 @@ class ImageWidget(Gtk.Box):
             "User-Agent": self._UA,
             "Accept": "image/avif,image/webp,image/png,image/jpeg,image/*,*/*;q=0.8",
         })
-        with urllib.request.urlopen(req, timeout=15) as r:
+        # Re-validate on EVERY redirect hop: a public image host must not be
+        # able to 302 the fetch to an internal / cloud-metadata address after
+        # the initial check passed.
+        opener = urllib.request.build_opener(_ImgSafeRedirect())
+        with opener.open(req, timeout=15) as r:
             return r.read(self._MAX_BYTES)
 
     def _decode(self, data: bytes):

@@ -3820,6 +3820,40 @@ def tool_remediation_hint(finding: Any) -> Dict[str, Any]:
         return {"ok": False, "error": f"remediation_hint failed: {e}"}
 
 
+def _fetch_target_host_ok(url: str) -> bool:
+    """SSRF guard for the tools that fetch an operator/model-supplied target
+    base_url (juiceshop_*, webapp_recon, captcha_solve).  Resolve the host and
+    refuse link-local / multicast / reserved / unspecified addresses — the
+    cloud-metadata endpoint (169.254.169.254) and friends — so an injected
+    base_url can't turn a benchmark/recon tool into a metadata-SSRF probe.
+    Loopback and private LAN are ALLOWED on purpose: Juice Shop on localhost and
+    internal hosts are legitimate targets.  Resolve-then-check (a DNS-rebinding
+    attacker could still slip past); it stops the common metadata/SSRF cases at
+    no cost to any real target."""
+    import ipaddress
+    import socket as _sock
+    try:
+        from urllib.parse import urlsplit
+        host = urlsplit(url).hostname
+    except Exception:
+        host = None
+    if not host:
+        return True
+    try:
+        infos = _sock.getaddrinfo(host, None)
+    except Exception:
+        return True   # can't resolve — not this guard's job to fail it
+    for info in infos:
+        try:
+            addr = ipaddress.ip_address(info[4][0].split("%")[0])
+        except ValueError:
+            continue
+        if (addr.is_link_local or addr.is_multicast
+                or addr.is_reserved or addr.is_unspecified):
+            return False
+    return True
+
+
 def tool_juiceshop_score(base_url: str = "http://localhost:3000") -> Dict[str, Any]:
     """Score Basilisk against the LIVE OWASP Juice Shop scoreboard — the hard,
     comparable benchmark. Fetches GET {base_url}/api/Challenges from the running
@@ -3829,6 +3863,9 @@ def tool_juiceshop_score(base_url: str = "http://localhost:3000") -> Dict[str, A
     import json as _json
     base = (base_url or "http://localhost:3000").strip().rstrip("/")
     url = base + "/api/Challenges"
+    if not _fetch_target_host_ok(url):
+        return {"ok": False, "error": "refusing a link-local/metadata address "
+                "(SSRF guard) — point base_url at your real target"}
     try:
         req = urllib.request.Request(url, headers={"Accept": "application/json"})
         with urllib.request.urlopen(req, timeout=30) as r:
@@ -3869,6 +3906,9 @@ def tool_juiceshop_next(base_url: str = "http://localhost:3000",
     import json as _json
     base = (base_url or "http://localhost:3000").strip().rstrip("/")
     url = base + "/api/Challenges"
+    if not _fetch_target_host_ok(url):
+        return {"ok": False, "error": "refusing a link-local/metadata address "
+                "(SSRF guard) — point base_url at your real target"}
     try:
         req = urllib.request.Request(url, headers={"Accept": "application/json"})
         with urllib.request.urlopen(req, timeout=30) as r:
@@ -3895,6 +3935,9 @@ def tool_juiceshop_diff(base_url: str = "http://localhost:3000",
     import json as _json
     base = (base_url or "http://localhost:3000").strip().rstrip("/")
     url = base + "/api/Challenges"
+    if not _fetch_target_host_ok(url):
+        return {"ok": False, "error": "refusing a link-local/metadata address "
+                "(SSRF guard) — point base_url at your real target"}
     try:
         req = urllib.request.Request(url, headers={"Accept": "application/json"})
         with urllib.request.urlopen(req, timeout=30) as r:
@@ -4002,6 +4045,9 @@ def tool_captcha_solve(base_url: str = "http://localhost:3000") -> Dict[str, Any
     import json as _json
     base = (base_url or "http://localhost:3000").strip().rstrip("/")
     url = base + "/rest/captcha"
+    if not _fetch_target_host_ok(url):
+        return {"ok": False, "error": "refusing a link-local/metadata address "
+                "(SSRF guard) — point base_url at your real target"}
     try:
         req = urllib.request.Request(url, headers={"Accept": "application/json"})
         with urllib.request.urlopen(req, timeout=20) as r:
@@ -4048,6 +4094,9 @@ def tool_webapp_recon(base_url: str = "http://localhost:3000",
             extra_paths if isinstance(extra_paths, list) else None)
     except Exception as e:
         return {"ok": False, "error": f"pentest module unavailable: {e}"}
+    if not _fetch_target_host_ok(base):
+        return {"ok": False, "error": "refusing a link-local/metadata address "
+                "(SSRF guard) — point base_url at your real target"}
     cap = max(1, _safe_int(max_paths, 40))
     targets = catalog[:cap]
 
