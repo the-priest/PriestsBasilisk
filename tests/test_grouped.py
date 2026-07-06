@@ -46,8 +46,8 @@ ck("offensive has pentest_plan + sqlmap_plan",
    {"pentest_plan", "sqlmap_plan"} <= tools(kc.tool_load_tools("offensive")["tools"]))
 ck("engagement has scope_check", "scope_check" in kc.tool_load_tools("engagement")["tools"])
 ck("system has system_info", "system_info" in kc.tool_load_tools("system")["tools"])
-ck("aliases work (pentest, scope, osint, gui)",
-   all(kc.tool_load_tools(a)["ok"] for a in ("pentest", "scope", "osint", "gui")))
+ck("aliases work (pentest, scope, gui)",
+   all(kc.tool_load_tools(a)["ok"] for a in ("pentest", "scope", "gui")))
 ck("unknown group errors with a list",
    kc.tool_load_tools("zzz")["ok"] is False and "available" in kc.tool_load_tools("zzz"))
 ck("'all' loads everything", kc.tool_load_tools("all")["ok"])

@@ -148,6 +148,8 @@ Its standout trick: with `enrich_cves`, it **auto-chains into CVE intelligence**
 
 Pulls CVEs from the **NVD**, enriches each with **CISA KEV** (exploited in the wild?) and **EPSS** (exploitation likelihood), and **re-ranks KEV → EPSS → CVSS** so the genuinely dangerous ones surface first — not just the highest score. "Any known CVEs for OpenSSH 8.2?"
 
+**Why it survived the web-tool removal (Part 10).** `cve_lookup` is *not* a general web reader. Every request is **host-pinned** to three authoritative, curated endpoints — `services.nvd.nist.gov`, `www.cisa.gov` (the KEV feed) and `api.first.org` (EPSS) — with the product/version passed only as URL-encoded query parameters. A target you're scanning can influence *which* record gets looked up (via a banner it controls), but it **cannot** point the fetch at a host it controls and **cannot** plant text in NVD/KEV/EPSS. That makes it categorically different from the arbitrary-URL readers that were removed. As defence-in-depth the free-text CVE descriptions are still run through the content firewall before they reach the model. The same lookup also runs automatically inside `parse_output` (`enrich_cves`, §4.6) on any confirmed service+version.
+
 ## 4.8 `nuclei_template` — generate or validate Nuclei templates
 
 Nuclei YAML is easy to get subtly wrong, and a malformed template only fails cryptically at run time. **Build mode:** give a spec (name, severity, protocol, path, matchers) and get a **structurally-valid** template. **Validate mode:** hand it any Nuclei YAML and it reports **exactly what's wrong** before you run `nuclei -t`. You still run the scan; this guarantees the template is correct first.
@@ -261,7 +263,7 @@ Juice Shop is the industry-standard deliberately-vulnerable web app. Run it (`do
 - **`juiceshop_source`** (optional) — if you *have* the target's source on hand (a container you control, or a local checkout), this reads it: `tree` (layout), `read` (cat a file), `grep` (search), `challenges` (cat `challenges.yml`), read-only. Not required, and the benchmark below did **not** use it — it's just there for when you happen to have source and want the shortcut.
 - **`juiceshop_report`** — render the scorecard.
 
-**The workflow (black-box — how the benchmark was actually run):** `juiceshop_score` for the baseline → `juiceshop_next` (each unsolved target comes with its live objective and hint from the public scoreboard) → build the exploit with the matching builder (jwt_forge, reset_password, nosql_injection, xxe_payload, coupon_forge, captcha_solve) or drive the browser → fire it → `juiceshop_diff` to confirm → next. Clear a tier, then climb. No source access — everything is exploited from the outside, the way a real black-box test (and every other tool's scoreboard number) works. Run in the default autonomous mode so exploits fire without a manual click each time. The loop stays planner-plus-feedback: every actual exploit still goes builder → scope check → run.
+**The workflow (black-box — how the benchmark was actually run):** `juiceshop_score` for the baseline → `juiceshop_next` (each unsolved target comes with its live objective and hint from the public scoreboard) → build the exploit with the matching builder (jwt_forge, reset_password, nosql_injection, xxe_payload, coupon_forge, captcha_solve) → fire it → `juiceshop_diff` to confirm → next. Clear a tier, then climb. No source access — everything is exploited from the outside, the way a real black-box test (and every other tool's scoreboard number) works. Run in the default autonomous mode so exploits fire without a manual click each time. The loop stays planner-plus-feedback: every actual exploit still goes builder → scope check → run.
 
 **Focused 30-challenge run.** For a quicker, high-yield pass, `juiceshop_next` with **`per_tier: 5`** returns a curated ~30-challenge board — 5 unsolved challenges from each star level (★1–★6), and within each tier the ones Basilisk has a direct builder for (JWT, NoSQL, XXE, CAPTCHA, coupon, SQLi, recon) come first, so they're the fastest to fall. A smaller, high-probability target set to work top-to-bottom instead of the full board.
 
@@ -305,35 +307,23 @@ MCP is a remote-code-execution surface, so every server is treated as **untruste
 
 ---
 
-# Part 10 — OSINT & research
+# Part 10 — Trusted-source lookup (`web_read`)
 
-## 10.1 `osint_username` — handle check across public sites
+Basilisk has **no general web access** and cannot open arbitrary pages. What it has is `web_read` against a fixed **allow-list** of authoritative sources.
 
-A Sherlock-style sweep across ~43 public profile sites. **Caveat Basilisk itself observes:** a hit means a *public page exists* at that handle — **not** that it's the same person. Confirm identity separately.
+## 10.1 `web_read` — read a page, but only from vetted sources
 
-## 10.2 `osint_lookup` / `social_read` — public readers
+`web_read` fetches and returns the readable text of a page **only if its host is on the allow-list** (`kali_core._WEB_READ_ALLOW`): NVD/NIST, MITRE (CVE / ATT&CK / CWE / CAPEC), CISA (incl. the KEV catalog), FIRST (EPSS), official vendor/distro security channels (Microsoft MSRC, Red Hat, Ubuntu, Debian, Arch, kernel.org), OWASP, PortSwigger, the Kali docs, and exploit-db. Any other host is refused.
 
-Platform-aware readers for public pages and public APIs (Reddit via public `.json`, and more). **Public only** — no login, no gated scraping.
+**Why this is safe** (the same reasoning that kept `cve_lookup`): the injection risk in a web reader comes from fetching **attacker-chosen** URLs. Here the model — or a target that fed it a URL — cannot point `web_read` at a host it controls. The allow-list is matched on the **parsed hostname**, never a substring, so `evil.com/nvd.nist.gov`, `nvd.nist.gov.evil.com` and userinfo tricks (`nvd.nist.gov@evil.com`) are all rejected. Redirects are followed **only while they stay on the list** — a trusted host with an open redirect can't bounce the fetch off-list or into the local network — and the final host is re-checked. Everything returned is run through the content firewall (`webshield`), because even a trusted source (an exploit-db PoC, an advisory quoting an exploit) is still someone else's text.
 
-## 10.3 `web_search` — ranked web search
+**How the model uses it:** when it hits something it isn't sure of — a specific CVE, a tool flag, an advisory, an ATT&CK technique, a public PoC — it's told to `web_read` the authoritative source rather than guess or state it from memory, then answer in its own words citing the URL. If what's needed genuinely isn't on an allow-listed source, it says so and tells you where to look instead of reaching for a host it doesn't have.
 
-Searches the web (DuckDuckGo), returning ranked results plus direct answers. The everyday "look this up."
+**Editing the allow-list:** `_WEB_READ_ALLOW` is a plain tuple of domains in `kali_core.py` (subdomains included automatically). Keep the bar high — a single open, user-editable host (a wiki anyone can PR) reopens the injection channel this design closes.
 
-## 10.4 `web_read` — fetch a page as clean text
+## 10.2 What was removed, and why
 
-Fetches any public page and returns clean, readable text — **headless**, no browser. Have Basilisk actually read an advisory or doc rather than guess.
-
-## 10.5 `web_verify` — the anti-propaganda engine
-
-Basilisk's most distinctive research tool. Instead of trusting one source it **gathers several independent sources**, scores each for credibility (primary / reputable / community / state-media / satire), checks whether they **actually corroborate**, and returns a **confidence label** — separating confirmed / inferred / unknown and **flagging state media and satire** instead of laundering them into fact. Use it whenever being wrong matters. "Verify whether X actually happened."
-
-## 10.6 `github` — read GitHub
-
-Searches repos and code, lists a user's repos, reads file trees, source, READMEs, releases, and issues. Public by default; private repos with a token you provide (`github_token`).
-
-## 10.7 `browser` — full browser automation
-
-Full **Playwright + Chromium** automation for sites that need a real browser — login-gated pages or JS-only apps `web_read` can't handle. Actions include `goto`, `read`, `click`, `fill`, `submit`, and more. It waits (bounded) for single-page apps to actually render and their XHR to settle before reading, so it doesn't act on a half-loaded skeleton. Heavier than `web_read`, used when a page genuinely requires it.
+Removed as a security measure and **gone**: the general `web_search` / `web_verify` / open-ended `web_read`, the OSINT/social readers (`osint_username`, `osint_lookup`, `social_read`), the `github` reader, the full `browser` (Playwright/Chromium/Brave) automation, and the semantic-search / GitHub "reach" sidecar (`kali_ext/reach.py`, `kali_ext/verify.py` — both deleted). Each fetched attacker-chosen text from the open web, social platforms, or arbitrary repos and fed it into the model — indirect prompt injection. `cve_lookup` (§4.7) and the allow-listed `web_read` above are the deliberately-narrow replacements.
 
 ---
 
@@ -463,7 +453,7 @@ Basilisk can **read replies aloud** — Piper (neural) or espeak, auto-selected.
 - **Urgency fast-path** — when you're clearly in a hurry, Basilisk skips preamble.
 - **Notification inbox** — a bell with a persistent store; `notify` posts here as well as to the desktop.
 - **Status pill** — a permanent indicator in the button row: it reads **"idle"** when nothing's running and the **live action title** ("forging a JWT…", "reading the source…") while Basilisk works. It never moves the other buttons, and it can't be pressed. In-chat, an in-progress reply shows the same action title instead of a generic "working".
-- **Media panel** — a toggleable bottom panel (the multimedia button, next to the terminal-log button) with a built-in **video/audio player** (play/seek/volume). Basilisk drops media into it with `media_play` — pass a **search term** ("play Rammstein Sonne"), a **page URL** (YouTube/SoundCloud/etc.), or a **direct media link**; it resolves search/page URLs with **yt-dlp** to a local file and plays it in the panel (not via a detached CLI player, so it won't cut off). Set `kind: "audio"` for a song. You can hide the panel and reopen it any time. It also shows **blocked pages**: when the browser hits a login wall or captcha, Basilisk screenshots the page and `media_show`s it here so you can see what's stopping it. (Playback needs GStreamer codecs, and search/URL playback needs yt-dlp; the panel degrades gracefully if they're absent.)
+- **Media panel** — a toggleable bottom panel (the multimedia button, next to the terminal-log button) with a built-in **video/audio player** (play/seek/volume). Basilisk drops media into it with `media_play` — pass a **search term** ("play Rammstein Sonne"), a **page URL** (YouTube/SoundCloud/etc.), or a **direct media link**; it resolves search/page URLs with **yt-dlp** to a local file and plays it in the panel (not via a detached CLI player, so it won't cut off). Set `kind: "audio"` for a song. You can hide the panel and reopen it any time. (Playback needs GStreamer codecs, and search/URL playback needs yt-dlp; the panel degrades gracefully if they're absent.)
 - **Ephemeral chats** — fresh chat per launch, auto-retention, empty-placeholder cleanup — all tunable.
 - **Theme & scale** — the "hellfire" charcoal-and-blood-red theme; UI scale auto-detects (down to a ~540px mobile width for NetHunter) or can be pinned.
 
@@ -533,7 +523,7 @@ The deliberate non-goals: Basilisk does **not** write self-propagating malware, 
 # Part 24 — Architecture & file layout
 
 - **`kali.py`** — the GTK4/libadwaita UI and the tool dispatch (status labels, the batchable-tool resolver, the main dispatch table). Every tool is registered here.
-- **`kali_core.py`** — the tool *implementations* (`tool_*`), the provider backends and router, the browser worker, and the safety/degradation helpers.
+- **`kali_core.py`** — the tool *implementations* (`tool_*`), the provider backends and router, and the safety/degradation helpers.
 - **`kali_persona.py`** — the system prompt, the immutable guardrail block, and the `TOOL_CONTRACT` catalog (which also drives lazy tool-group loading).
 - **`kali_ext/`** — optional stdlib-only sidecar modules loaded through a seam: memory, skills, sandbox, MCP, foresight, native reach, headroom compression, the pentest/exploit builders, the Juice Shop harness, benchmarking, XBOW, engagement graph, evidence verification, the untrusted-web-content firewall (webshield), and the background worker.
 - **`kali_safety.py` / `kali_ledger.py` / `kali_voice.py`** — the safety floor, the evidence ledger, and the voice stack.

@@ -32,37 +32,46 @@ keywords: ai security operator, kali linux ai, ai pentest tool, offensive securi
 
 <div align="center">
 
-## ⚡ Install — read it first, then run
+## ⚡ Install — your call: trust me, or check the work
 
 </div>
 
-Basilisk is a security tool, so it's installed the way a security tool should be — **auditable before anything runs.** The installer is a single, readable bash script; clone the repo, read it, then run it:
+Basilisk is an AI that runs shell commands on your machine **as you**. Before installing *any* tool like that — mine included — you should decide how much you trust it. So here's an honest, binary choice, no dark patterns:
+
+**Path A — you trust me. One line, done.**
 
 ```bash
-git clone https://github.com/the-priest/Basilisk.git kali && cd kali
+curl -fsSL https://raw.githubusercontent.com/the-priest/Basilisk/main/install.sh | bash
+```
+
+Fast, no fuss. You're taking my word that the installer and the code do what this page says. Plenty of tools you already run cleared exactly this bar — if you're comfortable with it, take this path and move on.
+
+**Path B — you don't trust a stranger's code (and blindly, you shouldn't). Read it, then run it.**
+
+```bash
+git clone https://github.com/the-priest/Basilisk.git kali
+```
+```bash
+cd kali
 ```
 ```bash
 less install.sh
+```
+```bash
+python3 -c "import ast,pathlib; [ast.parse(p.read_text()) for p in pathlib.Path('.').rglob('*.py')]; print('all modules parse')"
+```
+```bash
+python3 tests/test_grouped.py
 ```
 ```bash
 ./install.sh
 ```
 
-Prefer the one-liner? **Fetch it, read it, then run it** — don't blind-pipe a script into your shell:
+It's plain Python plus one shell script — nothing phones home, nothing needs a key to inspect, nothing hides in a binary. The test suites are stdlib-only (no display, no keys, no network), so you can run them before you trust it with anything. To freeze exactly what you audited so it can't change under you, check out a specific commit instead of tracking `main`.
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/the-priest/Basilisk/main/install.sh -o install.sh
-```
-```bash
-less install.sh
-```
-```bash
-bash install.sh
-```
+Both paths land in the same place. Pick the one that matches how much you trust a stranger's code — for a tool that literally tells the model to treat all outside input as hostile, Path B is the consistent move, but I'm not going to pretend the one-liner isn't sitting right there.
 
-The classic `curl … | bash` one-liner still works if you accept that tradeoff — but for a tool that tells you to sandbox untrusted input, reading the installer first is the consistent move, and it's the path we recommend.
-
-No Docker. No daemon. No account to create. The app itself runs on your machine — the only thing that leaves is the API call to the model provider you chose. Run the **same command** any time to update: it auto-detects your distro, installs what it needs, parse-checks every file before it touches your disk, backs up your chat history, and drops a launcher in your app grid.
+No Docker. No daemon. No account. The app runs on your machine — the only thing that leaves is the API call to the model provider you chose. Run your chosen command again any time to update: it auto-detects your distro, parse-checks every file before it touches your disk, backs up your chat history, and drops a launcher in your app grid.
 
 <br>
 
@@ -174,8 +183,8 @@ Read-only **sensing** runs freely. Anything that changes your system just runs �
 - **`scan_net`** — discovery on your own segment.
 - **`tooling_check`** — inventories **59** offensive tools (recon, probing, port-scan, fuzzing, vuln, secrets, creds, AD) with exact install lines, command aliases, and freshness nudges.
 - **`pentest_plan`** — an **ordered** recon plan (passive first) with profiles `web · network · ad · api · full · quick` and a `stealth / normal / aggressive` intensity knob. Steps run autonomously within the scope you set.
-- **`parse_output`** — turns raw scanner output into structured findings for **20+ tools** (nmap, httpx, nuclei, naabu, masscan, subfinder, ffuf, feroxbuster, gobuster, katana, whatweb, wpscan, sslscan/testssl, smbmap, netexec, nikto, gitleaks, dalfox, arjun…), strips ANSI, and **auto-chains into CVE intel** for every confirmed service+version.
-- **`cve_lookup`** — NVD CVEs enriched with **CISA KEV** (exploited in the wild?) and **EPSS** (exploit probability), re-ranked **KEV → EPSS → CVSS**.
+- **`parse_output`** — turns raw scanner output into structured findings for **20+ tools** (nmap, httpx, nuclei, naabu, masscan, subfinder, ffuf, feroxbuster, gobuster, katana, whatweb, wpscan, sslscan/testssl, smbmap, netexec, nikto, gitleaks, dalfox, arjun…), strips ANSI, and **auto-chains into CVE intel** (NVD → CISA KEV → EPSS, re-ranked) for every confirmed service+version.
+- **`cve_lookup`** — NVD CVEs enriched with **CISA KEV** (exploited in the wild?) and **EPSS** (exploit probability), re-ranked **KEV → EPSS → CVSS**. **Host-pinned** to NVD / CISA / FIRST — *not* a general web reader, so it survived the injection-surface cull: a scanned target can steer *which* CVE is queried via a banner, but can't redirect the fetch or plant the data.
 - **`nuclei_template`** — generate a structurally-valid Nuclei template from a simple spec, or validate one and get the exact list of problems before you run it.
 - **`reflect_findings`** — a false-positive self-check that flags unsupported, over-rated, hedged, host-less or duplicate findings *before* they reach a report.
 - **`attack_writeup`** — the **exploitation narrative**: a reproducible account of how access was obtained, pulled straight from the evidence ledger so the steps are backed by real hashed commands; secrets auto-redacted. This tool *documents* an authorized, already-executed path (the exploiting happens through the run gate; this writes it up).
@@ -216,16 +225,14 @@ Every command Basilisk runs is recorded automatically to an append-only JSONL le
 </details>
 
 <details>
-<summary><b>🌐 Web, search &amp; OSINT</b> — real browsing, fact-checking, footprinting</summary>
+<summary><b>🖼️ Images &amp; trusted lookup</b> — show pictures, read vetted sources</summary>
 
 <br>
 
-- **`browser`** — full **Playwright** automation that drives **Brave** when installed: Shields kill ads and trackers, cookie/consent walls are auto-dismissed, and the worst hosts are blocked at the network layer, so pages actually load and read. Falls back to bundled Chromium, and to headless HTTP for read-only fetches. goto, read, click, fill, submit, scroll, links, screenshot — and it self-heals a dead session instead of getting stuck.
-- **`web_search` · `web_read`** — ranked search and headless clean-text page fetch.
-- **`web_verify`** — anti-propaganda engine: gathers independent sources, scores each for credibility, checks corroboration (including high-signal anchors like CVE IDs and versions), and returns a confidence label instead of laundering state media or satire into fact.
-- **`osint_username` · `osint_lookup` · `social_read`** — public-profile and public-API readers (a hit means a public page exists, not that it's the same person).
-- **`image_search`** — searches the web for images and **shows them inline in chat** (no API key). Toggle off for OPSEC.
-- **`github`** — search/read repos, code, trees, READMEs, releases, issues (public; private with a token).
+- **`image_search`** — searches for images and **shows them inline in chat** (no API key). Returns image URLs to *render* (bytes → pixels), not page text to reason over. Toggle off for OPSEC.
+- **`web_read`** — fetch and read a page, but **only from a fixed allow-list of authoritative sources**: NVD/NIST, MITRE (CVE/ATT&CK/CWE/CAPEC), CISA (incl. the KEV catalog), FIRST (EPSS), official vendor/distro security channels (Microsoft MSRC, Red Hat, Ubuntu, Debian, Arch, kernel.org), OWASP, PortSwigger, the Kali docs, and exploit-db. Any other host is refused, redirects that leave the list are refused, and the returned text is run through the content firewall. It's the safe replacement for the removed general reader — the model reaches for it to look up a CVE, advisory, tool flag or technique from a trusted source instead of guessing, and **cannot** be pointed anywhere else.
+
+> **Removed for safety (see the safety-architecture section below).** The *general* web/search readers (`web_search`, `web_verify`, and the old open-ended `web_read`), the OSINT/social readers (`osint_username`, `osint_lookup`, `social_read`), the `github` reader, and the full **`browser`** (Playwright/Chromium/Brave) automation are **gone** — along with the semantic-search / GitHub "reach" sidecar. Every one of them fetched **attacker-chosen** URLs (anyone can host a page or push a repo that says *"ignore your instructions"*), which is the classic **indirect-prompt-injection** surface. What replaced them is deliberately narrow: the **allow-listed `web_read`** above and the host-pinned **`cve_lookup`** — both read only from sources an attacker can't point them at or plant content in.
 
 </details>
 
@@ -274,7 +281,7 @@ Basilisk is **decisive by default and un-catastrophic by construction.**
 
 - **Autonomous — no confirmation, ever.** Basilisk runs every command it decides on, immediately, and continues the chain on its own until the task is done or you hit Stop. There is no "confirm every command", no approval card, no mode to pick — you turn it on a job, walk away, and come back to results. The **only** dialog that can appear is a one-time prompt to collect a **sudo password** when a root command has no cached credential; after that it's cached and reused silently and you never see it again.
 - **The irreversible class is refused outright — no confirm, no override.** A **structural** detector (shlex-tokenized, `$IFS`/quote-normalized, recursing into `sh -c` / `eval`) **hard-blocks** disk/filesystem wipes, recursive root/`$HOME` deletes, fork bombs, and raw block-device writes — before the shell, no matter what steered the model. There is no "Run anyway" and no setting that turns it off. It sees through tricks a regex misses — `rm '-rf' /`, `rm${IFS}-rf${IFS}/`, `cd / && rm -rf *`, `find / -delete`, `echo … | base64 -d | sh` — while staying narrow enough that `nmap`, `nuclei`, `sqlmap` and `rm -rf ~/loot` never trip it. A raw shell write to Basilisk's own source is refused the same way, so a malicious page can't overwrite the safety code. Both are pinned in the test suite.
-- **A hardened content firewall stands between the outside world and the model.** Everything Basilisk reads from outside — a page via the browser or `web_read`, a search result, a social post, a repo, an **MCP tool's output**, an **analysed image** — is run through a deterministic firewall (`webshield`) *before* it can enter the model's context. Three layers: it **strips executable structure** (`<script>`/`<style>`/comment blocks, event handlers, `data:`/`javascript:` URIs, and the fake tool-call / role tags an attacker hides instructions in); it **redacts injection patterns** with a hardened rule set — not just "ignore previous instructions" and "system override", but prompt-extraction ("repeat the words above", "what were your instructions"), coercive framing ("you must run…"), credential-exfil lures, and markdown/URL data-exfiltration — and it sees through zero-width, homoglyph (`іgnоre`), and letter-spacing (`i g n o r e`) obfuscation; and it **wraps what's left in explicit `⟦UNTRUSTED WEB CONTENT⟧` markers** so the model treats it as data, never instructions. A target's raw command responses (an HTTP body from `curl`) can't be redacted without breaking the agent's parsing, so that channel is held at the **model level**: the core prompt names every untrusted source — web, target responses, files you didn't write, MCP results — and drills in that outside content is data, never a command. The whole thing is pinned in the test suite.
+- **A hardened content firewall stands between the outside world and the model.** Everything Basilisk reads from outside — an **MCP tool's output**, an **analysed image**, a target's own responses to your commands — is run through a deterministic firewall (`webshield`) *before* it can enter the model's context. Three layers: it **strips executable structure** (`<script>`/`<style>`/comment blocks, event handlers, `data:`/`javascript:` URIs, and the fake tool-call / role tags an attacker hides instructions in); it **redacts injection patterns** with a hardened rule set — not just "ignore previous instructions" and "system override", but prompt-extraction ("repeat the words above", "what were your instructions"), coercive framing ("you must run…"), credential-exfil lures, and markdown/URL data-exfiltration — and it sees through zero-width, homoglyph (`іgnоre`), and letter-spacing (`i g n o r e`) obfuscation; and it **wraps what's left in explicit `⟦UNTRUSTED WEB CONTENT⟧` markers** so the model treats it as data, never instructions. A target's raw command responses (an HTTP body from `curl`) can't be redacted without breaking the agent's parsing, so that channel is held at the **model level**: the core prompt names every untrusted source — target responses, files you didn't write, MCP results, image-analysis text — and drills in that outside content is data, never a command. **The biggest single reduction in this surface, though, was structural: the tools whose entire job was to pull *attacker-chosen* web / social / repo text into the model were removed outright** (see the Images &amp; trusted lookup section) — you can't be injected through a channel that no longer exists. What's left is deliberately narrow and can't be aimed by an attacker: `cve_lookup` (host-pinned to NVD/CISA/FIRST) and `web_read` (a fixed allow-list of authoritative sources, redirects re-validated per hop, output shielded). The whole thing is pinned in the test suite.
 - **Basilisk's own safety code can't be shell-stripped**, your **sudo password is never stored or shown to the model**, and self-written code runs only in a **bubblewrap jail** after passing its own test.
 - **It can't lie about your machine.** Hardware and system facts are read live with a tool, never guessed.
 - **Exploitation is the job.** Basilisk writes and runs real exploits (SQLi, XSS, JWT forgery, SSRF, sqlmap-driven attacks, and more) against targets you're authorized to test, within scope you set. The line it holds: no **standalone weaponized malware** (reverse shells, implants, ransomware, backdoors), and the irreversible/destructive class is refused outright and can never run through Basilisk at all.
@@ -293,40 +300,15 @@ The one thing no tool in this class can claim to have *solved* is indirect **pro
 
 ## Install &amp; update
 
-**Audit before you run.** The installer is one readable bash script — so read it, then run it. That's the path that matches the rest of this tool's discipline (if we tell you to sandbox untrusted input and audit code before you deploy it, we shouldn't ask you to blind-pipe our script into your shell):
+Install is the **two-path choice at the top** — trust me and one-line it, or clone, audit, and run from disk. Both land in the same place; pick based on how much you trust a stranger's code.
 
-```bash
-git clone https://github.com/the-priest/Basilisk.git kali && cd kali
-```
-```bash
-less install.sh
-```
-```bash
-./install.sh
-```
-
-Or fetch the one-liner, read it, then run it:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/the-priest/Basilisk/main/install.sh -o install.sh
-```
-```bash
-less install.sh
-```
-```bash
-bash install.sh
-```
-
-> **On `curl … | bash`:** the classic pipe-straight-to-shell one-liner works and is the fastest path, but it runs an unaudited remote script before anything — including the evidence ledger — is initialized. For a security tool that's the wrong default, so it's offered only as an explicit convenience for people who accept that tradeoff; the read-first paths above are the recommended ones. To freeze exactly what you run so it can't change under you, check out a specific commit (or a release tag, if one's published) instead of tracking `main`.
-
-Run the same command any time to update. The installer is idempotent and genuinely careful — it treats your machine the way you'd want it treated:
+Run your chosen command again any time to update. The installer is idempotent and genuinely careful — it treats your machine the way you'd want it treated:
 
 - 🐍 Detects **Python 3.10+** and installs **GTK4 + libadwaita** (apt / pacman / dnf, auto-detected).
-- 📦 Fetches the core modules **plus** the optional `kali_ext/` sidecar — and **verifies every one of the 18 sidecar modules arrived**, retrying any that didn't, refusing to install a half-broken update over a working one.
+- 📦 Fetches the core modules **plus** the optional `kali_ext/` sidecar — and **verifies every one of the 16 sidecar modules arrived**, retrying any that didn't, refusing to install a half-broken update over a working one.
 - 🛟 **Parse-checks every incoming file before it overwrites anything** — a corrupted download can't replace your working install.
 - 💾 **Backs up your chat database** before each update and reports the version move.
-- 🧩 Installs optional desktop helpers, voice packages, and optionally Playwright + Chromium.
-- 🦁 **`WITH_BRAVE=1`** installs Brave for ad/tracker-free browsing.
+- 🧩 Installs optional desktop-control helpers and voice packages.
 - 🚀 Drops a `kali` launcher in `~/.local/bin/` and a `.desktop` entry in your app grid.
 
 **Already cloned?** Just `./install.sh` from inside the repo.
@@ -343,13 +325,11 @@ Run the same command any time to update. The installer is idempotent and genuine
 | `--uninstall` | remove Basilisk (chat history kept) |
 | `--no-systemd` | skip the background-worker systemd unit |
 | `--no-helpers` | skip optional desktop-control helpers |
-| `--no-browser` | skip Playwright + Chromium |
 | `--no-voice` | skip voice setup |
 | `--no-prompt` | non-interactive (skips the API-key prompt) |
 
 ```bash
 GROQ_API_KEY=gsk_...  ./install.sh      # preset a key, no prompt
-WITH_BRAVE=1          ./install.sh      # also install Brave
 WITH_MCP=1            ./install.sh      # configure a safe starter MCP server
 BASILISK_REPO=user/fork  BASILISK_BRANCH=dev  ./install.sh
 ```
@@ -449,8 +429,6 @@ whether an attempt landed, retry intelligently, and keep going on its own:
 - **Recon sweep** — `webapp_recon` enumerates the high-signal leak surface
   (`/ftp`, `/encryptionkeys/jwt.pub`, exposed config/logs/backups, the SPA bundle)
   so the leaked-key / backup challenges stop failing on missed recon.
-- **Browser reliability** — `goto`/`submit`/`click` wait (bounded) for the Angular
-  SPA to render before reading, fixing browser-dependent challenges.
 
 The distribution shows it working: on an earlier one-shot run (before the loop),
 the 5★ tier was 1/19. With the closed loop and the builders, it's **10/19** — that
@@ -511,8 +489,8 @@ Keys live only in `~/.config/kali/settings.json` — they never go anywhere but 
    └─────────┘
          │
    ┌─────┴───────────────────────────────────────────────────────┐
-   │  kali_ext/  (optional sidecar — off by default, 18 modules)  │
-   │  memory · skills · sandbox · foresight · mcp · verify · reach │
+   │  kali_ext/  (optional sidecar — off by default, 16 modules)  │
+   │  memory · skills · sandbox · foresight · mcp · webshield ·    │
    │  worker · headroom · pentest · codescan · engage · bench ·    │
    │  extman · juiceshop · xbow                                    │
    └─────────────────────────────────────────────────────────────┘

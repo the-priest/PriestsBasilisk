@@ -24,7 +24,6 @@
 #   ./install.sh --remove-oracle     # remove the old Oracle install
 #   ./install.sh --no-systemd        # don't install the systemd unit
 #   ./install.sh --no-helpers        # skip optional desktop helpers
-#   ./install.sh --no-browser        # skip Playwright/Chromium
 #   ./install.sh --no-voice          # skip voice setup (espeak/piper/mic)
 #   ./install.sh --no-groq           # don't install the groq library / skip key prompt
 #   ./install.sh --no-prompt         # skip ALL interactive prompts
@@ -44,7 +43,6 @@ set -eo pipefail   # NOTE: no -u — curl|bash leaves BASH_SOURCE empty
 ACTION="install"
 SKIP_SYSTEMD=0
 SKIP_HELPERS=0
-SKIP_BROWSER=0
 SKIP_GROQ=0
 SKIP_VOICE=0
 NO_PROMPT=0
@@ -55,7 +53,6 @@ for arg in "$@"; do
     --remove-oracle)     ACTION="remove-oracle" ;;
     --no-systemd)        SKIP_SYSTEMD=1 ;;
     --no-helpers)        SKIP_HELPERS=1 ;;
-    --no-browser)        SKIP_BROWSER=1 ;;
     --no-groq)           SKIP_GROQ=1 ;;
     --no-voice)          SKIP_VOICE=1 ;;
     --no-prompt)         NO_PROMPT=1 ;;
@@ -298,7 +295,7 @@ fi
 # ── 4. Optional desktop-control helpers ──────────────────────────
 #
 # Basilisk's device-control tools (launch apps, type/click, screenshots,
-# screen OCR, browser automation) lean on small system helpers.  They
+# screen OCR) lean on small system helpers.  They
 # all degrade gracefully if absent — each tool reports what's missing —
 # but installing them up front means "do anything I ask" works on day
 # one.  This step is best-effort: failures here never abort the install.
@@ -329,44 +326,6 @@ if [ $SKIP_HELPERS -eq 0 ] && command -v apt-get >/dev/null; then
   else
     warn "some helpers unavailable on this mirror — Basilisk still runs;"
     warn "missing tools just report themselves when used"
-  fi
-  # Browser automation (optional, larger): Playwright + Chromium.
-  if [ $SKIP_BROWSER -eq 0 ]; then
-    say "browser automation (Playwright + Chromium, ~150MB) — optional"
-    if python3 -m pip install --user --break-system-packages --quiet playwright 2>/dev/null \
-       && python3 -m playwright install chromium 2>/dev/null; then
-      # Install the system libraries chromium needs to actually LAUNCH (not just
-      # download). Without these, chromium is present but fails to start. Needs
-      # root; best-effort so the install doesn't hard-fail without sudo.
-      if command -v sudo >/dev/null 2>&1; then
-        sudo python3 -m playwright install-deps chromium 2>/dev/null \
-          && ok "chromium system libraries installed" \
-          || warn "could not install chromium system libs (run: sudo python3 -m playwright install-deps chromium)"
-      else
-        python3 -m playwright install-deps chromium 2>/dev/null || true
-      fi
-      ok "Playwright + Chromium installed"
-    else
-      warn "Playwright not installed — the browser tool will tell you how"
-      warn "to enable it later:  pip install playwright && playwright install chromium && sudo playwright install-deps chromium"
-    fi
-
-    # Brave: Basilisk's browser tool drives Brave when present (its Shields block
-    # ads/trackers, so pages load without consent walls).  Opt in with
-    # WITH_BRAVE=1; otherwise we just detect an existing install.
-    if command -v brave-browser >/dev/null 2>&1 || [ -x /usr/bin/brave-browser ] \
-       || [ -x /opt/brave.com/brave/brave-browser ]; then
-      ok "Brave detected — the browser tool will use it"
-    elif [ "${WITH_BRAVE:-0}" = "1" ]; then
-      say "installing Brave (WITH_BRAVE=1) …"
-      if curl -fsS https://dl.brave.com/install.sh | sh >/dev/null 2>&1; then
-        ok "Brave installed — browsing will use it (ad/tracker Shields on)"
-      else
-        warn "Brave install failed — browsing falls back to bundled Chromium"
-      fi
-    else
-      say "tip: for ad/tracker-free browsing, install Brave (re-run with WITH_BRAVE=1)"
-    fi
   fi
 else
   [ $SKIP_HELPERS -eq 1 ] && warn "skipping desktop helpers (--no-helpers)"

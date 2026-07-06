@@ -20,7 +20,6 @@ from . import memory as _memory
 from . import skills as _skills
 from . import foresight as _foresight
 from . import mcp as _mcp
-from . import reach as _reach
 
 
 class _State:
@@ -104,7 +103,6 @@ def init(settings: Dict[str, Any],
     """
     try:
         S.settings = settings or {}
-        _reach.bind_settings(S.settings)
         S.data_dir = Path(os.path.expanduser(data_dir))
         S.ext_dir = S.data_dir / "ext"
         S.ext_dir.mkdir(parents=True, exist_ok=True)
@@ -213,8 +211,6 @@ def system_prompt_block() -> str:
                 lines.append(f"  <tool name=\"{s['name']}\">{{...}}</tool>  // "
                              f"{d[0] if d else ''}")
             parts.append("\n".join(lines))
-    if S.on("reach_enabled", True):
-        parts.append(_reach.PROMPT_BLOCK)
     return ("\n\n".join(p for p in parts if p)).strip()
 
 
@@ -308,9 +304,6 @@ def extra_tools(host: Any) -> Dict[str, Callable[[Dict[str, Any]], str]]:
             out[spec["name"]] = _mk(spec["name"])
         # A lister so the operator/model can see what's wired up.
         out["mcp_tools"] = lambda a: _mcp_tools_listing()
-
-    if S.on("reach_enabled", True):
-        out.update(_reach.tools())
 
     return out
 

@@ -42,11 +42,10 @@ from kali_core import (
     tool_notify, tool_type_text, tool_press_key,
     tool_media_control, tool_screenshot, tool_read_screen,
     tool_make_dir, tool_copy_path, tool_move_path, tool_delete_path,
-    tool_path_info, tool_open_url, tool_browser,
-    tool_web_search, tool_web_read, tool_github,
+    tool_path_info, tool_open_url, tool_web_read,
     tool_image_search,
     tool_analyze_image, tool_capture_photo, tool_detect_faces,
-    tool_web_verify, tool_tooling_check, tool_pentest_plan, tool_cve_lookup,
+    tool_tooling_check, tool_pentest_plan, tool_cve_lookup,
     tool_parse_output, tool_methodology, tool_wordlist_find,
     tool_cheatsheet, tool_report_findings,
     tool_nuclei_template, tool_reflect_findings,
@@ -63,7 +62,6 @@ from kali_core import (
     tool_webapp_recon, tool_juiceshop_source,
     tool_benchmark_targets, tool_benchmark_score, tool_benchmark_report,
     tool_benchmark_compare,
-    tool_osint_username, tool_osint_lookup, tool_social_read,
     quick_facts as tool_quick_facts,
     sudo_cached, detect_urgency, looks_degraded,
     note_command, recent_duplicate,
@@ -1566,6 +1564,42 @@ _CURRENT_ACTION = ""
 _APPROVAL_MODE = "none"
 
 
+def _img_url_is_fetchable(url: str) -> bool:
+    """SSRF guard for the inline image fetcher.  Resolve the URL's host and
+    refuse link-local / multicast / reserved / unspecified addresses — the
+    cloud-metadata endpoint (169.254.169.254) and other targets only an
+    attacker would point an <img> at (e.g. an image URL injected through a
+    compromised page or target response).  Loopback and private LAN ranges are
+    deliberately ALLOWED: Basilisk legitimately renders images from local
+    pentest targets (Juice Shop on localhost / the LAN).  This is a
+    resolve-then-check, so an active DNS-rebinding adversary could still slip an
+    internal address past it; it stops the common metadata/SSRF cases, which is
+    the point — cheap, and no cost to any legitimate fetch."""
+    import ipaddress
+    import socket as _sock
+    try:
+        from urllib.parse import urlsplit
+        host = urlsplit(url).hostname
+    except Exception:
+        host = None
+    if not host:
+        return True   # can't parse — let urlopen surface the real error
+    try:
+        infos = _sock.getaddrinfo(host, None)
+    except Exception:
+        return True   # can't resolve — not this guard's job to fail it
+    for info in infos:
+        ip = info[4][0]
+        try:
+            addr = ipaddress.ip_address(ip.split("%")[0])
+        except ValueError:
+            continue
+        if (addr.is_link_local or addr.is_multicast
+                or addr.is_reserved or addr.is_unspecified):
+            return False
+    return True
+
+
 class ImageWidget(Gtk.Box):
     """An image rendered inline in chat from a URL (http/https/file/local path).
 
@@ -1616,6 +1650,9 @@ class ImageWidget(Gtk.Box):
                 return f.read(self._MAX_BYTES)
         if not (u.startswith("http://") or u.startswith("https://")):
             raise ValueError("unsupported image URL scheme")
+        if not _img_url_is_fetchable(u):
+            raise ValueError("refusing image fetch to a link-local/reserved "
+                             "address (SSRF guard)")
         req = urllib.request.Request(u, headers={
             "User-Agent": self._UA,
             "Accept": "image/avif,image/webp,image/png,image/jpeg,image/*,*/*;q=0.8",
@@ -2861,17 +2898,6 @@ class SettingsDialog(Adw.PreferencesDialog):
             lambda r, _ps: self._set("show_thoughts", r.get_active()))
         intel_g.add(self.thoughts_row)
 
-        verify_row = Adw.SpinRow.new_with_range(2, 8, 1)
-        verify_row.set_title("Verification sources")
-        verify_row.set_subtitle(
-            "How many independent sources web_verify cross-checks before "
-            "she trusts a claim.")
-        verify_row.set_value(int(parent.settings.get("verify_max_sources", 5)))
-        verify_row.connect(
-            "notify::value",
-            lambda r, *_: self._set("verify_max_sources", int(r.get_value())))
-        intel_g.add(verify_row)
-
         gen_page.add(intel_g)
 
         # ── Extensions (sidecar capabilities) ──
@@ -2914,17 +2940,6 @@ class SettingsDialog(Adw.PreferencesDialog):
             "notify::active",
             lambda r, _ps: self._set("foresight_enabled", r.get_active()))
         ext_g.add(self.foresight_row)
-
-        self.reach_row = Adw.SwitchRow()
-        self.reach_row.set_title("Native web reach")
-        self.reach_row.set_subtitle(
-            "Semantic full-web search plus GitHub repo/issue search and README "
-            "reading — keyless. Powers deep research.")
-        self.reach_row.set_active(bool(parent.settings.get("reach_enabled", True)))
-        self.reach_row.connect(
-            "notify::active",
-            lambda r, _ps: self._set("reach_enabled", r.get_active()))
-        ext_g.add(self.reach_row)
 
         self.mem_consolidate_row = Adw.SwitchRow()
         self.mem_consolidate_row.set_title("Consolidate memory")
@@ -5127,17 +5142,11 @@ class MainWindow(Adw.ApplicationWindow):
     # reads "searching the web… → reading a page… → cross-checking sources…"
     # instead of a bare tool name or a flat "working…".
     _TOOL_STATUS = {
-        "web_search":       "searching the web",
+        "web_read":         "checking a trusted source",
         "image_search":     "finding images",
         "analyze_image":    "looking at the image",
         "capture_photo":    "taking a photo",
         "detect_faces":     "finding faces",
-        "web_read":         "reading a page",
-        "web_verify":       "cross-checking sources",
-        "github":           "browsing GitHub",
-        "osint_username":   "checking public profiles",
-        "osint_lookup":     "checking public profiles",
-        "social_read":      "reading a profile",
         "tooling_check":    "checking installed tools",
         "pentest_plan":     "planning recon",
         "cve_lookup":       "looking up CVEs",
@@ -5205,7 +5214,6 @@ class MainWindow(Adw.ApplicationWindow):
         "list_windows":     "listing windows",
         "launch_app":       "launching an app",
         "open_url":         "opening a link",
-        "browser":          "using the browser",
         "focus_window":     "switching windows",
         "close_window":     "closing a window",
         "type_text":        "typing",
@@ -5720,35 +5728,12 @@ class MainWindow(Adw.ApplicationWindow):
             except (TypeError, ValueError):
                 return d
 
-        # Web / GitHub research — the tools most likely to chain.
-        if n == "web_search":
-            return lambda: tool_web_search(
-                a.get("query", a.get("q", "")), i(a.get("max_results", 6), 6),
-                a.get("site", ""))
-        if n == "web_read":
-            return lambda: tool_web_read(
-                a.get("url", ""), i(a.get("max_chars", 6000), 6000))
-        if n == "osint_username":
-            return lambda: tool_osint_username(
-                a.get("username", a.get("user", "")), a.get("sites", ""),
-                i(a.get("timeout", 12), 12))
-        if n == "osint_lookup":
-            return lambda: tool_osint_lookup(
-                a.get("target", a.get("name", "")), a.get("full_name", ""))
-        if n == "social_read":
-            return lambda: tool_social_read(
-                a.get("url", a.get("handle", a.get("url_or_handle", ""))),
-                i(a.get("max_chars", 6000), 6000))
-        if n == "github":
-            return lambda: tool_github(
-                a.get("action", ""), a.get("query", ""), a.get("repo", ""),
-                a.get("user", ""), a.get("path", ""),
-                a.get("ref", a.get("branch", "")), i(a.get("limit", 10), 10))
         # Pentest planning / inventory / reference — pure local work (which-
         # checks, building a command plan, text parsing, reading the
         # filesystem, formatting), no network and no execution, so it's safe
-        # to bundle.  web_verify and cve_lookup are deliberately NOT here:
-        # they fan out their own network requests and must stay single-path.
+        # to bundle.  (The web / OSINT / social / GitHub readers that used to
+        # live here were removed — they ingested attacker-controllable external
+        # text, i.e. the prompt-injection surface.)
         if n == "tooling_check":
             return lambda: tool_tooling_check()
         if n == "pentest_plan":
@@ -6191,32 +6176,21 @@ class MainWindow(Adw.ApplicationWindow):
                 f"DELETE {a.get('path','')}"
                 f"{' (recursive)' if a.get('recursive') else ''}"),
 
-            # ── Browser automation ──
-            # read/title/url are read-only; goto/click/fill/screenshot/close
-            # are actions but low-risk, so they run without a blocking
-            # confirm (the operator can still stop the turn).  Destructive
-            # browser side-effects come from the page, not the tool.
-            "browser":           lambda a: self._tool_simple(
-                lambda: tool_browser(
-                    a.get("action", ""),
-                    a.get("target") or a.get("url") or a.get("href")
-                    or a.get("link") or a.get("address") or a.get("selector")
-                    or a.get("query") or "",
-                    a.get("value") or a.get("text") or a.get("keys") or "")),
-
-            # ── Web search & read (read-only: simple, headless) ──
-            # Fast HTTP search/read — no GUI browser, no API key.  This is
-            # the path the model should reach for to "look something up";
-            # the browser tool is reserved for interactive/login-gated work.
-            "web_search":        lambda a: self._tool_simple(
-                lambda: tool_web_search(
-                    a.get("query", a.get("q", "")),
-                    _safe_int(a.get("max_results", 6), 6),
-                    a.get("site", ""))),
+            # ── Trusted-source reference lookup (read-only, allow-listed) ──
+            # web_read refuses any host not on kali_core._WEB_READ_ALLOW
+            # (NVD/MITRE/CISA/FIRST/vendor advisories/OWASP/PortSwigger/Kali
+            # docs/exploit-db), re-validates redirects, and shields output — so
+            # it can't be pointed at attacker content. Single-path (own fetch).
             "web_read":          lambda a: self._tool_simple(
                 lambda: tool_web_read(
-                    a.get("url", ""),
+                    a.get("url", a.get("u", "")),
                     _safe_int(a.get("max_chars", 6000), 6000))),
+
+            # ── Media: image search / analysis (read-only) ──
+            # image_search returns image URLs to RENDER, not page text to
+            # reason over.  (The web/OSINT/social/GitHub/CVE readers were
+            # removed — they fed attacker-controllable external text into the
+            # model, the indirect-prompt-injection surface.)
             "image_search":      lambda a: self._tool_simple(
                 lambda: tool_image_search(
                     a.get("query", a.get("q", "")),
@@ -6233,50 +6207,11 @@ class MainWindow(Adw.ApplicationWindow):
                 lambda: tool_detect_faces(
                     a.get("image_path", a.get("path", "")))),
 
-            # ── OSINT (read-only: simple, public sources only) ──
-            # Footprint / username discovery across public profile sites and
-            # platform-aware public readers.  No login, no gated data.
-            "osint_username":    lambda a: self._tool_simple(
-                lambda: tool_osint_username(
-                    a.get("username", a.get("user", "")),
-                    a.get("sites", ""),
-                    _safe_int(a.get("timeout", 12), 12))),
-            "osint_lookup":      lambda a: self._tool_simple(
-                lambda: tool_osint_lookup(
-                    a.get("target", a.get("name", "")),
-                    a.get("full_name", ""))),
-            "social_read":       lambda a: self._tool_simple(
-                lambda: tool_social_read(
-                    a.get("url", a.get("handle", a.get("url_or_handle", ""))),
-                    _safe_int(a.get("max_chars", 6000), 6000))),
-
-            # ── GitHub (read-only: simple, headless) ──
-            "github":            lambda a: self._tool_simple(
-                lambda: tool_github(
-                    a.get("action", ""), a.get("query", ""),
-                    a.get("repo", ""), a.get("user", ""),
-                    a.get("path", ""), a.get("ref", a.get("branch", "")),
-                    _safe_int(a.get("limit", 10), 10))),
-
-            # ── Verification & anti-propaganda (read-only) ──
-            # Cross-check a claim across several INDEPENDENT sources, score
-            # them for credibility, flag state-media / satire, and report a
-            # confidence label.  The path the model should take before
-            # asserting anything current, factual, or security-relevant.
-            "web_verify":        lambda a: self._tool_simple(
-                lambda: tool_web_verify(
-                    a.get("query", a.get("q", a.get("claim", ""))),
-                    _safe_int(a.get("max_sources",
-                                    self.settings.get("verify_max_sources", 5)),
-                              self.settings.get("verify_max_sources", 5)),
-                    self.settings)),
-
             # ── Pentest support (read-only / proposing only) ──
             # None of these execute an attack: pentest_plan returns PROPOSED
             # commands that still go through the approve-before-run gate; the
             # rest are inventory, text parsing, filesystem lookups, reference
-            # knowledge and report formatting.  cve_lookup is the only one
-            # that touches the network (NVD + KEV + EPSS).
+            # knowledge and report formatting.
             "tooling_check":     lambda a: self._tool_simple(
                 lambda: tool_tooling_check()),
             "pentest_plan":      lambda a: self._tool_simple(
@@ -6284,6 +6219,9 @@ class MainWindow(Adw.ApplicationWindow):
                     a.get("target", a.get("host", a.get("url", ""))),
                     a.get("profile", a.get("mode", "web")),
                     a.get("intensity", a.get("speed", "normal")))),
+            # cve_lookup is host-pinned to NVD / CISA KEV / FIRST EPSS (not a
+            # general web reader) — it fans out its own network calls, so it
+            # stays single-path (not in the pure/batch resolver).
             "cve_lookup":        lambda a: self._tool_simple(
                 lambda: tool_cve_lookup(
                     a.get("product", a.get("name", a.get("software", ""))),
