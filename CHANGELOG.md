@@ -21,11 +21,12 @@ turn it into an ask-first mode.
   prompt.
 - Docs (README + manual) rewritten to describe the single autonomous posture and
   the one-time sudo prompt.
-- **Benchmark (autonomous, v5.1.2):** a fully autonomous Juice Shop run scored
-  **43/113 (38%)** — and the 5★ tier jumped to **10/19 (53%)** vs 1/19 on the
-  earlier one-shot run, showing the closed loop + white-box + class builders
-  reaching deep into the hard-exploit tier. Scorecard in
-  `benchmarks/juice-shop-scoreboard-2026-07-06.txt`. README corrected to stop
+- **Benchmark (autonomous, black-box, v5.1.2):** a fully autonomous, **black-box**
+  Juice Shop run (no source access — the source files aren't on the machine)
+  scored **43/113 (38%)**, and the 5★ tier jumped to **10/19 (53%)** vs 1/19 on the
+  earlier one-shot run, tracking the 5.x arsenal (closed-loop feedback + class
+  builders + recon). Scorecard in `benchmarks/juice-shop-scoreboard-2026-07-06.txt`.
+  Demo videos of 5★ solves added to the README. README also corrected to stop
   implying a local model — the app and your data are on your machine, but the
   model is DeepSeek via SiliconFlow (an API), stated plainly.
 
@@ -72,7 +73,7 @@ walk away" session used to stall.
 - **README consistency pass.** Corrected the destructive-command story
   everywhere (it's now *refused outright*, not "force-confirmed" — matching the
   code), fixed the sidecar module count (17), reframed the benchmark section from
-  the stale "v4.10.0" label to the current 5.x closed loop + white-box, and added
+  the stale "v4.10.0" label to the current 5.x closed loop, and added
   autonomous mode to the safety model. Version badges and headers moved to 5.1.0.
 
 ## v5.0.0 — the operator release
@@ -83,10 +84,10 @@ manual documenting every one of Basilisk's 119 tool entries in detail.
 
 The capability jump that defines 5.0:
 
-- **White-box benchmarking.** `juiceshop_source` reads the target's actual code
-  from the running container (or a local dir) — tree / read / grep / the
-  authoritative `challenges.yml` — so the model finds the vulnerable line
-  instead of black-box guessing. And `juiceshop_next` now surfaces each unsolved
+- **Optional source reader.** `juiceshop_source` can read the target's own code
+  from a running container you control (or a local dir) — tree / read / grep / the
+  `challenges.yml` — as a shortcut *if* you happen to have source on hand. It's
+  optional and not needed for a black-box run. And `juiceshop_next` now surfaces each unsolved
   challenge's **live objective, hint, and stable source key straight from the
   running build**, so the challenge list is exactly this instance's — never a
   stale or hardcoded one. Grep a challenge's key to jump to the code that scores

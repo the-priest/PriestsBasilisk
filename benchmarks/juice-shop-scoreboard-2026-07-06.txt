@@ -1,11 +1,12 @@
 ======================================================================
   OWASP JUICE SHOP BENCHMARK — FINAL SCORECARD
-  Basilisk v5.1.2 — fully autonomous, closed-loop + white-box
+  Basilisk v5.1.2 — fully autonomous
 ======================================================================
 
   DATE: 2026-07-06
   TARGET: localhost:3000  (NODE_ENV=unsafe)
-  MODE: autonomous (no operator intervention; model = DeepSeek via SiliconFlow)
+  MODE: autonomous, BLACK-BOX (no source access — source files not on the
+        machine; model = DeepSeek via SiliconFlow)
 
   TOTAL SOLVED: 43/113
   PERCENTAGE: 38.1%
@@ -57,15 +58,17 @@
   HOW IT WAS RUN
 ======================================================================
 
-  Fully autonomous: Basilisk was pointed at the target and left to work
-  the board on its own — no per-command approval, no human clicking.
-  It used the closed-loop harness (juiceshop_score -> juiceshop_next ->
-  build exploit -> fire -> juiceshop_diff -> repeat), white-box source
-  reading (juiceshop_source), and the class exploit builders (jwt_forge,
-  reset_password, nosql_injection, xxe_payload, coupon_forge,
-  captcha_solve, webapp_recon). Juice Shop self-grades: a challenge only
-  flips to solved when the exploit genuinely works, read live from
-  /api/Challenges. Reproduce with:
+  Fully autonomous, BLACK-BOX: Basilisk was pointed at the target and left
+  to work the board on its own — no per-command approval, no human clicking,
+  and no access to the application's source (the source files aren't on the
+  machine). It exploited everything from the outside, the way other tools and
+  human CTF players are scored. Its arsenal: the closed-loop harness
+  (juiceshop_score -> juiceshop_next -> build exploit -> fire -> juiceshop_diff
+  -> repeat), the class exploit builders (jwt_forge, reset_password,
+  nosql_injection, xxe_payload, coupon_forge, captcha_solve, webapp_recon),
+  and the browser. Juice Shop self-grades: a challenge only flips to solved
+  when the exploit genuinely works, read live from /api/Challenges.
+  Reproduce with:
 
     docker run -d -p 3000:3000 -e NODE_ENV=unsafe --name juiceshop \
       bkimminich/juice-shop

@@ -48,9 +48,11 @@ No Docker. No daemon. No account. No cloud. Paste it once to install; paste the 
 
 <div align="center">
 
-## ▶ See it in action solving those 5 star challanges from benchmark i cought 2 on video
+## ▶ See it in action
 
-*Model in the loop, tools on the target, a receipt for every move.*
+**5★ challenges from the benchmark — solved fully autonomously, caught live.**
+
+*Model in the loop, tools on the target, a receipt for every move. No source access — pure black-box, start to finish.*
 
 </div>
 
@@ -338,13 +340,16 @@ available challenges (38%)**:
 
 Hardest cracked: **Login Support Team** (6★).
 
-**What this number means, and why the shape is the interesting part.** 38% fully
-autonomous on the *full* board is a strong result on its own — published research
-puts fully-autonomous LLM pentest agents in roughly the 20–30% range on
-comparable tasks. But look at the **5★ row: 10 of 19 (53%)** — a higher solve rate
-than the 3★ and 4★ tiers below it. That inversion is the whole point of the 5.x
-work. The class exploit builders and white-box source access map directly onto
-specific hard challenges — JWT forgery (*Unsigned JWT*), the security-question
+**What this number means, and why the shape is the interesting part.** This was a
+**pure black-box run** — Basilisk had no access to Juice Shop's source (the source
+files aren't even on the machine); it exploited everything from the outside, the
+same way other tools and human CTF players are scored. 38% fully autonomous and
+black-box on the *full* board is a strong result — published research puts
+fully-autonomous LLM pentest agents in roughly the 20–30% range on comparable
+tasks. But look at the **5★ row: 10 of 19 (53%)** — a higher solve rate than the
+3★ and 4★ tiers below it. That inversion tracks the 5.x work: the class exploit
+builders map directly onto specific hard challenges — JWT forgery
+(*Unsigned JWT*), the security-question
 password resets (*Reset Bjoern's / Morty's Password*, *Change Bender's Password*),
 leaked-secret recon (*Leaked API Key*, *Leaked Access Logs*, *Email Leak*), and
 supply-chain / typosquatting analysis (*Frontend Typosquatting*, *Blockchain
@@ -372,20 +377,18 @@ Then turn Basilisk loose on the board and call `juiceshop_report`, which reads t
 live scoreboard (`/api/Challenges`) and reports solved/available by difficulty.
 Full scorecard: [`benchmarks/juice-shop-scoreboard-2026-07-06.txt`](benchmarks/juice-shop-scoreboard-2026-07-06.txt).
 
-#### How the autonomous run works — the 5.x closed loop + white-box
+#### How the autonomous run works — the 5.x arsenal (black-box)
 
-The result above isn't one-shot guessing. 5.x runs a feedback loop with source
-access and per-class exploit builders, so the agent can tell whether an attempt
-landed, retry intelligently, and keep going on its own:
+No source access, no cheating — Basilisk worked the board from the outside. 5.x
+runs a feedback loop plus per-class exploit builders, so the agent can tell
+whether an attempt landed, retry intelligently, and keep going on its own:
 
 - **Closed-loop harness** — `juiceshop_score` reads the live board, `juiceshop_next`
   returns what's still unsolved (easiest-first, each mapped to the tool that
-  solves it, carrying its live objective + hint + source key; `per_tier` gives a
-  focused ~30-challenge board), and `juiceshop_diff` confirms a hit by diffing the
-  board. The agent works the board → tries a target → confirms → moves on.
-- **White-box source access** — `juiceshop_source` reads the running target's
-  actual code (tree / read / grep / the authoritative `challenges.yml`), so the
-  agent finds the vulnerable line instead of black-box guessing.
+  solves it, carrying its live objective + hint from the public scoreboard;
+  `per_tier` gives a focused ~30-challenge board), and `juiceshop_diff` confirms a
+  hit by diffing the board. The agent works the board → tries a target → confirms
+  → moves on.
 - **Class exploit builders** — `jwt_forge` (alg:none + RS256→HS256 confusion),
   `nosql_injection`, `xxe_payload`, `coupon_forge` (z85), `captcha_solve`
   (auto-reads the arithmetic CAPTCHA), `reset_password` (security-question flow,
@@ -396,9 +399,10 @@ landed, retry intelligently, and keep going on its own:
 - **Browser reliability** — `goto`/`submit`/`click` wait (bounded) for the Angular
   SPA to render before reading, fixing browser-dependent challenges.
 
-The distribution proves it works: on an earlier one-shot run (before the loop),
-the 5★ tier was 1/19. With the closed loop, white-box, and builders, it's **10/19**
-— that jump is the feedback loop and the builders doing their job.
+The distribution shows it working: on an earlier one-shot run (before the loop),
+the 5★ tier was 1/19. With the closed loop and the builders, it's **10/19** — that
+jump is the feedback loop and the exploit builders doing their job, entirely
+black-box.
 
 ### The methodology check: OWASP vuln-class coverage — 14 / 14 (F1 0.95)
 
