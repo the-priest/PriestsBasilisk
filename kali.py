@@ -6144,8 +6144,9 @@ class MainWindow(Adw.ApplicationWindow):
             "notify":            lambda a: self._tool_simple(
                 lambda: (self._add_notification(a.get("title", "Basilisk"),
                                                 a.get("message", "")),
-                         tool_notify(a.get("message", ""),
-                                     a.get("title", "Basilisk")))[1]),
+                         self._desktop_notify(a.get("title", "Basilisk"),
+                                              a.get("message", "")),
+                         {"ok": True, "notified": a.get("message", "")})[2]),
 
             # ── Desktop control (actions: confirm-gated) ──
             "launch_app":        lambda a: self._action_tool(
@@ -6520,6 +6521,36 @@ class MainWindow(Adw.ApplicationWindow):
         return sum(1 for n in self._notifications if not n.get("read"))
 
     # ── Community-source approval gate (enforced in code, not the prompt) ──
+    def _desktop_notify(self, title: str, body: str = "",
+                        nid: str = "basilisk-notify"):
+        """Fire a REAL desktop notification through the GTK application (Gio).
+        This uses the app's own D-Bus connection and the installed .desktop
+        file, so it works on GNOME / Phosh / KDE WITHOUT libnotify-bin and
+        without a notify-send binary in PATH. Falls back to notify-send /
+        kdialog only if the Gio path is unavailable."""
+        title = (title or "Basilisk").strip()
+        body = (body or "").strip()
+        sent = False
+        try:
+            app = self.get_application()
+            if app is not None:
+                note = Gio.Notification.new(title)
+                if body:
+                    note.set_body(body)
+                try:
+                    note.set_priority(Gio.NotificationPriority.HIGH)
+                except Exception:
+                    pass
+                app.send_notification(nid, note)
+                sent = True
+        except Exception:
+            sent = False
+        if not sent:
+            try:
+                tool_notify(body or title, title)
+            except Exception:
+                pass
+
     def _url_host(self, url: str) -> str:
         try:
             from urllib.parse import urlsplit
@@ -6603,9 +6634,11 @@ class MainWindow(Adw.ApplicationWindow):
             GLib.idle_add(self._refresh_notifications)
         except Exception:
             pass
-        try:  # best-effort desktop popup so it's seen even off-screen
-            tool_notify(f"Basilisk wants to read {domain}. Open to Allow or ignore.",
-                        "Access requested")
+        try:  # real desktop notification (Gio), per-domain so they don't clobber
+            self._desktop_notify(
+                f"Access requested: {domain}",
+                "Basilisk wants to read this source — open it to Allow or ignore.",
+                nid=f"basilisk-approval-{domain}")
         except Exception:
             pass
 
@@ -7552,6 +7585,20 @@ class MainWindow(Adw.ApplicationWindow):
     # ── watcher event handler ──────────────────────────────────
 
     def _on_watcher_event(self, event):
+        # Persist the event so it survives in the notification inbox (the bell),
+        # AND fire a real desktop notification — not just the transient banner,
+        # which vanishes after 15s and is missed if you're not looking.
+        _title = (event.get("title", "") or "Basilisk").strip()
+        _detail = (event.get("detail", "") or "").strip()
+        try:
+            self._add_notification(_title, _detail)
+        except Exception:
+            pass
+        try:
+            self._desktop_notify(_title, _detail, nid="basilisk-watcher")
+        except Exception:
+            pass
+
         # banner appears at top of chat area
         def _ui():
             banner = Gtk.Label()
