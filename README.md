@@ -8,7 +8,7 @@ keywords: ai security operator, kali linux ai, ai pentest tool, offensive securi
 
 <img src="banner.png" alt="BASILISK — the serpent on your machine" width="820">
 
-### An AI security operator that lives on **your** machine — not someone else's cloud.
+### You can wake a man only if he is truly asleep; no effort will move him if he merely pretends.
 
 *You bring the model. Basilisk brings the hands, the toolchain, the discipline, and the paper trail.*
 
