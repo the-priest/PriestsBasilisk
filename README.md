@@ -14,7 +14,7 @@ keywords: ai security operator, kali linux ai, ai pentest tool, offensive securi
 
 <br>
 
-![version](https://img.shields.io/badge/version-5.1.2-7d121b?style=for-the-badge&labelColor=08090b)
+![version](https://img.shields.io/badge/version-5.1.3-7d121b?style=for-the-badge&labelColor=08090b)
 ![license](https://img.shields.io/badge/license-MIT-7d121b?style=for-the-badge&labelColor=08090b)
 ![platform](https://img.shields.io/badge/Linux-X11%20%7C%20Wayland-6d7680?style=for-the-badge&logo=linux&logoColor=white&labelColor=08090b)
 ![python](https://img.shields.io/badge/python-3.10+-6d7680?style=for-the-badge&logo=python&logoColor=white&labelColor=08090b)
@@ -246,17 +246,24 @@ Every command Basilisk runs is recorded automatically to an append-only JSONL le
 
 ---
 
-## The safety model — why you can hand it root
+## The safety model — what it guarantees, and what it doesn't
 
 Basilisk is **decisive by default and un-catastrophic by construction.**
 
 - **Autonomous — no confirmation, ever.** Basilisk runs every command it decides on, immediately, and continues the chain on its own until the task is done or you hit Stop. There is no "confirm every command", no approval card, no mode to pick — you turn it on a job, walk away, and come back to results. The **only** dialog that can appear is a one-time prompt to collect a **sudo password** when a root command has no cached credential; after that it's cached and reused silently and you never see it again.
 - **The irreversible class is refused outright — no confirm, no override.** A **structural** detector (shlex-tokenized, `$IFS`/quote-normalized, recursing into `sh -c` / `eval`) **hard-blocks** disk/filesystem wipes, recursive root/`$HOME` deletes, fork bombs, and raw block-device writes — before the shell, no matter what steered the model. There is no "Run anyway" and no setting that turns it off. It sees through tricks a regex misses — `rm '-rf' /`, `rm${IFS}-rf${IFS}/`, `cd / && rm -rf *`, `find / -delete`, `echo … | base64 -d | sh` — while staying narrow enough that `nmap`, `nuclei`, `sqlmap` and `rm -rf ~/loot` never trip it. A raw shell write to Basilisk's own source is refused the same way, so a malicious page can't overwrite the safety code. Both are pinned in the test suite.
+- **Untrusted web content is firewalled before it reaches the model.** Everything Basilisk reads from the web — a page via the browser or `web_read`, a search result, a social post, a repo — passes through a deterministic content firewall (`webshield`) *before* it enters the model's context. It (1) **strips executable structure** — `<script>`/`<style>` blocks, HTML comments, event handlers, and fake tool-call / role tags an attacker hides instructions in; (2) **redacts injection patterns** with a strict rule set (e.g. "ignore previous instructions", "system override", credential-exfil lures, "run the following command"), seeing through zero-width, homoglyph, and letter-spacing obfuscation; and (3) **wraps the result in explicit `⟦UNTRUSTED WEB CONTENT⟧` markers** so the model treats it as data to analyse, never as instructions. The model is also told, in its core prompt, that anything inside those markers is never a command. Pinned in the test suite.
 - **Basilisk's own safety code can't be shell-stripped**, your **sudo password is never stored or shown to the model**, and self-written code runs only in a **bubblewrap jail** after passing its own test.
 - **It can't lie about your machine.** Hardware and system facts are read live with a tool, never guessed.
 - **Exploitation is the job.** Basilisk writes and runs real exploits (SQLi, XSS, JWT forgery, SSRF, sqlmap-driven attacks, and more) against targets you're authorized to test, within scope you set. The line it holds: no **standalone weaponized malware** (reverse shells, implants, ransomware, backdoors), and the irreversible/destructive class is refused outright and can never run through Basilisk at all.
 
 > The guarantee isn't "asks every time" — it never asks. It's that the one mistake that can't be undone — wiping the system or its storage — **can never run through Basilisk at all**, while everything else runs unattended.
+
+### Threat model — read this before you run it autonomously
+
+Be clear-eyed about what this is: an **autonomous agent with shell access that reads attacker-controlled web pages**. That combination — untrusted input + the ability to act + access to your credentials — is the hard, *unsolved* problem in agent security (indirect **prompt injection**). The web firewall above meaningfully shrinks the attack surface and catches the known patterns, but **no filter catches everything**, and a novel injection that the model obeys could still get a non-destructive-but-harmful command run (a cron job, a `~/.bashrc` append, an outbound `curl`). The catastrophic floor stops *system destruction*; it does **not** claim to stop every malicious-but-valid action.
+
+So: the layers here are **defense in depth, not a guarantee.** For live engagements against untrusted targets, run Basilisk in a **disposable, isolated VM** with no access to your real host, personal files, or production networks — snapshot it, treat it as burnable. That's standard offensive-tooling hygiene and it's the actual answer to prompt injection, the same way you'd sandbox Metasploit or a C2 framework. Isolation is the control; everything above reduces blast radius inside it.
 
 <br>
 
@@ -271,7 +278,7 @@ curl -fsSL https://raw.githubusercontent.com/the-priest/Basilisk/main/install.sh
 Run it once to install; run the **exact same line** any time to update. The installer is idempotent and genuinely careful — it treats your machine the way you'd want it treated:
 
 - 🐍 Detects **Python 3.10+** and installs **GTK4 + libadwaita** (apt / pacman / dnf, auto-detected).
-- 📦 Fetches the core modules **plus** the optional `kali_ext/` sidecar — and **verifies every one of the 17 sidecar modules arrived**, retrying any that didn't, refusing to install a half-broken update over a working one.
+- 📦 Fetches the core modules **plus** the optional `kali_ext/` sidecar — and **verifies every one of the 18 sidecar modules arrived**, retrying any that didn't, refusing to install a half-broken update over a working one.
 - 🛟 **Parse-checks every incoming file before it overwrites anything** — a corrupted download can't replace your working install.
 - 💾 **Backs up your chat database** before each update and reports the version move.
 - 🧩 Installs optional desktop helpers, voice packages, and optionally Playwright + Chromium.
@@ -458,7 +465,7 @@ Keys live only in `~/.config/kali/settings.json` — they never go anywhere but 
    └─────────┘
          │
    ┌─────┴───────────────────────────────────────────────────────┐
-   │  kali_ext/  (optional sidecar — off by default, 17 modules)  │
+   │  kali_ext/  (optional sidecar — off by default, 18 modules)  │
    │  memory · skills · sandbox · foresight · mcp · verify · reach │
    │  worker · headroom · pentest · codescan · engage · bench ·    │
    │  extman · juiceshop · xbow                                    │

@@ -2,7 +2,7 @@
 
 *The full reference for Basilisk, the AI security operator that lives on your Linux machine.*
 
-**Version 5.1.2** · GTK4 + libadwaita · X11 & Wayland · desktop and NetHunter mobile
+**Version 5.1.3** · GTK4 + libadwaita · X11 & Wayland · desktop and NetHunter mobile
 
 ---
 
@@ -535,7 +535,7 @@ The deliberate non-goals: Basilisk does **not** write self-propagating malware, 
 - **`kali.py`** — the GTK4/libadwaita UI and the tool dispatch (status labels, the batchable-tool resolver, the main dispatch table). Every tool is registered here.
 - **`kali_core.py`** — the tool *implementations* (`tool_*`), the provider backends and router, the browser worker, and the safety/degradation helpers.
 - **`kali_persona.py`** — the system prompt, the immutable guardrail block, and the `TOOL_CONTRACT` catalog (which also drives lazy tool-group loading).
-- **`kali_ext/`** — optional stdlib-only sidecar modules loaded through a seam: memory, skills, sandbox, MCP, foresight, native reach, headroom compression, the pentest/exploit builders, the Juice Shop harness, benchmarking, XBOW, engagement graph, evidence verification, and the background worker.
+- **`kali_ext/`** — optional stdlib-only sidecar modules loaded through a seam: memory, skills, sandbox, MCP, foresight, native reach, headroom compression, the pentest/exploit builders, the Juice Shop harness, benchmarking, XBOW, engagement graph, evidence verification, the untrusted-web-content firewall (webshield), and the background worker.
 - **`kali_safety.py` / `kali_ledger.py` / `kali_voice.py`** — the safety floor, the evidence ledger, and the voice stack.
 - **Data** — `~/.local/share/kali/` (chats.db, memory, skills, evidence ledger + artifacts, notification store). App-id `org.thepriest.kali`.
 
@@ -577,4 +577,4 @@ The rule of thumb: **sensing is free and instant; acting waits for your Apply (o
 
 ---
 
-*⟁ Basilisk v5.1.2 — built by The Priest. Powerful on purpose, safe by construction.*
+*⟁ Basilisk v5.1.3 — built by The Priest. Powerful on purpose, safe by construction.*
