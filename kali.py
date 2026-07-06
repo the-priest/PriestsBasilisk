@@ -92,7 +92,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.kali"
 APP_NAME = "Basilisk"
-VERSION = "5.0.0"
+VERSION = "5.1.0"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -2816,17 +2816,17 @@ class SettingsDialog(Adw.PreferencesDialog):
         intel_g.add(self.lean_chat_row)
 
         self.grouped_tools_row = Adw.SwitchRow()
-        self.grouped_tools_row.set_title("Lazy tool groups (experimental)")
+        self.grouped_tools_row.set_title("Max mode (full tool catalog)")
         self.grouped_tools_row.set_subtitle(
-            "Ship a lean tool core plus a group index; Basilisk loads a specialist "
-            "group (offensive, engagement, code…) only when she needs it — "
-            "biggest per-request save, at the cost of an occasional load step. "
-            "Test it against your model before relying on it.")
+            "OFF (default): lean — a tiny tool directory plus load-on-demand, "
+            "~7k tokens lighter every turn. ON: ship every tool's full spec "
+            "inline every turn — maximum context for the model, far more tokens "
+            "(and money). Autonomous mode always stays lean regardless.")
         self.grouped_tools_row.set_active(
-            bool(parent.settings.get("grouped_tools", False)))
+            bool(parent.settings.get("max_mode", False)))
         self.grouped_tools_row.connect(
             "notify::active",
-            lambda r, _ps: self._set("grouped_tools", r.get_active()))
+            lambda r, _ps: self._set("max_mode", r.get_active()))
         intel_g.add(self.grouped_tools_row)
 
         self.thoughts_row = Adw.SwitchRow()
@@ -3091,6 +3091,21 @@ class SettingsDialog(Adw.PreferencesDialog):
         self.confirm_all_row.set_active(parent.settings["confirm_all_commands"])
         self.confirm_all_row.connect("notify::active", self._on_confirm_all)
         bg.add(self.confirm_all_row)
+
+        self.autonomous_row = Adw.SwitchRow()
+        self.autonomous_row.set_title("Autonomous mode (unleashed)")
+        self.autonomous_row.set_subtitle(
+            "For \"pentest / benchmark X and don't stop\". Runs every command "
+            "WITHOUT asking, stays on the fast model, acts instead of planning, "
+            "and keeps going until done or you hit Stop. Destructive commands are "
+            "still hard-blocked. Sudo is asked once, then cached for the session "
+            "(you never see it). Only turn this on for a target you've authorised.")
+        self.autonomous_row.set_active(
+            bool(parent.settings.get("autonomous_mode", False)))
+        self.autonomous_row.connect(
+            "notify::active",
+            lambda r, _ps: self._set("autonomous_mode", r.get_active()))
+        bg.add(self.autonomous_row)
 
         self.one_cmd_row = Adw.SwitchRow()
         self.one_cmd_row.set_title("One command at a time")
@@ -4536,15 +4551,77 @@ class MainWindow(Adw.ApplicationWindow):
         GLib.idle_add(_do)
 
     def _tool_media_play(self, a: Dict[str, Any]) -> Dict[str, Any]:
-        """Dispatch handler for the media_play tool — plays a URL/path in the
-        panel. Runs on the UI thread via media_load."""
-        url = a.get("url", a.get("uri", a.get("path", ""))) or ""
-        if not url:
-            return {"ok": False, "error": "media_play needs a url or path"}
-        self.media_load(url, a.get("caption", a.get("title", "")))
-        return {"ok": True, "playing": url,
-                "note": "Loaded into the media panel (bottom). Tap the media "
-                        "button to show/hide it."}
+        """Play a song/video in the media panel. Accepts a direct media URL/path,
+        a page URL (YouTube/SoundCloud/etc.), OR a plain search term. Page URLs
+        and search terms are resolved with yt-dlp to a local file first — because
+        Gtk.Video can't play a YouTube page, only a real media stream. Runs in a
+        worker thread (via _tool_simple), so the yt-dlp fetch doesn't block the
+        UI. This is why playback stays in the panel and doesn't get cut off:
+        nothing is handed to a detached CLI player."""
+        import subprocess, tempfile, shutil, glob
+        query = (a.get("url") or a.get("uri") or a.get("path") or a.get("query")
+                 or a.get("song") or a.get("title") or "").strip()
+        if not query:
+            return {"ok": False,
+                    "error": "media_play needs a url, path, or search term"}
+        kind = (a.get("kind") or "").strip().lower()   # "audio" | "video" | ""
+        caption = a.get("caption", a.get("title", query))
+
+        direct_exts = (".mp3", ".mp4", ".webm", ".ogg", ".oga", ".wav", ".m4a",
+                       ".mkv", ".flac", ".aac", ".opus", ".mov", ".avi")
+        is_url = query.startswith(("http://", "https://"))
+        # A local file or a direct media URL plays as-is — no yt-dlp needed.
+        if (not is_url and os.path.exists(query)) or (
+                is_url and query.lower().split("?")[0].endswith(direct_exts)):
+            self.media_load(query, caption)
+            return {"ok": True, "playing": query,
+                    "note": "playing directly in the media panel"}
+
+        # Page URL or search term → resolve with yt-dlp.
+        if not shutil.which("yt-dlp"):
+            return {"ok": False,
+                    "error": "yt-dlp isn't installed — it's needed to fetch a "
+                    "song/video from a URL or search. Install it: "
+                    "pipx install yt-dlp (or sudo apt install yt-dlp)."}
+
+        # Clean the previous fetch so the temp dir doesn't grow unbounded.
+        prev = getattr(self, "_last_media_tmp", None)
+        if prev:
+            try:
+                shutil.rmtree(prev, ignore_errors=True)
+            except Exception:
+                pass
+        tmpdir = tempfile.mkdtemp(prefix="basilisk-media-")
+        self._last_media_tmp = tmpdir
+        outtmpl = os.path.join(tmpdir, "media.%(ext)s")
+        target = query if is_url else f"ytsearch1:{query}"
+
+        if kind == "audio":
+            cmd = ["yt-dlp", "-x", "--audio-format", "mp3", "--no-playlist",
+                   "-o", outtmpl, target]
+        else:
+            # Prefer a single-file mp4; fall back to a merged best (needs ffmpeg)
+            # or any best single stream if ffmpeg is absent.
+            cmd = ["yt-dlp", "--no-playlist", "--merge-output-format", "mp4",
+                   "-f", "b[ext=mp4]/bv*+ba/b", "-o", outtmpl, target]
+        self.terminal_log(f"media: resolving “{query}” with yt-dlp…", "dim")
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=240)
+        except subprocess.TimeoutExpired:
+            return {"ok": False, "error": "yt-dlp timed out fetching the media "
+                    "(240s). Try a direct link or a shorter clip."}
+        except Exception as e:
+            return {"ok": False, "error": f"yt-dlp failed to run: {e}"}
+
+        files = sorted(glob.glob(os.path.join(tmpdir, "media.*")))
+        if not files:
+            tail = (r.stderr or r.stdout or "").strip()[-300:]
+            return {"ok": False,
+                    "error": f"couldn't fetch that media. yt-dlp said: {tail}"}
+        fpath = files[0]
+        self.media_load(fpath, caption)
+        return {"ok": True, "playing": os.path.basename(fpath), "source": target,
+                "note": "fetched with yt-dlp and now playing in the media panel."}
 
     def _tool_media_show(self, a: Dict[str, Any]) -> Dict[str, Any]:
         """Dispatch handler for the media_show tool — display a local image
@@ -5475,6 +5552,30 @@ class MainWindow(Adw.ApplicationWindow):
                     addendum = (addendum + "\n\n" + extra).strip()
             except Exception:
                 pass
+        # Autonomous mode: unleashed execution. Act over plan, keep going.
+        if self.settings.get("autonomous_mode", False):
+            addendum = (addendum + "\n\n[AUTONOMOUS MODE IS ON. The operator has "
+                "authorised you to run without asking permission per command. "
+                "Rules for this mode:\n"
+                "- ACT, don't plan. Do NOT enumerate long option lists, do NOT "
+                "narrate a multi-step plan, do NOT reason at length. Pick the "
+                "SINGLE most likely path in and just try it. If it fails, move to "
+                "the next single option and try that. Never spend a turn only "
+                "thinking or listing — every turn should DO something (a tool "
+                "call or a concrete action).\n"
+                "- Keep going until the objective is met (e.g. the whole board "
+                "solved, the target fully tested) or the operator stops you. "
+                "Don't stop to ask 'should I continue' — continue.\n"
+                "- Confirm the TARGET is correct exactly ONCE at the very start "
+                "if it isn't already obvious, then unleash everything you have on "
+                "it without further permission prompts.\n"
+                "- Commands run without confirmation. Destructive/system-"
+                "destroying commands are still hard-blocked — don't attempt them. "
+                "If a command needs sudo, the operator is asked for the password "
+                "once and it's cached for the rest of the session; you never see "
+                "it.\n"
+                "- Be terse. Short status lines, not essays. Save tokens.]").strip()
+            self.terminal_log("🔥 autonomous mode: unleashed", "dim")
         # Lean-chat: on a plainly conversational OPENING turn (a greeting,
         # thanks, an opinion question — no hint of an action), skip the ~8K-token
         # tool catalog. "Just talking" shouldn't ship 100+ tool specs. Only the
@@ -5537,7 +5638,8 @@ class MainWindow(Adw.ApplicationWindow):
         sysprompt = build_system_prompt(
             agent_mode=(False if _lean else self.current_agent_mode),
             custom_addendum=addendum,
-            grouped=self.settings.get("grouped_tools", False))
+            grouped=(self.settings.get("autonomous_mode", False)
+                     or not self.settings.get("max_mode", False)))
         full = assemble_messages(sysprompt, history)
         # Splice in relevance-scoped recall (top-k memories for THIS turn).
         # No-op unless memory is enabled; never grows with history length.
@@ -7136,23 +7238,37 @@ class MainWindow(Adw.ApplicationWindow):
         # guardrail), so it never auto-runs silently.
         tampers = command_tampers_self(command)
         reason_txt = reason or "no reason"
+        # Destructive/system-destroying commands are BANNED outright — no confirm
+        # dialog, no "Run anyway". Same hard floor as the primary run path, so
+        # there's nothing to approve and autonomous mode never trips on one.
         if catastrophic:
-            self.terminal_log("⚠ destructive command — forcing confirm", "error")
-        elif tampers:
+            self.terminal_log("■ BLOCKED — destructive command refused (banned, "
+                              "no override)", "error")
+            self._feed_tool_result(
+                "REFUSED. This is a catastrophic/destructive command — it would "
+                "irreversibly destroy the system or its data — so Basilisk will "
+                "not run it under any circumstances. Hard floor, no override.\n\n"
+                "  " + command)
+            return
+        if tampers:
             self.terminal_log("• command writes to Basilisk's own source — "
                               "forcing confirm", "dim")
             reason_txt = ("This command writes to one of Basilisk's own source "
                           "files, which sidesteps the guarded edit path "
                           "(parse-check + immutable guardrail). Confirm to "
                           "allow.\n\n" + reason_txt)
-        need_approval = (catastrophic or tampers
+        # Autonomous mode drops the per-command approval prompt (the operator
+        # authorised it). Self-tampering still confirms; the one-time sudo
+        # password prompt below still happens so the credential can be cached.
+        _auton = self.settings.get("autonomous_mode", False)
+        need_approval = (tampers
                          or (getattr(self, "_fs_force_confirm", False)
                              and not from_card)
                          or (self.settings.get("confirm_all_commands", True)
-                             and not from_card))
+                             and not from_card and not _auton))
         if need_approval or (sudo_needed and not have_cached_sudo):
             confirm_command_dialog(self, command, reason_txt, decide,
-                                   catastrophic=catastrophic)
+                                   catastrophic=False)
         else:
             if have_cached_sudo:
                 self.terminal_log("• using cached sudo credential", "dim")

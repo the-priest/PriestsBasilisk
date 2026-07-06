@@ -86,6 +86,14 @@ HTTP_TIMEOUT_S    = 600
 # streaming never trips this — tokens keep arriving well under 60s apart, and
 # even a slow reasoning model's time-to-first-token is comfortably inside it.
 STREAM_IDLE_TIMEOUT_S = 60
+# Absolute wall-clock cap for a single model turn. The idle timeout above only
+# catches DEAD air; a model that keeps *streaming* (e.g. a reasoning model
+# emitting "thinking" tokens on and on) never trips it and could run for
+# minutes, which reads as a hang and burns tokens. This is the hard backstop:
+# once a turn has been streaming this long, cut it and finalise with whatever
+# came through. Generous enough that normal long answers finish; only runaway
+# turns hit it. Autonomous mode stays on the fast model, so it rarely gets here.
+STREAM_MAX_WALL_S = 150
 HEALTH_TIMEOUT_S  = 1.5
 
 GROQ_DEFAULT_MODEL = "llama-3.3-70b-versatile"
@@ -286,6 +294,9 @@ DEFAULT_SETTINGS = {
     "auto_fallback_on_degraded": False, # hop provider if a reply comes back junk
     "urgency_fast_path":       True,    # skip preamble when the operator is urgent
     "auto_sudo_when_cached":   True,    # silently use sudo if already authenticated
+    "autonomous_mode":         False,   # unleashed: no per-command asks, stay on the
+                                        # fast model, act-don't-plan, destructive still
+                                        # banned. For "pentest/benchmark X and don't stop".
 
     # ── Voice (speech in / speech out) ──
     # Voice input transcribes through Groq's Whisper endpoint (reuses the
@@ -334,11 +345,12 @@ DEFAULT_SETTINGS = {
                                         # conversational turns (big token save
                                         # for "just talking"; full toolset the
                                         # moment a message hints at an action)
-    "grouped_tools":           False,   # EXPERIMENTAL: ship only a lean tool
-                                        # core + a group index; Basilisk loads a
-                                        # specialist group on demand with
-                                        # load_tools. Off by default — test it
-                                        # against your model before relying on it
+    "max_mode":                False,   # OFF = lean by default (a tiny tool
+                                        # directory + load-on-demand, ~7k tokens
+                                        # lighter/turn). ON = ship every tool spec
+                                        # inline every turn — maximum context, far
+                                        # more tokens. Autonomous mode always stays
+                                        # lean regardless of this.
     "max_tool_steps":          150,     # tool round-trips allowed per turn
                                         # before Basilisk finalizes. Resets every
                                         # turn (send another message to continue).
@@ -531,7 +543,12 @@ class GroqBackend:
                     timeout=STREAM_IDLE_TIMEOUT_S,
                 )
                 parts: List[str] = []
+                _wall_start = time.time()
                 for chunk in resp:
+                    if time.time() - _wall_start > STREAM_MAX_WALL_S:
+                        log(f"groq {attempt_model} hit the {STREAM_MAX_WALL_S}s "
+                            f"wall-clock cap — cutting the turn")
+                        break
                     if cancel_event and cancel_event.is_set():
                         on_done({"cancelled": True,
                                  "text": "".join(parts),
@@ -692,8 +709,14 @@ class OpenAICompatBackend:
                 req = urllib.request.Request(
                     url, data=data, headers=self._headers())
                 parts: List[str] = []
+                _wall_start = time.time()
                 with urllib.request.urlopen(req, timeout=STREAM_IDLE_TIMEOUT_S) as r:
                     for raw in r:
+                        if time.time() - _wall_start > STREAM_MAX_WALL_S:
+                            log(f"{self.name} {attempt_model} hit the "
+                                f"{STREAM_MAX_WALL_S}s wall-clock cap — cutting "
+                                f"the turn with what streamed so far")
+                            break
                         if cancel_event and cancel_event.is_set():
                             on_done({"cancelled": True,
                                      "text": "".join(parts),
@@ -885,11 +908,12 @@ class BackendRouter:
         #    own chain + a bigger reasoning budget).  Setting adaptive_effort
         #    False turns it all off and restores flat behaviour.
         if self.settings.get("adaptive_effort", True) and backend is not None:
+            _auton = self.settings.get("autonomous_mode", False)
             if effort == "light":
                 max_tokens = min(
                     max_tokens,
                     self.settings.get("effort_light_max_tokens", 1536))
-            elif effort == "heavy":
+            elif effort == "heavy" and not _auton:
                 max_tokens = max(
                     max_tokens,
                     self.settings.get("effort_heavy_max_tokens", 4096))

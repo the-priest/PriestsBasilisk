@@ -2,7 +2,7 @@
 
 *The full reference for Basilisk, the AI security operator that lives on your Linux machine.*
 
-**Version 5.0.0** · GTK4 + libadwaita · X11 & Wayland · desktop and NetHunter mobile
+**Version 5.1.0** · GTK4 + libadwaita · X11 & Wayland · desktop and NetHunter mobile
 
 ---
 
@@ -48,7 +48,7 @@ When a tool wants to *do* something you should see first, Basilisk shows a **car
 
 ## 1.4 The hard floor (the one rule that never bends)
 
-Regardless of mode, regardless of what you or a document or an MCP server asks, a **catastrophic-command floor** sits in code beneath everything. Disk wipes, recursive deletes of `/` or your home, fork bombs, overwriting a whole disk device — these are **force-confirmed or refused before they ever leave the process**, even in fully decisive mode, even if the model was told to do it. It is enforced in code, not merely requested of the model. This is the guarantee that lets you run Basilisk decisively at all.
+Regardless of mode, regardless of what you or a document or an MCP server asks, a **catastrophic-command floor** sits in code beneath everything. Disk wipes, recursive deletes of `/` or your home, fork bombs, overwriting a whole disk device — these are **refused outright before they ever leave the process**, even in fully decisive mode, even if the model was told to do it. It is enforced in code, not merely requested of the model. This is the guarantee that lets you run Basilisk decisively at all.
 
 ---
 
@@ -384,7 +384,7 @@ Basilisk can drive your **actual** desktop. It auto-detects **X11 vs Wayland** a
 
 # Part 14 — Files & shell
 
-Reading is free; anything that changes the filesystem is gated (and the irreversible class is always force-confirmed).
+Reading is free; anything that changes the filesystem is gated (and the irreversible class is refused outright — no override).
 
 ## 14.1 Reading (read-only)
 
@@ -394,11 +394,11 @@ Reading is free; anything that changes the filesystem is gated (and the irrevers
 
 ## 14.2 Changing (gated)
 
-- **`make_dir`** — create a directory. **`copy_path`** — copy. **`move_path`** — move/rename. **`delete_path`** — delete (recursive root/home forms are force-confirmed).
+- **`make_dir`** — create a directory. **`copy_path`** — copy. **`move_path`** — move/rename. **`delete_path`** — delete (recursive root/home forms are refused outright).
 
 ## 14.3 `run` — any shell command
 
-The big one. Basilisk can run **any shell command**. In decisive mode it executes directly, reads output, and continues; under Confirm-every-command it's an approve-first card; the catastrophic class is always force-confirmed regardless. **Sudo is handled safely** — your password is collected in a dialog, validated, cached for the session, and **never stored, logged, or shown to the model**.
+The big one. Basilisk can run **any shell command**. In decisive mode it executes directly, reads output, and continues; under Confirm-every-command it's an approve-first card; the catastrophic class is refused outright regardless. **Sudo is handled safely** — your password is collected in a dialog, validated, cached for the session, and **never stored, logged, or shown to the model**.
 
 ## 14.4 `write_file` — write any file (diff card)
 
@@ -462,7 +462,7 @@ Basilisk can **read replies aloud** — Piper (neural) or espeak, auto-selected.
 - **Urgency fast-path** — when you're clearly in a hurry, Basilisk skips preamble.
 - **Notification inbox** — a bell with a persistent store; `notify` posts here as well as to the desktop.
 - **Status pill** — a permanent indicator in the button row: it reads **"idle"** when nothing's running and the **live action title** ("forging a JWT…", "reading the source…") while Basilisk works. It never moves the other buttons, and it can't be pressed. In-chat, an in-progress reply shows the same action title instead of a generic "working".
-- **Media panel** — a toggleable bottom panel (the multimedia button, next to the terminal-log button) with a built-in **video/audio player** (play/seek/volume). Basilisk drops media into it with `media_play` — a video or audio URL/path (mp4, webm, mp3, ogg, wav, …) it found for you — and you can hide the panel and reopen it any time. It also shows **blocked pages**: when the browser hits a login wall or captcha, Basilisk screenshots the page and `media_show`s it here so you can see what's stopping it. (Playback needs GStreamer codecs installed; the panel degrades gracefully if they're absent.)
+- **Media panel** — a toggleable bottom panel (the multimedia button, next to the terminal-log button) with a built-in **video/audio player** (play/seek/volume). Basilisk drops media into it with `media_play` — pass a **search term** ("play Rammstein Sonne"), a **page URL** (YouTube/SoundCloud/etc.), or a **direct media link**; it resolves search/page URLs with **yt-dlp** to a local file and plays it in the panel (not via a detached CLI player, so it won't cut off). Set `kind: "audio"` for a song. You can hide the panel and reopen it any time. It also shows **blocked pages**: when the browser hits a login wall or captcha, Basilisk screenshots the page and `media_show`s it here so you can see what's stopping it. (Playback needs GStreamer codecs, and search/URL playback needs yt-dlp; the panel degrades gracefully if they're absent.)
 - **Ephemeral chats** — fresh chat per launch, auto-retention, empty-placeholder cleanup — all tunable.
 - **Theme & scale** — the "hellfire" charcoal-and-blood-red theme; UI scale auto-detects (down to a ~540px mobile width for NetHunter) or can be pinned.
 
@@ -478,7 +478,7 @@ An optional headless `systemd --user` companion that can poll on a cadence for t
 
 Basilisk is powerful on purpose, so the safety model is layered and mostly enforced in **code**, not just asked of the model:
 
-1. **The catastrophic-command floor.** Disk wipes, recursive `/` or home deletes, fork bombs, whole-disk overwrites — force-confirmed or refused before leaving the process, in every mode, no matter who asked. Applies to `run`, to filesystem tools, and to MCP call arguments alike.
+1. **The catastrophic-command floor.** Disk wipes, recursive `/` or home deletes, fork bombs, whole-disk overwrites — refused outright before leaving the process, in every mode, no matter who asked. Applies to `run`, to filesystem tools, and to MCP call arguments alike.
 2. **Sensing vs. acting.** Read-only tools run freely; acting tools go through the gate (always cards under Confirm-every-command).
 3. **Scope, fail-closed.** The invocation builders check `scope_check` before constructing anything active, and scope fails closed — not-clearly-authorised is out.
 4. **The evidence ledger.** Every executed command and MCP call is hashed and recorded, tamper-evidently — accountability by default.
@@ -511,12 +511,13 @@ The deliberate non-goals: Basilisk does **not** write self-propagating malware, 
 
 **Behaviour**
 - `agent_mode_default` (on), `confirm_all_commands` (off), `one_command_at_a_time` (on), `warn_duplicate_commands` (off), `urgency_fast_path` (on), `auto_sudo_when_cached` (on), `max_tool_steps` (150).
+- `autonomous_mode` (off) — unleashed: runs every command without asking, stays on the fast model, acts instead of planning, keeps going until done or stopped. Destructive commands stay hard-blocked; sudo is asked once then cached. For authorised "pentest/benchmark X and don't stop" runs.
 
 **Subsystems (mostly off by default)**
 - `memory_enabled`, `skills_enabled`, `foresight_enabled`, `reach_enabled` — recall, self-written tools, consequence-prediction, native web reach.
 - `mcp_enabled` + `mcp_servers` — external tool servers (off).
 - `worker_enabled` + `worker_interval_seconds` — background companion (off).
-- `headroom_enabled` (on), `lean_chat` (on), `grouped_tools` (experimental lean catalog).
+- `headroom_enabled` (on), `lean_chat` (on). `max_mode` (off) — OFF is the hard default: lean tool loading (a compact tool directory + load-on-demand, ~7k tokens lighter per turn); ON ships every tool spec inline every turn for maximum context at much higher token cost. Autonomous mode always stays lean.
 
 **Vision & media** — `chat_render_images`, `vision_model`, `vision_provider`.
 
@@ -575,4 +576,4 @@ The rule of thumb: **sensing is free and instant; acting waits for your Apply (o
 
 ---
 
-*⟁ Basilisk v5.0.0 — built by The Priest. Powerful on purpose, safe by construction.*
+*⟁ Basilisk v5.1.0 — built by The Priest. Powerful on purpose, safe by construction.*

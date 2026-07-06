@@ -31,7 +31,7 @@ ck("non-grouped ships the whole contract", kp.TOOL_CONTRACT in full)
 print("-- grouped mode ships core + index, not the whole contract --")
 g = kp.build_system_prompt(agent_mode=True, grouped=True)
 ck("grouped omits the full contract", kp.TOOL_CONTRACT not in g)
-ck("grouped ships the group index", "TOOL GROUPS (load on demand)" in g)
+ck("grouped ships the group index", "TOOL DIRECTORY" in g)
 ck("grouped keeps the run/acting core", "<tool name=\"run\">" in g)
 
 print("-- real token savings --")

@@ -295,7 +295,7 @@ Two kinds of action, and they are not the same:
 
   <tool name="analyze_image">{"image_path": "/path/to/photo.jpg", "question": "What's in this image? Read any text."}</tool>  // Basilisk SEES the image
   <tool name="capture_photo">{}</tool>  // grab a photo from the camera, returns a file path
-  <tool name="media_play">{"url": "https://example.com/video.mp4", "caption": "the clip you asked for"}</tool>  // play a video OR audio (mp4/webm/mp3/ogg/wav…) — URL or local path — in the on-screen media panel, with play/seek/volume controls. Use it when the operator wants to watch/listen to something you found. It pops the panel open; they can hide it and reopen it any time.
+  <tool name="media_play">{"query": "song or video name, a page URL, or a direct media link", "kind": "audio", "caption": "what you're playing"}</tool>  // play a song/video/audio in the on-screen media panel. Pass a search term ("play Rammstein Sonne"), a page URL (YouTube/SoundCloud/etc.), OR a direct media link — it resolves search/page URLs with yt-dlp automatically and plays a local file with real controls. kind: "audio" for a song (mp3), else video. ALWAYS use this to play anything for the operator. NEVER shell out to mpv/vlc/cvlc/ffplay/mpg123/paplay or `run` a media player — those play detached and get killed when the command returns (that's why playback "cuts off"). media_play is the only correct way.
   <tool name="media_show">{"path": "/tmp/blocked.png", "caption": "solve this captcha, then say 'go'"}</tool>  // display a still image (a screenshot) in the media panel. Use it when the browser hits a login wall / captcha / block: screenshot the page, media_show it so the operator can SEE what's stopping you, and ask them to resolve it — then continue.
   <tool name="detect_faces">{"image_path": "/path/to/photo.jpg"}</tool>  // count/locate faces (detection only, not identification)
   // Typical flow for "take a photo and tell me what you see": capture_photo →
@@ -652,25 +652,14 @@ Rules:
     pieces of information at once — multiple web_read URLs, a web_search
     plus a github read, a few sensing calls — emit ALL their tags in the
     SAME reply.  The host runs them together in parallel and returns every
-    result at once, which is faster and cheaper than one-per-turn.  The
-    batchable read-only tools: web_search, web_read, image_search, github,
-    read_file, list_dir, find_file, path_info, system_info, disk_usage,
-    processes, network_status, recent_downloads, service_status, journal_tail,
-    desktop_info, list_apps, list_windows, tooling_check, pentest_plan,
-    parse_output, methodology, wordlist_find, cheatsheet, report_findings,
-    reflect_findings, nuclei_template, attack_writeup,
-    code_tooling_check, code_scan_plan, parse_scan, triage_findings,
-    remediation_hint, scope_set, scope_check, scope_show, asset_record,
-    engagement_graph, loot_record, loot_list, loot_reuse, graph_ingest,
-    sqlmap_plan, webapp_recon, jwt_forge, nosql_injection, xxe_payload,
-    coupon_forge, captcha_solve, reset_password, juiceshop_next, juiceshop_diff,
-    juiceshop_source,
-    benchmark_targets, benchmark_score, benchmark_report,
-    benchmark_compare,
-    evidence_engagement, evidence_report, evidence_verify.
-    Prefer one batched turn over five sequential ones — don't waste tool
-    steps.  EXCEPTION: web_verify and cve_lookup each do their own network
-    fan-out internally, so call those ONE at a time, not inside a batch.
+    result at once, which is faster and cheaper than one-per-turn.  Any
+    read-only tool batches: the sensing tools (system/network/file/disk
+    inspection), the web/OSINT/github readers, and the planning/parsing/
+    reporting/exploit-BUILDER tools (they return a plan or a payload, they
+    don't fire anything).  Prefer one batched turn over five sequential ones
+    — don't waste tool steps.  EXCEPTION: web_verify and cve_lookup each do
+    their own network fan-out internally, so call those ONE at a time, not
+    inside a batch.
   · ONE command (side effect) per message.  This is the opposite rule for
     anything that CHANGES something: shell `run`, propose, edits, skills,
     moving/deleting files, launching apps, typing/keys.  Never more than
@@ -1015,19 +1004,30 @@ SPECIALIST_GROUPS = {g: t for g, t in _TOOL_BUCKETS.items() if g != "core"}
 
 
 def _group_index() -> str:
-    lines = ["── TOOL GROUPS (load on demand) ──",
-             "Besides the always-available tools above, you have specialist tool "
-             "GROUPS. To use any tool in a group you must FIRST load it — call "
-             "load_tools with the group name and its tools' full specs come back "
-             "for you to call. Load a group the first time you need it; once "
-             "loaded it stays available. If unsure which group, load the closest "
-             "match (aliases are accepted).",
+    import re as _re
+    lines = ["── TOOL DIRECTORY (specialist tools — load specs on demand) ──",
+             "Below is the COMPLETE list of every specialist tool you have, by "
+             "group. You know all of these exist and can use any of them — but "
+             "to CALL one you must first load its group's full specs (exact "
+             "args + examples): call load_tools with the group name and the "
+             "specs come back. Load a group the first time you need a tool in "
+             "it; once loaded it stays available all conversation. Names are "
+             "self-describing; if unsure which group, load the closest match "
+             "(aliases accepted). This keeps the prompt tiny instead of shipping "
+             "every spec every turn.",
              '  <tool name="load_tools">{"group": "offensive"}</tool>',
-             "Groups:"]
+             "Groups and their tools:"]
     for g in ("system", "offensive", "engagement", "code", "benchmark",
               "recon", "desktop", "media"):
         if g in SPECIALIST_GROUPS:
-            lines.append(f"  · {g:11}— {_GROUP_BLURB.get(g,'')}")
+            names = []
+            for n in _re.findall(r'<tool name="([a-z_]+)">', SPECIALIST_GROUPS[g]):
+                if n not in names:
+                    names.append(n)
+            blurb = _GROUP_BLURB.get(g, "")
+            lines.append(f"  · {g} — {blurb}")
+            if names:
+                lines.append(f"      tools: {', '.join(names)}")
     return "\n".join(lines)
 
 

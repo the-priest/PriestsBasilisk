@@ -1,5 +1,22 @@
 # Changelog
 
+## v5.1.0 — lean by default
+
+- **Lean tool loading is the hard default now.** The system prompt ships a
+  compact tool directory + load-on-demand instead of every tool spec inline —
+  ~7.5k tokens/turn instead of ~14.5k. Opt into the full inline catalog with the
+  new **Max mode** switch (Settings → "Max mode (full tool catalog)"); autonomous
+  mode always stays lean regardless. Replaces the old inverted `grouped_tools`
+  toggle with a single clear `max_mode` switch (off = lean).
+- **Trimmed prompt redundancy.** Removed the ~250-token batchable-tool name list
+  from the `run` spec — it just duplicated the tool directory. Zero behaviour
+  change, pure token saving.
+- **README consistency pass.** Corrected the destructive-command story
+  everywhere (it's now *refused outright*, not "force-confirmed" — matching the
+  code), fixed the sidecar module count (17), reframed the benchmark section from
+  the stale "v4.10.0" label to the current 5.x closed loop + white-box, and added
+  autonomous mode to the safety model. Version badges and headers moved to 5.1.0.
+
 ## v5.0.0 — the operator release
 
 Major version. 5.0 consolidates the closed-loop offensive capability added across
@@ -22,6 +39,31 @@ The capability jump that defines 5.0:
   memory consolidation, the model foresight pass, the background worker, and the
   provider-pill/token-count display switches. No more editing a config to flip a
   behaviour.
+- **Lean tool loading is now the default — ~7k fewer tokens per turn.** Instead
+  of shipping all ~97 tool specs (~11k tokens) in the system prompt every single
+  turn, Basilisk now ships a lean core plus a **complete tool directory** — every
+  tool listed by name under its group — and loads a specialist group's full specs
+  on demand with `load_tools` the first time it needs them. The model still knows
+  every tool exists (it can read the whole directory), it just fetches the exact
+  args when it's about to use one. The core tools (`run`, `web_search`, `web_read`,
+  …) stay always-available inline. Net effect: the system prompt drops from
+  ~14.7k to ~7.7k tokens per turn (47% smaller) — big cost saving and less
+  attention dilution, with no loss of capability. This is now the HARD DEFAULT.
+  Flip on Max mode (Settings → "Max mode (full tool catalog)") to ship every spec
+  inline every turn for maximum context at higher token cost; autonomous mode
+  always stays lean regardless.
+- **Autonomous mode + never-hang backstop.** New **Autonomous mode** switch
+  (Settings → Behaviour → "Autonomous mode (unleashed)"): for "pentest/benchmark
+  X and don't stop". It runs every command **without asking**, stays on the
+  **fast model** (no reasoning-model escalation — far less "thinking" and far
+  cheaper), tells the model to **act instead of planning** (single most-likely
+  path, next on failure, no long option lists), and keeps going until done or
+  you hit Stop. Sudo is asked **once** and cached for the session (the model
+  never sees it). **Destructive commands are now hard-refused in every path**
+  (previously one path force-confirmed them) — so there's nothing to approve and
+  autonomous mode can't trip on one. And a **hard wall-clock cap** (150s) on any
+  single model turn guarantees it can never sit on "thinking…" indefinitely — a
+  runaway turn is cut and finalised, on both the primary and fallback providers.
 - **UI: status pill + media panel.** The working indicator is now a permanent,
   non-pressable pill in the button row that reads "idle" when nothing's running
   and the live action title while working — it no longer pops in and shoves the
