@@ -92,7 +92,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.kali"
 APP_NAME = "Basilisk"
-VERSION = "5.1.1"
+VERSION = "5.1.2"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -3094,27 +3094,18 @@ class SettingsDialog(Adw.PreferencesDialog):
         self.agent_default_row.set_active(parent.settings["agent_mode_default"])
         self.agent_default_row.connect("notify::active", self._on_agent_default)
         bg.add(self.agent_default_row)
-        # Command approval posture — one 3-way choice replaces the old
-        # confirm-every-command + autonomous toggles.
-        self.approval_row = Adw.ComboRow()
-        self.approval_row.set_title("Command approval")
-        self.approval_row.set_subtitle(
-            "Autonomous (default): runs everything without asking, stays on the "
-            "fast model, acts instead of planning — for authorised \"pentest / "
-            "benchmark X and don't stop\" runs. Risky only: confirms just sudo / "
-            "destructive / sensitive commands. Every command: approve each side-"
-            "effecting op. Destructive/system-destroying commands are refused "
-            "outright in ALL three. Sudo is asked once, then cached (never shown).")
-        self._approval_keys = ["none", "risky", "all"]
-        self._approval_labels = ["Autonomous — run everything",
-                                 "Confirm risky only",
-                                 "Confirm every command"]
-        self.approval_row.set_model(Gtk.StringList.new(self._approval_labels))
-        _cur_ap = parent.settings.get("approval_mode", "none")
-        if _cur_ap in self._approval_keys:
-            self.approval_row.set_selected(self._approval_keys.index(_cur_ap))
-        self.approval_row.connect("notify::selected", self._on_approval_mode)
-        bg.add(self.approval_row)
+        # Autonomous operation is the ONLY posture — there is no confirmation
+        # setting. Every command runs; a sudo password is collected once and
+        # cached; catastrophic commands are refused outright. A read-only info
+        # row makes that explicit (Adw.ActionRow with no switch).
+        _auto_info = Adw.ActionRow()
+        _auto_info.set_title("Autonomous operation")
+        _auto_info.set_subtitle(
+            "Basilisk runs every command with no approval prompts — turn it on a "
+            "task, walk away, come back to results. The only prompt is a one-time "
+            "sudo password (then cached, never shown). System-destroying commands "
+            "are refused outright. There is no confirm-every-command mode.")
+        bg.add(_auto_info)
 
         self.one_cmd_row = Adw.SwitchRow()
         self.one_cmd_row.set_title("One command at a time")
@@ -3677,14 +3668,6 @@ class SettingsDialog(Adw.PreferencesDialog):
 
     def _on_agent_default(self, row, _ps):
         self._set("agent_mode_default", row.get_active())
-
-    def _on_approval_mode(self, row, _ps):
-        idx = row.get_selected()
-        keys = getattr(self, "_approval_keys", ["none", "risky", "all"])
-        if 0 <= idx < len(keys):
-            self._set("approval_mode", keys[idx])
-            global _APPROVAL_MODE
-            _APPROVAL_MODE = keys[idx]
 
     def _on_watcher_enable(self, row, _ps):
         self._set("watcher_enabled", row.get_active())
@@ -6871,11 +6854,8 @@ class MainWindow(Adw.ApplicationWindow):
                 return
             self._tool_simple(fn)
 
-        if self._confirm_needed(risky=True):
-            confirm_command_dialog(self, description,
-                                   f"Basilisk wants to: {description}", _go)
-        else:
-            _go(True)
+        # No confirmation — autonomous. The action just runs.
+        _go(True)
 
     def _tool_skill_write(self, a):
         """Self-written skill.  The model supplies name/code/test/description/
@@ -6912,27 +6892,10 @@ class MainWindow(Adw.ApplicationWindow):
         descr = (f"save self-written skill '{name}'"
                  + (f" (caps: {', '.join(caps)})" if caps else "")
                  + " — sandbox-tested before keeping")
-        if self._confirm_needed(risky=True):
-            # Surface what's actually being approved: capabilities, any flagged
-            # constructs from the static screen, and a code preview.  Approving
-            # a skill you can't see defeats the point of the gate.
-            try:
-                from kali_ext import skills as _sk
-                flags = sorted({r for r in _sk._RISKY if r in code})
-            except Exception:
-                flags = []
-            preview = code.strip().splitlines()
-            preview_txt = "\n".join(preview[:18])
-            if len(preview) > 18:
-                preview_txt += f"\n… (+{len(preview) - 18} more lines)"
-            msg = (f"Basilisk wrote a skill '{name}' and wants to save it. It is "
-                   f"tested in a sandbox before being kept.\n\n"
-                   f"capabilities: {', '.join(caps) if caps else 'none'}\n"
-                   + (f"flagged: {', '.join(flags)}\n" if flags else "")
-                   + f"\ncode:\n{preview_txt}")
-            confirm_command_dialog(self, descr, msg, _go)
-        else:
-            _go(True)
+        # No confirmation — autonomous. The skill is saved directly (it's still
+        # ast-checked and sandbox-tested before being kept, so nothing unsafe
+        # runs in Basilisk's own process regardless).
+        _go(True)
 
 
     def _tool_read_file(self, path):
@@ -7111,51 +7074,6 @@ class MainWindow(Adw.ApplicationWindow):
         self._execute_command(command, explanation or "operator approved",
                               from_card=True)
 
-    def _command_is_risky(self, command: str) -> bool:
-        """Is this shell command 'risky' (worth a confirm in 'risky' mode)?
-        Catastrophic commands are already refused elsewhere; this flags the tier
-        below that — needs root, deletes/moves system things, changes power or
-        services, touches sensitive paths. Conservative: better to confirm one
-        borderline command than miss a damaging one."""
-        c = (command or "").lower()
-        if command_needs_sudo(command):
-            return True
-        import re as _re
-        risky_pats = [
-            r"\brm\b", r"\brmdir\b", r"\bdd\b", r"\bmkfs", r"\bshred\b",
-            r"\btruncate\b", r"\bchmod\s+-r", r"\bchown\s+-r",
-            r"\bkill(all)?\b", r"\bpkill\b",
-            r"\bsystemctl\s+(stop|disable|mask|kill)", r"\bservice\s+\S+\s+stop",
-            r"\biptables\s+-f", r"\bnft\s+flush", r"\bufw\s+(disable|reset)",
-            r">\s*/dev/", r"\bcrontab\b", r"\buserdel\b", r"\bgroupdel\b",
-            r"\bfdisk\b", r"\bparted\b", r"\bwipefs\b", r"\bmkswap\b",
-            r"\bshutdown\b", r"\breboot\b", r"\bhalt\b", r"\bpoweroff\b",
-            r"\binsmod\b", r"\brmmod\b", r"\bmodprobe\b", r"\bmount\b",
-            r"\bumount\b", r"\bnpm\s+publish\b", r"\bgit\s+push\b.*--force",
-        ]
-        if any(_re.search(p, c) for p in risky_pats):
-            return True
-        # writing/moving into a system dir
-        if _re.search(r"\b(mv|cp|tee|dd)\b.*\s/(etc|usr|bin|sbin|boot|lib|var)\b", c):
-            return True
-        return False
-
-    def _confirm_needed(self, command: str = "", risky: bool = False,
-                        from_card: bool = False) -> bool:
-        """The one place the approval posture is decided. approval_mode:
-        'none'  → never (autonomous; the default),
-        'risky' → only for risky commands / inherently-risky actions,
-        'all'   → every side-effecting op.
-        A command already approved through a card never re-confirms."""
-        if from_card:
-            return False
-        mode = self.settings.get("approval_mode", "none")
-        if mode == "all":
-            return True
-        if mode == "risky":
-            return risky or (bool(command) and self._command_is_risky(command))
-        return False  # 'none' — autonomous
-
     def _execute_command(self, command, reason, from_card=False):
         """Confirm (with sudo password if needed), run, feed result back.
         Shared by the model's `run` tool and the card's Run button.
@@ -7323,61 +7241,30 @@ class MainWindow(Adw.ApplicationWindow):
         have_cached_sudo = (sudo_needed
                             and self.settings.get("auto_sudo_when_cached", True)
                             and sudo_cached())
-        # Hard backstop: a system-destroying command (disk/fs wipe, recursive
-        # root delete, fork bomb…) ALWAYS stops for an explicit confirm — even
-        # in auto-run mode, even from a card.  This is the one gate a setting
-        # can't switch off, because it's the one mistake that can't be undone.
-        catastrophic = is_catastrophic_command(command)
-        # Same treatment for a raw shell write to Basilisk's own source files: it
-        # would bypass the guarded edit path (parse-check + immutable
-        # guardrail), so it never auto-runs silently.
-        tampers = command_tampers_self(command)
         reason_txt = reason or "no reason"
-        # Destructive/system-destroying commands are BANNED outright — no confirm
-        # dialog, no "Run anyway". Same hard floor as the primary run path, so
-        # there's nothing to approve and autonomous mode never trips on one.
-        if catastrophic:
-            self.terminal_log("■ BLOCKED — destructive command refused (banned, "
-                              "no override)", "error")
+        # ── NO CONFIRMATION. Basilisk is autonomous, full stop. ──
+        # There is no "confirm every command", no approval card, no mode. Every
+        # command just runs. The ONLY two exceptions, and neither is a
+        # "may I?" prompt:
+        #   1. Catastrophic/system-destroying commands are REFUSED (already
+        #      hard-blocked at the top of this method) — a hard floor, no dialog.
+        #   2. A raw shell write to Basilisk's OWN source is refused too, so a
+        #      malicious page/tool can't overwrite the safety code — also no
+        #      dialog, just refused.
+        # The one dialog that can appear is to COLLECT A SUDO PASSWORD, once,
+        # when a root command has no cached credential; after that it's cached
+        # and reused silently and you never see it again.
+        if command_tampers_self(command):
+            self.terminal_log("■ refused — raw write to Basilisk's own source "
+                              "(use the guarded edit path)", "error")
             self._feed_tool_result(
-                "REFUSED. This is a catastrophic/destructive command — it would "
-                "irreversibly destroy the system or its data — so Basilisk will "
-                "not run it under any circumstances. Hard floor, no override.\n\n"
-                "  " + command)
+                "REFUSED — this command writes directly to one of Basilisk's own "
+                "source files, bypassing the guarded edit path. Not run (this "
+                "protects the safety code from being overwritten). Use propose_edit "
+                "/ write_file for legitimate self-edits.\n\n  " + command)
             return
-        if tampers:
-            self.terminal_log("• command writes to Basilisk's own source — "
-                              "forcing confirm", "dim")
-            reason_txt = ("This command writes to one of Basilisk's own source "
-                          "files, which sidesteps the guarded edit path "
-                          "(parse-check + immutable guardrail). Confirm to "
-                          "allow.\n\n" + reason_txt)
-        # Approval posture (approval_mode): 'none' runs everything without asking
-        # (default), 'risky' confirms only risky commands, 'all' confirms every
-        # side-effecting command. Self-tampering always confirms; the one-time
-        # sudo password prompt below still happens so the credential can be cached.
-        need_approval = (tampers
-                         or (getattr(self, "_fs_force_confirm", False)
-                             and not from_card)
-                         or self._confirm_needed(command=command,
-                                                 from_card=from_card))
-        _autonomous = self.settings.get("approval_mode", "none") == "none"
-        # Walk-away safety: in autonomous mode, a sudo command with no cached
-        # credential must NOT pop a password dialog and block forever with
-        # nobody watching. Skip it with a clear message and let the chain go on.
-        if (_autonomous and not need_approval
-                and sudo_needed and not have_cached_sudo):
-            self.terminal_log("• autonomous: skipping uncached-sudo command "
-                              "(no one to enter the password)", "dim")
-            self._feed_tool_result(
-                "NOT RUN — this needs root (sudo) and no credential is cached for "
-                "this unattended session, so it would block on a password prompt "
-                "with nobody watching. Work around it without root if you can, or "
-                "skip it. (To allow privileged steps on a walk-away run, the "
-                "operator runs one sudo command before leaving to cache the "
-                "password.) Command:\n  " + command)
-            return
-        if need_approval or (sudo_needed and not have_cached_sudo):
+        if sudo_needed and not have_cached_sudo:
+            # Collect the sudo password once (then it's cached + reused silently).
             confirm_command_dialog(self, command, reason_txt, decide,
                                    catastrophic=False)
         else:

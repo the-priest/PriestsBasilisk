@@ -241,20 +241,6 @@ DEFAULT_SETTINGS = {
     # Behaviour
     "system_prompt": "",
     "agent_mode_default": True,        # Basilisk defaults to agent on
-    # Off by default: a command Basilisk decides to run executes without a card
-    # click.  The hard catastrophic-command backstop (is_catastrophic_command)
-    # still forces an explicit confirm for system-destroying commands even
-    # when this is off, so "no friction" never means "no floor".
-    "approval_mode":           "none",  # command approval posture:
-                                        #   "none"  = autonomous (default): run
-                                        #            everything, no per-command asks,
-                                        #            act-don't-plan, fast model.
-                                        #   "risky" = confirm only risky commands
-                                        #            (sudo / destructive / sensitive),
-                                        #            run safe ones directly.
-                                        #   "all"   = confirm every side-effecting
-                                        #            command. Destructive is ALWAYS
-                                        #            refused regardless of this.
 
     # Watcher
     "watcher_enabled": False,
@@ -417,16 +403,9 @@ def _migrate_settings(merged: Dict[str, Any], raw: Dict[str, Any]) -> None:
     if merged.get("active_provider") not in PROVIDERS_BY_KEY:
         merged["active_provider"] = "siliconflow"
 
-    # Approval posture: the old confirm_all_commands + autonomous_mode booleans
-    # were folded into the 3-way approval_mode. Preserve an existing operator's
-    # intent, otherwise default to autonomous ("none").
-    if "approval_mode" not in raw:
-        if raw.get("autonomous_mode") is True:
-            merged["approval_mode"] = "none"       # they wanted unleashed
-        elif raw.get("confirm_all_commands") is True:
-            merged["approval_mode"] = "all"        # they wanted every command
-        else:
-            merged["approval_mode"] = "none"       # default: autonomous
+    # There is only ONE posture now: autonomous. Drop any saved approval keys
+    # (from any older build) so nothing can re-enable a confirmation prompt.
+    merged.pop("approval_mode", None)
     merged.pop("autonomous_mode", None)
     merged.pop("confirm_all_commands", None)
 

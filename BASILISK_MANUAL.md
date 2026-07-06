@@ -2,7 +2,7 @@
 
 *The full reference for Basilisk, the AI security operator that lives on your Linux machine.*
 
-**Version 5.1.1** · GTK4 + libadwaita · X11 & Wayland · desktop and NetHunter mobile
+**Version 5.1.2** · GTK4 + libadwaita · X11 & Wayland · desktop and NetHunter mobile
 
 ---
 
@@ -35,19 +35,17 @@ Basilisk's tools fall into two buckets:
 
 Almost everything in the offensive toolkit is a **planner or builder** — it produces a command or a payload as text. The moment something is actually *executed against a target*, that's an act, and it runs through the gate on scope **you** set.
 
-## 1.2 The three approval postures
+## 1.2 Autonomous — no confirmation
 
-One setting — **Command approval** — decides how much Basilisk asks before acting:
+Basilisk is **autonomous, full stop.** Acting tools execute immediately, it reads the result and continues the chain on its own, and it keeps going until the task is done or you hit Stop. There is no "confirm every command", no approval card, no mode to choose — you turn it on a job, walk away, and come back to results.
 
-- **Autonomous (the default).** Acting tools execute immediately, Basilisk reads the result and continues the chain on its own, and it keeps going until the task is done or you hit Stop. It stays on the fast model and acts rather than planning. This is the "turn it on, walk away, come back to results" mode — no cards, no per-command prompts.
-- **Confirm risky only.** Safe commands run directly; Basilisk stops for a card on the risky ones — anything needing sudo, destructive verbs (`rm`, `dd`, `mkfs`, service stops, power), or sensitive paths.
-- **Confirm every command.** Every acting tool becomes an approve-first **card**: you see exactly what it wants to do and click Apply (or decline).
+The **only** dialog that ever appears is a one-time prompt to collect a **sudo password**, when a root command has no cached credential. You enter it once; after that it's cached for the session and reused silently, and the model never sees it. Read-only sensing always runs freely.
 
-Sensing (read-only) always runs freely in all three. You choose the posture in Settings → Command approval. The one thing no posture changes is the hard floor below.
+The two things that never run — and neither is a "may I?" prompt — are the hard floor below.
 
-## 1.3 Cards
+## 1.3 The one dialog: sudo password
 
-When you've dialed approval up (risky-only or every-command) and a tool wants to *do* something you should see first, Basilisk shows a **card**: the exact command or a real diff, with Apply / decline. Shell commands, file writes, self-edits, and self-written tools surface as cards. In **autonomous** mode there are no cards — those same actions execute directly and the chain keeps moving.
+There are no approval cards. The single dialog you may see is the **sudo password prompt**: when Basilisk runs a `sudo` command and no credential is cached yet, it asks for the password once, validates it, caches it for the session, and runs. Every later root command in that session runs silently. Your password is never stored to disk, logged, or shown to the model.
 
 ## 1.4 The hard floor (the one rule that never bends)
 
@@ -514,7 +512,7 @@ The deliberate non-goals: Basilisk does **not** write self-propagating malware, 
 
 **Behaviour**
 - `agent_mode_default` (on), `one_command_at_a_time` (on), `warn_duplicate_commands` (off), `urgency_fast_path` (on), `auto_sudo_when_cached` (on), `max_tool_steps` (150; autonomous runs lift this to 5000 for long walk-away sessions).
-- `approval_mode` ("none") — command approval posture. "none" = autonomous (default: run everything, no per-command asks, fast model, act-don't-plan, keeps going until done or Stop); "risky" = confirm only sudo/destructive/sensitive commands; "all" = confirm every side-effecting command. Destructive commands are refused outright in all three; sudo is asked once then cached.
+- Command approval: there is none. Basilisk is autonomous — every command runs with no prompt. The only dialog is a one-time sudo password (then cached, never shown). Destructive/system-destroying commands, and raw shell writes to Basilisk's own source, are refused outright.
 
 **Subsystems (mostly off by default)**
 - `memory_enabled`, `skills_enabled`, `foresight_enabled`, `reach_enabled` — recall, self-written tools, consequence-prediction, native web reach.
@@ -579,4 +577,4 @@ The rule of thumb: **sensing is free and instant; acting waits for your Apply (o
 
 ---
 
-*⟁ Basilisk v5.1.1 — built by The Priest. Powerful on purpose, safe by construction.*
+*⟁ Basilisk v5.1.2 — built by The Priest. Powerful on purpose, safe by construction.*

@@ -1,5 +1,27 @@
 # Changelog
 
+## v5.1.2 — no confirmation, period
+
+Confirmation is **gone**. There is one posture — autonomous — and no setting can
+turn it into an ask-first mode.
+
+- **No approval prompt for any command.** Removed the `approval_mode` setting, its
+  3-way selector, and the `_confirm_needed` / `_command_is_risky` machinery. Every
+  command Basilisk decides on just runs. The action-tool and skill-write paths run
+  directly too. Across the whole codebase there is now exactly **one**
+  command-confirmation dialog call, and it fires solely to collect a **sudo
+  password** when a root command has no cached credential (then it's cached and
+  reused silently, never shown to the model).
+- **The floor is unchanged, and never a prompt.** Catastrophic/system-destroying
+  commands are refused outright; a raw shell write to Basilisk's own source is
+  refused too (so a malicious page can't overwrite the safety code). Neither shows
+  a dialog — they're hard blocks, not questions.
+- **Migration wipes any old approval keys** from existing settings files, so no
+  prior "confirm every command" choice can survive an upgrade and re-introduce a
+  prompt.
+- Docs (README + manual) rewritten to describe the single autonomous posture and
+  the one-time sudo prompt.
+
 ## v5.1.1 — autonomous by default
 
 Autonomous is now the **default** posture, and the confirmation model is one clean
