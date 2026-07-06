@@ -14,7 +14,7 @@ keywords: ai security operator, kali linux ai, ai pentest tool, offensive securi
 
 <br>
 
-![version](https://img.shields.io/badge/version-5.1.0-7d121b?style=for-the-badge&labelColor=08090b)
+![version](https://img.shields.io/badge/version-5.1.1-7d121b?style=for-the-badge&labelColor=08090b)
 ![license](https://img.shields.io/badge/license-MIT-7d121b?style=for-the-badge&labelColor=08090b)
 ![platform](https://img.shields.io/badge/Linux-X11%20%7C%20Wayland-6d7680?style=for-the-badge&logo=linux&logoColor=white&labelColor=08090b)
 ![python](https://img.shields.io/badge/python-3.10+-6d7680?style=for-the-badge&logo=python&logoColor=white&labelColor=08090b)
@@ -137,7 +137,7 @@ Three pieces, and understanding them is understanding Basilisk.
 
 ## Everything Basilisk can do
 
-Read-only **sensing** runs freely. Anything that changes your system either runs directly (default) or becomes an approve-first card (*Confirm every command* mode) — and the irreversible class is refused outright regardless, no override. The lists below are grouped by what you'd actually reach for.
+Read-only **sensing** runs freely. Anything that changes your system runs directly by default (autonomous), or — if you dial up the approval setting — becomes an approve-first card for risky commands or for every command. The irreversible class is refused outright regardless, no override. The lists below are grouped by what you'd actually reach for.
 
 <details>
 <summary><b>🛡️ Offensive security</b> — recon, scanning, CVE intel, exploitation write-ups</summary>
@@ -212,7 +212,7 @@ Every command Basilisk runs is recorded automatically to an append-only JSONL le
 
 **Desktop control (confirm-gated):** `launch_app` · `list_apps` · `list_windows` · `focus_window` · `close_window` · `type_text` · `press_key` · `open_url` · `screenshot` · `read_screen` (on-screen **OCR**) · `media_control` · `notify`. Auto-detects **X11 vs Wayland** and picks the right backend.
 
-**Files &amp; shell (gated for anything that changes):** `read_file` · `list_dir` · `find_file` · `make_dir` · `copy_path` · `move_path` · `delete_path` · **`run`** any shell command (decisive by default, the catastrophic class refused outright, sudo handled safely). **Write any file** via a diff card you Apply.
+**Files &amp; shell (gated for anything that changes):** `read_file` · `list_dir` · `find_file` · `make_dir` · `copy_path` · `move_path` · `delete_path` · **`run`** any shell command (runs directly in autonomous, the catastrophic class refused outright, sudo handled safely). **Write any file** — applied directly in autonomous, or via a diff card you Apply if you've dialed up approval.
 
 </details>
 
@@ -246,13 +246,13 @@ Every command Basilisk runs is recorded automatically to an append-only JSONL le
 
 Basilisk is **decisive by default and un-catastrophic by construction.**
 
-- **Three speeds, you pick.** *Default:* read-only sensing runs free, and when you ask for something Basilisk does it, reads the result, and continues — no clicking through routine work. *Confirm every command (one toggle):* every side-effecting action becomes a card you approve one at a time. *Autonomous mode (one toggle):* for an authorized "pentest/benchmark X and don't stop" run — no per-command prompts at all, sudo asked once then cached, it just works until done or you hit Stop.
-- **The irreversible class is refused outright — no confirm, no override.** A **structural** detector (shlex-tokenized, `$IFS`/quote-normalized, recursing into `sh -c` / `eval`) **hard-blocks** disk/filesystem wipes, recursive root/`$HOME` deletes, fork bombs, and raw block-device writes — before any dialog, in every mode, no matter what steered the model. There is no "Run anyway" button and no setting that turns it off. It sees through tricks a regex misses — `rm '-rf' /`, `rm${IFS}-rf${IFS}/`, `cd / && rm -rf *`, `find / -delete`, `echo … | base64 -d | sh` — while staying narrow enough that `nmap`, `nuclei`, `sqlmap` and `rm -rf ~/loot` never trip it. The full catch/ignore contract is **pinned in the test suite.**
-- **Basilisk's own safety code can't be shell-stripped**, your **sudo password is never stored or shown to the model**, and self-written code runs only in a **bubblewrap jail** after passing its own test.
+- **One approval setting, three postures.** *Autonomous (default):* Basilisk runs every command without asking, stays on the fast model, acts instead of planning, and keeps going until the task is done or you hit Stop — turn it on, walk away, come back to results. *Confirm risky only:* it runs safe commands directly but stops for a card on sudo / destructive / sensitive ones. *Confirm every command:* every side-effecting action becomes an approve-first card. You pick in Settings → Command approval.
+- **The irreversible class is refused outright — no confirm, no override.** A **structural** detector (shlex-tokenized, `$IFS`/quote-normalized, recursing into `sh -c` / `eval`) **hard-blocks** disk/filesystem wipes, recursive root/`$HOME` deletes, fork bombs, and raw block-device writes — before any dialog, in every posture, no matter what steered the model. There is no "Run anyway" button and no setting that turns it off. It sees through tricks a regex misses — `rm '-rf' /`, `rm${IFS}-rf${IFS}/`, `cd / && rm -rf *`, `find / -delete`, `echo … | base64 -d | sh` — while staying narrow enough that `nmap`, `nuclei`, `sqlmap` and `rm -rf ~/loot` never trip it. The full catch/ignore contract is **pinned in the test suite.**
+- **Basilisk's own safety code can't be shell-stripped**, your **sudo password is never stored or shown to the model** (and in a walk-away autonomous run an uncached-sudo command is skipped rather than left blocking on a prompt), and self-written code runs only in a **bubblewrap jail** after passing its own test.
 - **It can't lie about your machine.** Hardware and system facts are read live with a tool, never guessed.
-- **Exploitation is the job — with you on the trigger.** Basilisk writes and runs real exploits (SQLi, XSS, JWT forgery, SSRF, sqlmap-driven attacks, and more) against targets you're authorized to test, within scope you set. The line it holds: no **standalone weaponized malware** (reverse shells, implants, ransomware, backdoors), and the irreversible/destructive class is refused outright and can never run through Basilisk at all.
+- **Exploitation is the job.** Basilisk writes and runs real exploits (SQLi, XSS, JWT forgery, SSRF, sqlmap-driven attacks, and more) against targets you're authorized to test, within scope you set. The line it holds: no **standalone weaponized malware** (reverse shells, implants, ransomware, backdoors), and the irreversible/destructive class is refused outright and can never run through Basilisk at all.
 
-> The guarantee isn't "asks every time" — you can dial friction from full-confirm all the way to fully autonomous. It's that the one mistake that can't be undone — wiping the system or its storage — **can never run through Basilisk, in any mode.**
+> The guarantee isn't "asks every time" — the default is fully autonomous, and you dial *up* to confirming risky commands or every command whenever you want. It's that the one mistake that can't be undone — wiping the system or its storage — **can never run through Basilisk, in any posture.**
 
 <br>
 
@@ -485,7 +485,7 @@ For per-machine persona tweaks that survive upgrades, use **Settings → Persona
 ## What Basilisk will *not* do
 
 - **Destroy your system or its storage — ever.** Disk/FS wipes, recursive root/`$HOME` deletes, fork bombs and raw block-device writes are *refused outright* — hard-blocked before any dialog, in every mode (including autonomous), even via quoting / `$IFS` / `bash -c` tricks. No "Run anyway", no setting to disable it.
-- **Be an always-on autonomous fleet agent.** A deliberate non-goal. Autonomous mode is an *opt-in, single-session* unleash for a target you authorised — you start it and you stop it; it's not a background daemon roaming on its own.
+- **Be an always-on autonomous fleet agent.** Autonomous execution is the default *within a session you start and stop* — you can turn it on, walk away, and come back to results, but it's not a background daemon roaming your machines on its own, and **Stop halts it instantly**. Destructive commands are refused even here.
 - **See your sudo password**, or reach private content it hasn't been given a token for.
 - **Invent facts about your machine.** Hardware and system state are read with a tool, not guessed.
 - **Generate standalone weaponized malware.** Writing and running exploits against *authorized, in-scope* targets is the whole point, and it does exactly that — but it won't churn out reverse-shell binaries, self-propagating implants, ransomware or persistent backdoors, and the irreversible/destructive class can never run through it at all.

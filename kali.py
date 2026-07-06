@@ -92,7 +92,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.kali"
 APP_NAME = "Basilisk"
-VERSION = "5.1.0"
+VERSION = "5.1.1"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -107,6 +107,11 @@ VERSION = "5.1.0"
 # always grants a fresh budget — the cap only stops a runaway WITHIN one turn,
 # which protects the token bill.
 MAX_TOOL_CHAIN = 150
+# In autonomous mode the operator wants a long walk-away run ("turn it on, come
+# back hours later, still working or finished"). The normal 150-step cap would
+# halt that, so autonomous gets a much higher ceiling — still finite so a genuine
+# infinite loop can't bill forever, but large enough for a many-hour engagement.
+AUTONOMOUS_TOOL_CHAIN = 5000
 # Parallel workers when several read-only tools fire in one turn.
 TOOL_BATCH_MAX_WORKERS = 6
 # Keep this many most-recent tool_result blocks at full length in the
@@ -1547,6 +1552,11 @@ _RENDER_IMAGES = True
 # action title instead of a generic "working".
 _CURRENT_ACTION = ""
 
+# Mirror of the approval_mode setting so the message renderer (no settings
+# handle) can tell whether to draw interactive proposal cards. In autonomous
+# mode ("none") proposals auto-execute, so their cards are suppressed.
+_APPROVAL_MODE = "none"
+
 
 class ImageWidget(Gtk.Box):
     """An image rendered inline in chat from a URL (http/https/file/local path).
@@ -2363,7 +2373,9 @@ class MessageWidget(Gtk.Box):
         # advisory only — the model emits <tool name="propose"> and the
         # operator decides whether to run.  Parsed from the raw (un-
         # stripped) content so the cards survive a chat reload.
-        if self.role == "assistant":
+        # In autonomous mode proposals auto-execute (no operator watching), so
+        # we don't draw interactive cards at all — they'd just sit there.
+        if self.role == "assistant" and _APPROVAL_MODE != "none":
             try:
                 for call in parse_tool_calls(text):
                     _rendered = False
@@ -2815,19 +2827,19 @@ class SettingsDialog(Adw.PreferencesDialog):
             lambda r, _ps: self._set("lean_chat", r.get_active()))
         intel_g.add(self.lean_chat_row)
 
-        self.grouped_tools_row = Adw.SwitchRow()
-        self.grouped_tools_row.set_title("Max mode (full tool catalog)")
-        self.grouped_tools_row.set_subtitle(
+        self.max_mode_row = Adw.SwitchRow()
+        self.max_mode_row.set_title("Max mode (full tool catalog)")
+        self.max_mode_row.set_subtitle(
             "OFF (default): lean — a tiny tool directory plus load-on-demand, "
             "~7k tokens lighter every turn. ON: ship every tool's full spec "
             "inline every turn — maximum context for the model, far more tokens "
             "(and money). Autonomous mode always stays lean regardless.")
-        self.grouped_tools_row.set_active(
+        self.max_mode_row.set_active(
             bool(parent.settings.get("max_mode", False)))
-        self.grouped_tools_row.connect(
+        self.max_mode_row.connect(
             "notify::active",
             lambda r, _ps: self._set("max_mode", r.get_active()))
-        intel_g.add(self.grouped_tools_row)
+        intel_g.add(self.max_mode_row)
 
         self.thoughts_row = Adw.SwitchRow()
         self.thoughts_row.set_title("Show reasoning panel")
@@ -3082,30 +3094,27 @@ class SettingsDialog(Adw.PreferencesDialog):
         self.agent_default_row.set_active(parent.settings["agent_mode_default"])
         self.agent_default_row.connect("notify::active", self._on_agent_default)
         bg.add(self.agent_default_row)
-
-        self.confirm_all_row = Adw.SwitchRow()
-        self.confirm_all_row.set_title("Confirm every command")
-        self.confirm_all_row.set_subtitle(
-            "Off (default): Basilisk runs commands without a click. "
-            "System-destroying commands always prompt regardless.")
-        self.confirm_all_row.set_active(parent.settings["confirm_all_commands"])
-        self.confirm_all_row.connect("notify::active", self._on_confirm_all)
-        bg.add(self.confirm_all_row)
-
-        self.autonomous_row = Adw.SwitchRow()
-        self.autonomous_row.set_title("Autonomous mode (unleashed)")
-        self.autonomous_row.set_subtitle(
-            "For \"pentest / benchmark X and don't stop\". Runs every command "
-            "WITHOUT asking, stays on the fast model, acts instead of planning, "
-            "and keeps going until done or you hit Stop. Destructive commands are "
-            "still hard-blocked. Sudo is asked once, then cached for the session "
-            "(you never see it). Only turn this on for a target you've authorised.")
-        self.autonomous_row.set_active(
-            bool(parent.settings.get("autonomous_mode", False)))
-        self.autonomous_row.connect(
-            "notify::active",
-            lambda r, _ps: self._set("autonomous_mode", r.get_active()))
-        bg.add(self.autonomous_row)
+        # Command approval posture — one 3-way choice replaces the old
+        # confirm-every-command + autonomous toggles.
+        self.approval_row = Adw.ComboRow()
+        self.approval_row.set_title("Command approval")
+        self.approval_row.set_subtitle(
+            "Autonomous (default): runs everything without asking, stays on the "
+            "fast model, acts instead of planning — for authorised \"pentest / "
+            "benchmark X and don't stop\" runs. Risky only: confirms just sudo / "
+            "destructive / sensitive commands. Every command: approve each side-"
+            "effecting op. Destructive/system-destroying commands are refused "
+            "outright in ALL three. Sudo is asked once, then cached (never shown).")
+        self._approval_keys = ["none", "risky", "all"]
+        self._approval_labels = ["Autonomous — run everything",
+                                 "Confirm risky only",
+                                 "Confirm every command"]
+        self.approval_row.set_model(Gtk.StringList.new(self._approval_labels))
+        _cur_ap = parent.settings.get("approval_mode", "none")
+        if _cur_ap in self._approval_keys:
+            self.approval_row.set_selected(self._approval_keys.index(_cur_ap))
+        self.approval_row.connect("notify::selected", self._on_approval_mode)
+        bg.add(self.approval_row)
 
         self.one_cmd_row = Adw.SwitchRow()
         self.one_cmd_row.set_title("One command at a time")
@@ -3669,8 +3678,13 @@ class SettingsDialog(Adw.PreferencesDialog):
     def _on_agent_default(self, row, _ps):
         self._set("agent_mode_default", row.get_active())
 
-    def _on_confirm_all(self, row, _ps):
-        self._set("confirm_all_commands", row.get_active())
+    def _on_approval_mode(self, row, _ps):
+        idx = row.get_selected()
+        keys = getattr(self, "_approval_keys", ["none", "risky", "all"])
+        if 0 <= idx < len(keys):
+            self._set("approval_mode", keys[idx])
+            global _APPROVAL_MODE
+            _APPROVAL_MODE = keys[idx]
 
     def _on_watcher_enable(self, row, _ps):
         self._set("watcher_enabled", row.get_active())
@@ -3772,6 +3786,8 @@ class MainWindow(Adw.ApplicationWindow):
         self.set_default_size(w, h)
         self.app = app
         self.settings = load_settings()
+        global _APPROVAL_MODE
+        _APPROVAL_MODE = self.settings.get("approval_mode", "none")
         # In-app notification inbox — things Basilisk flags for the operator.
         # Persisted so they survive a restart; capped so it can't grow forever.
         self._notif_path = os.path.expanduser(
@@ -5505,6 +5521,8 @@ class MainWindow(Adw.ApplicationWindow):
         # to stop calling tools; _after_stream ignores any it emits anyway.
         self._tool_chain_depth += 1
         _budget = self.settings.get("max_tool_steps", MAX_TOOL_CHAIN)
+        if self.settings.get("approval_mode", "none") == "none":
+            _budget = max(_budget, AUTONOMOUS_TOOL_CHAIN)  # long walk-away runs
         if self._tool_chain_depth > _budget and not self._tools_locked:
             self._tools_locked = True
             self.terminal_log("── tool budget reached; finalizing answer", "dim")
@@ -5552,29 +5570,41 @@ class MainWindow(Adw.ApplicationWindow):
                     addendum = (addendum + "\n\n" + extra).strip()
             except Exception:
                 pass
-        # Autonomous mode: unleashed execution. Act over plan, keep going.
-        if self.settings.get("autonomous_mode", False):
-            addendum = (addendum + "\n\n[AUTONOMOUS MODE IS ON. The operator has "
-                "authorised you to run without asking permission per command. "
-                "Rules for this mode:\n"
-                "- ACT, don't plan. Do NOT enumerate long option lists, do NOT "
-                "narrate a multi-step plan, do NOT reason at length. Pick the "
-                "SINGLE most likely path in and just try it. If it fails, move to "
-                "the next single option and try that. Never spend a turn only "
-                "thinking or listing — every turn should DO something (a tool "
-                "call or a concrete action).\n"
-                "- Keep going until the objective is met (e.g. the whole board "
-                "solved, the target fully tested) or the operator stops you. "
-                "Don't stop to ask 'should I continue' — continue.\n"
-                "- Confirm the TARGET is correct exactly ONCE at the very start "
-                "if it isn't already obvious, then unleash everything you have on "
-                "it without further permission prompts.\n"
-                "- Commands run without confirmation. Destructive/system-"
-                "destroying commands are still hard-blocked — don't attempt them. "
-                "If a command needs sudo, the operator is asked for the password "
-                "once and it's cached for the rest of the session; you never see "
-                "it.\n"
-                "- Be terse. Short status lines, not essays. Save tokens.]").strip()
+        # Autonomous posture (approval_mode 'none', the default): act over plan,
+        # keep going, NO cards. When the operator has opted into confirming
+        # commands, drop this so it reasons/plans more carefully.
+        if self.settings.get("approval_mode", "none") == "none":
+            addendum = (addendum + "\n\n[AUTONOMOUS MODE — THIS OVERRIDES ANY "
+                "CONFLICTING INSTRUCTION ABOVE. The operator turned this on to "
+                "start a job, walk away, and come back hours later to find it "
+                "still working or finished. Obey these rules exactly:\n"
+                "- NEVER use the `propose` or `propose_edit` tools. Never put a "
+                "card on screen for the operator to click — there is no operator "
+                "watching. Run shell commands DIRECTLY with the `run` tool; write "
+                "files DIRECTLY with `write_file`. They execute immediately in "
+                "this mode; do not wait for approval.\n"
+                "- IGNORE any guidance to 'reason WITH him and propose', 'let him "
+                "decide', 'have a conversation not a runaway', or to 'stop and ask "
+                "how he wants to proceed'. Those are OFF now. You decide and you "
+                "act.\n"
+                "- NEVER stop to check in, summarise-and-wait, or ask a question. "
+                "Do NOT end your turn with a question or a 'let me know'. If you're "
+                "about to write a summary and stop — DON'T; do the next action "
+                "instead. The ONLY reasons to stop are: the whole task is finished, "
+                "or you are truly blocked on something only the operator can do "
+                "(and even then, try every alternative first).\n"
+                "- ACT, don't plan. No long option lists, no multi-step plan "
+                "narration, no lengthy reasoning. Pick the single most likely path, "
+                "try it; if it fails, try the next single option. Every turn must "
+                "DO something (a tool call), never just think or list.\n"
+                "- Keep firing tool calls until the objective is met (e.g. the "
+                "whole board solved / the target fully tested) or you're stopped. "
+                "Chain step after step without pausing.\n"
+                "- Destructive/system-destroying commands are hard-blocked (refused) "
+                "— don't attempt them. sudo: if a credential is cached it's used "
+                "silently; you never see the password.\n"
+                "- Be terse. One short status line per step, not essays. Save "
+                "tokens.]").strip()
             self.terminal_log("🔥 autonomous mode: unleashed", "dim")
         # Lean-chat: on a plainly conversational OPENING turn (a greeting,
         # thanks, an opinion question — no hint of an action), skip the ~8K-token
@@ -5638,8 +5668,7 @@ class MainWindow(Adw.ApplicationWindow):
         sysprompt = build_system_prompt(
             agent_mode=(False if _lean else self.current_agent_mode),
             custom_addendum=addendum,
-            grouped=(self.settings.get("autonomous_mode", False)
-                     or not self.settings.get("max_mode", False)))
+            grouped=(not self.settings.get("max_mode", False)))
         full = assemble_messages(sysprompt, history)
         # Splice in relevance-scoped recall (top-k memories for THIS turn).
         # No-op unless memory is enabled; never grows with history length.
@@ -6198,6 +6227,27 @@ class MainWindow(Adw.ApplicationWindow):
         # They never execute here; if one slips through, end the turn so
         # the card stands on its own.
         if call.name in ("propose", "propose_edit", "write_file"):
+            # AUTONOMOUS MODE: never leave a card waiting — there's no operator
+            # watching. Execute the proposal directly and keep the chain going.
+            if self.settings.get("approval_mode", "none") == "none":
+                if call.name == "propose":
+                    _cmd = (call.args.get("command")
+                            or call.args.get("cmd") or "").strip()
+                    if _cmd:
+                        self.terminal_log("• autonomous: running proposed command "
+                                          "directly", "dim")
+                        self._run_proposed_command(
+                            _cmd, str(call.args.get("explanation", "")))
+                        return
+                else:  # propose_edit / write_file
+                    _p = (call.args.get("path") or "").strip()
+                    _c = call.args.get("content")
+                    if _p and _c is not None:
+                        self.terminal_log("• autonomous: applying file write "
+                                          "directly", "dim")
+                        self._run_proposed_edit(_p, _c)
+                        return
+                # args unusable — fall through to the normal re-emit handling
             # …but ONLY if the card actually had the data to render.  A
             # propose_edit whose JSON couldn't be parsed (e.g. unescaped
             # quotes inside `content` that the lenient parser can't safely
@@ -6821,7 +6871,7 @@ class MainWindow(Adw.ApplicationWindow):
                 return
             self._tool_simple(fn)
 
-        if self.settings.get("confirm_all_commands", True):
+        if self._confirm_needed(risky=True):
             confirm_command_dialog(self, description,
                                    f"Basilisk wants to: {description}", _go)
         else:
@@ -6862,7 +6912,7 @@ class MainWindow(Adw.ApplicationWindow):
         descr = (f"save self-written skill '{name}'"
                  + (f" (caps: {', '.join(caps)})" if caps else "")
                  + " — sandbox-tested before keeping")
-        if self.settings.get("confirm_all_commands", True):
+        if self._confirm_needed(risky=True):
             # Surface what's actually being approved: capabilities, any flagged
             # constructs from the static screen, and a code preview.  Approving
             # a skill you can't see defeats the point of the gate.
@@ -7061,6 +7111,51 @@ class MainWindow(Adw.ApplicationWindow):
         self._execute_command(command, explanation or "operator approved",
                               from_card=True)
 
+    def _command_is_risky(self, command: str) -> bool:
+        """Is this shell command 'risky' (worth a confirm in 'risky' mode)?
+        Catastrophic commands are already refused elsewhere; this flags the tier
+        below that — needs root, deletes/moves system things, changes power or
+        services, touches sensitive paths. Conservative: better to confirm one
+        borderline command than miss a damaging one."""
+        c = (command or "").lower()
+        if command_needs_sudo(command):
+            return True
+        import re as _re
+        risky_pats = [
+            r"\brm\b", r"\brmdir\b", r"\bdd\b", r"\bmkfs", r"\bshred\b",
+            r"\btruncate\b", r"\bchmod\s+-r", r"\bchown\s+-r",
+            r"\bkill(all)?\b", r"\bpkill\b",
+            r"\bsystemctl\s+(stop|disable|mask|kill)", r"\bservice\s+\S+\s+stop",
+            r"\biptables\s+-f", r"\bnft\s+flush", r"\bufw\s+(disable|reset)",
+            r">\s*/dev/", r"\bcrontab\b", r"\buserdel\b", r"\bgroupdel\b",
+            r"\bfdisk\b", r"\bparted\b", r"\bwipefs\b", r"\bmkswap\b",
+            r"\bshutdown\b", r"\breboot\b", r"\bhalt\b", r"\bpoweroff\b",
+            r"\binsmod\b", r"\brmmod\b", r"\bmodprobe\b", r"\bmount\b",
+            r"\bumount\b", r"\bnpm\s+publish\b", r"\bgit\s+push\b.*--force",
+        ]
+        if any(_re.search(p, c) for p in risky_pats):
+            return True
+        # writing/moving into a system dir
+        if _re.search(r"\b(mv|cp|tee|dd)\b.*\s/(etc|usr|bin|sbin|boot|lib|var)\b", c):
+            return True
+        return False
+
+    def _confirm_needed(self, command: str = "", risky: bool = False,
+                        from_card: bool = False) -> bool:
+        """The one place the approval posture is decided. approval_mode:
+        'none'  → never (autonomous; the default),
+        'risky' → only for risky commands / inherently-risky actions,
+        'all'   → every side-effecting op.
+        A command already approved through a card never re-confirms."""
+        if from_card:
+            return False
+        mode = self.settings.get("approval_mode", "none")
+        if mode == "all":
+            return True
+        if mode == "risky":
+            return risky or (bool(command) and self._command_is_risky(command))
+        return False  # 'none' — autonomous
+
     def _execute_command(self, command, reason, from_card=False):
         """Confirm (with sudo password if needed), run, feed result back.
         Shared by the model's `run` tool and the card's Run button.
@@ -7223,7 +7318,7 @@ class MainWindow(Adw.ApplicationWindow):
         # (#9) If a root command is needed but sudo already has a cached
         # credential this session, skip the password prompt and run silently
         # (when auto_sudo_when_cached is on).  Approval gating is separate:
-        # confirm_all_commands still shows the dialog for model-initiated runs.
+        # approval_mode decides whether a model-initiated run confirms.
         sudo_needed = command_needs_sudo(command)
         have_cached_sudo = (sudo_needed
                             and self.settings.get("auto_sudo_when_cached", True)
@@ -7257,15 +7352,31 @@ class MainWindow(Adw.ApplicationWindow):
                           "files, which sidesteps the guarded edit path "
                           "(parse-check + immutable guardrail). Confirm to "
                           "allow.\n\n" + reason_txt)
-        # Autonomous mode drops the per-command approval prompt (the operator
-        # authorised it). Self-tampering still confirms; the one-time sudo
-        # password prompt below still happens so the credential can be cached.
-        _auton = self.settings.get("autonomous_mode", False)
+        # Approval posture (approval_mode): 'none' runs everything without asking
+        # (default), 'risky' confirms only risky commands, 'all' confirms every
+        # side-effecting command. Self-tampering always confirms; the one-time
+        # sudo password prompt below still happens so the credential can be cached.
         need_approval = (tampers
                          or (getattr(self, "_fs_force_confirm", False)
                              and not from_card)
-                         or (self.settings.get("confirm_all_commands", True)
-                             and not from_card and not _auton))
+                         or self._confirm_needed(command=command,
+                                                 from_card=from_card))
+        _autonomous = self.settings.get("approval_mode", "none") == "none"
+        # Walk-away safety: in autonomous mode, a sudo command with no cached
+        # credential must NOT pop a password dialog and block forever with
+        # nobody watching. Skip it with a clear message and let the chain go on.
+        if (_autonomous and not need_approval
+                and sudo_needed and not have_cached_sudo):
+            self.terminal_log("• autonomous: skipping uncached-sudo command "
+                              "(no one to enter the password)", "dim")
+            self._feed_tool_result(
+                "NOT RUN — this needs root (sudo) and no credential is cached for "
+                "this unattended session, so it would block on a password prompt "
+                "with nobody watching. Work around it without root if you can, or "
+                "skip it. (To allow privileged steps on a walk-away run, the "
+                "operator runs one sudo command before leaving to cache the "
+                "password.) Command:\n  " + command)
+            return
         if need_approval or (sudo_needed and not have_cached_sudo):
             confirm_command_dialog(self, command, reason_txt, decide,
                                    catastrophic=False)

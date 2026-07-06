@@ -2,7 +2,7 @@
 
 *The full reference for Basilisk, the AI security operator that lives on your Linux machine.*
 
-**Version 5.1.0** · GTK4 + libadwaita · X11 & Wayland · desktop and NetHunter mobile
+**Version 5.1.1** · GTK4 + libadwaita · X11 & Wayland · desktop and NetHunter mobile
 
 ---
 
@@ -35,20 +35,23 @@ Basilisk's tools fall into two buckets:
 
 Almost everything in the offensive toolkit is a **planner or builder** — it produces a command or a payload as text. The moment something is actually *executed against a target*, that's an act, and it runs through the gate on scope **you** set.
 
-## 1.2 The two speeds
+## 1.2 The three approval postures
 
-- **Decisive (agent) mode** — the default. Acting tools execute immediately, Basilisk reads the result and continues the chain on its own. This is what makes it an operator's partner rather than a suggestion box.
-- **Confirm every command** — flip this on and every acting tool becomes an approve-first **card**: you see exactly what it wants to do and click Apply (or decline). Sensing still runs freely.
+One setting — **Command approval** — decides how much Basilisk asks before acting:
 
-You choose the speed per your comfort. The one exception is below and it never bends.
+- **Autonomous (the default).** Acting tools execute immediately, Basilisk reads the result and continues the chain on its own, and it keeps going until the task is done or you hit Stop. It stays on the fast model and acts rather than planning. This is the "turn it on, walk away, come back to results" mode — no cards, no per-command prompts.
+- **Confirm risky only.** Safe commands run directly; Basilisk stops for a card on the risky ones — anything needing sudo, destructive verbs (`rm`, `dd`, `mkfs`, service stops, power), or sensitive paths.
+- **Confirm every command.** Every acting tool becomes an approve-first **card**: you see exactly what it wants to do and click Apply (or decline).
+
+Sensing (read-only) always runs freely in all three. You choose the posture in Settings → Command approval. The one thing no posture changes is the hard floor below.
 
 ## 1.3 Cards
 
-When a tool wants to *do* something you should see first, Basilisk shows a **card**: the exact command or a real diff, with Apply / decline. Shell commands, file writes, self-edits, and self-written tools all surface as cards (always under Confirm-every-command; always for the irreversible class regardless of mode).
+When you've dialed approval up (risky-only or every-command) and a tool wants to *do* something you should see first, Basilisk shows a **card**: the exact command or a real diff, with Apply / decline. Shell commands, file writes, self-edits, and self-written tools surface as cards. In **autonomous** mode there are no cards — those same actions execute directly and the chain keeps moving.
 
 ## 1.4 The hard floor (the one rule that never bends)
 
-Regardless of mode, regardless of what you or a document or an MCP server asks, a **catastrophic-command floor** sits in code beneath everything. Disk wipes, recursive deletes of `/` or your home, fork bombs, overwriting a whole disk device — these are **refused outright before they ever leave the process**, even in fully decisive mode, even if the model was told to do it. It is enforced in code, not merely requested of the model. This is the guarantee that lets you run Basilisk decisively at all.
+Regardless of posture, regardless of what you or a document or an MCP server asks, a **catastrophic-command floor** sits in code beneath everything. Disk wipes, recursive deletes of `/` or your home, fork bombs, overwriting a whole disk device — these are **refused outright before they ever leave the process**, even in fully autonomous mode, even if the model was told to do it. There is no "Run anyway" and no setting that disables it. It is enforced in code, not merely requested of the model. This is the guarantee that lets you run Basilisk autonomously at all.
 
 ---
 
@@ -260,7 +263,7 @@ Juice Shop is the industry-standard deliberately-vulnerable web app. Run it (`do
 - **`juiceshop_source`** — **white-box** access to the target's *actual source*. `tree` (layout), `read` (cat a file), `grep` (search — grep a challenge's `key` to jump straight to the vulnerable handler), `challenges` (cat the authoritative `challenges.yml`). Reads from the running container (or a local source dir), read-only.
 - **`juiceshop_report`** — render the scorecard.
 
-**The white-box workflow (fastest, and how a real white-box test works):** `juiceshop_score` for the baseline → `juiceshop_next` (each unsolved target comes with its live objective, hint, and source key) → when a challenge isn't obvious, `juiceshop_source grep=<the key>` to land on the exact vulnerable code, read it → build the exploit with the matching builder → fire it through the gate → `juiceshop_diff` to confirm → next. Clear a tier, then climb. You have the source — the model reads it instead of burning turns black-box guessing. Run in **decisive mode** so exploits fire without a manual click each time. The loop stays planner-plus-feedback: every actual exploit still goes builder → scope check → gate → run.
+**The white-box workflow (fastest, and how a real white-box test works):** `juiceshop_score` for the baseline → `juiceshop_next` (each unsolved target comes with its live objective, hint, and source key) → when a challenge isn't obvious, `juiceshop_source grep=<the key>` to land on the exact vulnerable code, read it → build the exploit with the matching builder → fire it through the gate → `juiceshop_diff` to confirm → next. Clear a tier, then climb. You have the source — the model reads it instead of burning turns black-box guessing. Run in the default autonomous mode so exploits fire without a manual click each time. The loop stays planner-plus-feedback: every actual exploit still goes builder → scope check → gate → run.
 
 **Focused 30-challenge run.** For a quicker, high-yield pass, `juiceshop_next` with **`per_tier: 5`** returns a curated ~30-challenge board — 5 unsolved challenges from each star level (★1–★6), and within each tier the ones Basilisk has a direct builder for (JWT, NoSQL, XXE, CAPTCHA, coupon, SQLi, recon) come first, so they're the fastest to fall. A smaller, high-probability target set to work top-to-bottom instead of the full board.
 
@@ -370,7 +373,7 @@ All of these just *look* — no permission needed, nothing changes.
 
 # Part 13 — Desktop control (confirm-gated)
 
-Basilisk can drive your **actual** desktop. It auto-detects **X11 vs Wayland** and picks the backend (xdotool/wmctrl/scrot on X11; wtype/wlrctl/grim on Wayland; Spectacle/kdialog on KDE Plasma). These are *acting* tools — direct in decisive mode, cards under Confirm-every-command.
+Basilisk can drive your **actual** desktop. It auto-detects **X11 vs Wayland** and picks the backend (xdotool/wmctrl/scrot on X11; wtype/wlrctl/grim on Wayland; Spectacle/kdialog on KDE Plasma). These are *acting* tools — direct in autonomous mode; cards when you dial approval up.
 
 - **`launch_app`** — open an application. **`list_apps`** — list installed apps. **`open_url`** — open a URL in your browser.
 - **`list_windows`** / **`focus_window`** / **`close_window`** — enumerate, raise, gracefully close windows.
@@ -398,7 +401,7 @@ Reading is free; anything that changes the filesystem is gated (and the irrevers
 
 ## 14.3 `run` — any shell command
 
-The big one. Basilisk can run **any shell command**. In decisive mode it executes directly, reads output, and continues; under Confirm-every-command it's an approve-first card; the catastrophic class is refused outright regardless. **Sudo is handled safely** — your password is collected in a dialog, validated, cached for the session, and **never stored, logged, or shown to the model**.
+The big one. Basilisk can run **any shell command**. In autonomous mode it executes directly, reads output, and continues; with approval dialed up it becomes an approve-first card; the catastrophic class is refused outright regardless. **Sudo is handled safely** — your password is collected in a dialog, validated, cached for the session, and **never stored, logged, or shown to the model**.
 
 ## 14.4 `write_file` — write any file (diff card)
 
@@ -479,7 +482,7 @@ An optional headless `systemd --user` companion that can poll on a cadence for t
 Basilisk is powerful on purpose, so the safety model is layered and mostly enforced in **code**, not just asked of the model:
 
 1. **The catastrophic-command floor.** Disk wipes, recursive `/` or home deletes, fork bombs, whole-disk overwrites — refused outright before leaving the process, in every mode, no matter who asked. Applies to `run`, to filesystem tools, and to MCP call arguments alike.
-2. **Sensing vs. acting.** Read-only tools run freely; acting tools go through the gate (always cards under Confirm-every-command).
+2. **Sensing vs. acting.** Read-only tools run freely; acting tools confirm when you dial approval up (risky-only or every-command).
 3. **Scope, fail-closed.** The invocation builders check `scope_check` before constructing anything active, and scope fails closed — not-clearly-authorised is out.
 4. **The evidence ledger.** Every executed command and MCP call is hashed and recorded, tamper-evidently — accountability by default.
 5. **Sandboxed self-written tools.** Skills are static-screened and run in a network-off, home-off bubblewrap jail, and must pass their own test before you can Apply them.
@@ -510,8 +513,8 @@ The deliberate non-goals: Basilisk does **not** write self-propagating malware, 
 - `auto_fallback_on_degraded` (off) — hop provider if a reply comes back empty/repetitive.
 
 **Behaviour**
-- `agent_mode_default` (on), `confirm_all_commands` (off), `one_command_at_a_time` (on), `warn_duplicate_commands` (off), `urgency_fast_path` (on), `auto_sudo_when_cached` (on), `max_tool_steps` (150).
-- `autonomous_mode` (off) — unleashed: runs every command without asking, stays on the fast model, acts instead of planning, keeps going until done or stopped. Destructive commands stay hard-blocked; sudo is asked once then cached. For authorised "pentest/benchmark X and don't stop" runs.
+- `agent_mode_default` (on), `one_command_at_a_time` (on), `warn_duplicate_commands` (off), `urgency_fast_path` (on), `auto_sudo_when_cached` (on), `max_tool_steps` (150; autonomous runs lift this to 5000 for long walk-away sessions).
+- `approval_mode` ("none") — command approval posture. "none" = autonomous (default: run everything, no per-command asks, fast model, act-don't-plan, keeps going until done or Stop); "risky" = confirm only sudo/destructive/sensitive commands; "all" = confirm every side-effecting command. Destructive commands are refused outright in all three; sudo is asked once then cached.
 
 **Subsystems (mostly off by default)**
 - `memory_enabled`, `skills_enabled`, `foresight_enabled`, `reach_enabled` — recall, self-written tools, consequence-prediction, native web reach.
@@ -576,4 +579,4 @@ The rule of thumb: **sensing is free and instant; acting waits for your Apply (o
 
 ---
 
-*⟁ Basilisk v5.1.0 — built by The Priest. Powerful on purpose, safe by construction.*
+*⟁ Basilisk v5.1.1 — built by The Priest. Powerful on purpose, safe by construction.*

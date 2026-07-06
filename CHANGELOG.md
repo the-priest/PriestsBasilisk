@@ -1,5 +1,34 @@
 # Changelog
 
+## v5.1.1 — autonomous by default
+
+Autonomous is now the **default** posture, and the confirmation model is one clean
+setting instead of two overlapping toggles. Also fixes the real reasons a "run and
+walk away" session used to stall.
+
+- **One `approval_mode` setting, three postures** — replaces the old
+  `confirm_all_commands` + `autonomous_mode` booleans. **Autonomous (default):**
+  runs every command with no cards/prompts, stays on the fast model, acts instead
+  of planning, and keeps going until done or Stop. **Confirm risky only:** cards
+  just for sudo / destructive / sensitive commands. **Confirm every command:**
+  cards for everything. Pick it in Settings → Command approval. Existing installs
+  are migrated (old confirm-all → "all", old autonomous → "none", otherwise
+  autonomous).
+- **Actually autonomous — no cards in autonomous mode.** Three layers guarantee
+  it: the persona forbids `propose` and overrides the old "reason with him / stop
+  and ask" guidance; the renderer suppresses proposal cards; and if the model
+  proposes anyway the handler auto-runs/auto-applies it. Verified end to end.
+- **Walk-away fixes.** The tool-chain budget lifts from 150 to **5000** steps in
+  autonomous mode (a many-hour run instead of halting early), and an uncached-sudo
+  command is **skipped with a note rather than blocking on a password dialog**
+  nobody is watching. Combined with the 150s per-turn wall-clock cap, it runs long
+  without hanging.
+- **Removed redundant settings** — dropped the dead `num_ctx` and `theme` keys and
+  the retired `grouped_tools`/`confirm_all_commands`/`autonomous_mode` keys (folded
+  into `max_mode` / `approval_mode`), cleaned from existing settings files on load.
+- **Docs** — README and manual updated so the approval postures, autonomous-default
+  behaviour, and refused-outright destructive policy are consistent throughout.
+
 ## v5.1.0 — lean by default
 
 - **Lean tool loading is the hard default now.** The system prompt ships a

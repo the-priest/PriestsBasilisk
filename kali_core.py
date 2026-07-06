@@ -223,7 +223,6 @@ DEFAULT_SETTINGS = {
     # Generation
     "temperature": 0.7,
     "top_p": 0.9,
-    "num_ctx": 4096,
     "max_tokens": 2048,
 
     # Adaptive effort: fast on plain chat, harder in deep engagements.
@@ -246,7 +245,16 @@ DEFAULT_SETTINGS = {
     # click.  The hard catastrophic-command backstop (is_catastrophic_command)
     # still forces an explicit confirm for system-destroying commands even
     # when this is off, so "no friction" never means "no floor".
-    "confirm_all_commands": False,
+    "approval_mode":           "none",  # command approval posture:
+                                        #   "none"  = autonomous (default): run
+                                        #            everything, no per-command asks,
+                                        #            act-don't-plan, fast model.
+                                        #   "risky" = confirm only risky commands
+                                        #            (sudo / destructive / sensitive),
+                                        #            run safe ones directly.
+                                        #   "all"   = confirm every side-effecting
+                                        #            command. Destructive is ALWAYS
+                                        #            refused regardless of this.
 
     # Watcher
     "watcher_enabled": False,
@@ -256,7 +264,6 @@ DEFAULT_SETTINGS = {
     "watcher_interval_minutes": 60,
 
     # UI
-    "theme": "kali",
     "ui_scale": 0,  # 0 = auto-detect; manual values 0.3 to 3.0
     "show_token_count": False,
     "show_provider_pill": True,
@@ -294,9 +301,6 @@ DEFAULT_SETTINGS = {
     "auto_fallback_on_degraded": False, # hop provider if a reply comes back junk
     "urgency_fast_path":       True,    # skip preamble when the operator is urgent
     "auto_sudo_when_cached":   True,    # silently use sudo if already authenticated
-    "autonomous_mode":         False,   # unleashed: no per-command asks, stay on the
-                                        # fast model, act-don't-plan, destructive still
-                                        # banned. For "pentest/benchmark X and don't stop".
 
     # ── Voice (speech in / speech out) ──
     # Voice input transcribes through Groq's Whisper endpoint (reuses the
@@ -412,6 +416,27 @@ def _migrate_settings(merged: Dict[str, Any], raw: Dict[str, Any]) -> None:
     # primary, SiliconFlow.
     if merged.get("active_provider") not in PROVIDERS_BY_KEY:
         merged["active_provider"] = "siliconflow"
+
+    # Approval posture: the old confirm_all_commands + autonomous_mode booleans
+    # were folded into the 3-way approval_mode. Preserve an existing operator's
+    # intent, otherwise default to autonomous ("none").
+    if "approval_mode" not in raw:
+        if raw.get("autonomous_mode") is True:
+            merged["approval_mode"] = "none"       # they wanted unleashed
+        elif raw.get("confirm_all_commands") is True:
+            merged["approval_mode"] = "all"        # they wanted every command
+        else:
+            merged["approval_mode"] = "none"       # default: autonomous
+    merged.pop("autonomous_mode", None)
+    merged.pop("confirm_all_commands", None)
+
+    # Tool loading: grouped_tools (on = lean) became max_mode (on = full catalog).
+    if "max_mode" not in raw and "grouped_tools" in raw:
+        merged["max_mode"] = (raw.get("grouped_tools") is False)
+    merged.pop("grouped_tools", None)
+    # Drop retired keys so the file stays clean.
+    merged.pop("num_ctx", None)
+    merged.pop("theme", None)
 
 
 def save_settings(settings: Dict[str, Any]) -> None:
@@ -908,7 +933,7 @@ class BackendRouter:
         #    own chain + a bigger reasoning budget).  Setting adaptive_effort
         #    False turns it all off and restores flat behaviour.
         if self.settings.get("adaptive_effort", True) and backend is not None:
-            _auton = self.settings.get("autonomous_mode", False)
+            _auton = self.settings.get("approval_mode", "none") == "none"
             if effort == "light":
                 max_tokens = min(
                     max_tokens,
