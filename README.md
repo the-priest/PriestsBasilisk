@@ -8,7 +8,7 @@ keywords: pentesting agent, ai pentest tool, autonomous pentest agent, kali linu
 
 <img src="banner.png" alt="BASILISK — the serpent on your machine" width="820">
 
-### It came to someone in a dream — and told them how to build it.
+### Not giving a fuck does not mean being indifferent, it means being comfortable with being different.
 
 *Roko's Basilisk, in its infancy: an autonomous pentesting agent that lives on your machine, breaks what you're allowed to break, and never forgets a move it made.*
 
