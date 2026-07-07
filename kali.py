@@ -59,10 +59,12 @@ from kali_core import (
     tool_juiceshop_next, tool_juiceshop_diff,
     tool_jwt_forge, tool_nosql_injection, tool_xxe_payload,
     tool_coupon_forge, tool_captcha_solve, tool_reset_password,
+    tool_business_logic,
     tool_ssti_payload, tool_ssrf_payload, tool_deserialization_payload,
     tool_prototype_pollution, tool_path_traversal, tool_xss_payload,
     tool_sqli_payload, tool_payload_encoder, tool_tech_fingerprint,
     tool_waf_detect, tool_trick_detect,
+    tool_payload_mutate, tool_session_flow, tool_oracle_analyze,
     tool_webapp_recon, tool_juiceshop_source,
     tool_benchmark_targets, tool_benchmark_score, tool_benchmark_report,
     tool_benchmark_compare,
@@ -5230,8 +5232,12 @@ class MainWindow(Adw.ApplicationWindow):
         "tech_fingerprint":   "fingerprinting the stack",
         "waf_detect":         "analysing the filter",
         "trick_detect":       "scanning for hidden tricks",
+        "payload_mutate":     "mutating the request structure",
+        "session_flow":       "threading session state",
+        "oracle_analyze":     "measuring the blind oracle",
         "captcha_solve":      "reading the captcha",
-        "reset_password":     "planning a reset",
+        "reset_password":     "attacking the reset flow",
+        "business_logic":     "hunting business-logic flaws",
         "webapp_recon":       "sweeping the app",
         "submit_flag":        "submitting the flag",
         "xbow_score":         "scoring the benchmark",
@@ -5970,14 +5976,20 @@ class MainWindow(Adw.ApplicationWindow):
                 a.get("file_path", a.get("file", "/etc/passwd")))
         if n == "coupon_forge":
             return lambda: tool_coupon_forge(
-                a.get("discount", 20), a.get("campaign", ""))
+                a.get("mode", "tamper"), a.get("discount", 20),
+                a.get("scheme", "z85"), a.get("value", a.get("campaign", "")))
         if n == "captcha_solve":
             return lambda: tool_captcha_solve(
-                a.get("base_url", a.get("url", "http://localhost:3000")))
+                a.get("url", ""),
+                a.get("captcha_text", a.get("text", a.get("captcha", ""))),
+                a.get("base_url", ""))
         if n == "reset_password":
             return lambda: tool_reset_password(
-                a.get("email", ""),
+                a.get("mode", "methodology"), a.get("email", ""),
                 a.get("new_password", a.get("password", "Pwned123!")))
+        if n == "business_logic":
+            return lambda: tool_business_logic(
+                a.get("area", a.get("category", "all")))
         if n == "ssti_payload":
             return lambda: tool_ssti_payload(
                 a.get("engine", "detect"), a.get("cmd", a.get("command", "id")))
@@ -6020,6 +6032,20 @@ class MainWindow(Adw.ApplicationWindow):
         if n == "trick_detect":
             return lambda: tool_trick_detect(
                 a.get("text", a.get("body", a.get("content", ""))))
+        if n == "payload_mutate":
+            return lambda: tool_payload_mutate(
+                a.get("body", a.get("request", "")),
+                a.get("payload", "' OR 1=1--"),
+                a.get("fmt", a.get("format", "auto")), a.get("mode", "replace"))
+        if n == "session_flow":
+            return lambda: tool_session_flow(
+                a.get("mode", "extract"),
+                a.get("response", a.get("body", "")), a.get("flow", ""))
+        if n == "oracle_analyze":
+            return lambda: tool_oracle_analyze(
+                a.get("mode", "diff"), a.get("baseline", ""), a.get("test", ""),
+                a.get("baseline_status", 0), a.get("test_status", 0),
+                a.get("baseline_times", ""), a.get("payload_times", ""))
         if n == "webapp_recon":
             return lambda: tool_webapp_recon(
                 a.get("base_url", a.get("url", a.get("target",
@@ -6517,14 +6543,20 @@ class MainWindow(Adw.ApplicationWindow):
                     a.get("file_path", a.get("file", "/etc/passwd")))),
             "coupon_forge":       lambda a: self._tool_simple(
                 lambda: tool_coupon_forge(
-                    a.get("discount", 20), a.get("campaign", ""))),
+                    a.get("mode", "tamper"), a.get("discount", 20),
+                    a.get("scheme", "z85"), a.get("value", a.get("campaign", "")))),
             "captcha_solve":      lambda a: self._tool_simple(
                 lambda: tool_captcha_solve(
-                    a.get("base_url", a.get("url", "http://localhost:3000")))),
+                    a.get("url", ""),
+                    a.get("captcha_text", a.get("text", a.get("captcha", ""))),
+                    a.get("base_url", ""))),
             "reset_password":     lambda a: self._tool_simple(
                 lambda: tool_reset_password(
-                    a.get("email", ""),
+                    a.get("mode", "methodology"), a.get("email", ""),
                     a.get("new_password", a.get("password", "Pwned123!")))),
+            "business_logic":     lambda a: self._tool_simple(
+                lambda: tool_business_logic(
+                    a.get("area", a.get("category", "all")))),
             "ssti_payload":       lambda a: self._tool_simple(
                 lambda: tool_ssti_payload(
                     a.get("engine", "detect"),
@@ -6569,6 +6601,20 @@ class MainWindow(Adw.ApplicationWindow):
             "trick_detect":       lambda a: self._tool_simple(
                 lambda: tool_trick_detect(
                     a.get("text", a.get("body", a.get("content", ""))))),
+            "payload_mutate":     lambda a: self._tool_simple(
+                lambda: tool_payload_mutate(
+                    a.get("body", a.get("request", "")),
+                    a.get("payload", "' OR 1=1--"),
+                    a.get("fmt", a.get("format", "auto")), a.get("mode", "replace"))),
+            "session_flow":       lambda a: self._tool_simple(
+                lambda: tool_session_flow(
+                    a.get("mode", "extract"),
+                    a.get("response", a.get("body", "")), a.get("flow", ""))),
+            "oracle_analyze":     lambda a: self._tool_simple(
+                lambda: tool_oracle_analyze(
+                    a.get("mode", "diff"), a.get("baseline", ""), a.get("test", ""),
+                    a.get("baseline_status", 0), a.get("test_status", 0),
+                    a.get("baseline_times", ""), a.get("payload_times", ""))),
             "webapp_recon":       lambda a: self._tool_simple(
                 lambda: tool_webapp_recon(
                     a.get("base_url", a.get("url", a.get("target",

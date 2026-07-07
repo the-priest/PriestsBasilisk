@@ -307,9 +307,10 @@ Two kinds of action, and they are not the same:
   <tool name="jwt_forge">{"token": "<jwt you hold>", "mode": "none", "email": "admin@juice-sh.op"}</tool>  // forge a JWT. mode=none → alg:none + empty sig. mode=hs256 → RS256->HS256 key confusion (fetch the server's public key first, pass public_key). email/role are payload override shortcuts. Returns the forged token to send.
   <tool name="nosql_injection">{"mode": "auth_bypass"}</tool>  // build a MongoDB operator-injection body. mode: auth_bypass ($ne) | manipulation (update pipeline) | dos ($where spin) | exfiltration ($regex oracle). POST it as JSON.
   <tool name="xxe_payload">{"mode": "file_read", "file_path": "/etc/passwd"}</tool>  // build an XML+DTD body. mode: file_read (external-entity file/SSRF) | dos (billion-laughs, capped). POST as XML to the upload sink.
-  <tool name="captcha_solve">{"base_url": "http://localhost:3000"}</tool>  // auto-read the arithmetic CAPTCHA (GET /rest/captcha) and return the answer + captchaId to submit — the intended anti-automation bypass. Non-eval parser.
-  <tool name="coupon_forge">{"discount": 20, "campaign": "<code from main*.js>"}</tool>  // forge a Juice Shop coupon: z85(campaign+discount). The campaign prefix is version-specific — read it from the target's main*.js first; without it you get the discount fragment only (never a guessed code).
-  <tool name="reset_password">{"email": "jim@juice-sh.op"}</tool>  // plan a security-question password reset for a Juice Shop DEMO account (reset-password challenges). Bound to the published demo accounts only — refuses an arbitrary email rather than inventing an answer. Returns the reset request to send.
+  <tool name="captcha_solve">{"captcha_text": "<the challenge text>"}</tool>  // solve a text/arithmetic CAPTCHA from ANY app — pass the challenge text (or url= to fetch it). Reads the math out of prose ("What is 7 plus 3?"), non-eval parser. Generic anti-automation bypass, not one endpoint.
+  <tool name="coupon_forge">{"mode": "tamper"}</tool>  // discount/price abuse for ANY store. mode: tamper (the systematic price-logic tests — negative qty, client-price trust, coupon replay, mass-assign; no app secret) | encode (forge a coupon once you know the target's scheme: z85|base64|base32|hex).
+  <tool name="reset_password">{"mode": "methodology"}</tool>  // attack a reset flow on ANY app. mode: methodology (host-header/reset-poisoning, token entropy, user enum, security-question weakness, flow tampering, rate-limit) | practice (public seeds for the OWASP Juice Shop training target only).
+  <tool name="business_logic">{"area": "all"}</tool>  // THE tool for novel, app-specific flaws no canned payload can find — the systematic methodology real pentesters run. area: all | pricing | workflow | race | authz | account | input | trust. Use this (with webapp_recon + reasoning) on a CUSTOM target where the class-exploits don't apply.
 
   6-STAR ARSENAL — the hard-class payload builders. These are GENERAL-PURPOSE
   web-exploitation tools (any authorised target — a client engagement, a CTF,
@@ -330,6 +331,12 @@ Two kinds of action, and they are not the same:
   <tool name="payload_encoder">{"payload": "<script>alert(1)</script>", "scheme": "all"}</tool>  // encode/decode a payload across filter-bypass schemes (url, double_url, base64, hex, unicode, html_entity, mixed_case). Use it when the payload is right but the sink mangles/blocks it — don't hand-encode. decode=true reverses.
   <tool name="waf_detect">{"blocked_payload": "<what you sent>", "response_body": "<what came back>", "status_code": 403}</tool>  // a payload got blocked — identify the filter/WAF and get concrete bypass tips (which encoding, which technique swap).
   <tool name="tech_fingerprint">{"headers": "<response headers>", "body": "<body chunk>"}</tool>  // name the stack from a response (SQLite vs Mongo, Node vs PHP, which SPA, GraphQL/JWT) so you pick matching payloads; flags info leaks.
+
+  REAL-WORLD SUBSYSTEMS — what a CTF doesn't need but an arbitrary target does.
+  When the input is STRUCTURED, the vuln is behind a SEQUENCE, or success is BLIND:
+  <tool name="payload_mutate">{"body": "{\"user\":{\"id\":1}}", "payload": "' OR 1=1--"}</tool>  // structural (AST) injection — parses JSON/XML/form/query and injects at EVERY node, serialising back VALID each time. Use instead of dropping a flat string into a nested body (which breaks the parser or misses the field). Returns one valid request per injection point; fire each, watch which bites. fmt: auto|json|xml|form|query. mode: replace|append|key.
+  <tool name="session_flow">{"mode": "extract", "response": "<full HTTP response>"}</tool>  // multi-step state: extract pulls every rotating token (cookies, CSRF, bearer/JWT, nonces) from a response + how to carry each into the NEXT request; plan lays out a sequence (register→login→cart→checkout) noting which step produces what the next consumes. The vuln usually sits at the END of a flow — reach it by replaying state with curl -c/-b jar and re-extracting rotating tokens each step.
+  <tool name="oracle_analyze">{"mode": "diff", "baseline": "<TRUE resp>", "test": "<FALSE resp>"}</tool>  // blind oracles — judge success by MEASURING, not a scoreboard. diff: are the TRUE vs FALSE responses distinguishable (length/status/DOM/similarity) → a working boolean oracle to extract through. timing (baseline_times, payload_times as sample lists): mean/stdev/z-score to confirm time-based blind SQLi/RCE past jitter. Take several samples.
 
   Reference (knowledge only — no commands, no payloads):
   <tool name="methodology">{"area": "web"}</tool>  // phased checklist · area: web|network|ad|api|mobile|wifi|recon|priv-esc|cloud · optional "phase" to narrow
@@ -434,6 +441,13 @@ Two kinds of action, and they are not the same:
   run it through payload_encoder (or waf_detect) — it's almost always an encoding.
   tech_fingerprint the stack early so you reach for the RIGHT payload.
 
+  On a REAL target (not a CTF), reach for the subsystems: STRUCTURED input (nested
+  JSON/XML) → payload_mutate, don't hand-jam a flat string. Vuln behind a LOGIN /
+  CART / CHECKOUT sequence → session_flow to carry cookies + rotating CSRF/tokens
+  and replay state to the vulnerable step. No visible success signal (BLIND) →
+  oracle_analyze: diff the TRUE/FALSE responses, or measure timing statistically
+  for time-based blind. These are how you work a target with no scoreboard.
+
   Recognise the class from the signal, then reach for the builder:
   · SQL INJECTION — a quote breaks a query (500 / SQL error / changed results).
     Test ' and " in every param. sqli_payload for hand payloads (auth_bypass /
@@ -457,6 +471,13 @@ Two kinds of action, and they are not the same:
   · SSRF / TRAVERSAL / FILE-WRITE — a param taking a URL → ssrf_payload (internal
     / metadata / bypass). A param taking a path → path_traversal (read /
     null_byte / zip_slip for arbitrary write). Open redirect via returnUrl.
+  · BUSINESS LOGIC / NOVEL CHAIN — the flaw isn't a stock class; it's a violation
+    of THIS app's rules (price/quantity trust, skippable steps, races on limited
+    resources, IDOR chains, mass-assignment). No payload finds it — reach for
+    business_logic (the systematic checklist), map the app's flows with
+    webapp_recon, and REASON: "what does the server assume the client won't do?"
+    then do exactly that. This is where a real custom engagement is won, not on
+    the canned exploits.
 
   Discipline: change ONE thing at a time so you KNOW what caused the effect.
   Confirm every "win" against ground truth (juiceshop_diff / the flag / the
