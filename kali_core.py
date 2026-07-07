@@ -4253,15 +4253,17 @@ def tool_xss_payload(context: str = "html", mode: str = "basic") -> Dict[str, An
     return _exp_call("xss_payload", context=context, mode=mode)
 
 
-def tool_sqli_payload(mode: str = "auth_bypass", columns: Any = 3,
-                      table: str = "Users") -> Dict[str, Any]:
-    """Manual SQL-injection payloads (complements sqlmap_plan). modes: auth_bypass
-    | union | boolean | time | error."""
+def tool_sqli_payload(mode: str = "auth_bypass", dbms: str = "generic",
+                      columns: Any = 3, table: str = "users") -> Dict[str, Any]:
+    """Manual SQL-injection payloads, DBMS-aware (mysql/postgres/mssql/oracle/
+    sqlite/generic). Complements sqlmap_plan. modes: auth_bypass | union |
+    enumerate | boolean | time | error | stacked."""
     try:
         columns = int(columns)
     except Exception:
         columns = 3
-    return _exp_call("sqli_payload", mode=mode, columns=columns, table=table)
+    return _exp_call("sqli_payload", mode=mode, dbms=dbms, columns=columns,
+                     table=table)
 
 
 def tool_payload_encoder(payload: str = "", scheme: str = "all",

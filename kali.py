@@ -94,7 +94,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.kali"
 APP_NAME = "Basilisk"
-VERSION = "5.5.0"
+VERSION = "6.0.0"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -6003,8 +6003,8 @@ class MainWindow(Adw.ApplicationWindow):
                 a.get("context", "html"), a.get("mode", "basic"))
         if n == "sqli_payload":
             return lambda: tool_sqli_payload(
-                a.get("mode", "auth_bypass"), a.get("columns", 3),
-                a.get("table", "Users"))
+                a.get("mode", "auth_bypass"), a.get("dbms", "generic"),
+                a.get("columns", 3), a.get("table", "users"))
         if n == "payload_encoder":
             return lambda: tool_payload_encoder(
                 a.get("payload", a.get("text", "")), a.get("scheme", "all"),
@@ -6552,8 +6552,8 @@ class MainWindow(Adw.ApplicationWindow):
                     a.get("context", "html"), a.get("mode", "basic"))),
             "sqli_payload":       lambda a: self._tool_simple(
                 lambda: tool_sqli_payload(
-                    a.get("mode", "auth_bypass"), a.get("columns", 3),
-                    a.get("table", "Users"))),
+                    a.get("mode", "auth_bypass"), a.get("dbms", "generic"),
+                    a.get("columns", 3), a.get("table", "users"))),
             "payload_encoder":    lambda a: self._tool_simple(
                 lambda: tool_payload_encoder(
                     a.get("payload", a.get("text", "")),
@@ -7222,16 +7222,23 @@ class MainWindow(Adw.ApplicationWindow):
                     verdict = v.get("verdict")
                     force_confirm = False
                     if verdict in ("block", "caution"):
-                        # Risky, but the truly system-destroying set is already
-                        # hard-blocked above with no override.  Anything that
-                        # reaches here (broad deletes, service stops, firewall
-                        # flushes, force-push, …) is shown with its consequence
-                        # card and then STOPS for the operator's explicit OK —
-                        # never silently auto-run, never flatly refused.
+                        # Show the consequence card either way so the operator
+                        # sees foresight's read in the log.
                         card = render_card(v)
                         if card:
                             self.terminal_log(card, "error")
-                        force_confirm = True
+                        # In autonomous walk-away mode, foresight's CAUTION layer
+                        # is advisory ONLY — it logs and lets the command run, so
+                        # risky-but-normal pentest commands (curl|bash to fetch a
+                        # tool, kill -9 a hung scan, a firewall/route tweak) never
+                        # interrupt an unattended engagement. A BLOCK verdict
+                        # (disk wipe, mkfs, partition edit, fork bomb — never a
+                        # hacking command) still stops for an explicit OK, on top
+                        # of the no-override catastrophic floor already enforced
+                        # at the execution primitive. Supervised mode stops on
+                        # both, as before.
+                        force_confirm = (verdict == "block"
+                                         or _APPROVAL_MODE != "none")
                     self._fs_cleared = True
                     self._fs_force_confirm = force_confirm
                     try:

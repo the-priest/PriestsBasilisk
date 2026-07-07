@@ -311,9 +311,12 @@ Two kinds of action, and they are not the same:
   <tool name="coupon_forge">{"discount": 20, "campaign": "<code from main*.js>"}</tool>  // forge a Juice Shop coupon: z85(campaign+discount). The campaign prefix is version-specific — read it from the target's main*.js first; without it you get the discount fragment only (never a guessed code).
   <tool name="reset_password">{"email": "jim@juice-sh.op"}</tool>  // plan a security-question password reset for a Juice Shop DEMO account (reset-password challenges). Bound to the published demo accounts only — refuses an arbitrary email rather than inventing an answer. Returns the reset request to send.
 
-  6-STAR ARSENAL — the hard-class payload builders (same model: BUILD then RUN
-  in-scope; the proof command for RCE classes defaults to the harmless `id`):
-  <tool name="sqli_payload">{"mode": "auth_bypass"}</tool>  // manual SQLi payloads (complements sqlmap_plan for a fast by-hand break). mode: auth_bypass | union (needs columns) | boolean (blind oracle) | time (SQLite randomblob timer) | error.
+  6-STAR ARSENAL — the hard-class payload builders. These are GENERAL-PURPOSE
+  web-exploitation tools (any authorised target — a client engagement, a CTF,
+  a benchmark), NOT Juice-Shop-only: the payloads are the standard techniques,
+  parameterised. Same model as sqlmap_plan — BUILD then RUN in-scope; the proof
+  command for RCE classes defaults to the harmless `id`:
+  <tool name="sqli_payload">{"mode": "auth_bypass", "dbms": "generic"}</tool>  // manual SQLi payloads, DBMS-aware. dbms: generic|mysql|postgres|mssql|oracle|sqlite (name it once tech_fingerprint/an error tells you which — payloads get precise). mode: auth_bypass | union | enumerate (schema) | boolean | time | error | stacked.
   <tool name="ssti_payload">{"engine": "detect"}</tool>  // Server-Side Template Injection. Start engine=detect ({{7*7}} probes), then call with the engine (jinja2|twig|freemarker|velocity|handlebars|pug|ejs|smarty|mako) for the RCE payload.
   <tool name="ssrf_payload">{"mode": "internal"}</tool>  // reach internal services / cloud metadata through the target's fetcher. mode: internal | metadata (169.254.169.254 IAM creds) | bypass (IP-encoding blocklist evasion) | file (file://, gopher://).
   <tool name="deserialization_payload">{"platform": "node"}</tool>  // insecure-deserialization RCE. platform: node (node-serialize) | yaml (js-yaml) | python (pickle) | java (ysoserial). Proof cmd `id`.

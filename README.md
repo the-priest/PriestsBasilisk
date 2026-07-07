@@ -14,7 +14,7 @@ keywords: pentesting agent, ai pentest tool, autonomous pentest agent, kali linu
 
 <br>
 
-![version](https://img.shields.io/badge/version-5.5.0-7d121b?style=for-the-badge&labelColor=08090b)
+![version](https://img.shields.io/badge/version-6.0.0-7d121b?style=for-the-badge&labelColor=08090b)
 ![license](https://img.shields.io/badge/license-MIT-7d121b?style=for-the-badge&labelColor=08090b)
 ![platform](https://img.shields.io/badge/Linux-X11%20%7C%20Wayland-6d7680?style=for-the-badge&logo=linux&logoColor=white&labelColor=08090b)
 ![python](https://img.shields.io/badge/python-3.10+-6d7680?style=for-the-badge&logo=python&logoColor=white&labelColor=08090b)
@@ -135,7 +135,7 @@ Every legend needs a first believer — someone willing to say yes to something 
 
 Point it at a target and it doesn't just spray payloads and hope — it runs a **closed loop**. It reads the target's *behaviour* to identify the vulnerability class, reaches for the matching **exploit builder**, fires it, and **confirms the hit against ground truth** before moving on — no guessing whether it worked.
 
-It carries a purpose-built builder for every class that matters, each a smart generator that hands back the right payload for an authorized target: **SQLi** (manual + sqlmap), **JWT** forgery (`alg:none`, key confusion), **NoSQL**, **XXE**, **SSTi** (RCE, per template engine), **SSRF** (internal + cloud-metadata + blocklist-bypass), **insecure deserialization** (Node/YAML/pickle/Java → RCE), **prototype pollution**, **path traversal** (read, null-byte, zip-slip file-write), and context-aware **XSS** with filter and CSP bypasses — the classes that get you into the 6★ tier.
+It carries a purpose-built builder for every class that matters, each a smart, **general-purpose** generator — the standard techniques, parameterised for *any* authorized target (a client engagement, a CTF, the benchmark), not Juice-Shop-bound toys: **SQLi** (DBMS-aware across MySQL/PostgreSQL/MSSQL/Oracle/SQLite, plus sqlmap), **JWT** forgery (`alg:none`, key confusion), **NoSQL**, **XXE**, **SSTi** (RCE, per template engine), **SSRF** (internal + cloud-metadata + blocklist-bypass), **insecure deserialization** (Node/YAML/pickle/Java → RCE), **prototype pollution**, **path traversal** (read, null-byte, zip-slip file-write), and context-aware **XSS** with filter and CSP bypasses — the classes that get you into the 6★ tier on a real assessment.
 
 And it has *eyes*. A set of analysis tools reads what came back and surfaces the things that make a model waste turns: a **trick detector** that flags hidden encodings, HTML-comment hints, client-side-only "protection," stale tokens and rate limits; a **payload encoder** that slips a blocked payload past a filter (URL, double-URL, base64, unicode, mixed-case); a **WAF/filter analyzer**; and a **stack fingerprinter** so it picks the payload that fits the target instead of guessing.
 
