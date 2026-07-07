@@ -105,7 +105,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.kali"
 APP_NAME = "Basilisk"
-VERSION = "6.0.8"
+VERSION = "6.0.9"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -4160,19 +4160,22 @@ class MainWindow(Adw.ApplicationWindow):
         # Header — BASILISK (with a live online dot) on the left, new-chat on the
         # right.  The dot is green when online, red when offline.
         title_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=7)
-        # Death-metal wordmark: the carved logo art (CSS can't draw those
-        # thorned letters). Scaled to header height, width follows aspect. Falls
-        # back to the styled text label if the image isn't present.
+        # Death-metal wordmark: the carved logo art. SCALED DOWN to a small
+        # intrinsic size (never CONTAIN off a full-res texture, which renders at
+        # the image's huge natural size and blows the header up). Falls back to a
+        # styled text label if the image isn't present.
         if _LOGO_PNG_PATH:
             try:
-                _logo_tex = Gdk.Texture.new_from_filename(_LOGO_PNG_PATH)
-                _lh = 40
-                _lw = max(1, int(_lh * _logo_tex.get_intrinsic_width()
-                                 / _logo_tex.get_intrinsic_height()))
-                t = Gtk.Picture.new_for_paintable(_logo_tex)
-                t.set_content_fit(Gtk.ContentFit.CONTAIN)
+                _lh = 34
+                _pb = GdkPixbuf.Pixbuf.new_from_file_at_scale(
+                    _LOGO_PNG_PATH, -1, _lh, True)   # height=_lh, width auto
+                t = Gtk.Picture.new_for_paintable(
+                    Gdk.Texture.new_for_pixbuf(_pb))
+                t.set_content_fit(Gtk.ContentFit.SCALE_DOWN)
                 t.set_can_shrink(True)
-                t.set_size_request(_lw, _lh)
+                t.set_hexpand(False)
+                t.set_vexpand(False)
+                t.set_size_request(_pb.get_width(), _lh)
                 t.set_valign(Gtk.Align.CENTER)
                 t.set_halign(Gtk.Align.START)
                 t.set_tooltip_text(APP_NAME)
@@ -4267,18 +4270,24 @@ class MainWindow(Adw.ApplicationWindow):
         # Header centre shows a SMALL BASILISK death-metal wordmark instead of the
         # tiny "New chat" title text. (chat_title_lbl is kept, un-shown, so rename/
         # title code still works.)
+        # IMPORTANT: scale the source DOWN to a small intrinsic size and never let
+        # it expand — otherwise the wide title area makes a CONTAIN Picture fill
+        # the width and blow the header up to hundreds of px tall.
         _hdr_title = None
+        _H = 24   # target wordmark height in px — keeps the header its normal size
         if _LOGO_PNG_PATH:
             try:
-                _t2 = Gdk.Texture.new_from_filename(_LOGO_PNG_PATH)
-                _h2 = 22
-                _w2 = max(1, int(_h2 * _t2.get_intrinsic_width()
-                                 / _t2.get_intrinsic_height()))
+                _pb = GdkPixbuf.Pixbuf.new_from_file_at_scale(
+                    _LOGO_PNG_PATH, -1, _H, True)   # height=_H, width auto, keep aspect
+                _t2 = Gdk.Texture.new_for_pixbuf(_pb)
                 _hdr_title = Gtk.Picture.new_for_paintable(_t2)
-                _hdr_title.set_content_fit(Gtk.ContentFit.CONTAIN)
+                _hdr_title.set_content_fit(Gtk.ContentFit.SCALE_DOWN)  # never upscale
                 _hdr_title.set_can_shrink(True)
-                _hdr_title.set_size_request(_w2, _h2)
+                _hdr_title.set_hexpand(False)
+                _hdr_title.set_vexpand(False)
+                _hdr_title.set_halign(Gtk.Align.CENTER)
                 _hdr_title.set_valign(Gtk.Align.CENTER)
+                _hdr_title.set_size_request(_pb.get_width(), _H)
                 _hdr_title.set_tooltip_text(APP_NAME)
             except Exception:
                 _hdr_title = None

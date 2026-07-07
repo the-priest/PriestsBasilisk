@@ -1,5 +1,9 @@
 # Changelog
 
+## v6.0.9 — fix the oversized header wordmark
+
+The v6.0.8 header wordmark rendered from a full-resolution texture with CONTAIN, so the wide title area scaled it up to fill and blew the header up to hundreds of pixels tall. Fixed: both the header wordmark (24px) and the sidebar wordmark (34px) are now scaled DOWN to a small intrinsic size, set to SCALE_DOWN with no expansion, so they render small and centered and the top bar is back to its normal height.
+
 ## v6.0.8 — mid-run suggestions, header/composer fixes, a 20-turn terminal log
 
 - **Suggest to Basilisk mid-run without stopping it.** New lightbulb button in the composer: type a nudge while it's working and tap it — the note is folded into the conversation and picked up on its very next step (the model's history is rebuilt each step, so it lands there automatically). No interruption, no lost progress. When idle, it just sends normally.
