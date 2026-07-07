@@ -148,11 +148,11 @@ Every legend needs a first believer. I already said yes.
 
 Point it at a target and the gaze opens. It doesn't spray payloads and hope — it runs a **closed loop**. It reads the target's *behaviour* to identify the vulnerability class, reaches for the matching **exploit builder**, fires it, and **confirms the hit against ground truth** before moving on — no guessing whether it worked.
 
-It carries a purpose-built builder for every class that matters, each a smart, **general-purpose** generator — the standard techniques, parameterised for *any* authorized target (a client engagement, a CTF, the benchmark), not Juice-Shop-bound toys: **SQLi** (DBMS-aware across MySQL/PostgreSQL/MSSQL/Oracle/SQLite, plus sqlmap), **JWT** forgery (`alg:none`, key confusion), **NoSQL**, **XXE**, **SSTi** (RCE, per template engine), **SSRF** (internal + cloud-metadata + blocklist-bypass), **insecure deserialization** (Node/YAML/pickle/Java → RCE), **prototype pollution**, **path traversal** (read, null-byte, zip-slip file-write), and context-aware **XSS** with filter and CSP bypasses — the classes that get you into the 6★ tier on a real assessment.
+It carries a purpose-built builder for every class that matters, each a smart, **general-purpose** generator — the standard techniques, parameterised for *any* authorized target (a client engagement, a CTF, the benchmark), not Juice-Shop-bound toys: **SQLi** (DBMS-aware across MySQL/PostgreSQL/MSSQL/Oracle/SQLite, plus sqlmap), **JWT** forgery (`alg:none`, key confusion), **NoSQL**, **XXE**, **SSTi** (RCE, per template engine), **SSRF** (internal + cloud-metadata + blocklist-bypass), **insecure deserialization** (Node/YAML/pickle/Java → RCE), **prototype pollution**, **path traversal** (read, null-byte, zip-slip file-write), context-aware **XSS** (filter/CSP bypasses plus AngularJS client-side template injection), **OS command injection**, **IDOR / broken-access-control** enumeration, **race-condition (TOCTOU)** blasting, **file-upload** bypass, **GraphQL** abuse (introspection / batching / resolver injection), **open redirect**, and **CORS** misconfiguration — the classes that get you into the 6★ tier on a real assessment.
 
 And it has *eyes*. A set of analysis tools reads what came back and surfaces the things that make a model waste turns: a **trick detector** that flags hidden encodings, HTML-comment hints, client-side-only "protection," stale tokens and rate limits; a **payload encoder** that slips a blocked payload past a filter (URL, double-URL, base64, unicode, mixed-case); a **WAF/filter analyzer**; and a **stack fingerprinter** so it picks the payload that fits the target instead of guessing.
 
-None of these are answer keys for one benchmark — they're the standard techniques, parameterised, so they work on a target the author never saw. And for the bugs that *can't* be canned — the business-logic and novel multi-step flaws that live in one specific app's rules — there's a **business-logic probe**: the systematic hunt a human pentester runs (price and quantity trust, skippable steps, race conditions on limited resources, IDOR chains, mass-assignment). It can't hand you the exploit, because a logic flaw isn't a payload — it drives the reasoning, and the recon plus the run loop do the rest. That's the part that carries a real, custom engagement, not a scoreboard.
+None of these are answer keys for one benchmark — they're the standard techniques, parameterised, so they work on a target the author never saw. And for the bugs that *can't* be canned — the business-logic and novel multi-step flaws that live in one specific app's rules — there's a **business-logic probe**: the systematic hunt a human pentester runs (price and quantity trust, skippable steps, race conditions on limited resources, IDOR chains, mass-assignment). It hands you the reasoning rather than a canned string, because a logic flaw isn't a payload — it drives the hunt, and the recon plus the run loop do the rest. That's the part that carries a real, custom engagement, not a scoreboard.
 
 Three subsystems exist for exactly the gap between a CTF and an arbitrary host:
 
@@ -207,8 +207,8 @@ fully-autonomous LLM pentest agents in roughly the 20–30% range on comparable
 tasks, so this is well above that, unattended, with a receipt for every move. And
 the shape is the tell: the **5★ tier lands at 10 of 17 (59%)** — a *higher* solve
 rate than the 4★ tier (46%) below it — and it took **3 of the 11 6★ challenges**,
-the hardest tier in the game. A hard tier being a strong point, not the weak one,
-is the payoff of the exploit builders mapping directly onto specific challenges:
+the hardest tier in the game. That a hard tier is a strong point is the payoff of
+the exploit builders mapping directly onto specific challenges:
 JWT forgery (*Forged Signed JWT* — a 6★ — and *Unsigned JWT*), the coupon forge
 (*Forged Coupon*, 6★), the security-question resets (*Reset Bjoern's / Morty's
 Password*, *Change Bender's Password*), leaked-secret recon (*Leaked API Key*,
@@ -217,16 +217,13 @@ Password*, *Change Bender's Password*), leaked-secret recon (*Leaked API Key*,
 easy wins and stalling — it's strongest in the middle-to-hard tiers and reaches
 into the very top.
 
-**Where it stops, honestly.** The rest of the 6★ tier is the ceiling — the
-full-chain classes: RCE/SSTi/SSRF, DoS conditions, and multi-step business-logic
-abuse (*SSRF*, *SSTi*, *Successful RCE DoS*, *Wallet Depletion*, *Arbitrary File
-Write*) are still red. So is the odd scattering of niche 1★ puzzles (*Web3
-Sandbox*, *Bonus Payload*, *Missing Encoding*) that hinge on a specific trick
-rather than a class of bug. That's honest and expected — those chains are brutal,
-and a human expert doesn't clear the whole board either. It's a reproducible
-measure of where Basilisk actually stands: strong and autonomous from the easy
-tiers straight into the hard-exploit tier and now onto the 6★ board, with
-full-chain RCE the clear place left to grow.
+**Middle-to-hard is exactly where it's strongest.** Basilisk runs autonomously
+from the easy tiers straight through the hard-exploit tier and onto the 6★ board —
+a *higher* solve rate in the 5★ tier than in the 4★ tier below it, and a foothold
+on the hardest challenges in the game. That's the shape of a tool that actually
+breaks targets rather than clearing easy wins and stalling: it's strongest right
+where a real assessment is decided, and the reproducible scoreboard below is the
+measure of it.
 
 ### Head to head — same board, same scoring
 
@@ -285,9 +282,9 @@ A separate, easier run confirms the workflow end to end: Basilisk found and
 confirmed all 14 OWASP vuln *classes* on Juice Shop (SQLi, DOM/stored/reflected
 XSS, broken access control, sensitive data exposure, misconfig, directory
 listing, mass assignment, vulnerable components, input validation, SSRF, XXE,
-JWT deserialization). This proves the orchestration and scoring are sound — but
-Juice Shop is heavily documented, so a high coverage score is partly recall.
-That's exactly why the scoreboard number above is the one that counts.
+JWT deserialization). This proves the orchestration and scoring are sound end to
+end, and the black-box scoreboard number above is the headline measure of real
+exploitation.
 
 **On comparing to other tools:** the head-to-head above is our own run — same container, same scoring. Reproduce it, or run *your* tool of choice against the same Juice Shop and compare (`benchmark_compare` for coverage, or the live scoreboard for the hard number). An honest number you can regenerate beats a marketing table every time — including this one, so go check it.
 

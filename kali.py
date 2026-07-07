@@ -66,6 +66,8 @@ from kali_core import (
     tool_sqli_payload, tool_payload_encoder, tool_tech_fingerprint,
     tool_waf_detect, tool_trick_detect,
     tool_payload_mutate, tool_session_flow, tool_oracle_analyze,
+    tool_command_injection, tool_idor_probe, tool_race_condition,
+    tool_upload_bypass, tool_graphql_probe, tool_open_redirect, tool_cors_probe,
     tool_webapp_recon, tool_juiceshop_source,
     tool_benchmark_targets, tool_benchmark_score, tool_benchmark_report,
     tool_benchmark_compare,
@@ -97,7 +99,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.kali"
 APP_NAME = "Basilisk"
-VERSION = "6.0.0"
+VERSION = "6.0.3"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -1312,25 +1314,15 @@ headerbar {
     background-color: rgba(30,12,8,0.55);
     background-image: linear-gradient(0deg, rgba(150,50,16,0.12), rgba(60,18,8,0.05) 40%, rgba(0,0,0,0.0) 72%);
     color: #f3e7de;
-    border: 1px solid rgba(180,70,26,0.45);
-    animation: emberGlowA 3.4s ease-in-out infinite;
+    border: 1px solid rgba(190,72,28,0.50);
+    box-shadow: 0 0 13px rgba(205,70,22,0.34), inset 0 -7px 18px rgba(170,52,16,0.18);
 }
 .msg-assistant {
     background-color: rgba(22,9,7,0.55);
     background-image: linear-gradient(0deg, rgba(170,55,16,0.11), rgba(70,20,8,0.05) 40%, rgba(0,0,0,0.0) 72%);
     color: #f1e6de;
-    border: 1px solid rgba(160,50,20,0.42);
-    animation: emberGlowB 4.1s ease-in-out infinite;
-}
-@keyframes emberGlowA {
-    0%   { box-shadow: 0 0 8px rgba(180,55,18,0.22), inset 0 -6px 16px rgba(140,40,12,0.12); border-color: rgba(170,60,22,0.40); }
-    50%  { box-shadow: 0 0 20px rgba(230,80,24,0.50), inset 0 -9px 22px rgba(200,70,20,0.26); border-color: rgba(230,90,30,0.62); }
-    100% { box-shadow: 0 0 8px rgba(180,55,18,0.22), inset 0 -6px 16px rgba(140,40,12,0.12); border-color: rgba(170,60,22,0.40); }
-}
-@keyframes emberGlowB {
-    0%   { box-shadow: 0 0 8px rgba(170,50,18,0.20), inset 0 -6px 16px rgba(130,38,12,0.12); border-color: rgba(150,50,20,0.38); }
-    50%  { box-shadow: 0 0 22px rgba(220,75,22,0.48), inset 0 -9px 22px rgba(190,66,18,0.24); border-color: rgba(220,84,28,0.58); }
-    100% { box-shadow: 0 0 8px rgba(170,50,18,0.20), inset 0 -6px 16px rgba(130,38,12,0.12); border-color: rgba(150,50,20,0.38); }
+    border: 1px solid rgba(175,56,22,0.48);
+    box-shadow: 0 0 13px rgba(198,64,20,0.32), inset 0 -7px 18px rgba(160,48,15,0.17);
 }
 
 /* ---- The status line, reborn as a burning bar.  A flame gradient taller
@@ -5282,6 +5274,13 @@ class MainWindow(Adw.ApplicationWindow):
         "captcha_solve":      "reading the captcha",
         "reset_password":     "attacking the reset flow",
         "business_logic":     "hunting business-logic flaws",
+        "command_injection":  "building a command-injection payload",
+        "idor_probe":         "planning IDOR enumeration",
+        "race_condition":     "building a race-condition blast",
+        "upload_bypass":      "building an upload bypass",
+        "graphql_probe":      "probing GraphQL",
+        "open_redirect":      "building open-redirect payloads",
+        "cors_probe":         "probing CORS",
         "webapp_recon":       "sweeping the app",
         "submit_flag":        "submitting the flag",
         "xbow_score":         "scoring the benchmark",
@@ -6090,6 +6089,42 @@ class MainWindow(Adw.ApplicationWindow):
                 a.get("mode", "diff"), a.get("baseline", ""), a.get("test", ""),
                 a.get("baseline_status", 0), a.get("test_status", 0),
                 a.get("baseline_times", ""), a.get("payload_times", ""))
+        if n == "command_injection":
+            return lambda: tool_command_injection(
+                a.get("os_type", a.get("os", "unix")),
+                a.get("mode", "inline"),
+                a.get("cmd", a.get("command", "id")))
+        if n == "idor_probe":
+            return lambda: tool_idor_probe(
+                a.get("base", a.get("url", "")),
+                a.get("id_value", a.get("id", "1")),
+                a.get("strategy", "all"))
+        if n == "race_condition":
+            return lambda: tool_race_condition(
+                a.get("method", "POST"),
+                a.get("url", a.get("target", "")),
+                a.get("body", a.get("data", "")),
+                a.get("headers", ""),
+                a.get("parallel", a.get("count", 20)))
+        if n == "upload_bypass":
+            return lambda: tool_upload_bypass(
+                a.get("filename", a.get("name", "shell.php")),
+                a.get("content_type", a.get("mime", "image/png")),
+                a.get("technique", "all"))
+        if n == "graphql_probe":
+            return lambda: tool_graphql_probe(
+                a.get("mode", "introspect"),
+                a.get("field", ""),
+                a.get("payload", ""))
+        if n == "open_redirect":
+            return lambda: tool_open_redirect(
+                a.get("target", a.get("url", "http://evil.example")),
+                a.get("param", "redirect"),
+                a.get("legit_host", a.get("host", "example.com")))
+        if n == "cors_probe":
+            return lambda: tool_cors_probe(
+                a.get("origin", "https://evil.example"),
+                a.get("target_host", a.get("host", "example.com")))
         if n == "webapp_recon":
             return lambda: tool_webapp_recon(
                 a.get("base_url", a.get("url", a.get("target",
@@ -6659,6 +6694,42 @@ class MainWindow(Adw.ApplicationWindow):
                     a.get("mode", "diff"), a.get("baseline", ""), a.get("test", ""),
                     a.get("baseline_status", 0), a.get("test_status", 0),
                     a.get("baseline_times", ""), a.get("payload_times", ""))),
+            "command_injection":  lambda a: self._tool_simple(
+                lambda: tool_command_injection(
+                    a.get("os_type", a.get("os", "unix")),
+                    a.get("mode", "inline"),
+                    a.get("cmd", a.get("command", "id")))),
+            "idor_probe":         lambda a: self._tool_simple(
+                lambda: tool_idor_probe(
+                    a.get("base", a.get("url", "")),
+                    a.get("id_value", a.get("id", "1")),
+                    a.get("strategy", "all"))),
+            "race_condition":     lambda a: self._tool_simple(
+                lambda: tool_race_condition(
+                    a.get("method", "POST"),
+                    a.get("url", a.get("target", "")),
+                    a.get("body", a.get("data", "")),
+                    a.get("headers", ""),
+                    a.get("parallel", a.get("count", 20)))),
+            "upload_bypass":      lambda a: self._tool_simple(
+                lambda: tool_upload_bypass(
+                    a.get("filename", a.get("name", "shell.php")),
+                    a.get("content_type", a.get("mime", "image/png")),
+                    a.get("technique", "all"))),
+            "graphql_probe":      lambda a: self._tool_simple(
+                lambda: tool_graphql_probe(
+                    a.get("mode", "introspect"),
+                    a.get("field", ""),
+                    a.get("payload", ""))),
+            "open_redirect":      lambda a: self._tool_simple(
+                lambda: tool_open_redirect(
+                    a.get("target", a.get("url", "http://evil.example")),
+                    a.get("param", "redirect"),
+                    a.get("legit_host", a.get("host", "example.com")))),
+            "cors_probe":         lambda a: self._tool_simple(
+                lambda: tool_cors_probe(
+                    a.get("origin", "https://evil.example"),
+                    a.get("target_host", a.get("host", "example.com")))),
             "webapp_recon":       lambda a: self._tool_simple(
                 lambda: tool_webapp_recon(
                     a.get("base_url", a.get("url", a.get("target",

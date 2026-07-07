@@ -4368,6 +4368,71 @@ def tool_oracle_analyze(mode: str = "diff", baseline: str = "", test: str = "",
                      baseline_times=baseline_times, payload_times=payload_times)
 
 
+def tool_command_injection(os_type: str = "unix", mode: str = "inline",
+                           cmd: str = "id") -> Dict[str, Any]:
+    """OS command-injection DETECTION payloads (inline/blind/time/oob), Unix or
+    Windows. Proof command defaults to the read-only `id`/`whoami` marker — proves
+    the class, not an implant. For a scope_set target."""
+    return _exp_call("command_injection", os_type=os_type, mode=mode, cmd=cmd)
+
+
+def tool_idor_probe(base: str = "", id_value: str = "1",
+                    strategy: str = "all") -> Dict[str, Any]:
+    """Broken-access-control / IDOR enumeration plan — id candidates + request-
+    mutation plays to reach another principal's object. strategy: all | sequential
+    | uuid | encoded | wrapper | verb. Baseline your own object, fire neighbours,
+    diff."""
+    return _exp_call("idor_probe", base=base, id_value=id_value, strategy=strategy)
+
+
+def tool_race_condition(method: str = "POST", url: str = "", body: str = "",
+                        headers: str = "", parallel: Any = 20) -> Dict[str, Any]:
+    """TOCTOU / race-condition recipe — a single limited action plus the
+    concurrent blast (curl+xargs and a stdlib threaded blaster) that fires N
+    copies before any commits. For double-spend / over-draw / limit-bypass on a
+    scope_set target."""
+    try:
+        parallel = int(parallel)
+    except Exception:
+        parallel = 20
+    return _exp_call("race_condition", method=method, url=url, body=body,
+                     headers=headers, parallel=parallel)
+
+
+def tool_upload_bypass(filename: str = "shell.php", content_type: str = "image/png",
+                       technique: str = "all") -> Dict[str, Any]:
+    """File-upload filter bypass — filename/content-type/magic-byte/polyglot/path/
+    svg variants that slip a payload past an upload check. technique: all |
+    content_type | double_ext | null_byte | magic_bytes | polyglot | path | svg."""
+    return _exp_call("upload_bypass", filename=filename,
+                     content_type=content_type, technique=technique)
+
+
+def tool_graphql_probe(mode: str = "introspect", field: str = "",
+                       payload: str = "") -> Dict[str, Any]:
+    """GraphQL attack surface — introspection dump, field-suggestion enumeration,
+    alias/batch amplification, injection through resolver args, query DoS. mode:
+    introspect | suggest | batch | injection | dos. POST the body to /graphql."""
+    return _exp_call("graphql_probe", mode=mode, field=field, payload=payload)
+
+
+def tool_open_redirect(target: str = "http://evil.example", param: str = "redirect",
+                       legit_host: str = "example.com") -> Dict[str, Any]:
+    """Open-redirect bypass values for a redirect/return-url parameter that
+    doesn't validate the destination (//, /\\, @-userinfo, subdomain, #/? suffix,
+    encoded). A phishing / OAuth-token-theft primitive."""
+    return _exp_call("open_redirect", target=target, param=param,
+                     legit_host=legit_host)
+
+
+def tool_cors_probe(origin: str = "https://evil.example",
+                    target_host: str = "example.com") -> Dict[str, Any]:
+    """CORS-misconfiguration probe — the Origin values that reveal a server which
+    reflects/over-trusts an attacker origin (credentialed cross-origin read).
+    Returns the Origins to send + what a vulnerable ACA-* response looks like."""
+    return _exp_call("cors_probe", origin=origin, target_host=target_host)
+
+
 def tool_webapp_recon(base_url: str = "http://localhost:3000",
                       extra_paths: Any = None,
                       max_paths: Any = 40) -> Dict[str, Any]:
