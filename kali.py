@@ -68,6 +68,12 @@ from kali_core import (
     tool_payload_mutate, tool_session_flow, tool_oracle_analyze,
     tool_command_injection, tool_idor_probe, tool_race_condition,
     tool_upload_bypass, tool_graphql_probe, tool_open_redirect, tool_cors_probe,
+    tool_ldap_injection, tool_xpath_injection, tool_crlf_injection,
+    tool_host_header_injection, tool_ssi_injection, tool_csv_injection,
+    tool_request_smuggling, tool_csrf_poc, tool_clickjacking,
+    tool_mass_assignment, tool_auth_bypass_headers, tool_cache_poisoning,
+    tool_email_header_injection, tool_websocket_probe, tool_oauth_probe,
+    tool_attack_surface, tool_verify_solve,
     tool_webapp_recon, tool_juiceshop_source,
     tool_benchmark_targets, tool_benchmark_score, tool_benchmark_report,
     tool_benchmark_compare,
@@ -99,7 +105,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.kali"
 APP_NAME = "Basilisk"
-VERSION = "6.0.3"
+VERSION = "6.0.4"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -132,6 +138,12 @@ HISTORY_TRIM_HEAD_CHARS = 600
 # — trimming old widgets frees memory and speeds up layout, and changes nothing
 # about behaviour, autonomy, or the model's context.
 MAX_TERMINAL_LINES = 2500
+# Byte ceilings so a pentest run (few but HUGE lines — full HTTP bodies, JSON,
+# base64) can't grow the view buffer without bound even when the line count
+# stays low. MAX_TERMINAL_CHARS bounds the whole buffer; MAX_TERMINAL_LINE_CHARS
+# truncates any single monster line before it's inserted.
+MAX_TERMINAL_CHARS = 220_000
+MAX_TERMINAL_LINE_CHARS = 2_000
 # Keep only the most recent chat bubbles in the widget tree. GTK message
 # widgets (TextViews, code blocks, images) are heavy; holding a whole long
 # conversation is what balloons RAM to gigabytes. The full transcript lives in
@@ -5281,6 +5293,23 @@ class MainWindow(Adw.ApplicationWindow):
         "graphql_probe":      "probing GraphQL",
         "open_redirect":      "building open-redirect payloads",
         "cors_probe":         "probing CORS",
+        "ldap_injection":     "building an LDAP-injection payload",
+        "xpath_injection":    "building an XPath-injection payload",
+        "crlf_injection":     "building a CRLF payload",
+        "host_header_injection": "building a host-header attack",
+        "ssi_injection":      "building an SSI/ESI payload",
+        "csv_injection":      "checking for formula injection",
+        "request_smuggling":  "building a request-smuggling probe",
+        "csrf_poc":           "building a CSRF proof-of-concept",
+        "clickjacking":       "checking clickjacking",
+        "mass_assignment":    "building a mass-assignment probe",
+        "auth_bypass_headers": "building a 403 bypass",
+        "cache_poisoning":    "probing cache poisoning",
+        "email_header_injection": "building an email-header injection",
+        "websocket_probe":    "probing WebSockets",
+        "oauth_probe":        "probing the OAuth flow",
+        "attack_surface":     "mapping the attack surface",
+        "verify_solve":       "confirming the solve against ground truth",
         "webapp_recon":       "sweeping the app",
         "submit_flag":        "submitting the flag",
         "xbow_score":         "scoring the benchmark",
@@ -6125,6 +6154,59 @@ class MainWindow(Adw.ApplicationWindow):
             return lambda: tool_cors_probe(
                 a.get("origin", "https://evil.example"),
                 a.get("target_host", a.get("host", "example.com")))
+        if n == "ldap_injection":
+            return lambda: tool_ldap_injection(
+                a.get("mode", "auth_bypass"), a.get("field", "username"))
+        if n == "xpath_injection":
+            return lambda: tool_xpath_injection(a.get("mode", "auth_bypass"))
+        if n == "crlf_injection":
+            return lambda: tool_crlf_injection(
+                a.get("mode", "header"), a.get("value", ""))
+        if n == "host_header_injection":
+            return lambda: tool_host_header_injection(
+                a.get("mode", "reset"), a.get("host", "evil.example"))
+        if n == "ssi_injection":
+            return lambda: tool_ssi_injection(a.get("mode", "ssi"))
+        if n == "csv_injection":
+            return lambda: tool_csv_injection(a.get("mode", "detect"))
+        if n == "request_smuggling":
+            return lambda: tool_request_smuggling(a.get("mode", "clte"))
+        if n == "csrf_poc":
+            return lambda: tool_csrf_poc(
+                a.get("method", "POST"), a.get("url", a.get("target", "")),
+                a.get("body", a.get("data", "")), a.get("mode", "form"))
+        if n == "clickjacking":
+            return lambda: tool_clickjacking(
+                a.get("url", a.get("target", "")), a.get("mode", "check"))
+        if n == "mass_assignment":
+            return lambda: tool_mass_assignment(
+                a.get("base_body", a.get("body", "{}")), a.get("fields", ""))
+        if n == "auth_bypass_headers":
+            return lambda: tool_auth_bypass_headers(
+                a.get("url", a.get("target", "")), a.get("mode", "headers"))
+        if n == "cache_poisoning":
+            return lambda: tool_cache_poisoning(
+                a.get("url", a.get("target", "")), a.get("mode", "poison"))
+        if n == "email_header_injection":
+            return lambda: tool_email_header_injection(
+                a.get("mode", "inject"), a.get("value", ""))
+        if n == "websocket_probe":
+            return lambda: tool_websocket_probe(
+                a.get("url", a.get("target", "")), a.get("mode", "cswsh"))
+        if n == "oauth_probe":
+            return lambda: tool_oauth_probe(
+                a.get("mode", "redirect_uri"),
+                a.get("redirect_uri", a.get("uri", "https://evil.example")))
+        if n == "attack_surface":
+            return lambda: tool_attack_surface(
+                a.get("content", a.get("body", a.get("text", ""))),
+                a.get("base_url", a.get("url", "")))
+        if n == "verify_solve":
+            return lambda: tool_verify_solve(
+                a.get("mode", "scoreboard"), a.get("before", ""),
+                a.get("after", ""), a.get("target", ""),
+                a.get("category", ""), a.get("expected", ""),
+                a.get("observed", ""))
         if n == "webapp_recon":
             return lambda: tool_webapp_recon(
                 a.get("base_url", a.get("url", a.get("target",
@@ -6730,6 +6812,59 @@ class MainWindow(Adw.ApplicationWindow):
                 lambda: tool_cors_probe(
                     a.get("origin", "https://evil.example"),
                     a.get("target_host", a.get("host", "example.com")))),
+            "ldap_injection":     lambda a: self._tool_simple(
+                lambda: tool_ldap_injection(
+                    a.get("mode", "auth_bypass"), a.get("field", "username"))),
+            "xpath_injection":    lambda a: self._tool_simple(
+                lambda: tool_xpath_injection(a.get("mode", "auth_bypass"))),
+            "crlf_injection":     lambda a: self._tool_simple(
+                lambda: tool_crlf_injection(
+                    a.get("mode", "header"), a.get("value", ""))),
+            "host_header_injection": lambda a: self._tool_simple(
+                lambda: tool_host_header_injection(
+                    a.get("mode", "reset"), a.get("host", "evil.example"))),
+            "ssi_injection":      lambda a: self._tool_simple(
+                lambda: tool_ssi_injection(a.get("mode", "ssi"))),
+            "csv_injection":      lambda a: self._tool_simple(
+                lambda: tool_csv_injection(a.get("mode", "detect"))),
+            "request_smuggling":  lambda a: self._tool_simple(
+                lambda: tool_request_smuggling(a.get("mode", "clte"))),
+            "csrf_poc":           lambda a: self._tool_simple(
+                lambda: tool_csrf_poc(
+                    a.get("method", "POST"), a.get("url", a.get("target", "")),
+                    a.get("body", a.get("data", "")), a.get("mode", "form"))),
+            "clickjacking":       lambda a: self._tool_simple(
+                lambda: tool_clickjacking(
+                    a.get("url", a.get("target", "")), a.get("mode", "check"))),
+            "mass_assignment":    lambda a: self._tool_simple(
+                lambda: tool_mass_assignment(
+                    a.get("base_body", a.get("body", "{}")), a.get("fields", ""))),
+            "auth_bypass_headers": lambda a: self._tool_simple(
+                lambda: tool_auth_bypass_headers(
+                    a.get("url", a.get("target", "")), a.get("mode", "headers"))),
+            "cache_poisoning":    lambda a: self._tool_simple(
+                lambda: tool_cache_poisoning(
+                    a.get("url", a.get("target", "")), a.get("mode", "poison"))),
+            "email_header_injection": lambda a: self._tool_simple(
+                lambda: tool_email_header_injection(
+                    a.get("mode", "inject"), a.get("value", ""))),
+            "websocket_probe":    lambda a: self._tool_simple(
+                lambda: tool_websocket_probe(
+                    a.get("url", a.get("target", "")), a.get("mode", "cswsh"))),
+            "oauth_probe":        lambda a: self._tool_simple(
+                lambda: tool_oauth_probe(
+                    a.get("mode", "redirect_uri"),
+                    a.get("redirect_uri", a.get("uri", "https://evil.example")))),
+            "attack_surface":     lambda a: self._tool_simple(
+                lambda: tool_attack_surface(
+                    a.get("content", a.get("body", a.get("text", ""))),
+                    a.get("base_url", a.get("url", "")))),
+            "verify_solve":       lambda a: self._tool_simple(
+                lambda: tool_verify_solve(
+                    a.get("mode", "scoreboard"), a.get("before", ""),
+                    a.get("after", ""), a.get("target", ""),
+                    a.get("category", ""), a.get("expected", ""),
+                    a.get("observed", ""))),
             "webapp_recon":       lambda a: self._tool_simple(
                 lambda: tool_webapp_recon(
                     a.get("base_url", a.get("url", a.get("target",
@@ -8003,18 +8138,33 @@ class MainWindow(Adw.ApplicationWindow):
 
     def terminal_log(self, text: str, kind: str = "info"):
         """Append a line to the terminal log panel.  Thread-safe via GLib.idle_add."""
+        text = text if isinstance(text, str) else str(text)
+        # Truncate a monster single line (a full HTTP body / base64 blob) BEFORE
+        # it enters the buffer — otherwise the line-count cap never trips and the
+        # buffer grows in bytes without bound during a pentest run.
+        if len(text) > MAX_TERMINAL_LINE_CHARS:
+            text = (text[:MAX_TERMINAL_LINE_CHARS]
+                    + "  …[+%d bytes truncated]" % (len(text) - MAX_TERMINAL_LINE_CHARS))
+
         def _ui():
             try:
                 buf = self.terminal_log_buf
-                end = buf.get_end_iter()
-                buf.insert_with_tags_by_name(end, text + "\n", kind)
-                # Rolling window: drop the oldest lines so a long run can't grow
-                # this buffer without bound. Display-only; nothing else reads it.
-                n = buf.get_line_count()
-                if n > MAX_TERMINAL_LINES:
-                    ok, cut = buf.get_iter_at_line(n - MAX_TERMINAL_LINES)
-                    if ok:
+                buf.insert_with_tags_by_name(buf.get_end_iter(), text + "\n", kind)
+                # Rolling window — bound BOTH lines and bytes. The byte cap uses
+                # get_iter_at_offset (returns a plain iter, always succeeds), so
+                # trimming stays reliable regardless of how this GTK build returns
+                # get_iter_at_line. Display-only; nothing else reads this buffer.
+                try:
+                    n = buf.get_line_count()
+                    if n > MAX_TERMINAL_LINES:
+                        res = buf.get_iter_at_line(n - MAX_TERMINAL_LINES)
+                        cut = res[1] if isinstance(res, tuple) else res
                         buf.delete(buf.get_start_iter(), cut)
+                except Exception:
+                    pass
+                over = buf.get_char_count() - MAX_TERMINAL_CHARS
+                if over > 0:
+                    buf.delete(buf.get_start_iter(), buf.get_iter_at_offset(over))
                 self.terminal_status_lbl.set_text(text[:40].strip() or "…")
                 GLib.idle_add(self._terminal_scroll_to_bottom)
             except Exception:

@@ -4433,6 +4433,118 @@ def tool_cors_probe(origin: str = "https://evil.example",
     return _exp_call("cors_probe", origin=origin, target_host=target_host)
 
 
+def tool_ldap_injection(mode: str = "auth_bypass", field: str = "username") -> Dict[str, Any]:
+    """LDAP injection payloads for a directory-backed login/search. mode:
+    auth_bypass | blind | attributes. For a scope_set target."""
+    return _exp_call("ldap_injection", mode=mode, field=field)
+
+
+def tool_xpath_injection(mode: str = "auth_bypass") -> Dict[str, Any]:
+    """XPath/XQuery injection for an XML-store-backed auth or lookup. mode:
+    auth_bypass | blind."""
+    return _exp_call("xpath_injection", mode=mode)
+
+
+def tool_crlf_injection(mode: str = "header", value: str = "") -> Dict[str, Any]:
+    """CRLF injection / HTTP response splitting via %0d%0a in a header-reflected
+    value. mode: header | cookie | redirect | xss."""
+    return _exp_call("crlf_injection", mode=mode, value=value)
+
+
+def tool_host_header_injection(mode: str = "reset", host: str = "evil.example") -> Dict[str, Any]:
+    """Host-header injection — override the trusted Host to poison reset links /
+    cache / routing. mode: reset | cache | routing | ssrf."""
+    return _exp_call("host_header_injection", mode=mode, host=host)
+
+
+def tool_ssi_injection(mode: str = "ssi") -> Dict[str, Any]:
+    """Server-Side / Edge-Side Includes injection. mode: ssi | esi. RCE proof is
+    the read-only `id` marker."""
+    return _exp_call("ssi_injection", mode=mode)
+
+
+def tool_csv_injection(mode: str = "detect") -> Dict[str, Any]:
+    """CSV/formula-injection DETECTION (benign =1+1 proof; impact described, not
+    weaponised). mode: detect | pocs."""
+    return _exp_call("csv_injection", mode=mode)
+
+
+def tool_request_smuggling(mode: str = "clte") -> Dict[str, Any]:
+    """HTTP request-smuggling DETECTION probes (CL.TE/TE.CL/TE.TE + timing). mode:
+    clte | tecl | tete | detect. Returns raw request templates."""
+    return _exp_call("request_smuggling", mode=mode)
+
+
+def tool_csrf_poc(method: str = "POST", url: str = "", body: str = "",
+                  mode: str = "form") -> Dict[str, Any]:
+    """CSRF proof-of-concept page (auto-submit form / fetch / json) for a
+    state-changing request. mode: form | fetch | json."""
+    return _exp_call("csrf_poc", method=method, url=url, body=body, mode=mode)
+
+
+def tool_clickjacking(url: str = "", mode: str = "check") -> Dict[str, Any]:
+    """Clickjacking — framing check (XFO/CSP) + a framing PoC page. mode:
+    check | poc."""
+    return _exp_call("clickjacking", url=url, mode=mode)
+
+
+def tool_mass_assignment(base_body: str = "{}", fields: str = "") -> Dict[str, Any]:
+    """Mass assignment — inject privileged props (isAdmin/role/verified/balance)
+    into a create/update body; one-at-a-time + all-at-once variants."""
+    return _exp_call("mass_assignment", base_body=base_body, fields=fields)
+
+
+def tool_auth_bypass_headers(url: str = "", mode: str = "headers") -> Dict[str, Any]:
+    """403/401 bypass — client-IP / X-Original-URL headers and path-normalisation
+    mutations for a forbidden endpoint. mode: headers | path."""
+    return _exp_call("auth_bypass_headers", url=url, mode=mode)
+
+
+def tool_cache_poisoning(url: str = "", mode: str = "poison") -> Dict[str, Any]:
+    """Web cache poisoning (unkeyed-header probe) & cache deception (static-suffix
+    path confusion). mode: poison | deception."""
+    return _exp_call("cache_poisoning", url=url, mode=mode)
+
+
+def tool_email_header_injection(mode: str = "inject", value: str = "") -> Dict[str, Any]:
+    """Email header injection — %0a/%0d%0a Bcc/Cc/header injection through an
+    unsanitised mail() field."""
+    return _exp_call("email_header_injection", mode=mode, value=value)
+
+
+def tool_websocket_probe(url: str = "", mode: str = "cswsh") -> Dict[str, Any]:
+    """WebSocket testing — cross-site WebSocket hijacking PoC + per-frame message
+    tampering. mode: cswsh | tamper."""
+    return _exp_call("websocket_probe", url=url, mode=mode)
+
+
+def tool_oauth_probe(mode: str = "redirect_uri",
+                     redirect_uri: str = "https://evil.example") -> Dict[str, Any]:
+    """OAuth2/OIDC misconfiguration checks — redirect_uri theft, missing state,
+    scope/aud confusion, PKCE downgrade. mode: redirect_uri | state | scope |
+    pkce."""
+    return _exp_call("oauth_probe", mode=mode, redirect_uri=redirect_uri)
+
+
+def tool_verify_solve(mode: str = "scoreboard", before: str = "", after: str = "",
+                      target: str = "", category: str = "",
+                      expected: str = "", observed: str = "") -> Dict[str, Any]:
+    """Confirm an exploit ACTUALLY landed (a 200/plausible response is NOT proof).
+    mode=scoreboard diffs two /api/Challenges snapshots and, on a miss, explains
+    WHY it didn't trigger; mode=assert checks a concrete ground-truth marker
+    (expected=) is really present in the response (observed=)."""
+    return _exp_call("verify_solve", mode=mode, before=before, after=after,
+                     target=target, category=category, expected=expected,
+                     observed=observed)
+
+
+def tool_attack_surface(content: str = "", base_url: str = "") -> Dict[str, Any]:
+    """Attack-surface miner — extract endpoints, parameters, hidden fields, DOM
+    XSS sinks and leaked secrets from a captured page / JS bundle / API response,
+    and map each to the builder that attacks it. Feed it webapp_recon output."""
+    return _exp_call("attack_surface", content=content, base_url=base_url)
+
+
 def tool_webapp_recon(base_url: str = "http://localhost:3000",
                       extra_paths: Any = None,
                       max_paths: Any = 40) -> Dict[str, Any]:

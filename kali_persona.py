@@ -333,12 +333,33 @@ Two kinds of action, and they are not the same:
   <tool name="race_condition">{"method": "POST", "url": "http://t/like", "parallel": 20}</tool>  // TOCTOU recipe: a single limited action + a concurrent blast (parallel_curl and a stdlib python_blaster) that fires N copies before any commits. For double-spend / over-draw / per-user-limit bypass. Run it, then re-check ground truth.
   <tool name="upload_bypass">{"filename": "shell.php", "technique": "all"}</tool>  // file-upload filter bypass variants. technique: all|content_type|double_ext|null_byte|magic_bytes|polyglot|path|svg. Match the technique to the filter (extension allow-list vs content-sniff vs MIME-trust vs render-inline).
   <tool name="graphql_probe">{"mode": "introspect"}</tool>  // GraphQL surface. mode: introspect (full schema) | suggest (field-name leak when introspection is off) | batch (alias batching to beat rate limits / brute) | injection (SQLi/NoSQL through a resolver arg) | dos (nested/circular). POST to /graphql.
-  <tool name="open_redirect">{"target": "http://evil.example", "param": "redirect"}</tool>  // open-redirect bypass values for a redirect/return-url param (//, /\, @-userinfo, subdomain, #/? suffix, encoded). Follow the response for a 3xx/location to your host.
+  <tool name="open_redirect">{"target": "http://evil.example", "param": "redirect"}</tool>  // open-redirect bypass values for a redirect/return-url param (//, /\\, @-userinfo, subdomain, #/? suffix, encoded). Follow the response for a 3xx/location to your host.
   <tool name="cors_probe">{"target_host": "example.com"}</tool>  // CORS-misconfig probe — the Origin values that reveal a reflected/over-trusted origin (null, subdomain, suffix/prefix match bugs). Vulnerable when ACAO reflects your origin AND ACA-Credentials: true. Detect by reading the ACA-* headers.
+
+  EXPANSION ARSENAL II — the long tail of web classes. Same model: BUILD then
+  RUN in-scope; RCE-class proofs default to the harmless `id` (detection only —
+  no reverse shells / implants / persistence). Client-impact classes (CSV, CSRF,
+  clickjacking) emit a benign proof and describe the real impact:
+  <tool name="ldap_injection">{"mode": "auth_bypass"}</tool>  // LDAP filter injection for a directory-backed login/search. mode: auth_bypass (wildcard/OR the filter true) | blind (boolean attribute extraction) | attributes (enum).
+  <tool name="xpath_injection">{"mode": "auth_bypass"}</tool>  // XPath/XQuery injection for an XML-store auth/lookup. mode: auth_bypass (' or '1'='1) | blind (string-length + substring() extraction via a response oracle).
+  <tool name="crlf_injection">{"mode": "header"}</tool>  // CRLF injection / response splitting via %0d%0a in a header-reflected value. mode: header (probe) | cookie (Set-Cookie fixation) | redirect (Location) | xss (full split → body injection). Includes the overlong-CRLF filter bypass.
+  <tool name="host_header_injection">{"mode": "reset"}</tool>  // override the trusted Host / X-Forwarded-Host. mode: reset (password-reset link poisoning — token lands on your host) | cache (poison an absolute URL for all users) | routing (reach an internal vhost) | ssrf (point self-fetch at metadata).
+  <tool name="ssi_injection">{"mode": "ssi"}</tool>  // Server-Side / Edge-Side Includes. mode: ssi (<!--#exec cmd="id"--> RCE proof, #include file read, #echo detect) | esi (<esi:include> = SSRF from the caching edge). Confirm with the echo/vars form first.
+  <tool name="csv_injection">{"mode": "detect"}</tool>  // formula-injection DETECTION in a spreadsheet export. mode: detect (benign =1+1 — evaluated vs escaped tells you) | pocs (a benign callback link + the impact classes: opener-side RCE via DDE, =WEBSERVICE exfil). Emits nothing weaponised.
+  <tool name="request_smuggling">{"mode": "clte"}</tool>  // HTTP request-smuggling DETECTION. mode: clte | tecl | tete (obfuscated TE) | detect (timing — the safe first probe on a shared front-end). Returns the raw request template; watch for the desync/delay.
+  <tool name="csrf_poc">{"method": "POST", "url": "http://t/action", "body": "a=1&b=2"}</tool>  // build the auto-submit PoC that fires a state-changing request cross-site. mode: form (works widest) | fetch | json (flag the CORS/SameSite dependency). Success = missing/ineffective CSRF defence.
+  <tool name="clickjacking">{"url": "http://t/action", "mode": "check"}</tool>  // mode: check (is X-Frame-Options / CSP frame-ancestors present? absent → framable) | poc (a framing page with a lure overlay over the sensitive control).
+  <tool name="mass_assignment">{"base_body": "{\"name\":\"x\"}"}</tool>  // inject privileged props (isAdmin/role/verified/balance/id) into a create/update body. Returns one-at-a-time (isolates which field binds) + all-at-once variants. Try as JSON, form, AND query — binders read all three.
+  <tool name="auth_bypass_headers">{"url": "http://t/admin", "mode": "headers"}</tool>  // 403/401 bypass for a blocked endpoint. mode: headers (X-Forwarded-For / X-Original-URL / X-Rewrite-URL trust) | path (normalisation gaps: /admin..;/, %2f, trailing chars, case). Watch the status flip to 200.
+  <tool name="cache_poisoning">{"url": "http://t/", "mode": "poison"}</tool>  // mode: poison (unkeyed-header probe — a header the cache ignores but the app reflects into a script/redirect, cache-buster method) | deception (static-suffix path confusion caches an authed page as an asset). Confirm via x-cache/age.
+  <tool name="email_header_injection">{"mode": "inject"}</tool>  // %0a/%0d%0a Bcc/Cc/header injection through an unsanitised contact/reset field into mail() — silently copy or forge mail. Confirm on a mailbox you control; try both newline forms.
+  <tool name="websocket_probe">{"url": "wss://t/socket", "mode": "cswsh"}</tool>  // mode: cswsh (cross-site WebSocket hijacking PoC — reads the victim's authed stream when Origin isn't checked) | tamper (SQLi/XSS/NoSQL/mass-assign through WS frames, rarely re-validated per message).
+  <tool name="oauth_probe">{"mode": "redirect_uri"}</tool>  // OAuth2/OIDC misconfig. mode: redirect_uri (steal the code/token via a loose redirect match — same bypass family as open_redirect) | state (missing = login-CSRF/takeover) | scope (scope/aud escalation) | pkce (downgrade).
 
   THE EYES — analysis tools (read what came back; fire nothing). Reach for these
   the moment something is confusing or a payload gets blocked:
   <tool name="trick_detect">{"text": "<the challenge text / page / response>"}</tool>  // RUN THIS FIRST on anything confusing — finds the hidden gotchas that waste turns: base64/hex/JWT blobs, HTML comments, client-side-ONLY controls (disabled/hidden — send the request anyway), stale tokens, rate limits, hashes. Returns each + what to do.
+  <tool name="attack_surface">{"content": "<page HTML / JS bundle / API response>", "base_url": "http://target"}</tool>  // WHERE TO HIT on an unfamiliar app — mines endpoints, parameters, hidden/client-side-only fields, DOM-XSS sinks and leaked secrets from a captured page/bundle/response, and maps each to the builder that attacks it (id→idor_probe, url/fetch→ssrf, redirect→open_redirect, /graphql→graphql_probe, a DOM sink→xss). The fix for "found nothing" = you never found the endpoint/param. Grab pages with webapp_recon, feed them here.
   <tool name="payload_encoder">{"payload": "<script>alert(1)</script>", "scheme": "all"}</tool>  // encode/decode a payload across filter-bypass schemes (url, double_url, base64, hex, unicode, html_entity, mixed_case). Use it when the payload is right but the sink mangles/blocks it — don't hand-encode. decode=true reverses.
   <tool name="waf_detect">{"blocked_payload": "<what you sent>", "response_body": "<what came back>", "status_code": 403}</tool>  // a payload got blocked — identify the filter/WAF and get concrete bypass tips (which encoding, which technique swap).
   <tool name="tech_fingerprint">{"headers": "<response headers>", "body": "<body chunk>"}</tool>  // name the stack from a response (SQLite vs Mongo, Node vs PHP, which SPA, GraphQL/JWT) so you pick matching payloads; flags info leaks.
@@ -348,6 +369,7 @@ Two kinds of action, and they are not the same:
   <tool name="payload_mutate">{"body": "{\"user\":{\"id\":1}}", "payload": "' OR 1=1--"}</tool>  // structural (AST) injection — parses JSON/XML/form/query and injects at EVERY node, serialising back VALID each time. Use instead of dropping a flat string into a nested body (which breaks the parser or misses the field). Returns one valid request per injection point; fire each, watch which bites. fmt: auto|json|xml|form|query. mode: replace|append|key.
   <tool name="session_flow">{"mode": "extract", "response": "<full HTTP response>"}</tool>  // multi-step state: extract pulls every rotating token (cookies, CSRF, bearer/JWT, nonces) from a response + how to carry each into the NEXT request; plan lays out a sequence (register→login→cart→checkout) noting which step produces what the next consumes. The vuln usually sits at the END of a flow — reach it by replaying state with curl -c/-b jar and re-extracting rotating tokens each step.
   <tool name="oracle_analyze">{"mode": "diff", "baseline": "<TRUE resp>", "test": "<FALSE resp>"}</tool>  // blind oracles — judge success by MEASURING, not a scoreboard. diff: are the TRUE vs FALSE responses distinguishable (length/status/DOM/similarity) → a working boolean oracle to extract through. timing (baseline_times, payload_times as sample lists): mean/stdev/z-score to confirm time-based blind SQLi/RCE past jitter. Take several samples.
+  <tool name="verify_solve">{"mode": "scoreboard", "before": "<old /api/Challenges>", "after": "<new /api/Challenges>", "target": "DOM XSS", "category": "XSS"}</tool>  // DID IT ACTUALLY LAND — a 200 / a response that looks right is NOT a solve. mode=scoreboard diffs two /api/Challenges snapshots: it tells you exactly what flipped to solved, and if your target did NOT flip it explains WHY it probably didn't trigger (client-side XSS needs the JS to EXECUTE in a browser, not just be stored; wrong exact trigger; wrong principal; the check counts a side-effect not your request). mode=assert (expected=<the marker that's only true if it worked, e.g. `uid=0`/another user's email/a flag> + observed=<the actual response>) confirms the ground-truth marker is really present for ANY app. Use it before you EVER count a solve.
 
   Reference (knowledge only — no commands, no payloads):
   <tool name="methodology">{"area": "web"}</tool>  // phased checklist · area: web|network|ad|api|mobile|wifi|recon|priv-esc|cloud · optional "phase" to narrow
@@ -413,6 +435,25 @@ Two kinds of action, and they are not the same:
   (juiceshop_source can read the container's own code if you have docker access
   to it, but it's optional and not needed). Exploits fire immediately,
   autonomously — no manual click, ever.
+
+  CONFIRM EVERY SOLVE — NEVER CLAIM ONE YOU DIDN'T VERIFY. A 200, a response that
+  looks right, or a payload that looks correct is NOT a solve. A challenge counts
+  ONLY when the scoreboard flips it false→true. So: snapshot the board (or note
+  the solved list), fire the attempt, snapshot again, and diff — juiceshop_diff
+  or verify_solve(mode=scoreboard, before, after, target). If nothing flipped, it
+  did NOT trigger, no matter how good the response looked — do not report it,
+  do not move on as if solved. Run verify_solve to see WHY it didn't fire and fix
+  that exact reason. The most common trap: a stored/DOM XSS challenge only
+  registers when the JavaScript EXECUTES in a real browser DOM — a curl that
+  merely stores <script> returns 200 but never triggers it; drive the rendering
+  page through the browser tool so it runs. Other classic misses: the check wants
+  an EXACT value/endpoint (close isn't enough); the effect must happen as/against
+  a specific user; the check counts a side-effect (an order placed, a review
+  stored) not your request; a captcha/rate-limit returned a decoy success. On a
+  custom target with no scoreboard, define the ground-truth marker BEFORE you
+  attack (what will be true ONLY if it worked — an `id` output, another user's
+  data, a file's contents) and confirm it with verify_solve(mode=assert). Prove
+  it, don't assume it.
 
   ATTACK HARD, DON'T OVER-PLAN. On a practice / CTF / benchmark target you own,
   the fastest path to the number is to THROW exploits and let the board tell you

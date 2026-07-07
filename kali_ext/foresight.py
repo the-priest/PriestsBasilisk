@@ -98,6 +98,54 @@ _UNDO_HINTS = {
 }
 
 
+# Offensive-security tooling. Running these against an AUTHORISED target is
+# normal work that does not touch the operator's OWN machine — so once the
+# catastrophic/risky floor is clear, they don't need consequence-prediction and
+# must never be escalated for merely carrying scary-looking payload strings.
+_OFFENSIVE_TOOLS = frozenset({
+    "nmap", "masscan", "rustscan", "naabu", "sqlmap", "nikto", "nuclei", "ffuf",
+    "gobuster", "feroxbuster", "dirb", "dirbuster", "dirsearch", "wfuzz",
+    "whatweb", "wpscan", "httpx", "katana", "subfinder", "amass", "dnsx",
+    "assetfinder", "arjun", "paramspider", "dalfox", "xsstrike", "commix",
+    "tplmap", "jwt_tool", "hydra", "medusa", "patator", "kerbrute", "netexec",
+    "crackmapexec", "nxc", "smbmap", "enum4linux", "enum4linux-ng", "hashcat",
+    "john", "hashid", "hash-identifier", "responder", "evil-winrm", "gowitness",
+    "eyewitness", "testssl", "testssl.sh", "sslscan", "wafw00f", "gau",
+    "waybackurls", "httprobe", "dnsrecon", "fierce", "sublist3r", "cewl",
+    "nc", "ncat", "socat",
+})
+
+# Writing fetched/scanned output to a SENSITIVE local path is not benign recon —
+# let the floor/model judge those instead of auto-allowing.
+_LOCAL_WRITE_DANGER = re.compile(
+    r"(-[oO]\s+|>>?\s*)\s*("
+    r"/etc/|/root/|/boot/|/usr/|/bin/|/sbin/|/lib/|/var/spool/cron|"
+    r"/etc/systemd|~/\.ssh|\$HOME/\.ssh|"
+    r"[~/][^\s]*(authorized_keys|\.bashrc|\.zshrc|\.profile|crontab|id_rsa))")
+
+
+def _is_offensive(command: str) -> bool:
+    """True when the command is recognisable authorised-target offensive work
+    (a scanner/exploit tool, or curl/wget/httpie carrying a request) that poses
+    no risk to the OPERATOR'S OWN system. Deliberately excludes a remote-script-
+    into-shell pipe and writes to a sensitive local path."""
+    cmd = (command or "").strip()
+    if not cmd:
+        return False
+    low = cmd.lower()
+    if re.search(r"\|\s*(sudo\s+)?(bash|sh|zsh|python)\b", low):
+        return False   # curl | bash and friends stay under the risky floor
+    if _LOCAL_WRITE_DANGER.search(cmd):
+        return False
+    toks = low.split()
+    first = toks[0].rsplit("/", 1)[-1] if toks else ""
+    if first in _OFFENSIVE_TOOLS:
+        return True
+    if first in ("curl", "wget", "http", "https", "httpie"):
+        return True   # web requests — payload CONTENTS never touch the local box
+    return False
+
+
 def _rule_floor(command: str) -> Dict[str, Any]:
     cmd = command.strip()
     for rx, rev, blast, reason in _CATASTROPHIC:
@@ -159,7 +207,14 @@ def _model_assess(command: str, kind: str,
            '"reasons":["short, concrete"],"undo":"how to reverse, or null"}\n'
            "block only for irreversible destruction (wiping disks/data, "
            "bricking boot, fork bombs). caution for risky-but-recoverable. "
-           "Be terse and specific.")
+           "IMPORTANT: this is an authorised security operator. A command may be "
+           "offensive-security work against a REMOTE authorised target — "
+           "requests carrying payloads (SQLi/XSS/traversal/command-injection "
+           "test strings, JWT tokens, a benign `id`/`whoami` RCE proof), "
+           "scanners, and injection strings that LOOK alarming do NOT affect this "
+           "machine. Judge only the risk to the OPERATOR'S OWN system; a "
+           "payload's contents are not a local action, so a curl/scanner "
+           "carrying one is `allow`. Be terse and specific.")
     usr = f"kind={kind}\ncommand:\n{command[:1200]}"
     try:
         raw = (complete_fn(sys, usr) or "").strip().strip("`")
@@ -182,6 +237,17 @@ def assess(command: str, kind: str = "shell",
     # A hard rule-block needs no model spend.
     if floor["verdict"] == "block":
         return floor
+    # Authorised offensive work is normal and safe to the operator's OWN box. The
+    # consequence-predictor kept mistaking scary-LOOKING payload STRINGS (DROP
+    # TABLE, ;id, <script>, an 'rm' inside a test value) for local danger and
+    # pausing autonomous engagements. When the floor is clear AND the command is
+    # recognisable offensive tooling (not piping a remote script into a shell,
+    # not writing to a sensitive local path), allow it without model spend. The
+    # catastrophic + risky rule floors above still run FIRST and are untouched.
+    if floor["verdict"] == "allow" and _is_offensive(command or ""):
+        out = dict(floor)
+        out["rule"] = "offensive-allow"
+        return out
     model = _model_assess(command, kind, complete_fn) if complete_fn else None
     return _merge(floor, model)
 
