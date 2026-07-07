@@ -100,7 +100,7 @@ OLD_DATA_DIR="${HOME}/.local/share/oracle"
 OLD_CONFIG_DIR="${HOME}/.config/oracle"
 
 REQUIRED_FILES=(kali.py kali_core.py kali_safety.py kali_ledger.py kali_persona.py kali_voice.py)
-OPTIONAL_FILES=(org.thepriest.kali.svg kali-dragon.svg kali-watermark.png kali-cross.svg kali-avatar.png basilisk-logo.png basilisk-priest.png)
+OPTIONAL_FILES=(org.thepriest.kali.svg kali-dragon.svg kali-watermark.png kali-cross.svg kali-avatar.png basilisk-logo.png basilisk-priest.png kali-btn-settings.png kali-btn-bell.png kali-btn-terminal.png kali-btn-minimise.png kali-btn-close.png)
 # kali_ext sidecar modules — fetched in remote (curl|bash) mode so phones
 # and fresh boxes get the full toolset (headroom / verify / pentest plus the
 # memory/skills/foresight extensions), not just the core four files.

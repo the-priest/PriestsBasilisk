@@ -105,7 +105,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.kali"
 APP_NAME = "Basilisk"
-VERSION = "6.0.10"
+VERSION = "6.1.2"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -1089,6 +1089,26 @@ link, button.link, *:link { color: #7d121b; }
     box-shadow: none;
 }
 .logo-toggle { padding: 3px; }
+/* Custom dragon-forged art buttons (settings, bell, terminal, minimise, close):
+   the emblem art carries its own carved-stone frame, so the button is
+   transparent -- just a soft ember glow on hover, to match the rest. */
+.art-button {
+    background: transparent;
+    background-image: none;
+    border: none;
+    box-shadow: none;
+    padding: 2px;
+    border-radius: 12px;
+    transition: all 150ms ease;
+}
+.art-button:hover {
+    background-color: rgba(125, 18, 27, 0.14);
+    box-shadow: 0 0 14px rgba(205, 54, 28, 0.45);
+}
+.art-button:active {
+    background-color: rgba(125, 18, 27, 0.22);
+    box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.40), 0 0 8px rgba(205, 54, 28, 0.40);
+}
 .header-icon-button {
     background-color: transparent;
     background-image: none;
@@ -2122,6 +2142,45 @@ def _find_dragon_svg() -> Optional[str]:
 
 # Resolved once at import; None if the emblem isn't on disk.
 _DRAGON_SVG_PATH = _find_dragon_svg()
+
+
+def _find_btn_png(name: str) -> Optional[str]:
+    """Locate a custom dragon-forged button icon (kali-btn-<name>.png), in the
+    install dir or next to this module. None if it isn't on disk."""
+    fn = "kali-btn-%s.png" % name
+    for p in (os.path.expanduser("~/.local/share/kali/" + fn),
+              os.path.join(os.path.dirname(os.path.abspath(__file__)), fn)):
+        if os.path.isfile(p):
+            return p
+    return None
+
+
+_BTN_SETTINGS = _find_btn_png("settings")
+_BTN_BELL     = _find_btn_png("bell")
+_BTN_TERMINAL = _find_btn_png("terminal")
+_BTN_MINIMISE = _find_btn_png("minimise")
+_BTN_CLOSE    = _find_btn_png("close")
+
+
+def _btn_art(path: Optional[str], px: int = 26):
+    """A Gtk.Picture of a button-art PNG scaled to `px` HEIGHT (aspect kept, never
+    upscaled, never expands — so it can't blow up a header/toolbar). None on any
+    failure so the caller falls back to a symbolic icon."""
+    if not path:
+        return None
+    try:
+        pb = GdkPixbuf.Pixbuf.new_from_file_at_scale(path, -1, px, True)
+        pic = Gtk.Picture.new_for_paintable(Gdk.Texture.new_for_pixbuf(pb))
+        pic.set_content_fit(Gtk.ContentFit.SCALE_DOWN)
+        pic.set_can_shrink(True)
+        pic.set_hexpand(False)
+        pic.set_vexpand(False)
+        pic.set_halign(Gtk.Align.CENTER)
+        pic.set_valign(Gtk.Align.CENTER)
+        pic.set_size_request(pb.get_width(), px)
+        return pic
+    except Exception:
+        return None
 
 
 def _find_avatar_png() -> Optional[str]:
@@ -4301,6 +4360,25 @@ class MainWindow(Adw.ApplicationWindow):
         # Only our own dragon toggle belongs at the top-left — suppress the
         # compositor's start-side title button so there aren't two icons there.
         hb.set_show_start_title_buttons(False)
+        # Custom dragon-forged window controls (minimise / close). Only take over
+        # from the compositor's buttons when the art is actually present, so we
+        # never leave the window with no way to close.
+        _close_art = _btn_art(_BTN_CLOSE)
+        _min_art = _btn_art(_BTN_MINIMISE)
+        if _close_art is not None and _min_art is not None:
+            hb.set_show_end_title_buttons(False)
+            _close_btn = Gtk.Button()
+            _close_btn.set_child(_close_art)
+            _close_btn.add_css_class("art-button")
+            _close_btn.set_tooltip_text("Close")
+            _close_btn.connect("clicked", lambda *_: self.close())
+            hb.pack_end(_close_btn)            # first packed_end = far right
+            _min_btn = Gtk.Button()
+            _min_btn.set_child(_min_art)
+            _min_btn.add_css_class("art-button")
+            _min_btn.set_tooltip_text("Minimise")
+            _min_btn.connect("clicked", lambda *_: self.minimize())
+            hb.pack_end(_min_btn)              # sits left of close
         # The sidebar toggle IS the dragon logo now — tap the emblem to show/hide
         # the sidebar (one branded button instead of a plain toggle + a logo).
         sb_toggle = Gtk.Button()
@@ -4358,8 +4436,13 @@ class MainWindow(Adw.ApplicationWindow):
         # green/red dot next to BASILISK in the sidebar header.)
 
         menu_btn = Gtk.MenuButton()
-        menu_btn.set_icon_name("open-menu-symbolic")
-        menu_btn.add_css_class("icon-button")
+        _mset = _btn_art(_BTN_SETTINGS)
+        if _mset is not None:
+            menu_btn.set_child(_mset)
+            menu_btn.add_css_class("art-button")
+        else:
+            menu_btn.set_icon_name("open-menu-symbolic")
+            menu_btn.add_css_class("icon-button")
         menu = Gio.Menu()
         menu.append("Pin chat", "win.pin-chat")
         menu.append("Rename chat", "win.rename-chat")
@@ -4375,10 +4458,15 @@ class MainWindow(Adw.ApplicationWindow):
         # symbolic icon, so set_icon_name rendered a blank button. A bell glyph
         # renders in any font.
         self.notif_btn = Gtk.MenuButton()
-        _bell = Gtk.Label(label="\U0001F514")   # bell
-        _bell.add_css_class("bell-glyph")
-        self.notif_btn.set_child(_bell)
-        self.notif_btn.add_css_class("icon-button")
+        _bellart = _btn_art(_BTN_BELL)
+        if _bellart is not None:
+            self.notif_btn.set_child(_bellart)
+            self.notif_btn.add_css_class("art-button")
+        else:
+            _bell = Gtk.Label(label="\U0001F514")   # bell
+            _bell.add_css_class("bell-glyph")
+            self.notif_btn.set_child(_bell)
+            self.notif_btn.add_css_class("icon-button")
         self.notif_btn.set_valign(Gtk.Align.CENTER)
         self.notif_btn.set_tooltip_text("Notifications from Basilisk")
         notif_pop = Gtk.Popover()
@@ -4762,9 +4850,15 @@ class MainWindow(Adw.ApplicationWindow):
             actions.append(self.tts_toggle)
 
         # Log toggle sits right alongside the other toolbar buttons.
-        self.terminal_toggle_btn = Gtk.Button.new_from_icon_name(
-            "utilities-terminal-symbolic")
-        self.terminal_toggle_btn.add_css_class("icon-button")
+        self.terminal_toggle_btn = Gtk.Button()
+        _termart = _btn_art(_BTN_TERMINAL)
+        if _termart is not None:
+            self.terminal_toggle_btn.set_child(_termart)
+            self.terminal_toggle_btn.add_css_class("art-button")
+        else:
+            self.terminal_toggle_btn.set_child(
+                Gtk.Image.new_from_icon_name("utilities-terminal-symbolic"))
+            self.terminal_toggle_btn.add_css_class("icon-button")
         self.terminal_toggle_btn.set_tooltip_text("Show/hide live terminal log")
         self.terminal_toggle_btn.connect("clicked", self._toggle_terminal_panel)
         actions.append(self.terminal_toggle_btn)

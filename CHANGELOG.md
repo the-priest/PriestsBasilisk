@@ -1,5 +1,16 @@
 # Changelog
 
+## v6.1.2 — custom dragon-forged button art
+
+Your five dragon-emblem art pieces are wired in as real button faces (settings/gear, notification bell, terminal, minimise, close). Each is scaled down to button size, kept transparent (the art carries its own carved-stone frame, so no double border), with the same ember-glow hover as the rest of the buttons. Every one falls back cleanly to the old symbolic icon if its file is ever missing.
+
+- **Settings** — the gear-in-dragon emblem is now the header menu button (Pin/Rename/Delete/Settings/About still live under it).
+- **Notification bell** — the bell-in-dragon emblem replaces the glyph; the unread badge still overlays correctly.
+- **Terminal** — the ">basilisk" terminal emblem replaces the symbolic icon on the toggle button.
+- **Minimise / Close** — the window now uses two custom dragon buttons (the crossed-serpents X for close, the dragon-with-dash for minimise) instead of the compositor's default controls, so the whole top-right reads as Basilisk's own chrome.
+
+Honest flags: the window now controls minimise/close itself rather than the desktop's own decorations — that's a real behavior change, and it may look/feel different under Phosh or other compositors than under KDE/X11 on the ThinkPad, worth a look on the NetHunter side. Also, this art is green-toned stone versus the red-ember theme of the other buttons — you said you'd forge the rest to match later, so left as-is for now.
+
 ## v6.0.10 — arcane buttons: carved obsidian and ember sigils, not gray squares
 
 Cosmetic. Every chrome button was a flat gray robotic square; now they read like rune-stones lit from within by a Basilisk ember. Carved-obsidian base with a blood-red glow rising from the bottom, a faint sigil border, an inset carved highlight — and on hover the ember *awakens* (the glow flares and the border lights up); pressing sinks it into the stone. Applied to the composer buttons (attach, idea/suggest, camera, read-aloud, terminal), the model switcher, the menu / notification / settings buttons, and the window controls (the close sigil flares blood-red as you reach for it). Left untouched: the pieces that are already art -- the dragon logo toggle and the BASILISK wordmarks.
