@@ -530,6 +530,33 @@ step "source files"
 mkdir -p "${INSTALL_DIR}" "${CONFIG_DIR}" "${BIN_DIR}" "${DESKTOP_DIR}" \
          "${BACKUP_DIR}" "${ICON_DIR}"
 
+# ── Migrate legacy "kali" data/settings into the Basilisk dirs ────
+# Renamed kali -> basilisk.  Bring chats.db, settings.json (with your API
+# keys), evidence and backups across BEFORE settings.json is (re)written, so
+# the merge step below keeps your existing keys.  The old DATA dir also held
+# the old code/assets (shared dir), so copy an ALLOWLIST there — never *.py or
+# assets.  The old CONFIG dir is pure data, so copy everything.  Copy only,
+# missing-only: the old tree is preserved and nothing new is overwritten.
+_data_migrated=0
+if [ -d "${LEGACY_KALI_DATA}" ] && [ "${LEGACY_KALI_DATA}" != "${DATA_DIR}" ]; then
+  mkdir -p "${DATA_DIR}"
+  for _item in chats.db chats.db-wal chats.db-shm watcher.json backups memory skills; do
+    if [ -e "${LEGACY_KALI_DATA}/${_item}" ] && [ ! -e "${DATA_DIR}/${_item}" ]; then
+      cp -a "${LEGACY_KALI_DATA}/${_item}" "${DATA_DIR}/${_item}" 2>/dev/null && _data_migrated=1 || true
+    fi
+  done
+fi
+if [ -d "${LEGACY_KALI_CONFIG}" ] && [ "${LEGACY_KALI_CONFIG}" != "${CONFIG_DIR}" ]; then
+  mkdir -p "${CONFIG_DIR}"
+  for _f in "${LEGACY_KALI_CONFIG}"/* "${LEGACY_KALI_CONFIG}"/.[!.]*; do
+    [ -e "${_f}" ] || continue
+    _base="$(basename "${_f}")"
+    [ -e "${CONFIG_DIR}/${_base}" ] && continue
+    cp -a "${_f}" "${CONFIG_DIR}/${_base}" 2>/dev/null && _data_migrated=1 || true
+  done
+fi
+[ "${_data_migrated}" = "1" ] && ok "migrated existing chats + settings from the pre-rename 'kali' folders"
+
 HAVE_LOCAL=1
 if [ -z "${SCRIPT_DIR}" ]; then
   HAVE_LOCAL=0
@@ -792,19 +819,31 @@ fi
 
 # ── 8. Launcher + desktop ─────────────────────────────────────────
 
+# Resolve an ABSOLUTE python3.  When an app is launched from its desktop icon
+# the session hands it a minimal PATH that may not include python3 — that is
+# the usual reason an app starts fine from a terminal but does nothing from
+# the icon.  Baking the full path into the launcher removes that failure mode.
+PYTHON_BIN="$(command -v python3 2>/dev/null || echo /usr/bin/python3)"
+
 cat > "${BIN_DIR}/basilisk" <<EOF
 #!/usr/bin/env bash
 cd "${INSTALL_DIR}" || exit 1
-exec python3 basilisk.py "\$@"
+exec "${PYTHON_BIN}" basilisk.py "\$@"
 EOF
 chmod +x "${BIN_DIR}/basilisk"
-# Retire the pre-rename "kali" launcher so there's one command, not two.
-rm -f "${BIN_DIR}/kali" 2>/dev/null || true
 
-# Icon name reference (theme lookup), NOT absolute path.  GTK/Phosh/KDE
-# icon caches work on theme names; an absolute path bypasses the cache
-# and is much less reliable.  The .desktop is named after the app-id so
-# KDE Plasma's task manager matches the running window to this entry.
+# Compatibility shim: a launcher entry or a taskbar/favourites icon pinned
+# before the rename still calls "kali".  Point it at basilisk so those old
+# icons keep working instead of silently doing nothing.  (basilisk is the real
+# command; this is just an alias.)
+cat > "${BIN_DIR}/kali" <<EOF
+#!/usr/bin/env bash
+exec "${BIN_DIR}/basilisk" "\$@"
+EOF
+chmod +x "${BIN_DIR}/kali"
+
+# The .desktop is named after the app-id so KDE/Phosh match the running window
+# to this entry.  Remove the pre-rename entries so there's a single icon.
 rm -f "${DESKTOP_DIR}/kali.desktop"                 # legacy name
 rm -f "${DESKTOP_DIR}/org.thepriest.kali.desktop"   # legacy app-id
 cat > "${DESKTOP_DIR}/${APP_ID}.desktop" <<EOF
@@ -814,13 +853,16 @@ Name=Basilisk
 GenericName=AI Assistant
 Comment=Autonomous pentesting agent that answers only to you
 Exec=${BIN_DIR}/basilisk
+TryExec=${BIN_DIR}/basilisk
+Path=${INSTALL_DIR}
 Icon=${APP_ID}
 Terminal=false
-Categories=Utility;Network;Development;Security;
+Categories=Utility;Network;Development;
 Keywords=ai;assistant;pentest;security;basilisk;
 StartupWMClass=${APP_ID}
 StartupNotify=true
 EOF
+chmod +x "${DESKTOP_DIR}/${APP_ID}.desktop" 2>/dev/null || true
 update-desktop-database "${DESKTOP_DIR}" 2>/dev/null || true
 
 # Force-refresh icon caches so the new dragon shows up immediately.

@@ -49,24 +49,49 @@ HOME              = Path.home()
 DATA_DIR          = HOME / ".local" / "share" / "basilisk"
 CONFIG_DIR        = HOME / ".config" / "basilisk"
 
-# ── One-time migration from the legacy "basilisk" dirs ──────────────────────
-# The project was renamed kali -> basilisk. Anyone upgrading has their chats,
-# settings, evidence and backups under the old ~/.local/share/kali and
-# ~/.config/kali. If the new dirs don't exist yet but the old ones do, COPY
-# (never move) them across so nothing is lost and the old copy stays as a
-# fallback. Wrapped so a migration hiccup can never stop the app from starting.
-_OLD_DATA_DIR     = HOME / ".local" / "share" / "basilisk"
-_OLD_CONFIG_DIR   = HOME / ".config" / "basilisk"
-def _migrate_legacy_dir(old: Path, new: Path) -> None:
+# ── One-time migration from the legacy "kali" dirs ──────────────────────
+# The project was renamed kali -> basilisk. Bring a user's chats, settings,
+# evidence and backups across from ~/.local/share/kali and ~/.config/kali.
+# The OLD data dir also held the old code + assets (code and data shared one
+# dir), so for it we copy an ALLOWLIST of user-data items only — never *.py,
+# assets, or __pycache__. The old config dir is pure user data, so we copy
+# everything missing there. COPY only (old tree stays as a fallback), and we
+# never overwrite anything already in the new home. Fully wrapped so a hiccup
+# can never stop startup.
+_LEGACY_DATA_DIR   = HOME / ".local" / "share" / "kali"
+_LEGACY_CONFIG_DIR = HOME / ".config" / "kali"
+# The only user-data names that live in the (shared) data dir:
+_DATA_MIGRATE = ("chats.db", "chats.db-wal", "chats.db-shm",
+                 "watcher.json", "backups", "memory", "skills")
+
+def _copy_missing(src: Path, dst: Path) -> None:
     try:
-        if old.exists() and old.is_dir() and not new.exists():
-            import shutil
-            new.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copytree(old, new)
+        if dst.exists():
+            return
+        import shutil
+        if src.is_dir():
+            shutil.copytree(src, dst)
+        else:
+            shutil.copy2(src, dst)
     except Exception:
         pass
-_migrate_legacy_dir(_OLD_DATA_DIR, DATA_DIR)
-_migrate_legacy_dir(_OLD_CONFIG_DIR, CONFIG_DIR)
+
+def _migrate_legacy() -> None:
+    try:
+        if _LEGACY_DATA_DIR.is_dir() and _LEGACY_DATA_DIR.resolve() != DATA_DIR.resolve():
+            DATA_DIR.mkdir(parents=True, exist_ok=True)
+            for _name in _DATA_MIGRATE:
+                _src = _LEGACY_DATA_DIR / _name
+                if _src.exists():
+                    _copy_missing(_src, DATA_DIR / _name)
+        if _LEGACY_CONFIG_DIR.is_dir() and _LEGACY_CONFIG_DIR.resolve() != CONFIG_DIR.resolve():
+            CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+            for _src in _LEGACY_CONFIG_DIR.iterdir():
+                _copy_missing(_src, CONFIG_DIR / _src.name)
+    except Exception:
+        pass
+
+_migrate_legacy()
 
 CHATS_DB          = DATA_DIR / "chats.db"
 SETTINGS_JSON     = CONFIG_DIR / "settings.json"

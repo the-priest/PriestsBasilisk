@@ -1,5 +1,13 @@
 # Changelog
 
+## v6.3.1 — desktop icon launches again, and your old history actually migrates
+
+Two fixes for regressions from the rename.
+
+**Your chats now migrate for real.** The v6.3.0 migration was broken two ways: a rename pass had accidentally pointed it at the *new* dir instead of the old `kali` one, and it only ran when the new dir was missing — but the installer creates that dir (code lives beside data), so it never fired. Rewritten to copy each user-data item (chats, settings + your API keys, evidence, backups) out of the old `kali` folders whenever it's absent in the new home, on both first run and install. Your data was never gone — it sat in `~/.local/share/kali` — but the app now picks it up. Copy-only, so the old folders stay as a fallback; old code/assets in the shared dir are deliberately left behind.
+
+**The desktop icon launches again.** It ran from the terminal but not the icon because the launcher relied on the session PATH finding `python3`, which the desktop launcher doesn't always provide. The launcher now hard-codes the absolute `python3` path, the `.desktop` entry gained `TryExec`/`Path`, and a small `kali → basilisk` shim was restored so any icon pinned before the rename still works. Installer also refreshes the desktop/icon caches.
+
 ## v6.3.0 — one name, end to end: the whole namespace is Basilisk now
 
 The project was born under the `kali` name and kept it in a hundred places the eye never reached. This release finishes the rename so the repo reads as one thing.
