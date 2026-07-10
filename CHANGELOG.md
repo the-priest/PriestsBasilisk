@@ -1,5 +1,11 @@
 # Changelog
 
+## v6.6.6 — a serpent coils the penguin, and the floor learns to read
+
+**New face behind the chat.** The dragon watermark is retired. Behind every conversation now sits the real thing — Tux lit in the same ember-pink as the rest of the forge, a basilisk coiled around and over him, fangs bared, on black. The scrim and 0.9 opacity are unchanged, so it sets the mood without fighting the text. Drop your own `basilisk-watermark.png` in `~/.local/share/basilisk/` to override it, same as always.
+
+**The hard safety floor can now read interpreter payloads.** The catastrophic-command floor was a *shell* classifier: it caught `rm -rf /` through quoting, `$IFS`, `sh -c`, `cd && rm`, `find -delete`, and decode-pipe-to-shell — but a `python3 -c "import os; os.system('rm -rf /')"` or `python3 -c "shutil.rmtree('/')"` handed the model a language runtime the shell floor couldn't see into, and walked straight past it (python, perl, ruby, node, php). Closed. The floor now lifts the shell string back out of `os.system` / `subprocess(shell=True)` / `popen` / backticks / `child_process.exec` / php `system()` and re-scans it under the **same** rules — so `os.system("ls")` stays fine and `os.system("rm -rf /")` is caught — plus direct `shutil.rmtree` / `os.removedirs` on a root/`$HOME`/system path, and list-argv `subprocess.run(['rm','-rf','/'])`. The self-source tamper guard got the same lifting (`open('basilisk_safety.py','w')` and friends), and both guards now fail **safe** on a detector bug rather than waving a command through. Because it reuses the existing scan primitives, the false-positive surface is identical to the shell floor's — ordinary `python3 -c "..."` work never trips it. 20 new interpreter-attack cases plus a batch of benign one-liners added to the floor's test contract to prove it; full suite green. The immutable GUARDRAIL block is untouched.
+
 ## v6.3.1 — desktop icon launches again, and your old history actually migrates
 
 Two fixes for regressions from the rename.

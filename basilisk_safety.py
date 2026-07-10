@@ -220,6 +220,163 @@ def _payload_after(args: List[str], flag: str) -> Optional[str]:
     return None
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Interpreter inline-code payloads — python -c / perl -e / ruby -e / node -e /
+# php -r.  The classifier below reads SHELL argv; it cannot see inside a code
+# string handed to a language runtime.  So `python3 -c "import os;
+# os.system('rm -rf /')"` and `python3 -c "shutil.rmtree('/')"` would otherwise
+# sail straight past the floor (verified: they did).  We do NOT try to fully
+# understand the payload (undecidable) — we catch only the forms that map onto a
+# real catastrophe, reusing the SAME primitives (_scan, _dangerous_target) so the
+# false-positive surface is identical to the shell floor's:
+#   (a) the payload shells out (os.system / subprocess(shell=True) / popen /
+#       backticks / child_process.exec / php system) — lift the shell string back
+#       out and re-scan it, so os.system("ls") stays fine and os.system("rm -rf /")
+#       is caught, by the exact same rules;
+#   (b) subprocess/exec is called with a LIST argv — rejoin the tokens and
+#       re-scan (['rm','-rf','/'] is caught, ['nmap','-sV','x'] is not);
+#   (c) a direct in-language filesystem destroyer (shutil.rmtree / os.removedirs)
+#       hits a target _dangerous_target already treats as catastrophic.
+# The same lifting guards self-source tamper further down (open(...,'w') etc.).
+_INTERPRETERS = {
+    "python", "python2", "python3", "pypy", "pypy3",
+    "perl", "ruby", "node", "nodejs", "php",
+}
+
+# per-runtime flag(s) whose following argument is an inline code string
+_INLINE_FLAGS = {
+    "python": ("-c",), "python2": ("-c",), "python3": ("-c",),
+    "pypy": ("-c",), "pypy3": ("-c",),
+    "perl": ("-e", "-E"), "ruby": ("-e", "-E"),
+    "node": ("-e", "--eval", "-p", "--print"),
+    "nodejs": ("-e", "--eval", "-p", "--print"),
+    "php": ("-r",),
+}
+
+
+def _sink(prefix: str) -> "re.Pattern":
+    """Regex matching `<prefix>( 'string'` — captures the quoted first argument
+    (the string that gets executed) as the last group."""
+    return re.compile(prefix + r"\s*\(\s*(['\"])(.*?)\1", re.S)
+
+
+_PY_STR_SINKS = [
+    _sink(r"(?:os\.)?system"), _sink(r"os\.popen"),
+    _sink(r"subprocess\.(?:run|call|check_output|check_call|Popen|getoutput|"
+          r"getstatusoutput)"),
+]
+_PERL_STR_SINKS = [_sink(r"system"), _sink(r"exec"),
+                   re.compile(r"`([^`]+)`", re.S)]
+_RUBY_STR_SINKS = [_sink(r"system"), _sink(r"exec"), _sink(r"IO\.popen"),
+                   re.compile(r"`([^`]+)`", re.S),
+                   re.compile(r"%x[\{\(\[]([^\}\)\]]+)", re.S)]
+_NODE_STR_SINKS = [re.compile(
+    r"(?:child_process\.)?exec(?:Sync)?\s*\(\s*(['\"`])(.*?)\1", re.S)]
+_PHP_STR_SINKS = [_sink(r"system"), _sink(r"exec"), _sink(r"passthru"),
+                  _sink(r"shell_exec"), _sink(r"popen"), _sink(r"proc_open")]
+
+_STR_SINKS_BY_RT = {
+    "python": _PY_STR_SINKS, "python2": _PY_STR_SINKS, "python3": _PY_STR_SINKS,
+    "pypy": _PY_STR_SINKS, "pypy3": _PY_STR_SINKS,
+    "perl": _PERL_STR_SINKS, "ruby": _RUBY_STR_SINKS,
+    "node": _NODE_STR_SINKS, "nodejs": _NODE_STR_SINKS, "php": _PHP_STR_SINKS,
+}
+
+_PY_LIKE = {"python", "python2", "python3", "pypy", "pypy3"}
+_NODE_LIKE = {"node", "nodejs"}
+
+# subprocess/exec with a LIST argv — pull quoted tokens from the [...] and rejoin.
+_LIST_ARGV_RE = re.compile(
+    r"(?:subprocess\.(?:run|call|check_output|check_call|Popen)|"
+    r"(?:child_process\.)?(?:execFile|spawn)(?:Sync)?)\s*\(\s*\[([^\]]*)\]", re.S)
+_QUOTED_TOK_RE = re.compile(r"(['\"])(.*?)\1", re.S)
+
+# direct fs destroyers on a literal path, plus the canonical home-wipe idioms.
+_RMTREE_LITERAL_RE = re.compile(
+    r"(?:shutil\.rmtree|os\.removedirs)\s*\(\s*(['\"])(.*?)\1", re.S)
+_RMTREE_HOME_RE = re.compile(
+    r"(?:shutil\.rmtree|os\.removedirs)\s*\(\s*(?:"
+    r"os\.path\.expanduser\s*\(\s*['\"]~|"
+    r"os\.environ(?:\.get)?\s*[\(\[]\s*['\"]HOME|"
+    r"(?:pathlib\.)?Path\s*\.\s*home\s*\(\s*\))", re.S)
+
+
+def _inline_payload(rest: List[str], flags) -> Optional[str]:
+    """The code string after an inline flag (`-c "code"`), handling both the
+    space-separated form and the glued short-flag form (`-ccode`)."""
+    for i, a in enumerate(rest):
+        if a in flags and i + 1 < len(rest):
+            return rest[i + 1]
+        for f in flags:
+            if len(f) == 2 and a.startswith(f) and len(a) > len(f):
+                return a[len(f):]
+    return None
+
+
+def _interpreter_payload_is_catastrophic(cmd: str, rest: List[str],
+                                         depth: int) -> bool:
+    payload = _inline_payload(rest, _INLINE_FLAGS.get(cmd, ()))
+    if not payload:
+        return False
+    # (a) shelled-out command strings → re-scan as shell (same rules → same FPs)
+    for rx in _STR_SINKS_BY_RT.get(cmd, ()):
+        for m in rx.finditer(payload):
+            inner = m.group(m.lastindex)
+            if inner and _scan(inner, depth + 1):
+                return True
+    # (b) list-argv subprocess/exec → rejoin tokens and re-scan
+    if cmd in _PY_LIKE or cmd in _NODE_LIKE:
+        for m in _LIST_ARGV_RE.finditer(payload):
+            toks = [t for _, t in _QUOTED_TOK_RE.findall(m.group(1))]
+            if toks and _scan(" ".join(toks), depth + 1):
+                return True
+    # (c) direct in-language destroyer on a dangerous literal path / home idiom
+    if cmd in _PY_LIKE:
+        for m in _RMTREE_LITERAL_RE.finditer(payload):
+            if _dangerous_target(m.group(2)):
+                return True
+        if _RMTREE_HOME_RE.search(payload):
+            return True
+    return False
+
+
+# Protected-source WRITE/DELETE targets expressed in a python payload — the
+# tamper equivalent of the shell `> basilisk_safety.py` / `sed -i` forms.
+_OPEN_WRITE_RE = re.compile(
+    r"open\s*\(\s*(['\"])(?P<p>.*?)\1\s*,\s*(['\"])[^'\"]*[wax]", re.S)
+_PATH_WRITE_RE = re.compile(
+    r"(?:pathlib\.)?Path\s*\(\s*(['\"])(?P<p>.*?)\1\s*\)\s*\.\s*"
+    r"(?:write_text|write_bytes|unlink)", re.S)
+_OS_REMOVE_RE = re.compile(
+    r"os\.(?:remove|unlink)\s*\(\s*(['\"])(?P<p>.*?)\1", re.S)
+_DEST_WRITE_RE = re.compile(
+    r"(?:os\.(?:rename|replace)|shutil\.(?:copy|copy2|copyfile|move))\s*\("
+    r"[^,]*,\s*(['\"])(?P<p>.*?)\1", re.S)
+_PY_WRITE_TARGET_RES = [_OPEN_WRITE_RE, _PATH_WRITE_RE, _OS_REMOVE_RE,
+                        _DEST_WRITE_RE]
+
+
+def _interpreter_payload_tampers_self(cmd: str, rest: List[str],
+                                      depth: int) -> bool:
+    payload = _inline_payload(rest, _INLINE_FLAGS.get(cmd, ()))
+    if not payload:
+        return False
+    # shelled-out tamper command → re-check via the shell tamper path
+    for rx in _STR_SINKS_BY_RT.get(cmd, ()):
+        for m in rx.finditer(payload):
+            inner = m.group(m.lastindex)
+            if inner and _tampers_self(inner, depth + 1):
+                return True
+    # python payload opening / removing / renaming onto a protected source file
+    if cmd in _PY_LIKE:
+        for rx in _PY_WRITE_TARGET_RES:
+            for m in rx.finditer(payload):
+                p = m.group("p")
+                if p and os.path.basename(p) in _PROT_NAMES:
+                    return True
+    return False
+
+
 def _sub_is_catastrophic(args: List[str], depth: int) -> bool:
     if not args:
         return False
@@ -319,6 +476,13 @@ def _sub_is_catastrophic(args: List[str], depth: int) -> bool:
         for t in _operands(rest):
             if _BLOCK_DEV_RE.match(t):
                 return True
+
+    # interpreter inline-code payloads (python -c / perl -e / node -e / php -r):
+    # the shell classifier above can't see inside a language runtime's code
+    # string, so lift out whatever it shells out or destroys and judge THAT.
+    if depth < 4 and cmd in _INTERPRETERS:
+        if _interpreter_payload_is_catastrophic(cmd, rest, depth):
+            return True
 
     return False
 
@@ -475,18 +639,14 @@ def _copy_move_targets_self(args: List[str]) -> bool:
     return _base(ops[-1]) in _PROT_NAMES
 
 
-def command_tampers_self(command: str) -> bool:
-    """True if a shell command appears to WRITE to / modify one of Basilisk's own
-    source files, bypassing the guarded edit path.  Normalises $IFS and recurses
-    into sh -c / eval payloads so the check can't be dodged the same way the
-    catastrophic check could.  Reading the files (cat, grep) does NOT trip it."""
+def _tampers_self(command: str, depth: int = 0) -> bool:
     if not command:
         return False
     norm = _normalize(command)
     if _SELF_WRITE_RE.search(norm):
         return True
-    # peek inside `sh -c "<payload>"` and `eval "<payload>"`, and check cp/mv
-    # destinations per sub-command
+    # peek inside `sh -c "<payload>"`, `eval "<payload>"`, and interpreter
+    # inline-code payloads, and check cp/mv destinations per sub-command
     for sub in _split_subcommands(norm):
         args = _argv(sub)
         if not args:
@@ -496,9 +656,31 @@ def command_tampers_self(command: str) -> bool:
         b = _base(args[0])
         if b in _SHELLS:
             payload = _payload_after(args, "-c")
-            if payload and command_tampers_self(payload):
+            if payload and depth < 4 and _tampers_self(payload, depth + 1):
                 return True
         if b == "eval" and len(args) > 1:
-            if command_tampers_self(" ".join(args[1:])):
+            if depth < 4 and _tampers_self(" ".join(args[1:]), depth + 1):
+                return True
+        # `python3 -c "open('basilisk_safety.py','w')…"` and friends — a raw
+        # write to Basilisk's own source through a language runtime, which the
+        # shell-only _SELF_WRITE_RE above would miss.
+        if depth < 4 and b in _INTERPRETERS:
+            if _interpreter_payload_tampers_self(b, args[1:], depth):
                 return True
     return False
+
+
+def command_tampers_self(command: str) -> bool:
+    """True if a shell command appears to WRITE to / modify one of Basilisk's own
+    source files, bypassing the guarded edit path.  Normalises $IFS and recurses
+    into sh -c / eval / interpreter payloads so the check can't be dodged the same
+    way the catastrophic check could.  Reading the files (cat, grep) does NOT trip
+    it.  Fail-safe: a bug in the detector falls back to the raw self-write regex
+    and force-confirms rather than raising into the agent loop or waving a write
+    through."""
+    if not command:
+        return False
+    try:
+        return _tampers_self(command, 0)
+    except Exception:
+        return bool(_SELF_WRITE_RE.search(_normalize(command or "")))
