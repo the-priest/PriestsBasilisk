@@ -1055,16 +1055,16 @@ link, button.link, *:link { color: #7d121b; }
    Glows softly while working; still acts as Stop when pressed. */
 .send-button {
     background-color: #08090b;
-    border: 1px solid #1c2229;
-    border-radius: 16px;
-    min-width: 60px;
-    padding: 8px;
+    border: none;
+    border-radius: 14px;
+    min-width: 0;
+    padding: 3px;
     margin: 0;
     box-shadow: none;
 }
 .send-button:hover {
-    background-color: #141821;
-    border-color: #2a323b;
+    background-color: #08090b;
+    box-shadow: 0 0 14px rgba(205, 54, 28, 0.5);
 }
 .send-button:active {
     background-color: #0a0c0f;
@@ -2203,7 +2203,7 @@ _BTN_SOUND    = _find_btn_png("sound")    or "sound"
 # "Voice"/"Terminal"/"Attach"), not the small round header icons.  They need a
 # taller render height than the 26px header default or the engraved word is an
 # illegible sliver.  Header/titlebar buttons keep the _btn_art default (26).
-_COMPOSER_BTN_PX = 46
+_COMPOSER_BTN_PX = 36
 
 
 def _btn_art(name_or_path, px: int = 26):
@@ -5023,13 +5023,22 @@ class MainWindow(Adw.ApplicationWindow):
         # working (a tap then stops her) rather than turning into a stop icon.
         self.send_btn = Gtk.Button()
         self.send_btn.add_css_class("send-button")
-        self.send_btn.set_valign(Gtk.Align.FILL)
+        self.send_btn.set_valign(Gtk.Align.CENTER)
         self.send_btn.set_vexpand(False)
         self.send_btn.set_tooltip_text("Send")
         if _AVATAR_PNG_PATH:
-            _send_img = Gtk.Image.new_from_file(_AVATAR_PNG_PATH)
-            _send_img.set_pixel_size(_scaled(40, floor=30))
-            self.send_btn.set_child(_send_img)
+            # The emblem FILLS the button (square, COVER) so no dark border of
+            # button-background shows around it.  CENTER valign + a square size
+            # request keeps it a fixed square instead of stretching to the
+            # (growable) input height and floating a small head in a tall box.
+            _S = _scaled(54, floor=44)
+            _send_pic = Gtk.Picture.new_for_filename(_AVATAR_PNG_PATH)
+            _send_pic.set_content_fit(Gtk.ContentFit.COVER)
+            _send_pic.set_can_shrink(True)
+            _send_pic.set_hexpand(True)
+            _send_pic.set_vexpand(True)
+            self.send_btn.set_size_request(_S, _S)
+            self.send_btn.set_child(_send_pic)
         else:
             self.send_btn.set_icon_name("send-to-symbolic")
         self.send_btn.connect("clicked", lambda *_: self._on_send_or_stop())
