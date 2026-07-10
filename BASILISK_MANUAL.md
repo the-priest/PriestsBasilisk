@@ -2,7 +2,7 @@
 
 *The full reference for Basilisk, the AI security operator that lives on your Linux machine.*
 
-**Version 6.6.6** · GTK4 + libadwaita · X11 & Wayland · desktop and NetHunter mobile
+**Version 6.7.0** · GTK4 + libadwaita · X11 & Wayland · desktop and NetHunter mobile
 
 ---
 

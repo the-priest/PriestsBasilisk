@@ -1,5 +1,13 @@
 # Changelog
 
+## v6.7.0 — the whole toolbar is forged now, and one face rules the app
+
+**Five plaques where five buttons used to be.** The composer row was a lie of two halves — one wide serpent-and-plaque **Attach** button, then four flat little symbol coins (camera, lightbulb, speaker, prompt) that shared none of its craft. Retired. Camera, Suggestions, Voice and Terminal are each a full dragon-forged word-plaque now — the serpent coiled over cracked red stone, the name engraved across it in the same hand as Attach. The row reads as one set instead of one plaque chaperoning four placeholders.
+
+**And you can actually read them.** Those plaques were being rendered at the 26px height the little header coins use, which crushed an engraved word into an unreadable smear. The composer buttons now render tall enough to read (`_COMPOSER_BTN_PX`) while the titlebar/header icons stay small where they belong. The black around each plaque is punched to transparent, so on the near-black chat surface only the stone and the serpent show — no floating rectangles, and the ember hover-glow hugs the art. Drop your own `basilisk-btn-<name>.png` in `~/.local/share/basilisk/` to re-carve any single one, same as always; the embedded fallback copies were re-cut to match so the buttons are right even if the files ever go missing.
+
+**One head, worn everywhere it matters.** The crowned red dragon-head — scaled, four-eyed, staring out of a black iron frame — is now the single emblem of the app. It's the Send button you press, the toggle that opens the sidebar, and the face beside every reply Basilisk speaks — all one file (`basilisk-avatar.png`), so re-theming the app's identity is a single swap. The desktop and window/taskbar icon (`org.thepriest.basilisk.svg`) wears the same head, so what launches Basilisk and what sits inside it finally agree.
+
 ## v6.6.6 — a serpent coils the penguin, and the floor learns to read
 
 **New face behind the chat.** The dragon watermark is retired. Behind every conversation now sits the real thing — Tux lit in the same ember-pink as the rest of the forge, a basilisk coiled around and over him, fangs bared, on black. The scrim and 0.9 opacity are unchanged, so it sets the mood without fighting the text. Drop your own `basilisk-watermark.png` in `~/.local/share/basilisk/` to override it, same as always.

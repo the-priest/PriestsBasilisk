@@ -110,7 +110,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.basilisk"
 APP_NAME = "Basilisk"
-VERSION = "6.6.6"
+VERSION = "6.7.0"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -2198,6 +2198,12 @@ _BTN_ATTACH   = _find_btn_png("attach")   or "attach"
 _BTN_CAMERA   = _find_btn_png("camera")   or "camera"
 _BTN_SUGGEST  = _find_btn_png("suggest")  or "suggest"
 _BTN_SOUND    = _find_btn_png("sound")    or "sound"
+
+# Composer toolbar buttons are wide word-plaques ("Camera"/"Suggestions"/
+# "Voice"/"Terminal"/"Attach"), not the small round header icons.  They need a
+# taller render height than the 26px header default or the engraved word is an
+# illegible sliver.  Header/titlebar buttons keep the _btn_art default (26).
+_COMPOSER_BTN_PX = 46
 
 
 def _btn_art(name_or_path, px: int = 26):
@@ -4882,7 +4888,7 @@ class MainWindow(Adw.ApplicationWindow):
              self._user_action_camera, _BTN_CAMERA),
         ]:
             btn = Gtk.Button()
-            _bart = _btn_art(art)
+            _bart = _btn_art(art, px=_COMPOSER_BTN_PX)
             if _bart is not None:
                 btn.set_child(_bart)
                 btn.add_css_class("art-button")
@@ -4898,7 +4904,7 @@ class MainWindow(Adw.ApplicationWindow):
         # queued into the conversation and picked up on its next step; when idle
         # it just sends. A lightbulb glyph (icon themes don't all ship one).
         self.suggest_btn = Gtk.Button()
-        _sgart = _btn_art(_BTN_SUGGEST)
+        _sgart = _btn_art(_BTN_SUGGEST, px=_COMPOSER_BTN_PX)
         if _sgart is not None:
             self.suggest_btn.set_child(_sgart)
             self.suggest_btn.add_css_class("art-button")
@@ -4916,7 +4922,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.tts_toggle = None
         if self.tts is not None and self.tts.available():
             self.tts_toggle = Gtk.ToggleButton()
-            _sndart = _btn_art(_BTN_SOUND)
+            _sndart = _btn_art(_BTN_SOUND, px=_COMPOSER_BTN_PX)
             if _sndart is not None:
                 self.tts_toggle.set_child(_sndart)
                 self.tts_toggle.add_css_class("art-button")
@@ -4934,7 +4940,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         # Log toggle sits right alongside the other toolbar buttons.
         self.terminal_toggle_btn = Gtk.Button()
-        _termart = _btn_art(_BTN_TERMINAL)
+        _termart = _btn_art(_BTN_TERMINAL, px=_COMPOSER_BTN_PX)
         if _termart is not None:
             self.terminal_toggle_btn.set_child(_termart)
             self.terminal_toggle_btn.add_css_class("art-button")
