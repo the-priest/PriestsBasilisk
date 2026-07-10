@@ -5928,11 +5928,22 @@ class MainWindow(Adw.ApplicationWindow):
         if (self.settings.get("lean_chat", True)
                 and self.current_agent_mode
                 and self._tool_chain_depth == 1 and not self._tools_locked):
-            _last_user = next(
-                (m.get("content", "") for m in reversed(history)
-                 if m.get("role") == "user"
-                 and "<tool_result>" not in m.get("content", "")), "")
-            _lean = conversational_turn(_last_user)
+            # Only skip the toolset while the conversation is still PURELY
+            # social. The moment ANY tool has run in this chat, a short follow-up
+            # ("do it", "the next one", "yeah go on") is operational and NEEDS
+            # the toolset — stripping it there is what left a long conversation
+            # suddenly unable to act for several turns. So: lean is allowed only
+            # before the first tool call; after that the full toolset always
+            # ships. (Trimmed tool_results keep their <tool_result> head, so this
+            # detects operational history even deep into a long chat.)
+            _operational = any("<tool_result>" in (m.get("content") or "")
+                               for m in history)
+            if not _operational:
+                _last_user = next(
+                    (m.get("content", "") for m in reversed(history)
+                     if m.get("role") == "user"
+                     and "<tool_result>" not in m.get("content", "")), "")
+                _lean = conversational_turn(_last_user)
 
         # ── Effort ladder ────────────────────────────────────────────
         # Light on a plainly conversational turn (fast, cheap); heavy once

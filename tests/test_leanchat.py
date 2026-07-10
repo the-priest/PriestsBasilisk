@@ -24,6 +24,15 @@ for m in ["scan 10.0.0.5", "check my system", "run nmap", "benchmark juice shop"
           "thanks now scan the host", "open the ftp directory"]:
     ck(f"tools: {m!r}", kp.conversational_turn(m) is False)
 
+print("-- elliptical mid-conversation follow-ups -> KEEP TOOLS "
+      "(the 'works cold, struggles after a chat' bug) --")
+for m in ["do it", "ok do it", "yeah do it", "go on", "yeah go on", "go ahead",
+          "keep going", "carry on", "continue", "proceed", "try again",
+          "run it", "run that", "do that", "sure try that",
+          "cool now the next one", "alright the next host", "again",
+          "get to work", "onto the next target", "yeah go for it", "keep at it"]:
+    ck(f"follow-up keeps tools: {m!r}", kp.conversational_turn(m) is False)
+
 print("-- prompt sizes --")
 lean = len(kp.build_system_prompt(agent_mode=False)) // 4
 full = len(kp.build_system_prompt(agent_mode=True)) // 4
