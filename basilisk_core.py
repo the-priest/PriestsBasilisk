@@ -239,6 +239,24 @@ PROVIDERS: List[ProviderSpec] = [
 ]
 
 PROVIDERS_BY_KEY: Dict[str, ProviderSpec] = {p.key: p for p in PROVIDERS}
+
+# Curated vision-capable model ids per provider — a convenience picker in
+# Settings.  The vision-model field stays free-text so ANY current id can be
+# entered: provider line-ups shift (Groq's multimodal models especially rotate
+# and deprecate often), so if a picked one 404s, type the current id by hand.
+# SiliconFlow hosts the Qwen VL family under these exact ids.
+VISION_MODELS: Dict[str, List[str]] = {
+    "siliconflow": [
+        "Qwen/Qwen2.5-VL-72B-Instruct",
+        "Qwen/Qwen2.5-VL-32B-Instruct",
+        "Qwen/Qwen2.5-VL-7B-Instruct",
+        "Qwen/Qwen2-VL-72B-Instruct",
+    ],
+    "groq": [
+        "meta-llama/llama-4-scout-17b-16e-instruct",
+        "meta-llama/llama-4-maverick-17b-128e-instruct",
+    ],
+}
 CLOUD_PROVIDER_KEYS = [p.key for p in PROVIDERS]
 
 # Paths that need explicit operator confirmation even in agent mode

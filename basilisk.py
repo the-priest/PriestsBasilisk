@@ -90,6 +90,7 @@ from basilisk_core import (
     is_online, is_sensitive_path, command_needs_sudo, is_catastrophic_command,
     command_tampers_self, Watcher,
     PROVIDERS, PROVIDERS_BY_KEY,
+    VISION_MODELS,
     get_ledger,
 )
 from basilisk_persona import (
@@ -110,7 +111,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.basilisk"
 APP_NAME = "Basilisk"
-VERSION = "7.0.0"
+VERSION = "7.1.0"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -3429,21 +3430,40 @@ class SettingsDialog(Adw.PreferencesDialog):
             lambda r, _ps: self._set("notif_sound", r.get_active()))
         iv_g.add(self.notif_sound_row)
 
+        _vp_labels = [p.label for p in PROVIDERS]
+        self._vp_keys = [p.key for p in PROVIDERS]
         self.vision_provider_row = Adw.ComboRow()
         self.vision_provider_row.set_title("Vision provider")
         self.vision_provider_row.set_subtitle(
-            "Which provider hosts the vision model (must have a key set).")
-        _vp_labels = [p.label for p in PROVIDERS]
-        _vp_keys = [p.key for p in PROVIDERS]
+            "Which provider hosts the vision model. Needs that provider's API "
+            "key — set it right below.")
         self.vision_provider_row.set_model(Gtk.StringList.new(_vp_labels))
         _cur_vp = parent.settings.get("vision_provider", "siliconflow")
-        if _cur_vp in _vp_keys:
-            self.vision_provider_row.set_selected(_vp_keys.index(_cur_vp))
+        if _cur_vp in self._vp_keys:
+            self.vision_provider_row.set_selected(self._vp_keys.index(_cur_vp))
         self.vision_provider_row.connect(
-            "notify::selected",
-            lambda r, _ps: self._set("vision_provider", _vp_keys[r.get_selected()])
-            if 0 <= r.get_selected() < len(_vp_keys) else None)
+            "notify::selected", self._on_vision_provider)
         iv_g.add(self.vision_provider_row)
+
+        # API key for the vision provider — the SAME key that provider uses for
+        # chat, surfaced here so vision can be set up in one place.  Editing it
+        # here updates it everywhere.
+        self.vision_key_row = Adw.PasswordEntryRow()
+        self.vision_key_row.set_title("API key")
+        self.vision_key_row.set_show_apply_button(True)
+        self.vision_key_row.connect(
+            "apply",
+            lambda r: self._on_provider_key(self._vision_prov_key(),
+                                            r.get_text().strip()))
+        iv_g.add(self.vision_key_row)
+
+        # Quick-pick of known vision models for the chosen provider.  Selecting
+        # one fills the free-text field below; that field stays authoritative so
+        # any current model id can still be typed (line-ups change).
+        self.vision_pick_row = Adw.ComboRow()
+        self.vision_pick_row.set_title("Pick a vision model")
+        self.vision_pick_row.connect("notify::selected", self._on_vision_pick)
+        iv_g.add(self.vision_pick_row)
 
         self.vision_model_row = Adw.EntryRow()
         self.vision_model_row.set_title("Vision model")
@@ -3454,6 +3474,9 @@ class SettingsDialog(Adw.PreferencesDialog):
             "apply",
             lambda r: self._set("vision_model", r.get_text().strip()))
         iv_g.add(self.vision_model_row)
+
+        # fill the key field + quick-pick for whichever provider is selected
+        self._refresh_vision_widgets()
 
         d_page.add(iv_g)
         self.add(d_page)
@@ -3993,6 +4016,50 @@ class SettingsDialog(Adw.PreferencesDialog):
         if backend is not None and hasattr(backend, "set_api_key"):
             backend.set_api_key(text)
         self.win.update_status_pills()
+        # a key change may unlock/lock the vision key field mirror
+        if getattr(self, "vision_key_row", None) is not None:
+            self._refresh_vision_widgets()
+
+    def _vision_prov_key(self):
+        """Provider key currently selected in the Vision provider row."""
+        i = self.vision_provider_row.get_selected()
+        return (self._vp_keys[i] if 0 <= i < len(self._vp_keys)
+                else "siliconflow")
+
+    def _on_vision_provider(self, row, _ps):
+        self._set("vision_provider", self._vision_prov_key())
+        self._refresh_vision_widgets()
+
+    def _refresh_vision_widgets(self):
+        """Sync the vision API-key field and the model quick-pick to whichever
+        vision provider is selected.  Guarded so programmatic updates here don't
+        re-fire the pick handler and clobber the saved model."""
+        self._vision_refreshing = True
+        try:
+            pk = self._vision_prov_key()
+            label = (PROVIDERS_BY_KEY[pk].label
+                     if pk in PROVIDERS_BY_KEY else pk)
+            self.vision_key_row.set_title(f"{label} API key")
+            self.vision_key_row.set_text(
+                self.win.settings.get(f"{pk}_api_key", "") or "")
+            models = list(VISION_MODELS.get(pk, []))
+            self._vision_pick_models = models
+            self.vision_pick_row.set_model(
+                Gtk.StringList.new(models + ["Custom (type below)"]))
+            cur = (self.win.settings.get("vision_model", "") or "").strip()
+            self.vision_pick_row.set_selected(
+                models.index(cur) if cur in models else len(models))
+        finally:
+            self._vision_refreshing = False
+
+    def _on_vision_pick(self, row, _ps):
+        if getattr(self, "_vision_refreshing", False):
+            return
+        i = row.get_selected()
+        models = getattr(self, "_vision_pick_models", [])
+        if 0 <= i < len(models):
+            self.vision_model_row.set_text(models[i])
+            self._set("vision_model", models[i])
 
     def _on_provider_model(self, key, row):
         m = row.get_model()

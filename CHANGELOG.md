@@ -1,5 +1,9 @@
 # Changelog
 
+## v7.1.0 — she can be taught to see, in one place
+
+**Setting up vision no longer means guessing.** The Images & vision settings now walk the whole path in one spot: choose the **vision provider**, type that provider's **API key** right there (no more hunting through the Providers section — it's the same key, wired to update everywhere), then **pick a vision model** from a per-provider list instead of having to know the exact id. SiliconFlow's Qwen2.5-VL family (7B / 32B / 72B) and a couple of Groq multimodal options are offered directly. The **Vision model** field stays free-text underneath, so when a provider rotates its line-up you can always type the current id by hand — and the key field + model picker re-sync themselves the moment you switch provider. Now `analyze_image` actually has everything it needs to look at your photos.
+
 ## v7.0.0 — the serpent comes of age
 
 **You can finally reach the monster.** The Monster-voice switch and its depth dial were being greyed out whenever the speech engine wasn't detected at startup — which meant if espeak/ffmpeg weren't found the instant the app booted, you couldn't even *arm* the thing. That's backwards: it's a preference, not a live action. Both controls (and the Read-aloud switch) are now settable whenever the voice module is loaded, so you flip monster on once and it takes hold the moment an engine is present — no fighting a locked toggle. `tts_monster` and `tts_depth` also got proper entries in the defaults table instead of surviving on inline fallbacks, so the setting persists and reads back cleanly everywhere.

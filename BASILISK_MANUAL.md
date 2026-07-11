@@ -2,7 +2,7 @@
 
 *The full reference for Basilisk, the AI security operator that lives on your Linux machine.*
 
-**Version 7.0.0** · GTK4 + libadwaita · X11 & Wayland · desktop and NetHunter mobile
+**Version 7.1.0** · GTK4 + libadwaita · X11 & Wayland · desktop and NetHunter mobile
 
 ---
 
@@ -346,7 +346,7 @@ Removed as a security measure and **gone**: the general `web_search` / `web_veri
 
 Basilisk can see and hear as well as read.
 
-- **`analyze_image`** — Basilisk **sees** an image and describes/answers questions about it, via a vision-capable model (`vision_model`, default a Qwen2.5-VL on SiliconFlow).
+- **`analyze_image`** — Basilisk **sees** an image and describes/answers questions about it, via a vision-capable model. Set it up in **Settings → Display → Images & vision**: choose the **vision provider**, enter that provider's **API key** right there, then either **pick a vision model** from the per-provider list or type any model id in the **Vision model** field (line-ups change — the field is free-text so a current id can always be entered). Defaults to a Qwen2.5-VL on SiliconFlow. The key is the same one that provider uses for chat, so setting it here or in Providers is equivalent.
 - **`image_search`** — return relevant images from the web for a query.
 - **`capture_photo`** — grab a photo from the camera and (optionally) analyse it.
 - **`detect_faces`** — count/locate faces in an image.
