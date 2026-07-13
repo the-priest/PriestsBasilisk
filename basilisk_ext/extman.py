@@ -27,7 +27,7 @@ class _State:
     def __init__(self) -> None:
         self.ready: bool = False
         self.settings: Dict[str, Any] = {}
-        self.data_dir: Path = Path.home() / ".local" / "share" / "kali"
+        self.data_dir: Path = Path.home() / ".local" / "share" / "basilisk"
         self.ext_dir: Path = self.data_dir / "ext"
         self.complete_fn: Optional[Callable[[str, str], str]] = None
         self.embed_fn: Optional[Callable[[List[str]], List[List[float]]]] = None
