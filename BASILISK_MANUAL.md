@@ -2,7 +2,7 @@
 
 *The full reference for Basilisk, the AI security operator that lives on your Linux machine.*
 
-**Version 7.2.0** · GTK4 + libadwaita · X11 & Wayland · desktop and NetHunter mobile
+**Version 7.3.0** · GTK4 + libadwaita · X11 & Wayland · desktop and NetHunter mobile
 
 ---
 
@@ -71,7 +71,7 @@ The installer supports flags to skip optional subsystems (voice, etc.), do a dry
 
 ## 2.4 Environment overrides
 
-Paths and a few behaviours can be overridden by environment variables for non-standard setups (custom data dir, alternate config location). The data directory defaults to `~/.local/share/kali` and the app-id is `org.thepriest.kali` (both lowercase `kali` internally — that's plumbing, not the brand).
+Paths and a few behaviours can be overridden by environment variables for non-standard setups (custom data dir, alternate config location). The data directory defaults to `~/.local/share/basilisk` and the app-id is `org.thepriest.basilisk`. (Data from a pre-rename `~/.local/share/kali` install is migrated across automatically on first run, so an upgrade keeps your chats and evidence.)
 
 ## 2.5 Choosing a provider and getting a key
 
@@ -104,7 +104,7 @@ When the model exposes its chain-of-thought, Basilisk tucks it into a collapsed 
 
 ## 3.4 Chat history
 
-Conversations live in a local SQLite database (`~/.local/share/kali/chats.db`). By default Basilisk is **ephemeral**: fresh chat each launch, empty placeholders discarded, chats idle past the retention window binned — all tunable. Your DB is backed up before every update.
+Conversations live in a local SQLite database (`~/.local/share/basilisk/chats.db`). By default Basilisk is **ephemeral**: fresh chat each launch, empty placeholders discarded, chats idle past the retention window binned — all tunable. Your DB is backed up before every update.
 
 ---
 
@@ -239,6 +239,27 @@ Real work is scoped work. These tools hold the boundary and the picture of an en
 
 ---
 
+## 5.4 The exploitation oracle *(new in 7.3)* — `oracle_arm` / `oracle_check` / `oracle_status` / `oracle_listen`
+
+A `200` is not a solve, and on a real target nothing tells you otherwise. The oracle is how Basilisk knows whether a strike actually **landed** — by evidence, not vibes — and it keeps that knowledge in a running ledger the loop reads every planning turn, so it never re-runs a proven exploit and always knows what's left. This is the single thing that makes a long autonomous run get *smarter* instead of just longer. State is local, filed next to the engagement; nothing here touches the target on its own.
+
+- **`oracle_arm`** — register an attempt **before** you fire it, with the exact marker that would prove it. `criterion_type` is one of:
+  - `contains` — the response must contain a marker (a dumped row, another user's email, a token).
+  - `absent` — a marker must be **gone** (an error cleared, a filter bypassed).
+  - `status` — an exact HTTP status code.
+  - `regex` — a pattern in the response.
+  - `differential` — the attempt response differs from a captured **baseline** (the FALSE/normal response) beyond a threshold — proves a boolean/blind channel.
+  - `oob` — an out-of-band callback fired (see below).
+
+  Set `blind: true` for a bug that echoes nothing back (blind SSRF/RCE/XXE/SQLi) and `arm` stands up the canary listener and hands you a **canary URL** to bury in the payload. Returns an attempt id (`atk-0001`, …).
+- **`oracle_check`** — **after** you fire, judge the attempt against what came back. Pass the response as `evidence` (and `status` for a status check, `baseline` for a differential). It stamps a verdict — **confirmed · failed · pending · inconclusive** — with the reasoning, stores it, and hands you the next move. A blank `attempt_id` targets the most recent open attempt. *This is how you KNOW it worked instead of hoping* — and the verdict feeds straight back into what you try next.
+- **`oracle_status`** — the running verdict ledger for the engagement: what's confirmed, what's still open, what failed, and the counts. `all_confirmed` flips true only when every armed attempt is proven. Consult it when planning the next move.
+- **`oracle_listen`** — start / report the local **out-of-band canary listener** directly (arming a blind attempt starts it for you). It binds all interfaces and returns the base URL plus any callbacks recorded. `host` is the address the target calls back to (auto-detected LAN IP by default; for a localhost target, `127.0.0.1` is used). A callback to a canary URL is proof of a blind hit with certainty — the Burp-Collaborator / interactsh technique, running locally and offline.
+
+**The loop it enables:** `oracle_arm` (marker) → build + fire the exploit → `oracle_check` (verdict) → `oracle_status` (what's left) → next. In an autonomous run the mission directive pushes exactly this: consult `oracle_status` to avoid redoing proven work, and `oracle_check` every hit before counting it. These sit **on top of** the one-shot `oracle_analyze` (blind diff/timing) and `verify_solve` (scoreboard/assert) — those judge a single attempt in the moment; the oracle ledger remembers the whole campaign.
+
+---
+
 # Part 6 — Code security scanning
 
 For auditing source rather than a live target.
@@ -315,11 +336,11 @@ Basilisk has **no general web access** and cannot open arbitrary pages. What it 
 
 ## 10.1 `web_read` — read a page, but only from vetted sources
 
-`web_read` fetches the readable text of a page **only if its host is on the allow-list** (`kali_core._WEB_READ_ALLOW`). The list is matched on the **parsed hostname**, never a substring, so `evil.com/nvd.nist.gov`, `nvd.nist.gov.evil.com` and userinfo tricks (`nvd.nist.gov@evil.com`) are all rejected. Redirects are followed **only while they stay on the list** (a trusted host with an open redirect can't bounce the fetch off-list or into the local network), the final host is re-checked, and everything returned is run through the content firewall (`webshield`) — because even a trusted source is still someone else's text.
+`web_read` fetches the readable text of a page **only if its host is on the allow-list** (`basilisk_core._WEB_READ_ALLOW`). The list is matched on the **parsed hostname**, never a substring, so `evil.com/nvd.nist.gov`, `nvd.nist.gov.evil.com` and userinfo tricks (`nvd.nist.gov@evil.com`) are all rejected. Redirects are followed **only while they stay on the list** (a trusted host with an open redirect can't bounce the fetch off-list or into the local network), the final host is re-checked, and everything returned is run through the content firewall (`webshield`) — because even a trusted source is still someone else's text.
 
 ## 10.2 Two tiers — trusted vs community
 
-The allow-list is two sets in `kali_core.py`, and the split is enforced **in code** (`kali.py._web_read_gated`), not left to the model:
+The allow-list is two sets in `basilisk_core.py`, and the split is enforced **in code** (`basilisk.py._web_read_gated`), not left to the model:
 
 - **`_WEB_READ_TRUSTED` — authoritative, editorially controlled.** An attacker can't serve chosen content through these, so they're fetched **automatically, inside the autonomous loop**: NVD/NIST, MITRE (CVE / ATT&CK / CWE / CAPEC), CISA (incl. KEV), FIRST (EPSS), official vendor/distro security channels (MSRC, Red Hat, Ubuntu, Debian, Arch, kernel.org), OWASP, PortSwigger, Kali docs, MDN, python.org, SANS, and reputable news (Reuters, AP, BBC, the Guardian, Ars Technica, Wired, BleepingComputer, The Hacker News, Krebs).
 - **`_WEB_READ_COMMUNITY` — user-authored / moderated.** Someone else writes the content (a repo, a gist, an answer, an edit, a package page), so an attacker *can* get text in front of the model here. These are held **outside the autonomous loop**: exploit-db, arXiv, Wikipedia/Wikimedia/Wikidata, Stack Overflow / Stack Exchange, PyPI, npm, GitHub, GitHub raw content, and GitLab.
@@ -336,11 +357,11 @@ The point is that this is **structural, not advisory**: a compromised or injecte
 
 **How the model uses it:** when it hits something it isn't sure of — a CVE, a tool flag, an advisory, an ATT&CK technique, a public PoC, a library's docs, a current event — it's told to `web_read` the most authoritative source that covers it, then answer in its own words citing the URL. If what's needed genuinely isn't on an allow-listed source, it says so and tells you where to look.
 
-**Editing the list:** `_WEB_READ_TRUSTED` and `_WEB_READ_COMMUNITY` are plain tuples of domains in `kali_core.py` (subdomains included automatically). Put a source in the trusted tier only if an attacker genuinely can't plant content there; everything user-editable goes in the community tier so it stays behind the approval gate.
+**Editing the list:** `_WEB_READ_TRUSTED` and `_WEB_READ_COMMUNITY` are plain tuples of domains in `basilisk_core.py` (subdomains included automatically). Put a source in the trusted tier only if an attacker genuinely can't plant content there; everything user-editable goes in the community tier so it stays behind the approval gate.
 
 ## 10.4 What was removed, and why
 
-Removed as a security measure and **gone**: the general `web_search` / `web_verify` / open-ended `web_read`, the OSINT/social readers (`osint_username`, `osint_lookup`, `social_read`), the `github` reader, the full `browser` (Playwright/Chromium/Brave) automation, and the semantic-search / GitHub "reach" sidecar (`kali_ext/reach.py`, `kali_ext/verify.py` — both deleted). Each fetched attacker-chosen text from the open web, social platforms, or arbitrary repos and fed it into the model — indirect prompt injection. `cve_lookup` (§4.7) and the two-tier allow-listed `web_read` above are the deliberately-narrow replacements.
+Removed as a security measure and **gone**: the general `web_search` / `web_verify` / open-ended `web_read`, the OSINT/social readers (`osint_username`, `osint_lookup`, `social_read`), the `github` reader, the full `browser` (Playwright/Chromium/Brave) automation, and the semantic-search / GitHub "reach" sidecar (`basilisk_ext/reach.py`, `basilisk_ext/verify.py` — both deleted). Each fetched attacker-chosen text from the open web, social platforms, or arbitrary repos and fed it into the model — indirect prompt injection. `cve_lookup` (§4.7) and the two-tier allow-listed `web_read` above are the deliberately-narrow replacements.
 
 ---
 
@@ -445,7 +466,7 @@ Basilisk can **rewrite its own source and persona**, proposing the full new file
 - The **original is backed up**; writes are **atomic**.
 - A load-bearing **guardrail block is immutable by design** — Basilisk can edit everything else about itself, but the write path **refuses any edit that drops or alters that block** (enforced in code, not merely asked of the model).
 
-Persona edits reload live on the next reply; code edits load on relaunch. (Direct edits to `kali_persona.py` get overwritten on the next `install.sh` run — use the Settings persona addendum for changes that should survive updates.)
+Persona edits reload live on the next reply; code edits load on relaunch. (Direct edits to `basilisk_persona.py` get overwritten on the next `install.sh` run — use the Settings persona addendum for changes that should survive updates.)
 
 ---
 
@@ -541,12 +562,12 @@ The deliberate non-goals: Basilisk does **not** write self-propagating malware, 
 
 # Part 24 — Architecture & file layout
 
-- **`kali.py`** — the GTK4/libadwaita UI and the tool dispatch (status labels, the batchable-tool resolver, the main dispatch table). Every tool is registered here.
-- **`kali_core.py`** — the tool *implementations* (`tool_*`), the provider backends and router, and the safety/degradation helpers.
-- **`kali_persona.py`** — the system prompt, the immutable guardrail block, and the `TOOL_CONTRACT` catalog (which also drives lazy tool-group loading).
-- **`kali_ext/`** — optional stdlib-only sidecar modules loaded through a seam: memory, skills, sandbox, MCP, foresight, native reach, headroom compression, the pentest/exploit builders, the Juice Shop harness, benchmarking, XBOW, engagement graph, evidence verification, the untrusted-web-content firewall (webshield), and the background worker.
-- **`kali_safety.py` / `kali_ledger.py` / `kali_voice.py`** — the safety floor, the evidence ledger, and the voice stack.
-- **Data** — `~/.local/share/kali/` (chats.db, memory, skills, evidence ledger + artifacts, notification store). App-id `org.thepriest.kali`.
+- **`basilisk.py`** — the GTK4/libadwaita UI and the tool dispatch (status labels, the batchable-tool resolver, the main dispatch table). Every tool is registered here.
+- **`basilisk_core.py`** — the tool *implementations* (`tool_*`), the provider backends and router, and the safety/degradation helpers.
+- **`basilisk_persona.py`** — the system prompt, the immutable guardrail block, and the `TOOL_CONTRACT` catalog (which also drives lazy tool-group loading).
+- **`basilisk_ext/`** — optional stdlib-only sidecar modules loaded through a seam: memory, skills, sandbox, MCP, foresight, native reach, headroom compression, the pentest/exploit builders, the Juice Shop harness, benchmarking, XBOW, engagement graph, evidence verification, the untrusted-web-content firewall (webshield), and the background worker.
+- **`basilisk_safety.py` / `basilisk_ledger.py` / `basilisk_voice.py`** — the safety floor, the evidence ledger, and the voice stack.
+- **Data** — `~/.local/share/basilisk/` (chats.db, memory, skills, evidence ledger + artifacts, notification store). App-id `org.thepriest.basilisk`. (A legacy `~/.local/share/kali` install is migrated in automatically on first run.)
 
 Design constraints held throughout: cloud-model-driven (SiliconFlow primary, Groq fallback, never swapped without instruction), stdlib-only sidecars, single-file tools, HTTPS-only remotes, one-liner `curl | bash` install, plain-zip deliverables.
 

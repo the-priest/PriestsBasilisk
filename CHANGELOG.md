@@ -1,5 +1,21 @@
 # Changelog
 
+## v7.3.0 — the serpent learns to tell a kill from a near-miss
+
+**A 200 is not a solve, and now the serpent knows the difference.** The gaze could always fire an exploit; what it lacked was a memory of what actually *landed*. This release gives it one — an **exploitation oracle** that judges every strike by evidence, records the verdict, and feeds that truth straight back into the hunt. It stops mistaking a plausible response for a kill, stops re-killing what's already dead, and gets sharper about what's left with every move.
+
+- **Arm → fire → check.** Before it strikes, Basilisk *arms* an attempt with the exact marker that would prove it — a dumped row, another user's token, a status code, a regex, a measurable difference from baseline. After it strikes, `oracle_check` weighs the response against that marker and stamps a verdict: **confirmed · failed · pending · inconclusive**, with the reasoning attached. No more counting a solve on a hunch.
+- **A ledger that feeds the loop.** `oracle_status` is the running tally of the whole campaign — what's proven, what's still open, what died. The loop consults it every planning turn, so it never re-runs a confirmed exploit and always knows exactly what's left. This is the part that makes a long run get *smarter* instead of just longer.
+- **Eyes in the out-of-band dark.** For blind bugs that echo nothing back — blind SSRF, RCE, XXE, out-of-band SQLi — `arm` with `blind: true` stands up a local **out-of-band canary listener** and hands back a unique callback URL to bury in the payload. If the target ever reaches out to it, the blind hit is proven with certainty. The technique commercial suites charge a licence for (Burp Collaborator, interactsh), running locally and offline. `oracle_listen` drives it directly.
+- Four new tools in the **offensive** group: `oracle_arm`, `oracle_check`, `oracle_status`, `oracle_listen`. All local — the only thing that ever leaves is a target's own callback arriving at your canary.
+
+**Walk-away autonomy, taught to know when it's genuinely idle.** v7.2.0 made the loop never dead-end; the price was that *every* message — a greeting, a one-line question — became an unstoppable mission that could only end on a completion token the model doesn't always emit, so it span re-kicking on nothing. Fixed on two fronts, without loosening the leash on real work:
+
+- **Small-talk is no longer a mission.** A purely conversational opener (the same thing lean-chat already recognises — a greeting, thanks, an opinion question with no hint of an action) gets a normal single reply. Anything that hints at a task still starts a relentless mission.
+- **A mission that never acts can't spin forever.** Relentlessness is now unbounded *only once it has actually run a tool* — which a real pentest does constantly, so it stays as unstoppable as before. A pure-text task that never acts is idle-capped (`mission_max_idle_kicks`, default 3) so it settles cleanly instead of hammering the API on an empty loop. Come back to *done*, or to Basilisk still grinding a live target — never to a dead stop, and never to a greeting stuck in a loop.
+
+**Culled and cleaned.** Removed a dead, broken test file (`tests/test_kali.py` — a pre-rename duplicate that still imported the long-gone `kali_core` module and failed on every run); its coverage lives on in `tests/test_basilisk.py`. The suite is green end to end again, now **15** files including the new `tests/test_oracle.py` (verdict engine + ledger + out-of-band canary, all offline). The README was brought back in step with the app it describes — the walk-away autonomy and the new oracle are in *How it hunts*, next to the verified 73/113 board.
+
 ## v7.2.0 — she does not stop until it's done
 
 **Walk-away autonomy, enforced in the code — not just asked of the model.** Basilisk kept stopping for two reasons, and the persona telling it to be relentless was never enough on its own: (1) the turn loop only continued while the model was calling tools, so the instant it returned a plain reply — a summary, a status, a question — the loop treated that as *finished* and halted; (2) a single stream/API error tore the run down with no retry. Both are now fixed at the loop level.

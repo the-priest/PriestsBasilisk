@@ -310,6 +310,9 @@ DEFAULT_SETTINGS = {
     "agent_mode_default": True,        # Basilisk defaults to agent on
     "autonomous_persist": True,        # walk-away autonomy: a task runs until
                                        # done or you press Stop (agent mode only)
+    "mission_max_idle_kicks": 3,       # a mission that NEVER acts (pure-text
+                                       # task) stops after this many no-progress
+                                       # re-kicks; once it acts it's unbounded
 
     # Watcher
     "watcher_enabled": False,
@@ -5075,6 +5078,82 @@ def tool_loot_reuse() -> Dict[str, Any]:
         return _eng.loot_reuse(engagement=_current_engagement())
     except Exception as e:
         return {"ok": False, "error": f"loot_reuse failed: {e}"}
+
+
+def tool_oracle_arm(objective: str = "", target: str = "", technique: str = "",
+                    criterion_type: str = "contains", criterion_value: str = "",
+                    blind: bool = False, oob_host: str = "") -> Dict[str, Any]:
+    """Register an exploit attempt with an explicit success criterion BEFORE you
+    fire it, so 'did it land?' is decided by evidence, not a 200. criterion_type:
+    contains | absent | status | regex | differential | oob. Set blind=True for a
+    vuln with no visible response (blind SSRF/RCE/XXE/SQLi) and you get a canary
+    URL to embed — a callback to it confirms the hit. Returns the attempt id."""
+    try:
+        from basilisk_ext import oracle as _oracle
+    except Exception as e:
+        return {"ok": False, "error": f"oracle module unavailable: {e}"}
+    try:
+        return _oracle.arm(engagement=_current_engagement(),
+                           objective=objective, target=target,
+                           technique=technique, criterion_type=criterion_type,
+                           criterion_value=criterion_value,
+                           blind=blind not in (False, "false", "0", 0, None, ""),
+                           oob_host=oob_host)
+    except Exception as e:
+        return {"ok": False, "error": f"oracle_arm failed: {e}"}
+
+
+def tool_oracle_check(attempt_id: str = "", evidence: str = "", status: Any = None,
+                      baseline: str = "") -> Dict[str, Any]:
+    """Judge an armed attempt against the response you got back; sets and stores
+    its verdict (confirmed / failed / pending / inconclusive) and returns it with
+    the reasoning — the signal the loop acts on. Pass the response as `evidence`
+    (and `status` for a status check, `baseline` for a differential). Blank
+    attempt_id targets the most recent open attempt."""
+    try:
+        from basilisk_ext import oracle as _oracle
+    except Exception as e:
+        return {"ok": False, "error": f"oracle module unavailable: {e}"}
+    try:
+        return _oracle.check(engagement=_current_engagement(),
+                             attempt_id=(attempt_id or "").strip(),
+                             evidence=evidence, status=status, baseline=baseline)
+    except Exception as e:
+        return {"ok": False, "error": f"oracle_check failed: {e}"}
+
+
+def tool_oracle_status() -> Dict[str, Any]:
+    """The running verdict ledger for this engagement: what's CONFIRMED, what's
+    still PENDING/failed, and the counts. Consult it when planning the next move
+    so you don't redo proven work and you know exactly what's left. `all_confirmed`
+    flips true only when every armed attempt is confirmed."""
+    try:
+        from basilisk_ext import oracle as _oracle
+    except Exception as e:
+        return {"ok": False, "error": f"oracle module unavailable: {e}"}
+    try:
+        return _oracle.status(engagement=_current_engagement())
+    except Exception as e:
+        return {"ok": False, "error": f"oracle_status failed: {e}"}
+
+
+def tool_oracle_listen(port: Any = 0, host: str = "") -> Dict[str, Any]:
+    """Start / report the local out-of-band canary listener (arm(blind=True)
+    starts it for you). Returns its base URL and any callbacks recorded — use it
+    to confirm blind bugs that never echo a response. Binds all interfaces; host
+    is the address the TARGET calls back to (auto-detected LAN IP by default)."""
+    try:
+        from basilisk_ext import oracle as _oracle
+    except Exception as e:
+        return {"ok": False, "error": f"oracle module unavailable: {e}"}
+    try:
+        p = int(float(port)) if str(port).strip() not in ("", "0") else 0
+    except (TypeError, ValueError):
+        p = 0
+    try:
+        return _oracle.listen(port=p, host=(host or "").strip())
+    except Exception as e:
+        return {"ok": False, "error": f"oracle_listen failed: {e}"}
 
 
 def tool_graph_ingest(parsed: Any) -> Dict[str, Any]:

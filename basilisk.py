@@ -59,6 +59,7 @@ from basilisk_core import (
     tool_parse_scan, tool_triage_findings, tool_remediation_hint,
     tool_scope_set, tool_scope_check, tool_scope_show, tool_asset_record,
     tool_engagement_graph, tool_loot_record, tool_loot_list, tool_loot_reuse,
+    tool_oracle_arm, tool_oracle_check, tool_oracle_status, tool_oracle_listen,
     tool_graph_ingest, tool_sqlmap_plan, tool_load_tools,
     tool_submit_flag, tool_xbow_score, tool_xbow_report,
     tool_juiceshop_score, tool_juiceshop_report,
@@ -111,7 +112,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.basilisk"
 APP_NAME = "Basilisk"
-VERSION = "7.2.0"
+VERSION = "7.3.0"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -145,6 +146,10 @@ _MISSION_CONTINUE_DIRECTIVE = (
     "and NOTHING to wait for. Do NOT ask a question, do NOT say you'll wait, do "
     "NOT restate progress and stop. Take the very NEXT concrete action toward "
     "the objective RIGHT NOW with a tool call.\n"
+    "If this is an exploitation run: consult oracle_status to see what's already "
+    "CONFIRMED (never redo a proven exploit) and what's still open, and "
+    "oracle_check every hit against its success marker before you count it — a "
+    "200 or a plausible-looking response is NOT a solve.\n"
     "Only when the objective is genuinely 100% achieved and verified (or it was "
     "purely a question you have now fully answered) output the exact token "
     + MISSION_COMPLETE_TOKEN + " on its own line to end. NEVER output that token "
@@ -5562,6 +5567,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._mission_verify_pending = False
         self._mission_directive = ""
         self._error_retries = 0
+        self._mission_ever_acted = False
         if self.streaming_cancel:
             self.streaming_cancel.set()
         if self.tts:
@@ -5598,9 +5604,11 @@ class MainWindow(Adw.ApplicationWindow):
         """Chain another turn of the active mission instead of stopping.  Tears
         down the settled turn's widget refs but stays in the working state.  On
         repeated no-progress settles it applies a bounded exponential backoff so
-        a stuck model can't hammer the API — but it NEVER gives up on its own;
-        only Stop or a verified completion ends the mission.  A tool actually
-        running resets the backoff (see _on_stream_done)."""
+        a stuck model can't hammer the API.  Once the mission has ACTED (run a
+        tool), it never gives up on its own — only Stop or a verified completion
+        ends it, and a running tool resets the backoff (see _on_stream_done).  A
+        mission that has never acted (a pure-text task) is idle-capped here so it
+        can't spin re-kicking forever."""
         if (self._stop_requested or not self._mission_active
                 or not self.current_agent_mode):
             self._mission_active = False
@@ -5616,6 +5624,20 @@ class MainWindow(Adw.ApplicationWindow):
             self.terminal_log("🔎 completion claimed — forcing re-verify", "dim")
             delay = 200
         else:
+            # A mission that has NEVER acted (no tool has run) is a pure-text
+            # task; if the model neither acts nor emits the completion token, it
+            # must not spin re-kicking forever.  Cap the idle re-kicks and finish
+            # cleanly.  Once it HAS acted (_mission_ever_acted), this cap never
+            # applies — a real pentest runs tools constantly and stays truly
+            # relentless until it's done or you press Stop.
+            idle_cap = self.settings.get("mission_max_idle_kicks", 3)
+            if (not self._mission_ever_acted
+                    and self._mission_kicks >= idle_cap):
+                self._mission_active = False
+                self.terminal_log(
+                    "✅ mission settled — nothing left to act on", "ok")
+                self._finish_turn_cleanup()
+                return
             self._mission_kicks += 1
             # Backoff grows ONLY while the model keeps settling without acting
             # (0.15s, then 0.5→1→2→4→8s, capped at 15s).  Progress resets it.
@@ -5673,15 +5695,25 @@ class MainWindow(Adw.ApplicationWindow):
 
         # ── Autonomous mission: THIS message is the objective ──
         # In agent mode, Basilisk works it until it's done or you press Stop —
-        # a plain reply never ends it, an error never kills it.
+        # a plain reply never ends it, an error never kills it.  BUT a purely
+        # conversational opener (a greeting, thanks, an opinion question — the
+        # same thing lean-chat skips the toolset for) is NOT a mission: making
+        # small-talk relentless is what made it spin re-kicking on nothing.  Any
+        # message that hints at an action still starts a mission.
         if (self.settings.get("autonomous_persist", True)
-                and self.current_agent_mode):
+                and self.current_agent_mode
+                and not conversational_turn(text)):
             self._mission_active = True
             self._mission_objective = text
             self._mission_kicks = 0
             self._mission_verify_pending = False
             self._mission_directive = ""
             self._error_retries = 0
+            # Relentlessness is unbounded ONLY once it has actually acted (run a
+            # tool).  A mission that never acts (pure-text task) is idle-capped
+            # in _mission_continue so it can't spin forever — real pentests run
+            # tools constantly, so they stay truly relentless.
+            self._mission_ever_acted = False
         else:
             self._mission_active = False
 
@@ -6525,6 +6557,9 @@ class MainWindow(Adw.ApplicationWindow):
             # the objective isn't done).
             self._mission_kicks = 0
             self._mission_verify_pending = False
+            # It has now ACTED — from here the mission is truly relentless (no
+            # idle cap); only Stop or a verified completion ends it.
+            self._mission_ever_acted = True
             # EFFICIENCY: gather the leading run of read-only tools and run
             # them together in ONE round-trip (parallel), instead of one
             # model call per lookup.  Stop at the first side-effecting tool
@@ -6781,6 +6816,32 @@ class MainWindow(Adw.ApplicationWindow):
             return lambda: tool_loot_list()
         if n == "loot_reuse":
             return lambda: tool_loot_reuse()
+        # ── Exploitation oracle: verify whether an exploit actually landed and
+        #    keep a verdict ledger that feeds the loop (local; no target/network
+        #    side effects beyond a local OOB canary listener) ──
+        if n == "oracle_arm":
+            return lambda: tool_oracle_arm(
+                a.get("objective", a.get("goal", a.get("what", ""))),
+                a.get("target", a.get("url", a.get("host", ""))),
+                a.get("technique", a.get("vuln", a.get("class", a.get("attack", "")))),
+                a.get("criterion_type", a.get("type", a.get("criterion", a.get("check", "contains")))),
+                a.get("criterion_value", a.get("value", a.get("marker",
+                    a.get("expect", a.get("expected", a.get("pattern", "")))))),
+                a.get("blind", a.get("oob", False)),
+                a.get("oob_host", a.get("host", a.get("callback_host", ""))))
+        if n == "oracle_check":
+            return lambda: tool_oracle_check(
+                a.get("attempt_id", a.get("id", a.get("attempt", ""))),
+                a.get("evidence", a.get("response", a.get("body",
+                    a.get("output", a.get("text", a.get("resp", "")))))),
+                a.get("status", a.get("code", a.get("status_code", None))),
+                a.get("baseline", a.get("base", a.get("normal", a.get("control", "")))))
+        if n == "oracle_status":
+            return lambda: tool_oracle_status()
+        if n == "oracle_listen":
+            return lambda: tool_oracle_listen(
+                a.get("port", 0),
+                a.get("host", a.get("callback_host", a.get("ip", ""))))
         if n == "graph_ingest":
             return lambda: tool_graph_ingest(
                 a.get("parsed", a.get("findings", a.get("result", a))))
