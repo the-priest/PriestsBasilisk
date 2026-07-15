@@ -1,6 +1,6 @@
 # Wiring `codescan` into Basilisk
 
-`kali_ext/codescan.py` is self-contained (imports nothing from core, stdlib
+`basilisk_ext/codescan.py` is self-contained (imports nothing from core, stdlib
 only, 35/35 offline tests pass). To expose its five capabilities as
 model-callable tools, add the blocks below. Same pattern as the pentest tools —
 nothing here changes existing behaviour, it only adds five tools.
@@ -11,7 +11,7 @@ no-execution — so they go in the *batchable* set alongside `tooling_check`.
 
 ---
 
-## 1) `kali_core.py` — add five wrappers
+## 1) `basilisk_core.py` — add five wrappers
 
 Paste next to `tool_tooling_check` (after the pentest wrappers, ~line 4045):
 
@@ -21,7 +21,7 @@ def tool_code_tooling_check() -> Dict[str, Any]:
     secrets / IaC / container / web-DAST), with install lines for the gaps.
     Read-only — runs nothing but `which`."""
     try:
-        from kali_ext import codescan as _cs
+        from basilisk_ext import codescan as _cs
     except Exception as e:
         return {"ok": False, "error": f"codescan module unavailable: {e}"}
     try:
@@ -37,7 +37,7 @@ def tool_code_scan_plan(path: str = ".", kind: str = "auto",
     languages/lockfiles/IaC and sets JSON-output flags so results feed
     parse_scan. Runs NOTHING — every step goes through the approve gate."""
     try:
-        from kali_ext import codescan as _cs
+        from basilisk_ext import codescan as _cs
     except Exception as e:
         return {"ok": False, "error": f"codescan module unavailable: {e}"}
     try:
@@ -53,7 +53,7 @@ def tool_parse_scan(tool: str, raw: str) -> Dict[str, Any]:
     osv-scanner, trivy, pip-audit, npm audit, retire.js, nuclei) into one
     unified finding schema. Read-only text parsing."""
     try:
-        from kali_ext import codescan as _cs
+        from basilisk_ext import codescan as _cs
     except Exception as e:
         return {"ok": False, "error": f"codescan module unavailable: {e}"}
     try:
@@ -68,7 +68,7 @@ def tool_triage_findings(findings: Any) -> Dict[str, Any]:
     agreed), one severity scale (highest wins), sort worst-first, and flag the
     low-confidence / needs-manual-confirmation ones. Pure offline heuristics."""
     try:
-        from kali_ext import codescan as _cs
+        from basilisk_ext import codescan as _cs
     except Exception as e:
         return {"ok": False, "error": f"codescan module unavailable: {e}"}
     try:
@@ -82,7 +82,7 @@ def tool_remediation_hint(finding: Any) -> Dict[str, Any]:
     finding: fixed-version upgrade (SCA), else the CWE-class fix, else a
     generic pointer. Reference knowledge only."""
     try:
-        from kali_ext import codescan as _cs
+        from basilisk_ext import codescan as _cs
     except Exception as e:
         return {"ok": False, "error": f"codescan module unavailable: {e}"}
     try:
@@ -93,9 +93,9 @@ def tool_remediation_hint(finding: Any) -> Dict[str, Any]:
 
 ---
 
-## 2) `kali.py` — import the wrappers (~line 48)
+## 2) `basilisk.py` — import the wrappers (~line 48)
 
-Extend the existing import from `kali_core`:
+Extend the existing import from `basilisk_core`:
 
 ```python
     tool_nuclei_template, tool_reflect_findings,
@@ -103,7 +103,7 @@ Extend the existing import from `kali_core`:
     tool_triage_findings, tool_remediation_hint,
 ```
 
-## 3) `kali.py` — progress labels (~line 4512, in the label dict)
+## 3) `basilisk.py` — progress labels (~line 4512, in the label dict)
 
 ```python
         "code_tooling_check": "checking code scanners",
@@ -113,7 +113,7 @@ Extend the existing import from `kali_core`:
         "remediation_hint":   "looking up the fix",
 ```
 
-## 4) `kali.py` — batchable resolver (Site A, ~line 4962)
+## 4) `basilisk.py` — batchable resolver (Site A, ~line 4962)
 
 These are pure-local (no network, no execution), so add them to the batchable
 `if n == …` block next to `tooling_check`:
@@ -138,7 +138,7 @@ These are pure-local (no network, no execution), so add them to the batchable
                 a.get("finding", a.get("item", a)))
 ```
 
-## 5) `kali.py` — main dispatch dict (Site B, ~line 5326)
+## 5) `basilisk.py` — main dispatch dict (Site B, ~line 5326)
 
 Add next to the `"tooling_check": …` entry:
 
@@ -164,7 +164,7 @@ Add next to the `"tooling_check": …` entry:
 
 ---
 
-## 6) `kali_persona.py` — tell the model the tools exist
+## 6) `basilisk_persona.py` — tell the model the tools exist
 
 **(a)** Add a catalog block. Paste after the `nuclei_template` line in the
 PENTEST SUPPORT section (~line 383):
@@ -203,7 +203,7 @@ PENTEST SUPPORT section (~line 383):
 ## After wiring — smoke test
 
 ```bash
-python3 -c "from kali_ext import codescan as c; print(c.code_tooling_check()['summary'])"
+python3 -c "from basilisk_ext import codescan as c; print(c.code_tooling_check()['summary'])"
 ```
 
 Then in-app: ask Basilisk to `code_scan_plan` on a repo path, approve the

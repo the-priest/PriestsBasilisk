@@ -54,7 +54,7 @@ except Exception:  # pragma: no cover
         _safety = None  # type: ignore
 
 _PROTOCOL_VERSION = "2025-06-18"   # MCP protocol revision this client targets
-_CLIENT_INFO = {"name": "kali", "version": "3.2.0"}
+_CLIENT_INFO = {"name": "basilisk", "version": "3.2.0"}
 _DEFAULT_TIMEOUT = 60
 
 

@@ -112,7 +112,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.basilisk"
 APP_NAME = "Basilisk"
-VERSION = "7.3.0"
+VERSION = "7.4.0"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -4297,7 +4297,7 @@ class SettingsDialog(Adw.PreferencesDialog):
 
 class MainWindow(Adw.ApplicationWindow):
 
-    def __init__(self, app: "KaliApp"):
+    def __init__(self, app: "BasiliskApp"):
         super().__init__(application=app)
         self.set_title(APP_NAME)
         w, h = _default_window_size()
@@ -9320,7 +9320,7 @@ class DragonSplash(Gtk.Window):
             GLib.idle_add(self._finish)
 
 
-class KaliApp(Adw.Application):
+class BasiliskApp(Adw.Application):
     def __init__(self):
         super().__init__(application_id=APP_ID,
                           flags=Gio.ApplicationFlags.DEFAULT_FLAGS)
@@ -9590,7 +9590,7 @@ def _scale_css(css_bytes: bytes, scale: float) -> bytes:
 
 def main():
     try:
-        return KaliApp().run(sys.argv)
+        return BasiliskApp().run(sys.argv)
     except KeyboardInterrupt:
         # Ctrl+C from the terminal: GTK/PyGObject re-raises SIGINT as a
         # KeyboardInterrupt while the main loop unwinds.  Swallow it and

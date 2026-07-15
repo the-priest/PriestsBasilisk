@@ -140,7 +140,7 @@ def run_python(code_path: str,
         {ok, tier, rc, stdout, stderr, timed_out, duration}
     """
     code_path = os.path.abspath(code_path)
-    scratch = tempfile.mkdtemp(prefix="kali-skill-")
+    scratch = tempfile.mkdtemp(prefix="basilisk-skill-")
     tier = "rlimit"
     try:
         # The ONLY directory bound writable into the bwrap sandbox is `scratch`.

@@ -209,8 +209,8 @@ class TestWritePath(unittest.TestCase):
     def test_atomic_no_tmp_file_left(self):
         p = self.tmpdir / "note.txt"
         basilisk_core.tool_write_file(str(p), "x\n")
-        leftovers = list(self.tmpdir.glob("*.kali-tmp"))
-        self.assertEqual(leftovers, [], "atomic replace left a .kali-tmp file")
+        leftovers = list(self.tmpdir.glob("*.basilisk-tmp"))
+        self.assertEqual(leftovers, [], "atomic replace left a .basilisk-tmp file")
 
     def test_refuses_invalid_python_and_leaves_file_intact(self):
         p = self.tmpdir / "mod.py"

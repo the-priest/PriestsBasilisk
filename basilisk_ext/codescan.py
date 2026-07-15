@@ -315,7 +315,23 @@ def scan_plan(path: str = ".", kind: str = "auto",
 
     steps: List[Dict[str, str]] = []
     langs = det["languages"]
-    depth_flag = {"light": "", "normal": "", "deep": ""}.get(intensity, "")
+
+    # `intensity` now actually tunes the scan (it was previously a no-op: every
+    # level mapped to "" and the value was never read).  It changes how deep the
+    # SAST pass goes and whether the slow live-secret verifier runs:
+    #   light  → fast curated semgrep ruleset (p/ci), skip trufflehog's network
+    #            verification — a quick first-look pass
+    #   normal → semgrep `auto` ruleset, full tool set (default)
+    #   deep   → auto + the security-audit ruleset, and drop semgrep's file-size
+    #            cap so large/minified files are scanned too
+    if intensity not in ("light", "normal", "deep"):
+        intensity = "normal"
+    _semgrep_cfg = {
+        "light":  "--config p/ci",
+        "normal": "--config auto",
+        "deep":   "--config auto --config p/security-audit",
+    }[intensity]
+    _semgrep_extra = " --max-target-bytes 0" if intensity == "deep" else ""
 
     want_sast = kind in ("auto", "python", "node", "go")
     want_sca = kind in ("auto", "python", "node", "go", "deps")
@@ -330,16 +346,18 @@ def scan_plan(path: str = ".", kind: str = "auto",
             f"gitleaks detect --source {root} --report-format json "
             f"--report-path gitleaks.json --no-banner",
             "leaked secrets/keys in code and git history", "safe")
-        add(steps, "trufflehog",
-            f"trufflehog filesystem {root} --json > trufflehog.json",
-            "secrets with live-verification (Verified flag)", "safe")
+        if intensity != "light":
+            add(steps, "trufflehog",
+                f"trufflehog filesystem {root} --json > trufflehog.json",
+                "secrets with live-verification (Verified flag)", "safe")
 
     # ── SAST: language-aware ──
     if want_sast:
         if kind == "auto" or "python" in langs or kind == "python":
             add(steps, "semgrep",
-                f"semgrep --config auto --json --output semgrep.json {root}",
-                "multi-language static analysis (auto ruleset)", "safe")
+                f"semgrep {_semgrep_cfg} --json{_semgrep_extra} "
+                f"--output semgrep.json {root}",
+                f"multi-language static analysis ({intensity} ruleset)", "safe")
             if "python" in langs or kind == "python":
                 add(steps, "bandit",
                     f"bandit -r {root} -f json -o bandit.json",
@@ -356,7 +374,7 @@ def scan_plan(path: str = ".", kind: str = "auto",
             "lockfile dependencies → OSV vuln database", "safe")
         if "python" in langs or kind in ("python", "deps"):
             add(steps, "pip-audit",
-                f"pip-audit --format json --output pip-audit.json",
+                "pip-audit --format json --output pip-audit.json",
                 "Python deps → PyPI advisory DB (run in the project venv)", "safe")
         if "node" in langs or kind in ("node", "deps"):
             add(steps, "npm",

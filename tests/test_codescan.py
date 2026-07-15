@@ -116,5 +116,22 @@ check("jsonl trufflehog parses",
       cs.parse_scan("trufflehog",
         '{"DetectorName":"AWS","Verified":true,"SourceMetadata":{"Data":{"Filesystem":{"file":"a.py","line":1}}}}')["findings"][0]["severity"]=="critical")
 
+print("== scan_plan: intensity actually tunes the scan (regression guard) ==")
+def _semgrep_cmd(intensity):
+    steps = cs.scan_plan(".", "python", intensity)["steps"]
+    return next((s["cmd"] for s in steps if s["tool"] == "semgrep"), "")
+def _has_tool(intensity, tool):
+    return any(s["tool"] == tool for s in cs.scan_plan(".", "auto", intensity)["steps"])
+light, normal, deep = _semgrep_cmd("light"), _semgrep_cmd("normal"), _semgrep_cmd("deep")
+check("light/normal/deep semgrep cmds all differ", len({light, normal, deep}) == 3)
+check("light uses fast curated ruleset", "p/ci" in light)
+check("normal uses auto ruleset", "--config auto" in normal and "p/security-audit" not in normal)
+check("deep adds security-audit ruleset", "p/security-audit" in deep)
+check("deep drops the file-size cap", "--max-target-bytes 0" in deep)
+check("light skips the slow live-verifier", not _has_tool("light", "trufflehog"))
+check("normal keeps the live-verifier", _has_tool("normal", "trufflehog"))
+check("unknown intensity normalises to normal",
+      cs.scan_plan(".", "auto", "banana")["intensity"] == "normal")
+
 print(f"\n{'='*40}\n  {passed} passed, {failed} failed\n{'='*40}")
 sys.exit(1 if failed else 0)

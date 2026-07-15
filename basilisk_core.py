@@ -5735,11 +5735,12 @@ def check_mac() -> List[Finding]:
     return fs
 
 
+_HIST_SECRETS_RE = re.compile(
+    r'(password|passwd|api[_-]?key|secret|token|bearer)\s*[=:]\s*\S+', re.I)
+
+
 def check_shell_history() -> List[Finding]:
     fs: List[Finding] = []
-    secrets_re = re.compile(
-        r'(password|passwd|api[_-]?key|secret|token|bearer)\s*[=:]\s*\S+',
-        re.I)
     home = Path.home()
     for hf in (".bash_history", ".zsh_history"):
         p = home / hf
@@ -5749,7 +5750,7 @@ def check_shell_history() -> List[Finding]:
             data = p.read_text(errors="replace")
         except Exception:
             continue
-        hits = secrets_re.findall(data)
+        hits = _HIST_SECRETS_RE.findall(data)
         if hits:
             fs.append(Finding("HIST-001", f"Possible secrets in {hf}",
                               "medium",

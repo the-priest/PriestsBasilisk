@@ -69,7 +69,7 @@ def _safe_name(name: Optional[str]) -> str:
 
 def _base(base_dir: Optional[Path]) -> Path:
     if base_dir is None:
-        base_dir = Path(os.path.expanduser("~")) / ".config" / "kali" / "engagements"
+        base_dir = Path(os.path.expanduser("~")) / ".config" / "basilisk" / "engagements"
     return Path(base_dir)
 
 

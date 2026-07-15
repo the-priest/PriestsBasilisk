@@ -1,23 +1,23 @@
-# Wiring kali_ext into Basilisk
+# Wiring basilisk_ext into Basilisk
 
 Two ways. Pick one. Read both first.
 
 The sidecar's **hook modules** — the ones core calls into (`headroom`,
 `verify`, `pentest`, `memory`, `skills`, `sandbox`, `foresight`) — depend only
-on stdlib + two callables you inject, and import nothing from `kali.py` /
-`kali_core.py` / `kali_persona.py`. That one-way dependency is what keeps the
+on stdlib + two callables you inject, and import nothing from `basilisk.py` /
+`basilisk_core.py` / `basilisk_persona.py`. That one-way dependency is what keeps the
 sidecar optional and null-safe: core lazily imports these at call time, so a
 missing or broken sidecar can never break startup, and the whole thing deletes
 cleanly. (The sole exception is `worker.py`, the standalone `systemd --user`
 background **entry point** — it runs as its own process, *off* the core→ext
-call path, and may `import kali_core` to do headless jobs. It never imports back
+call path, and may `import basilisk_core` to do headless jobs. It never imports back
 into the UI.)
 
 ---
 
 ## Option A — minimal hooks (recommended)
 
-Six additive lines across `kali.py`, each guarded so deleting the `kali_ext/`
+Six additive lines across `basilisk.py`, each guarded so deleting the `basilisk_ext/`
 folder reverts Basilisk to exactly today's behaviour. This is the maintainable
 choice: explicit seams beat monkeypatch magic.
 
@@ -25,10 +25,10 @@ choice: explicit seams beat monkeypatch magic.
 
 ```python
 try:
-    from kali_ext import extman
+    from basilisk_ext import extman
     extman.init(
         settings=self.settings,
-        data_dir="~/.local/share/kali",
+        data_dir="~/.local/share/basilisk",
         complete_fn=self._ext_complete,
         embed_fn=None,                      # wire later if you add embeddings
     )
@@ -66,7 +66,7 @@ def _ext_complete(self, system: str, user: str) -> str:
 ### 3. System-prompt block — in `_kick_assistant_turn`, where you build `sysprompt`
 
 Append the sidecar's tool docs through the addendum you already support.
-No edit to `kali_persona.py`.
+No edit to `basilisk_persona.py`.
 
 ```python
 addendum = self.settings.get("system_prompt", "")
@@ -115,7 +115,7 @@ when "Confirm every command" is off.
 if getattr(self, "_ext", None):
     v = self._ext.foresight(command)
     if v.get("verdict") == "block":
-        from kali_ext.foresight import render_card
+        from basilisk_ext.foresight import render_card
         self._feed_tool_result("REFUSED by foresight:\n" + render_card(v))
         return
     if v.get("verdict") == "caution":
@@ -138,31 +138,31 @@ those onto the card so the Apply handler has them.
 
 ## Option B — zero core edits (monkeypatch launcher)
 
-If you want `kali.py` literally untouched, launch through a shim that imports
+If you want `basilisk.py` literally untouched, launch through a shim that imports
 Basilisk, wraps the same methods at runtime, then runs. Trade-off: it binds to
 private method names, so it can break on a refactor. Option A won't.
 
-Create `kali_boot.py` next to `kali.py`:
+Create `basilisk_boot.py` next to `basilisk.py`:
 
 ```python
-import threading, kali
-from kali_ext import extman
+import threading, basilisk
+from basilisk_ext import extman
 
-_orig_init = kali.MainWindow.__init__
+_orig_init = basilisk.MainWindow.__init__
 def _init(self, app):
     _orig_init(self, app)
     extman.init(settings=self.settings,
                 complete_fn=lambda s, u: "",   # wire _ext_complete here
                 embed_fn=None)
     self._ext = extman
-kali.MainWindow.__init__ = _init
+basilisk.MainWindow.__init__ = _init
 
-_orig_kick = kali.MainWindow._kick_assistant_turn
+_orig_kick = basilisk.MainWindow._kick_assistant_turn
 # ... wrap _kick_assistant_turn / _on_stream_done / _execute_tool_calls
 #     the same way, calling the extman hooks. (Left as an exercise; Option A
 #     is genuinely the cleaner path.)
 
-kali.main() if hasattr(kali, "main") else kali.KaliApp().run(None)
+basilisk.main() if hasattr(basilisk, "main") else basilisk.BasiliskApp().run(None)
 ```
 
 ---
@@ -188,11 +188,11 @@ Add to your `DEFAULT_SETTINGS` (or just set them in `settings.json`):
 Drop the folder next to your other files:
 
 ```
-cp -r kali_ext ~/.local/share/kali/kali_ext
+cp -r basilisk_ext ~/.local/share/basilisk/basilisk_ext
 ```
 
 Add the install dir to the path Basilisk runs under (your launcher already runs
-from `~/.local/share/kali`, so `from kali_ext import extman` resolves).
+from `~/.local/share/basilisk`, so `from basilisk_ext import extman` resolves).
 
 Sandbox: install bubblewrap for real skill isolation.
 
@@ -200,14 +200,14 @@ Sandbox: install bubblewrap for real skill isolation.
 sudo apt install bubblewrap
 ```
 
-Daemon (optional): see `packaging/kali-ext.service`.
+Daemon (optional): see `packaging/basilisk-ext.service`.
 
 ---
 
 ## Removal
 
 ```
-rm -rf ~/.local/share/kali/kali_ext
+rm -rf ~/.local/share/basilisk/basilisk_ext
 ```
 
 Delete the six hook lines (or just stop importing — they're all guarded by

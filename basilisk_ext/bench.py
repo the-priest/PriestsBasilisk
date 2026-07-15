@@ -233,7 +233,7 @@ def _coerce_findings(findings: Any) -> List[Dict[str, Any]]:
 
 
 def score_run(target: str = "", findings: Any = None,
-              ground_truth: Any = None, tool: str = "kali") -> Dict[str, Any]:
+              ground_truth: Any = None, tool: str = "basilisk") -> Dict[str, Any]:
     """Score a run's findings against a target's known vulnerabilities.
 
     `target` selects a built-in ground truth (juice-shop | dvwa | webgoat), or
