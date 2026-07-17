@@ -941,5 +941,56 @@ class TestImages(unittest.TestCase):
             basilisk_core._web_get = orig
 
 
+class TestShellBlockRecovery(unittest.TestCase):
+    """shell_block_command recovers a command the model PRINTED in a ``` fence
+    instead of calling run — the "commands show as a copy banner instead of
+    executing" bug. Shell fences only; first command; safe on non-shell blocks."""
+
+    def test_recovers_bash_fence(self):
+        txt = "Starting Docker now.\n```bash\nsudo systemctl start docker\n```"
+        self.assertEqual(basilisk_core.shell_block_command(txt),
+                         "sudo systemctl start docker")
+
+    def test_strips_prompt_and_takes_first(self):
+        txt = "```sh\n$ docker ps\n$ docker images\n```"
+        self.assertEqual(basilisk_core.shell_block_command(txt), "docker ps")
+
+    def test_skips_comment_lines(self):
+        txt = "```bash\n# start it first\nsudo systemctl start docker\n```"
+        self.assertEqual(basilisk_core.shell_block_command(txt),
+                         "sudo systemctl start docker")
+
+    def test_joins_line_continuation(self):
+        txt = "```bash\ncurl -s \\\n  http://localhost:3000\n```"
+        self.assertEqual(basilisk_core.shell_block_command(txt),
+                         "curl -s http://localhost:3000")
+
+    def test_ignores_non_shell_fences(self):
+        self.assertEqual(basilisk_core.shell_block_command(
+            '```json\n{"a":1}\n```'), "")
+        self.assertEqual(basilisk_core.shell_block_command(
+            "```python\nprint(1)\n```"), "")
+
+    def test_empty_when_no_fence(self):
+        self.assertEqual(basilisk_core.shell_block_command(
+            "just talking, no code here"), "")
+        self.assertEqual(basilisk_core.shell_block_command(""), "")
+
+    def test_recovered_command_parses_as_run(self):
+        cmd = basilisk_core.shell_block_command(
+            "```bash\nsudo systemctl start docker\n```")
+        synthetic = ('<tool name="run">'
+                     + json.dumps({"command": cmd, "reason": "auto-run"})
+                     + "</tool>")
+        calls = basilisk_core.parse_tool_calls(synthetic)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0].name, "run")
+        self.assertEqual(calls[0].args.get("command"), cmd)
+
+    def test_catastrophic_recovered_command_still_blocked(self):
+        # the recovery path checks is_catastrophic_command before running
+        self.assertTrue(basilisk_core.is_catastrophic_command("rm -rf /"))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

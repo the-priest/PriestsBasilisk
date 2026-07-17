@@ -6166,6 +6166,34 @@ def parse_tool_calls(text: str) -> List[ToolCall]:
     return calls
 
 
+def shell_block_command(text: str) -> str:
+    """Recover a shell command the model PRINTED in a ``` fence instead of
+    emitting a `run` tool call — the "it shows me a command with a copy banner
+    instead of running it" failure. Returns the first real command in the first
+    shell-language fence, or "" if there isn't one.
+
+    Shell fences only (bash/sh/shell/console/zsh) — never json/python/yaml, so a
+    printed config or example in a non-shell block is left alone. Conservative:
+    the FIRST command only (the mission loop re-kicks for the next), comments and
+    "$ "/"> " prompts stripped, backslash line-continuations joined.
+    """
+    if not text:
+        return ""
+    for m in re.finditer(
+            r"```(?:bash|sh|shell|console|zsh)[ \t]*\r?\n(.*?)```",
+            text, re.S | re.I):
+        body = m.group(1) or ""
+        body = re.sub(r"[ \t]*\\[ \t]*\r?\n[ \t]*", " ", body)
+        for ln in body.splitlines():
+            s = ln.strip()
+            if not s or s.startswith("#"):
+                continue
+            s = re.sub(r"^[\$>][ \t]+", "", s)
+            if s:
+                return s
+    return ""
+
+
 def strip_tool_calls(text: str) -> str:
     out = TOOL_TAG_RE.sub("", text)
     # Also remove dangling unclosed <tool ...> ... fragments mid-stream

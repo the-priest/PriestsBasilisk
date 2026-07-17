@@ -87,7 +87,7 @@ from basilisk_core import (
     quick_facts as tool_quick_facts,
     sudo_cached, detect_urgency, looks_degraded,
     note_command, recent_duplicate,
-    parse_tool_calls, strip_tool_calls,
+    parse_tool_calls, strip_tool_calls, shell_block_command,
     extract_think_blocks, strip_think_blocks,
     is_online, is_sensitive_path, command_needs_sudo, is_catastrophic_command,
     command_tampers_self, Watcher,
@@ -113,7 +113,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.basilisk"
 APP_NAME = "Basilisk"
-VERSION = "7.5.0"
+VERSION = "7.5.2"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -4401,6 +4401,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._mission_active: bool = False
         self._mission_objective: str = ""
         self._mission_kicks: int = 0            # consecutive no-progress re-kicks
+        self._recent_commands: list = []        # tail of run commands, for loop-break
         self._mission_verify_pending: bool = False   # first completion signal seen
         self._mission_directive: str = ""       # transient nudge for the next kick
         self._error_retries: int = 0            # consecutive stream-error retries
@@ -5565,6 +5566,7 @@ class MainWindow(Adw.ApplicationWindow):
         # continuation or error-retry can kick another turn behind our back.
         self._mission_active = False
         self._mission_kicks = 0
+        self._recent_commands = []
         self._mission_verify_pending = False
         self._mission_directive = ""
         self._error_retries = 0
@@ -5639,6 +5641,21 @@ class MainWindow(Adw.ApplicationWindow):
                     "✅ mission settled — nothing left to act on", "ok")
                 self._finish_turn_cleanup()
                 return
+            # Circuit breaker: if the model has fired the EXACT same command 6
+            # times in a row (despite the loop-breaker nudge at 3), it's stuck —
+            # e.g. re-running an uncached-sudo command that never completes. Stop
+            # cleanly rather than spin forever burning API calls; the operator can
+            # resume with a new message. (Distinct from the idle cap, which only
+            # covers missions that never acted.)
+            _tail = [c for c in getattr(self, "_recent_commands", []) if c]
+            if len(_tail) >= 6 and len(set(_tail[-6:])) == 1:
+                self._mission_active = False
+                self.terminal_log(
+                    "■ stopped — same command 6× in a row with no progress; "
+                    "ending to avoid an infinite loop (send a message to resume)",
+                    "error")
+                self._finish_turn_cleanup()
+                return
             self._mission_kicks += 1
             # Backoff grows ONLY while the model keeps settling without acting
             # (0.15s, then 0.5→1→2→4→8s, capped at 15s).  Progress resets it.
@@ -5708,6 +5725,7 @@ class MainWindow(Adw.ApplicationWindow):
             self._mission_active = True
             self._mission_objective = text
             self._mission_kicks = 0
+            self._recent_commands = []      # fresh objective — clear loop history
             self._mission_verify_pending = False
             self._mission_directive = ""
             self._error_retries = 0
@@ -6253,6 +6271,18 @@ class MainWindow(Adw.ApplicationWindow):
         _answer_only = (not self._mission_active
                         and (direct_answer_turn(_opening_user)
                              or conversational_turn(_opening_user)))
+        # A question must never grind into a tool chain. Autonomous mode is
+        # uncapped for MISSIONS (relentless by design), but a question has no
+        # mission machinery to stop a runaway chain — and _feed_tool_result keeps
+        # re-kicking as long as the model calls tools. So cap it: after a few tool
+        # round-trips on a question, lock tools and force the answer THIS turn.
+        if _answer_only and self._tool_chain_depth > 4 and not self._tools_locked:
+            self._tools_locked = True
+            addendum = (addendum + "\n\n[You've already used several tools on "
+                        "this question. Do NOT call any more tools — give your "
+                        "best, complete answer NOW from what you already have.]"
+                        ).strip()
+            self.terminal_log("── question tool-cap reached; answering now", "dim")
         if self.settings.get("approval_mode", "none") == "none" and _answer_only:
             addendum = (addendum + "\n\n[AUTONOMOUS MODE — but THIS turn is a "
                 "QUESTION, not a task. The operator asked something; give them "
@@ -6279,6 +6309,12 @@ class MainWindow(Adw.ApplicationWindow):
                 "watching. Run shell commands DIRECTLY with the `run` tool; write "
                 "files DIRECTLY with `write_file`. They execute immediately in "
                 "this mode; do not wait for approval.\n"
+                "- To run a command you MUST emit a `run` tool call. NEVER write "
+                "the command inside a ``` code block or as prose text — a command "
+                "shown in a code block does NOT execute, it just displays as a "
+                "useless copyable banner. If you want a command to run, the ONLY "
+                "way is the run tool. Same for files: use write_file, never a "
+                "fenced block.\n"
                 "- IGNORE any guidance to 'reason WITH him and propose', 'let him "
                 "decide', 'have a conversation not a runaway', or to 'stop and ask "
                 "how he wants to proceed'. Those are OFF now. You decide and you "
@@ -6308,6 +6344,35 @@ class MainWindow(Adw.ApplicationWindow):
                 "- Be terse. One short status line per step, not essays. Save "
                 "tokens.]").strip()
             self.terminal_log("🔥 autonomous mode: unleashed", "dim")
+        # ── Loop breaker ──
+        # Once the mission has ACTED, the idle cap no longer applies (a real
+        # engagement runs tools constantly and must stay relentless). The failure
+        # mode that leaves is the model firing the SAME command over and over —
+        # re-running `sudo systemctl start docker` when Docker already started, or
+        # an uncached sudo prompt failing silently — with nothing to break it out.
+        # If the last 3 executed commands are identical, inject a hard nudge to
+        # STOP repeating and VERIFY state with a different command instead. This
+        # doesn't stop the mission (legit relentless work continues); it only
+        # redirects a provably-stuck repeat.
+        _rc = getattr(self, "_recent_commands", [])
+        if (len(_rc) >= 3 and _rc[-1] and len(set(_rc[-3:])) == 1):
+            _stuck = _rc[-1]
+            if len(_stuck) > 160:
+                _stuck = _stuck[:157] + "…"
+            addendum = (addendum + "\n\n[LOOP BREAKER — you have now run this EXACT "
+                "command 3 times in a row:\n    " + _stuck + "\nRepeating it is NOT "
+                "making progress. It has almost certainly ALREADY succeeded, or it "
+                "is failing silently (an uncached `sudo` password prompt that never "
+                "gets answered in autonomous mode, or the service/target is already "
+                "in the desired state). Do NOT run that command again. Instead, on "
+                "this turn: VERIFY the real state with a DIFFERENT command (e.g. "
+                "`docker ps`, `systemctl status docker --no-pager`, "
+                "`curl -s -o /dev/null -w '%{http_code}' http://localhost:3000`), "
+                "READ the result, and then either advance to the next step or, if "
+                "the objective is already met, finish. If it needs sudo and sudo "
+                "isn't cached, say so plainly and move on — don't loop.]").strip()
+            self.terminal_log("⛔ loop breaker: same command ×3 — forcing a "
+                              "verify/redirect", "error")
         # Lean-chat: on a plainly conversational OPENING turn (a greeting,
         # thanks, an opinion question — no hint of an action), skip the ~8K-token
         # tool catalog. "Just talking" shouldn't ship 100+ tool specs. Only the
@@ -6534,6 +6599,15 @@ class MainWindow(Adw.ApplicationWindow):
         except Exception as e:
             log(f"tts stream feed error: {e}")
 
+    def _shell_block_command(self, text):
+        """Delegate to basilisk_core.shell_block_command (tested there). Recovers a
+        shell command the model printed in a ``` fence instead of calling run, so
+        autonomous mode still executes it."""
+        try:
+            return shell_block_command(text)
+        except Exception:
+            return ""
+
     def _on_stream_done(self, meta):
         if not self.streaming_msg_widget:
             self._finish_turn_cleanup()
@@ -6578,12 +6652,54 @@ class MainWindow(Adw.ApplicationWindow):
         # `propose` is advisory — it renders a command card (already done by
         # finish_streaming → set_content) and must NOT execute.  Only the
         # sensing/run tools are executable here.
-        executable = [c for c in calls
-                      if c.name not in ("propose", "propose_edit", "write_file")]
+        # In SUPERVISED mode, propose/propose_edit/write_file are advisory: they
+        # render an approval card (drawn in set_content) and must NOT auto-execute
+        # here — only the sensing/run tools are executable. But in AUTONOMOUS mode
+        # there is NO card and no operator to click it, so those calls MUST execute
+        # instead: they run directly through _execute_tool_calls (→ _run_proposed_
+        # command / _run_proposed_edit). Excluding them unconditionally was silently
+        # dropping autonomous file writes and command proposals (the model's
+        # write_file did nothing). So keep them only when supervised.
+        if self.settings.get("approval_mode", "none") == "none":
+            executable = list(calls)
+        else:
+            executable = [c for c in calls
+                          if c.name not in ("propose", "propose_edit",
+                                            "write_file")]
         # When the tool budget is spent we lock tools for the final answer
         # turn — ignore anything the model still tried to call.
         if self._tools_locked:
             executable = []
+        # ── RECOVERY: the model printed a command instead of calling `run` ──
+        # A known model-drift failure: instead of a `run` tool call, the model
+        # writes the shell command in a ```bash``` fence. parse_tool_calls finds
+        # no tool tag, so it renders as a copyable code block and NEVER executes —
+        # the "it gives me commands with a copy banner instead of running them"
+        # bug. In autonomous walk-away mode (the operator opted into acting), if
+        # NOTHING executable was emitted but the output carries a shell block,
+        # recover the first command and run it through the SAME gate (the
+        # catastrophic floor in _execute_command still applies). This is
+        # deterministic — it doesn't depend on the model getting the format right.
+        # ...and only during an ACTIVE MISSION (a task being worked). On a
+        # question turn (_mission_active is False, the direct-answer path) the
+        # model may legitimately SHOW an example command in a fence — recovering
+        # that would auto-run something the operator only ASKED about. So the
+        # recovery is scoped to tasks, where acting is the whole point.
+        if (not executable and not cancelled and self.current_agent_mode
+                and not self._tools_locked and self._mission_active
+                and self.settings.get("approval_mode", "none") == "none"):
+            _cmd = self._shell_block_command(final)
+            if _cmd and not is_catastrophic_command(_cmd):
+                synthetic = ('<tool name="run">' + json.dumps({
+                    "command": _cmd,
+                    "reason": "auto-run: the model wrote a shell block instead of "
+                              "calling the run tool"}) + "</tool>")
+                recovered = parse_tool_calls(synthetic)
+                if recovered:
+                    executable = recovered
+                    self.terminal_log(
+                        "↩ recovered a printed shell block into a run call "
+                        "(model wrote a code block instead of executing)", "error")
         # Honour the agent-mode toggle and the stop button.  If the user
         # turned agent mode off or hit stop, don't execute even if the
         # model emitted a tool tag.
@@ -8365,10 +8481,13 @@ class MainWindow(Adw.ApplicationWindow):
             if card is not None:
                 card.reset_apply_button()
             return
-        if self._is_busy():
+        # The busy guard is for OPERATOR CLICKS (card is not None) — don't apply a
+        # file mid-task from a click. When called programmatically in autonomous
+        # mode (card is None, from _execute_tool_calls mid-turn) we ARE the task
+        # and must proceed, or the model's write_file silently does nothing.
+        if card is not None and self._is_busy():
             self._show_toast("Busy — let the current task finish or stop it.")
-            if card is not None:
-                card.reset_apply_button()
+            card.reset_apply_button()
             return
         self._stop_requested = False
         if self.current_chat_id is None:
@@ -8415,10 +8534,12 @@ class MainWindow(Adw.ApplicationWindow):
             if card is not None:
                 card.reset_run_button()
             return
-        if self._is_busy():
+        # Busy guard is for OPERATOR CLICKS only (card is not None). The
+        # programmatic autonomous path (card is None) IS the running task and
+        # must proceed.
+        if card is not None and self._is_busy():
             self._show_toast("Busy — let the current task finish or stop it.")
-            if card is not None:
-                card.reset_run_button()
+            card.reset_run_button()
             return
         self._stop_requested = False
         if self.current_chat_id is None:
@@ -8554,6 +8675,18 @@ class MainWindow(Adw.ApplicationWindow):
             note_command(command)
         except Exception:
             pass
+
+        # ── loop-break bookkeeping ──
+        # Track the tail of executed commands so _kick_assistant_turn / _mission_
+        # continue can spot the model firing the SAME command over and over (a
+        # stuck autonomous loop). Placed AFTER the foresight gate so it records
+        # each command exactly once — _execute_command re-enters itself through
+        # foresight, and appending at the top double-counted with foresight on.
+        try:
+            self._recent_commands.append((command or "").strip())
+            self._recent_commands = self._recent_commands[-8:]
+        except Exception:
+            self._recent_commands = [(command or "").strip()]
 
         # How long should this command take, and when do we give up? The
         # estimator knows a quick command from a build from a server that will
