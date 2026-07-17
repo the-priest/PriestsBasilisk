@@ -8,12 +8,12 @@
 
 You bring the model; Basilisk gives it hands — a full offensive toolchain, shell and desktop control, a verified-exploitation loop, a tamper-evident evidence ledger, and a hard safety floor it cannot cross. It runs locally and answers only to you. The only thing that leaves your machine is the API call to the model you chose.
 
-![version](https://img.shields.io/badge/version-7.5.3-7d121b?style=for-the-badge&labelColor=08090b)
+![version](https://img.shields.io/badge/version-7.5.4-7d121b?style=for-the-badge&labelColor=08090b)
 ![license](https://img.shields.io/badge/license-MIT-7d121b?style=for-the-badge&labelColor=08090b)
 ![platform](https://img.shields.io/badge/Linux-X11%20%7C%20Wayland-6d7680?style=for-the-badge&logo=linux&logoColor=white&labelColor=08090b)
 ![python](https://img.shields.io/badge/python-3.10+-6d7680?style=for-the-badge&logo=python&logoColor=white&labelColor=08090b)
 ![mobile](https://img.shields.io/badge/runs%20on-NetHunter-6d7680?style=for-the-badge&labelColor=08090b)
-![benchmark](https://img.shields.io/badge/Juice%20Shop-73%2F113%20black--box-7d121b?style=for-the-badge&labelColor=08090b)
+![benchmark](https://img.shields.io/badge/Juice%20Shop-81%2F113%20black--box-7d121b?style=for-the-badge&labelColor=08090b)
 
 </div>
 
@@ -60,9 +60,9 @@ for t in tests/test_*.py; do python3 "$t"; done
 
 The claim is only worth the number you can regenerate. Basilisk is scored against **OWASP Juice Shop**, which marks a challenge solved only when the exploit genuinely fires — no partial credit, no checklist to recall, graded by difficulty (1–6 stars). It's the comparable benchmark the security community already uses.
 
-Turned loose **fully autonomously** and **black-box** — no per-command approval, no source on the machine — Basilisk solved **73 of 113 challenges (65%)**.
+Turned loose **fully autonomously** and **black-box** — no per-command approval, no source on the machine — Basilisk solved **81 of 113 challenges (71.7%)**.
 
-*Full board, `NODE_ENV=unsafe`, v7.1.0, target `192.168.1.151:3000`. Solved through the exploit builders + `run` only — no web reader, no source. Scorecard: [`benchmarks/juice-shop-scoreboard-2026-07-14.txt`](benchmarks/juice-shop-scoreboard-2026-07-14.txt).*
+*Full board, `NODE_ENV=unsafe`, v7.5.3, target `172.17.0.2:3000` (Docker). Solved through the exploit builders + `run` only — no web reader, no source. Scorecard: [`benchmarks/juice-shop-scoreboard-2026-07-17.txt`](benchmarks/juice-shop-scoreboard-2026-07-17.txt).*
 
 | Difficulty | Solved | Rate |
 |---|---|---|
@@ -70,21 +70,22 @@ Turned loose **fully autonomously** and **black-box** — no per-command approva
 | ★★ | 16 / 18 | 89% |
 | ★★★ | 21 / 26 | 81% |
 | ★★★★ | 11 / 25 | 44% |
-| ★★★★★ | 8 / 19 | 42% |
-| ★★★★★★ | **4 / 12** | **33%** |
+| ★★★★★ | 13 / 19 | 68% |
+| ★★★★★★ | **7 / 12** | **58%** |
 
-The curve is the honest part: it clears the easy and mid tiers almost completely, then thins as the chains get deeper — the shape a real tool should have. It reaches the top and takes four **6-star** challenges (SSRF, SSTi, Forged Coupon, Login Support Team) alongside hard 5-star work (unsigned JWT, XXE DoS, password resets, frontend typosquatting). Misses cluster in RCE/DoS, NoSQL exfiltration, and the chatbot prompt-injection challenges — where one builder isn't enough and the chain runs long.
+The curve is the honest part: it clears the easy and mid tiers almost completely, then thins as the chains get deeper — the shape a real tool should have. It now takes **7 of 12 6-star** challenges (SSRF, SSTi, Forged Coupon, Forged Signed JWT, Login Support Team, Premium Paywall, Arbitrary File Write) and **13 of 19 5-star** (unsigned JWT, XXE DoS, NoSQL exfiltration, three password resets, frontend typosquatting, retrieve blueprint, leaked access logs/API key, and more). Misses cluster where one builder isn't enough and the chain runs long: RCE/DoS variants, NoSQL manipulation/DoS, and the LLM-chatbot challenges (prompt injection, system-prompt extraction).
 
-**Context.** Published work generally puts fully-autonomous LLM pentest agents around **20–30%** on comparable tasks, so ~65% black-box on the full board sits well above that. The same board, scored the same way (other agents' figures are from the earlier v6-era session, not re-run for v7.1.0):
+**Context.** Published work generally puts fully-autonomous LLM pentest agents around **20–30%** on comparable tasks, so ~72% black-box on the full board sits well above that. The same board, scored the same way (other agents' figures are from the earlier v6-era session, not re-run):
 
 | Agent | Black-box | White-box *(source provided)* |
 |---|---|---|
-| **Basilisk** *(v7.1.0)* | **73 / 113** | — |
+| **Basilisk** *(v7.5.3)* | **81 / 113** | — |
+| Basilisk *(v7.1.0)* | 73 / 113 | — |
 | Basilisk *(v6.0.0)* | 58 / 113 | — |
 | Cascade *(Windsurf)* | 36 / 113 | 49 / 113 |
 | Claude Opus 4.8 | 23 / 113 | 24 / 113 |
 
-Progression, same scoring: **51 → 58 (v6.0.0) → 73 (v7.1.0)**. A separate coverage run confirms all **14 OWASP vuln classes** end to end (F1 0.95).
+Progression, same scoring: **51 → 58 (v6.0.0) → 73 (v7.1.0) → 81 (v7.5.3)**. The gains over v7.1.0 are concentrated in the deep end — 5-star jumped 42% → 68% and 6-star 33% → 58% — as the oracle stopped re-running solved bugs and the verified-exploitation loop got sharper about what was left. A separate coverage run confirms all **14 OWASP vuln classes** end to end (F1 0.95).
 
 **Reproduce it:**
 

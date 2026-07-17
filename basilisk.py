@@ -113,7 +113,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.basilisk"
 APP_NAME = "Basilisk"
-VERSION = "7.5.3"
+VERSION = "7.5.4"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -4403,7 +4403,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._mission_kicks: int = 0            # consecutive no-progress re-kicks
         self._recent_commands: list = []        # tail of run commands, for loop-break
         self._mission_verify_pending: bool = False   # first completion signal seen
-        self._mission_degraded_streak: int = 0       # empty/degraded replies in a row
+        self._mission_no_action_streak: int = 0      # turns in a row with no tool call
         self._mission_directive: str = ""       # transient nudge for the next kick
         self._error_retries: int = 0            # consecutive stream-error retries
 
@@ -5728,7 +5728,7 @@ class MainWindow(Adw.ApplicationWindow):
             self._mission_kicks = 0
             self._recent_commands = []      # fresh objective — clear loop history
             self._mission_verify_pending = False
-            self._mission_degraded_streak = 0
+            self._mission_no_action_streak = 0
             self._mission_directive = ""
             self._error_retries = 0
             # Relentlessness is unbounded ONLY once it has actually acted (run a
@@ -6716,7 +6716,7 @@ class MainWindow(Adw.ApplicationWindow):
                 self._mission_kicks = 0
                 self._mission_verify_pending = False
                 self._mission_ever_acted = True
-                self._mission_degraded_streak = 0
+                self._mission_no_action_streak = 0
             # EFFICIENCY: gather the leading run of read-only tools and run
             # them together in ONE round-trip (parallel), instead of one
             # model call per lookup.  Stop at the first side-effecting tool
@@ -6740,10 +6740,50 @@ class MainWindow(Adw.ApplicationWindow):
                     True, self._status_for_call(executable[0]) + "…")
                 self._execute_tool_calls(executable[:1])
         else:
+            # No executable tool ran this turn. Track how many turns in a row
+            # THIS mission has produced no tool call — a live pentest runs tools
+            # constantly, so a run of quiet turns means it's done or stuck.
+            self._mission_no_action_streak = getattr(
+                self, "_mission_no_action_streak", 0) + 1
+            # ── Rule 1: a pending completion claim is CONFIRMED by any quiet turn.
+            # Once the model has claimed done (emitted [[MISSION_COMPLETE]] last
+            # turn → verify pending), the very next turn with no NEW substantive
+            # action confirms it — whether that turn re-emits the token, says
+            # "done, all clean", or produces filler. A finished model confirms in
+            # natural language, NOT by re-emitting an exact token; demanding the
+            # token twice was why "claim → re-verify → (talk) → claim → …" looped
+            # forever. Only a real new tool call cancels a pending completion, and
+            # that path runs through the executable branch (which clears the flag).
+            if (self._mission_active and not cancelled
+                    and self._mission_verify_pending):
+                self._mission_active = False
+                self._mission_verify_pending = False
+                self.terminal_log(
+                    "✅ mission complete — confirmed on re-verify", "ok")
+                self._show_toast("Mission complete.", timeout=5)
+                self._finish_turn_cleanup()
+                return False
+            # ── Rule 2: stall guard. After it has ACTED, several consecutive
+            # quiet turns with no completion token means it's done but not
+            # signalling cleanly (or stuck). Force ONE re-verify; the next quiet
+            # turn then confirms via Rule 1. Catches the model that summarises
+            # endlessly ("Done. Container gone…") without ever emitting the token.
+            if (self._mission_active and not cancelled
+                    and self._mission_ever_acted
+                    and self._mission_no_action_streak >= 3
+                    and not self._mission_verify_pending):
+                self._mission_verify_pending = True
+                self._mission_directive = _MISSION_VERIFY_DIRECTIVE.format(
+                    obj=self._mission_objective)
+                self.terminal_log(
+                    "🔎 no action for several turns — forcing a final verify",
+                    "dim")
+                self._mission_continue(verify=True)
+                return False
             # (#7) Degraded-output check: if the model returned junk (empty,
-            # one-word, or stuck repeating) and it wasn't a deliberate stop,
-            # flag it.  With auto_fallback_on_degraded on, hop to the next
-            # provider that has a key so the NEXT turn retries elsewhere.
+            # one-word, or stuck repeating) and it wasn't a deliberate stop, flag
+            # it. With auto_fallback_on_degraded on, hop to the next provider that
+            # has a key so the NEXT turn retries elsewhere.
             if (not cancelled and not executable
                     and looks_degraded(final)):
                 self.terminal_log("⚠ response looked degraded (empty/"
@@ -6771,43 +6811,19 @@ class MainWindow(Adw.ApplicationWindow):
                         600, lambda: self._kick_assistant_turn() or False)
                     return
                 else:
+                    # Retries exhausted. Don't loop — just note it. If the model
+                    # is actually done, Rule 1/Rule 2 at the top of this branch
+                    # end the mission within a couple of quiet turns; if a human
+                    # is driving, they tap send.
                     self._degraded_retries = 0
-                    # Count how many times THIS mission has bottomed out on
-                    # empty/degraded output after exhausting provider retries.
-                    self._mission_degraded_streak = getattr(
-                        self, "_mission_degraded_streak", 0) + 1
-                    # If it already claimed completion once, a now-empty reply
-                    # means it's genuinely DONE — a finished model has nothing
-                    # left to add. Accept rather than loop forever on "done →
-                    # verify → (nothing) → done → …".
-                    if self._mission_active and self._mission_verify_pending:
-                        self._mission_active = False
-                        self._mission_verify_pending = False
-                        self.terminal_log(
-                            "✅ mission complete — claimed done and has nothing "
-                            "left to add", "ok")
-                        self._show_toast("Mission complete.", timeout=5)
-                        self._finish_turn_cleanup()
-                        return
-                    # Otherwise it keeps producing empty replies without ever
-                    # signalling completion — it's stuck or silently done. Stop
-                    # rather than re-kick into more empty replies forever.
-                    if (self._mission_active
-                            and self._mission_degraded_streak >= 2):
-                        self._mission_active = False
-                        self.terminal_log(
-                            "■ stopped — repeated empty/degraded replies with no "
-                            "progress; nothing left to do (send a message to "
-                            "resume)", "error")
-                        self._finish_turn_cleanup()
-                        return
                     self._show_toast(
                         "That reply looked degraded after retries. Tap send to "
                         "try again.", timeout=6)
             elif not cancelled and not executable:
-                # A clean, non-degraded settle → reset the retry counters.
+                # A clean, non-degraded settle → reset the degraded retry counter
+                # (but NOT the no-action streak: a plain reply is still a turn
+                # with no tool call, and Rule 2 needs to see the run of them).
                 self._degraded_retries = 0
-                self._mission_degraded_streak = 0
             # Turn has fully settled (no tool chaining).  Record it for
             # persistent memory in the background — no-op unless memory is on.
             if getattr(self, "_ext", None) and not cancelled:
@@ -6830,29 +6846,29 @@ class MainWindow(Adw.ApplicationWindow):
             #    signal or the Stop button. ──
             if self._mission_active and not cancelled:
                 if _mission_done_signal:
-                    if self._mission_verify_pending:
-                        # second confirmation on the forced re-check → accept.
-                        self._mission_active = False
-                        self._mission_verify_pending = False
-                        self.terminal_log("✅ mission complete", "ok")
-                        self._show_toast("Mission complete.", timeout=5)
-                    else:
-                        # first claim → force ONE hard re-verify before ending,
-                        # so a premature "done" can't slip through.
-                        self._mission_verify_pending = True
-                        self._mission_directive = (
-                            _MISSION_VERIFY_DIRECTIVE.format(
-                                obj=self._mission_objective))
-                        self._mission_continue(verify=True)
-                        return
+                    # First completion claim (the token this turn). Rule 1 at the
+                    # top of this branch has already handled the case where a
+                    # claim was pending, so here it's always the FIRST claim →
+                    # force ONE re-verify; the next quiet turn confirms via Rule 1
+                    # (it no longer has to re-emit the exact token — talk/filler
+                    # counts). A premature "done" still can't slip through in one
+                    # turn.
+                    self._mission_verify_pending = True
+                    self._mission_directive = (
+                        _MISSION_VERIFY_DIRECTIVE.format(
+                            obj=self._mission_objective))
+                    self._mission_continue(verify=True)
+                    return False
                 else:
-                    # no completion token → keep working toward the objective.
-                    self._mission_verify_pending = False
+                    # No completion token and no pending claim → keep working
+                    # toward the objective. (A pending claim would have been
+                    # accepted by Rule 1 above; a long quiet stall is handled by
+                    # Rule 2 above.)
                     self._mission_directive = (
                         _MISSION_CONTINUE_DIRECTIVE.format(
                             obj=self._mission_objective))
                     self._mission_continue()
-                    return
+                    return False
             self._finish_turn_cleanup()
         return False
 

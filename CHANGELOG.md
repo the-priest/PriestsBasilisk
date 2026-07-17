@@ -1,5 +1,14 @@
 # Changelog
 
+## v7.5.4 — completion that survives the model talking instead of tokening (and the 71.7% board)
+
+**From your Thoughts panel + terminal log. The model finished, thought "let me output the completion token", emitted `[[MISSION_COMPLETE]]` — and it STILL looped. The two-phase completion was too literal.**
+
+- **BUG — the re-verify demanded the exact token twice, so a done model that TALKED never ended.** Completion needs two confirmations so a premature "done" can't slip through. But the second one had to be the exact `[[MISSION_COMPLETE]]` token again — and a finished model doesn't re-emit a token, it says "Done. Container gone, docker daemon dead, socket disabled. All clean" or produces filler. So the flow was: claim done → forced re-verify → (natural-language confirmation, no token) → flag reset → claim done → … forever. Fixed with a cleaner model: once it has claimed done, the **next quiet turn confirms it** — whether that turn re-emits the token, talks, or produces filler. Only a real new **tool call** cancels a pending completion (that means it found more work), and that path already clears the flag. Two confirmations still required; the second no longer has to be a verbatim token.
+- **BUG — a model that never emitted the token at all looped on plain summaries.** If it just narrated "done" turn after turn without ever emitting `[[MISSION_COMPLETE]]`, nothing caught it (the idle cap only covers runs that never acted). Added a **stall guard**: after it has acted, several consecutive turns with no tool call means it's done or stuck (a live pentest runs tools constantly) — force one re-verify, which the next quiet turn then confirms. Consolidated the 7.5.3 degraded-streak counters into this single no-action streak; a real working run with tool calls resets it and is untouched. Verified it does NOT stop early when it claims done and then finds more real work.
+- **Traced against your exact sequences.** Replayed the completion state machine for token-then-filler (your screenshot), token-then-talk, never-emits-token, the alternating plain/degraded pattern from the v7.5.3 log, and claim-then-finds-more-work: the first four now end cleanly, the last correctly keeps working. Suite 15/15.
+- **Benchmark refreshed — 81/113 (71.7%), up from 73/113.** Full board, black-box, fully autonomous, v7.5.3 on `172.17.0.2:3000`. Gains concentrated in the deep end: 5-star 42% → 68%, 6-star 33% → 58% (now takes SSRF, SSTi, Forged Coupon, Forged Signed JWT, Login Support Team, Premium Paywall, Arbitrary File Write). README updated with the new table and progression (51 → 58 → 73 → 81); scorecard added at `benchmarks/juice-shop-scoreboard-2026-07-17.txt`.
+
 ## v7.5.3 — the serpent finally knows when to stop (the real "it won't stop" bug)
 
 **From your terminal log, not from reading code. The task finished — docker up, Juice Shop listening on 3000 — and it looped forever anyway. Root cause found and fixed.**
