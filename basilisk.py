@@ -85,7 +85,7 @@ from basilisk_core import (
     tool_benchmark_targets, tool_benchmark_score, tool_benchmark_report,
     tool_benchmark_compare,
     quick_facts as tool_quick_facts,
-    sudo_cached, detect_urgency, looks_degraded,
+    sudo_cached, detect_urgency, looks_degraded, reply_intends_action,
     note_command, recent_duplicate,
     parse_tool_calls, strip_tool_calls, shell_block_command,
     extract_think_blocks, strip_think_blocks,
@@ -113,7 +113,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.basilisk"
 APP_NAME = "Basilisk"
-VERSION = "7.5.4"
+VERSION = "7.5.5"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -156,13 +156,15 @@ _MISSION_CONTINUE_DIRECTIVE = (
     + MISSION_COMPLETE_TOKEN + " on its own line to end. NEVER output that token "
     "for partial, assumed, or unverified completion. Otherwise: act.]")
 _MISSION_VERIFY_DIRECTIVE = (
-    "[MISSION COMPLETION CLAIMED — VERIFY BEFORE ENDING.\n"
-    "You signalled this objective is done: {obj}\n"
-    "Re-check it point by point against concrete evidence you actually produced "
-    "this run. If ANY part is incomplete, unverified, untested, or assumed, "
-    "continue working NOW — take the next action. Only if you have concretely "
-    "confirmed EVERY part is complete, output " + MISSION_COMPLETE_TOKEN
-    + " again on its own line.]")
+    "[MISSION COMPLETION CHECK — VERIFY, THEN END.\n"
+    "The objective: {obj}\n"
+    "Silently re-check it point by point against concrete evidence you actually "
+    "produced this run. If ANY part is incomplete, unverified, untested, or "
+    "assumed, continue working NOW — take the next action with a tool call. "
+    "If every part IS concretely confirmed complete, reply with ONE short "
+    "confirming sentence — do NOT repeat your findings or the full report, it "
+    "has already been shown — and output " + MISSION_COMPLETE_TOKEN
+    + " on its own line.]")
 # Keep this many most-recent tool_result blocks at full length in the
 # history resent to the model; older ones get trimmed to a stub (they've
 # already been consumed) so a long research chat doesn't re-bill huge
@@ -5634,7 +5636,12 @@ class MainWindow(Adw.ApplicationWindow):
             # cleanly.  Once it HAS acted (_mission_ever_acted), this cap never
             # applies — a real pentest runs tools constantly and stays truly
             # relentless until it's done or you press Stop.
-            idle_cap = self.settings.get("mission_max_idle_kicks", 3)
+            # Only STALLS (a reply that keeps intending action without ever
+            # calling a tool) reach here now — a never-acted reply that reads as
+            # a finished answer is stopped immediately in _on_stream_done via
+            # reply_intends_action. So this cap just bounds a model that only
+            # ever talks about acting; 2 nudges is plenty.
+            idle_cap = self.settings.get("mission_max_idle_kicks", 2)
             if (not self._mission_ever_acted
                     and self._mission_kicks >= idle_cap):
                 self._mission_active = False
@@ -6763,23 +6770,37 @@ class MainWindow(Adw.ApplicationWindow):
                 self._show_toast("Mission complete.", timeout=5)
                 self._finish_turn_cleanup()
                 return False
-            # ── Rule 2: stall guard. After it has ACTED, several consecutive
-            # quiet turns with no completion token means it's done but not
-            # signalling cleanly (or stuck). Force ONE re-verify; the next quiet
-            # turn then confirms via Rule 1. Catches the model that summarises
-            # endlessly ("Done. Container gone…") without ever emitting the token.
+            # ── Rule 2 (smart completion): the mission has ACTED and this turn
+            # produced no tool call. Decide stop-vs-continue by what the reply
+            # SAYS, not a blind turn counter — this is what fixed "it answers me
+            # 3 times before it stops":
+            #   • reads as a CONCLUSION (no "next I'll…" intent), OR it has now
+            #     stalled 3 quiet turns (a hard backstop) → force ONE re-verify;
+            #     the next quiet turn confirms via Rule 1. A genuine multi-step
+            #     run is never cut short: ACTING (a tool call) resets all of this
+            #     in the executable branch above, so this only fires once the
+            #     model has genuinely stopped doing things.
+            #   • still intends a NEXT action ("I'll run X" with no tool call — a
+            #     stall) → fall through to the continue-nudge at the end of this
+            #     branch, which pushes it to actually act.
+            # A degraded/empty reply is NOT a conclusion (the (#7) block below
+            # handles that); only the 3-turn backstop can fire on junk, so
+            # persistent junk still terminates rather than looping forever.
             if (self._mission_active and not cancelled
                     and self._mission_ever_acted
-                    and self._mission_no_action_streak >= 3
                     and not self._mission_verify_pending):
-                self._mission_verify_pending = True
-                self._mission_directive = _MISSION_VERIFY_DIRECTIVE.format(
-                    obj=self._mission_objective)
-                self.terminal_log(
-                    "🔎 no action for several turns — forcing a final verify",
-                    "dim")
-                self._mission_continue(verify=True)
-                return False
+                _stalled_out = self._mission_no_action_streak >= 3
+                _concludes = (not looks_degraded(final)
+                              and not reply_intends_action(final))
+                if _concludes or _stalled_out:
+                    self._mission_verify_pending = True
+                    self._mission_directive = _MISSION_VERIFY_DIRECTIVE.format(
+                        obj=self._mission_objective)
+                    self.terminal_log(
+                        "🔎 no tool call and the reply reads as complete "
+                        "— forcing one final verify", "dim")
+                    self._mission_continue(verify=True)
+                    return False
             # (#7) Degraded-output check: if the model returned junk (empty,
             # one-word, or stuck repeating) and it wasn't a deliberate stop, flag
             # it. With auto_fallback_on_degraded on, hop to the next provider that
@@ -6796,17 +6817,18 @@ class MainWindow(Adw.ApplicationWindow):
                 if (self.settings.get("auto_fallback_on_degraded", True)
                         and _dret < 3 and not self._stop_requested):
                     self._degraded_retries = _dret + 1
-                    nxt = self._next_provider_with_key()
-                    if nxt:
-                        self.settings["active_provider"] = nxt
-                        save_settings(self.settings)
-                        self._refresh_subtitle()
-                        self.terminal_log(
-                            f"↻ auto-retry {self._degraded_retries}/3 on "
-                            f"{nxt}", "dim")
-                    else:
-                        self.terminal_log(
-                            f"↻ auto-retry {self._degraded_retries}/3", "dim")
+                    # PINNED PROVIDER: never hop clouds behind the operator's
+                    # back. Whatever provider is selected (default
+                    # SiliconFlow · DeepSeek-V4-Flash) STAYS selected — a
+                    # degraded reply just re-kicks the SAME provider. The backend
+                    # already walks its own model chain for rate-limits /
+                    # unavailability; a junk-content reply gets one more shot on
+                    # the same cloud. active_provider is never mutated or
+                    # persisted here — only the operator's manual model switcher
+                    # changes it.
+                    self.terminal_log(
+                        f"↻ auto-retry {self._degraded_retries}/3 "
+                        f"(staying on selected provider)", "dim")
                     GLib.timeout_add(
                         600, lambda: self._kick_assistant_turn() or False)
                     return
@@ -6846,9 +6868,7 @@ class MainWindow(Adw.ApplicationWindow):
             #    signal or the Stop button. ──
             if self._mission_active and not cancelled:
                 if _mission_done_signal:
-                    # First completion claim (the token this turn). Rule 1 at the
-                    # top of this branch has already handled the case where a
-                    # claim was pending, so here it's always the FIRST claim →
+                    # First explicit completion claim (the token this turn) →
                     # force ONE re-verify; the next quiet turn confirms via Rule 1
                     # (it no longer has to re-emit the exact token — talk/filler
                     # counts). A premature "done" still can't slip through in one
@@ -6859,10 +6879,28 @@ class MainWindow(Adw.ApplicationWindow):
                             obj=self._mission_objective))
                     self._mission_continue(verify=True)
                     return False
+                elif (not self._mission_ever_acted
+                        and not looks_degraded(final)
+                        and not reply_intends_action(final)):
+                    # NEVER-ACTED mission whose reply reads as a COMPLETE answer
+                    # with NO intent to act — this was really a question (or a
+                    # trivial task the model fully answered in one turn). Stop
+                    # NOW instead of re-kicking the same answer several times.
+                    # (If it HAD intended to act — a preamble/stall — we fall
+                    # through to the nudge below and push it to actually act; the
+                    # idle cap in _mission_continue bounds a model that only ever
+                    # talks.) This is the other half of the "answers me 3 times"
+                    # fix: the acted path is handled by Rule 2 above.
+                    self._mission_active = False
+                    self.terminal_log(
+                        "✅ answered in one turn — nothing to act on, ending",
+                        "ok")
+                    self._finish_turn_cleanup()
+                    return False
                 else:
-                    # No completion token and no pending claim → keep working
-                    # toward the objective. (A pending claim would have been
-                    # accepted by Rule 1 above; a long quiet stall is handled by
+                    # Acted-and-mid-task, or a stall that still intends action →
+                    # keep working toward the objective. (A pending claim was
+                    # accepted by Rule 1 above; a concluded acted-mission by
                     # Rule 2 above.)
                     self._mission_directive = (
                         _MISSION_CONTINUE_DIRECTIVE.format(
@@ -9067,8 +9105,15 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _next_provider_with_key(self) -> Optional[str]:
         """Pick the next cloud provider (after the current active one) that
-        has an API key set — for degraded-output fallback.  Returns None if
-        no other configured provider is available."""
+        has an API key set.  Returns None if no other configured provider is
+        available.
+
+        RETAINED BUT NOT WIRED INTO CHAT: the degraded-output path used to
+        call this to auto-hop clouds, which silently flipped the operator's
+        selected provider (e.g. DeepSeek -> Groq) and persisted it. That is
+        gone — the active provider is now pinned to the operator's choice and
+        only the manual model switcher changes it. Do not re-wire this into
+        the chat turn loop."""
         cur = (self.settings.get("active_provider") or "").strip()
         keys = [p.key for p in PROVIDERS]
         if cur in keys:

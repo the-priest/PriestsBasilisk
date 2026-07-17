@@ -992,5 +992,56 @@ class TestShellBlockRecovery(unittest.TestCase):
         self.assertTrue(basilisk_core.is_catastrophic_command("rm -rf /"))
 
 
+class TestMissionStopSignals(unittest.TestCase):
+    """reply_intends_action drives the autonomous loop's stop-vs-continue call:
+    a stall/preamble keeps going, a conclusion stops. This is the core of the
+    'answers me 3 times before it stops' fix, so lock its behaviour."""
+
+    def test_conclusion_phrases_stop(self):
+        for t in [
+            "Assessment complete. 22 issues found across auth and access control.",
+            "In summary, the target has SSRF and IDOR.",
+            "All done — here are the findings.",
+            "The objective has been achieved and verified.",
+            "Nothing further to test. [[MISSION_COMPLETE]]",
+            "Final report: 11 vulnerability classes confirmed.",
+        ]:
+            self.assertFalse(basilisk_core.reply_intends_action(t),
+                             f"should read as DONE: {t!r}")
+
+    def test_intent_phrases_continue(self):
+        for t in [
+            "I'll run an nmap scan against the host now.",
+            "Let me check the /admin routes for BFLA.",
+            "Next, I'll try the SSRF on the fetch-url endpoint.",
+            "Now I'll enumerate the users endpoint.",
+            "Proceeding to test the sort parameter for SQLi.",
+            "First, I'll map the API surface...",
+        ]:
+            self.assertTrue(basilisk_core.reply_intends_action(t),
+                            f"should read as CONTINUE: {t!r}")
+
+    def test_conclusion_wins_over_intent(self):
+        # a summary that mentions a next-step phrasing but clearly concludes
+        self.assertFalse(basilisk_core.reply_intends_action(
+            "I'll write up the final report — assessment complete."))
+
+    def test_empty_reply_is_not_an_intent_to_act(self):
+        # empty/near-empty is handled by looks_degraded, not treated as a stall
+        self.assertFalse(basilisk_core.reply_intends_action(""))
+        self.assertFalse(basilisk_core.reply_intends_action("   "))
+
+    def test_trailing_ellipsis_reads_as_more_coming(self):
+        self.assertTrue(basilisk_core.reply_intends_action(
+            "Working through the endpoints one by one..."))
+
+    def test_degraded_still_detected(self):
+        # unchanged safety net used alongside the stop logic
+        self.assertTrue(basilisk_core.looks_degraded(""))
+        self.assertTrue(basilisk_core.looks_degraded("a a a a a a a a a a"))
+        self.assertFalse(basilisk_core.looks_degraded(
+            "The login endpoint is vulnerable to SQL injection via the sort field."))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

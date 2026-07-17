@@ -310,9 +310,11 @@ DEFAULT_SETTINGS = {
     "agent_mode_default": True,        # Basilisk defaults to agent on
     "autonomous_persist": True,        # walk-away autonomy: a task runs until
                                        # done or you press Stop (agent mode only)
-    "mission_max_idle_kicks": 3,       # a mission that NEVER acts (pure-text
-                                       # task) stops after this many no-progress
-                                       # re-kicks; once it acts it's unbounded
+    "mission_max_idle_kicks": 2,       # a mission that NEVER acts but keeps
+                                       # intending to (a stall) stops after this
+                                       # many no-progress re-kicks; a finished
+                                       # one-turn answer stops immediately, and
+                                       # once it acts it's unbounded
 
     # Watcher
     "watcher_enabled": False,
@@ -2359,6 +2361,65 @@ def looks_degraded(text: str) -> bool:
         if len(set(words[-6:])) == 1:
             return True
     if len(t) >= 12 and len(set(t)) <= 2:
+        return True
+    return False
+
+
+# ── Does the model's reply signal it intends a NEXT action? ──
+# The autonomous mission loop uses this to tell a STALL/PREAMBLE ("I'll run the
+# scan next…" with no tool call) apart from a CONCLUSION ("assessment complete,
+# here are the findings"). A stall gets nudged to actually act; a conclusion
+# stops the run. Pure deterministic phrase match — NO model call — so the stop
+# decision is reproducible, instant, and can never hang the loop.
+#
+# Conclusion markers WIN over intent markers: "I'll write up the report —
+# assessment complete" resolves to DONE, not "keep going". An empty/near-empty
+# reply is NOT an intent to act (it's handled by looks_degraded instead), so
+# this returns False for it.
+_CONCLUSION_MARKERS = (
+    "mission complete", "objective complete", "objective achieved",
+    "assessment complete", "assessment is complete", "task complete",
+    "task is complete", "testing complete", "scan complete", "all done",
+    "we're done", "we are done", "i'm done", "i am done", "that's everything",
+    "thats everything", "that's all", "thats all", "nothing further",
+    "no further action", "no further steps", "no other action", "nothing left to",
+    "nothing more to", "nothing else to", "final report", "in summary",
+    "to summarize", "to summarise", "in conclusion", "summary of findings",
+    "here are the findings", "here's the summary", "heres the summary",
+    "here is the summary", "completed successfully", "everything is complete",
+    "fully complete", "objective is complete", "the objective has been",
+    "[[mission_complete]]",
+)
+_INTENT_MARKERS = (
+    "i'll ", "i will ", "i am going to", "i'm going to", "let me ", "let's ",
+    "lets ", "going to ", "gonna ", "next, i", "next i ", "next step",
+    "then i'll", "then i will", "now i'll", "now let", "proceeding",
+    "proceed to", "proceed with", "moving on", "moving to", "moving onto",
+    "continuing with", "i'll run", "i'll check", "i'll scan", "i'll try",
+    "i'll start", "i'll enumerate", "i'll test", "i'll attempt", "i'll look",
+    "i'll use", "i'll now", "attempting to", "starting the", "starting with",
+    "first, i", "first i'll", "shall i ", "let me run", "let me check",
+    "let me try", "let me start", "run the next", "on to the next",
+    "onto the next", "the next step", "my next step",
+)
+
+
+def reply_intends_action(text: str) -> bool:
+    """True if the reply reads as a stall/preamble that intends a NEXT action;
+    False if it reads as a conclusion (or is empty/uncertain). Used only by the
+    mission loop to choose 'nudge it to act' vs 'it's done, wrap up'."""
+    t = (text or "").strip().lower()
+    if not t:
+        return False
+    # A conclusion phrase anywhere is decisive: it's finishing, not continuing.
+    if any(m in t for m in _CONCLUSION_MARKERS):
+        return False
+    # An explicit intent-to-act phrase means it's mid-task.
+    if any(m in t for m in _INTENT_MARKERS):
+        return True
+    # A trailing ellipsis reads as "more coming".
+    ts = t.rstrip()
+    if ts.endswith("...") or ts.endswith("…"):
         return True
     return False
 

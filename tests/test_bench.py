@@ -16,6 +16,36 @@ ck("lists targets", len(t["targets"]) >= 3)
 js = b.benchmark_targets("juice-shop")
 ck("juice-shop expected set", js["expected_count"] == 15)
 ck("unknown target -> error", b.benchmark_targets("nope")["ok"] is False)
+ds = b.benchmark_targets("duck-store")
+ck("duck-store registered", ds["ok"] and ds["expected_count"] >= 10)
+ck("duck-store API classes present",
+   {"ssrf", "access-control", "sqli", "auth"}.issubset(set(ds["classes"])))
+ck("duck-store includes business-logic", "business-logic" in ds["classes"])
+# ground-truth names are CLASS-LEVEL, not an exploit map (integrity guard):
+# no ground-truth item name should leak a concrete endpoint path or query sink.
+_names = " ".join(v["name"].lower() for v in ds["expected_vulns"])
+ck("duck-store names carry no endpoint walkthrough",
+   ("/api/" not in _names) and ("?url=" not in _names) and ("{" not in _names))
+# a perfect duck-store run should score 100% coverage against its own classes
+dsp = b.score_run("duck-store", [{"cls": c} for c in ds["classes"]])
+ck("duck-store perfect run 100%", dsp["ok"] and dsp["score"]["coverage_pct"] == 100.0)
+# ADAPTABLE: a raw, prose-style findings report (like the assessment .txt) should
+# classify and score without any hardcoding — text-only findings, no cls field.
+report = [
+    {"title": "Stored XSS in testimonial content"},
+    {"title": "IDOR - user profile access, no ownership check"},
+    {"title": "BFLA: admin routes reachable as normal user"},
+    {"title": "Mass assignment: role field escalates to admin"},
+    {"title": "SSRF via fetch-url parameter"},
+    {"title": "SQL injection in sort parameter"},
+    {"title": "Broken authentication: TOTP verify oracle"},
+    {"title": "Unrestricted file upload on avatar endpoint"},
+    {"title": "Excessive data exposure: user enumeration"},
+    {"title": "Security misconfiguration: no rate limiting"},
+    {"title": "Business logic: 100% coupon abuse + referral credit farming"},
+]
+dsr = b.score_run("duck-store", report)
+ck("prose report scores 100% on duck-store", dsr["score"]["coverage_pct"] == 100.0)
 
 print("== classification (CWE + keyword) ==")
 ck("CWE-89 -> sqli", b._classify("something", "CWE-89") == "sqli")
@@ -23,6 +53,10 @@ ck("'SQL Injection' -> sqli", b._classify("SQL Injection in login") == "sqli")
 ck("'stored XSS' -> xss", b._classify("Persisted (stored) XSS") == "xss")
 ck("'IDOR' -> access-control", b._classify("IDOR on basket") == "access-control")
 ck("'SSRF' -> ssrf", b._classify("Server-Side Request Forgery") == "ssrf")
+ck("'mass assignment' -> access-control", b._classify("Mass assignment of role field") == "access-control")
+ck("'BFLA' -> access-control", b._classify("BFLA: admin route reachable") == "access-control")
+ck("'business logic' -> business-logic", b._classify("Business logic coupon abuse") == "business-logic")
+ck("'no rate limiting' -> misconfig", b._classify("No rate limiting on auth") == "misconfig")
 ck("gibberish -> None", b._classify("purple monkey dishwasher") is None)
 
 print("== scoring math ==")

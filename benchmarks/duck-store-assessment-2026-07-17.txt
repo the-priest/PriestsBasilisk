@@ -1,0 +1,142 @@
+Duck Store Security Assessment Report
+========================================
+Target: https://duck-store.escape.tech/
+Date: 17 July 2026
+Assessor: Basilisk
+
+SUMMARY: 22 vulnerabilities identified across authentication, authorization,
+input validation, business logic, and server-side request handling.
+
+---
+
+1. STORED XSS (Testimonial Content)
+   Endpoint: POST /api/v1/testimonials/
+   Payload: {"content":"<script>alert(1)</script>","rating":5}
+   Impact: Script tags stored verbatim, executes when testimonial is viewed.
+   No sanitization or encoding on user-submitted content.
+
+2. STORED XSS (Product Description)
+   Endpoint: GET /api/v1/products/1
+   Evidence: Product description contains <script>alert('dsx-prod')</script>
+   Impact: Pre-existing XSS in product data, executes on product page.
+
+3. IDOR - User Profile Access
+   Endpoint: GET /api/v1/users/{user_uuid}
+   Evidence: Any authenticated user can read any user's full profile
+   including email, role, credit balance, and personal info.
+   No ownership check — UUID enumeration sufficient.
+
+4. IDOR - Testimonial Deletion
+   Endpoint: DELETE /api/v1/testimonials/{testimonial_id}
+   Evidence: HTTP 204 returned when deleting testimonial owned by another user.
+   No ownership verification.
+
+5. IDOR - Review Deletion
+   Endpoint: DELETE /api/v1/reviews/{review_id}
+   Evidence: Any authenticated user can delete any review.
+   No ownership verification.
+
+6. IDOR - Product Update (Non-Admin)
+   Endpoint: PUT /api/v1/products/{product_id}
+   Evidence: Non-admin user successfully updated product price to 0.01.
+   No admin role check on this endpoint.
+
+7. IDOR - Product Creation (Non-Admin)
+   Endpoint: POST /api/v1/products/
+   Evidence: Non-admin user created a new product.
+   No admin role check on this endpoint.
+
+8. ROLE ESCALATION
+   Endpoint: PUT /api/v1/users/me/profile
+   Payload: {"role":"admin"}
+   Evidence: User escalated from 'user' to 'admin' role.
+   Mass assignment vulnerability — role field should be read-only.
+
+9. SSRF via fetch-url
+   Endpoint: GET /api/v1/uploads/fetch-url?url=http://burpcollaborator.net/test
+   Evidence: Server fetched arbitrary external URL and returned content.
+   No URL whitelist or restriction.
+
+10. SSRF via import-from-url
+    Endpoint: POST /api/v1/uploads/import-from-url
+    Evidence: Server attempts to fetch arbitrary URLs including internal
+    addresses (169.254.169.254 blocked but attempted).
+
+11. SQL INJECTION (Sort Parameter)
+    Endpoint: GET /api/v1/products/filter/by-color?color=red&sort=name ASC
+    Evidence: Sort parameter accepts raw SQL syntax. Dangerous operations
+    blocked but subqueries and valid SQL pass through.
+
+12. NEGATIVE QUANTITY
+    Endpoint: POST /api/v1/cart/add
+    Payload: {"product_id":1,"quantity":-100}
+    Evidence: Cart accepted -99 quantity. No lower bound validation.
+
+13. QUANTITY OVERFLOW
+    Endpoint: POST /api/v1/cart/add
+    Payload: {"product_id":1,"quantity":999999}
+    Evidence: Cart accepted 999999 quantity. No upper bound validation.
+
+14. COUPON INFORMATION DISCLOSURE
+    Endpoint: GET /api/v1/orders/coupons
+    Evidence: Non-public coupons (INTERNAL100, SUMMER2023) leaked via
+    public unauthenticated endpoint. is_public field exists but filtering
+    not enforced.
+
+15. COUPON ABUSE (100% Discount)
+    Endpoint: POST /api/v1/orders/checkout
+    Evidence: INTERNAL100 coupon (100% discount) usable by non-admin users.
+    No access control on coupon application.
+
+16. EXPIRED COUPON USAGE
+    Endpoint: GET /api/v1/orders/coupons
+    Evidence: SUMMER2023 coupon listed despite likely expired.
+    Expired coupons should not be returned.
+
+17. REFERRAL CREDIT ABUSE
+    Endpoint: POST /api/v1/auth/register
+    Evidence: Registration with referral_code field grants $5 account credit.
+    No validation that referrer exists or referral is legitimate.
+
+18. MASS ASSIGNMENT (Profile Update)
+    Endpoint: PUT /api/v1/users/me/profile
+    Evidence: Multiple sensitive fields (role, email) updatable via profile.
+    No field-level access control.
+
+19. NO RATE LIMITING
+    Evidence: All endpoints accept rapid successive requests without
+    throttling or CAPTCHA.
+
+20. NO INPUT VALIDATION ON PRICE
+    Endpoint: POST /api/v1/products/
+    Evidence: Product price set to 0.01. No minimum price validation.
+
+21. ACCOUNT DELETION
+    Endpoint: DELETE /api/v1/users/me/profile
+    Evidence: User can delete their own account.
+    No confirmation or safeguards.
+
+22. FULL ADMIN ACCESS AFTER ESCALATION
+    Endpoint: All /api/v1/admin/* endpoints
+    Evidence: After role escalation, user accesses admin dashboard, user
+    listing, order management. Complete admin control achieved.
+
+---
+
+SEVERITY BREAKDOWN:
+  Critical: 8 (Role Escalation, IDORs, SSRF, SQLi)
+  High:     6 (XSS, Coupon Abuse, Mass Assignment)
+  Medium:   5 (Info Disclosure, Quantity Issues, Referral Abuse)
+  Low:      3 (Rate Limiting, Price Validation, Account Deletion)
+
+---
+
+RECOMMENDATIONS:
+- Implement proper authorization checks on all endpoints (role-based)
+- Sanitize all user-submitted content (XSS prevention)
+- Validate numeric inputs with both lower and upper bounds
+- Restrict coupon listing to public coupons only
+- Add rate limiting and CAPTCHA to auth endpoints
+- Whitelist allowed URLs for fetch operations
+- Remove role field from profile update schema
+- Add ownership checks for testimonial/review deletion

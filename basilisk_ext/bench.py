@@ -74,15 +74,26 @@ _KW_CLASS = [
     (("broken authentication", "weak password", "default credential",
       "default creds", "brute force", "brute-force", "forged jwt", "jwt",
       "session fixation", "weak session"), "auth"),
-    (("broken access", "idor", "insecure direct object", "bola", "privilege escal",
-      "authorization bypass", "authorisation bypass", "missing authorization",
-      "missing function level"), "access-control"),
+    (("broken access", "idor", "insecure direct object", "bola", "bfla",
+      "privilege escal", "role escalation", "vertical privilege",
+      "horizontal privilege", "mass assignment", "mass-assignment",
+      "broken object level", "broken function level", "object level authorization",
+      "object-level authorization", "function level authorization",
+      "function-level authorization", "authorization bypass",
+      "authorisation bypass", "missing authorization", "missing function level"),
+     "access-control"),
+    (("business logic", "business-logic", "logic flaw", "coupon", "referral",
+      "negative quantity", "quantity overflow", "price manipulation",
+      "workflow bypass", "insufficient workflow"), "business-logic"),
     (("hardcoded", "hard-coded", "secret", "api key", "api-key", "credential leak",
       "exposed key", "leaked"), "secrets"),
-    (("sensitive data exposure", "information disclosure", "info leak",
-      "information exposure", "backup file", "access log"), "info-exposure"),
+    (("sensitive data exposure", "excessive data exposure", "data exposure",
+      "information disclosure", "info leak", "information exposure",
+      "enumeration", "user enumeration", "backup file", "access log"),
+     "info-exposure"),
     (("misconfig", "security misconfiguration", "cors", "verbose error",
-      "error handling", "csp bypass", "clickjack", "security header"), "misconfig"),
+      "error handling", "csp bypass", "clickjack", "security header",
+      "rate limit", "rate-limit", "no rate limiting", "missing rate"), "misconfig"),
     (("vulnerable component", "outdated", "known vulnerab", "vulnerable library",
       "vulnerable dependency", "retire", "components with known"), "vuln-component"),
     (("ldap injection",), "ldap-injection"),
@@ -167,6 +178,52 @@ _GROUND_TRUTH: Dict[str, Dict[str, Any]] = {
             _gt("wg-ssrf", "SSRF", "ssrf"),
             _gt("wg-crypto", "Weak/absent cryptography", "crypto"),
             _gt("wg-components", "Vulnerable Components", "vuln-component"),
+        ],
+    },
+    # Escape's "Duck Store" — a deliberately-vulnerable REST API used as an
+    # API-security scanner benchmark. The planted flaws are API-first
+    # (BOLA/BFLA/mass-assignment/SSRF/business-logic), not the web-app classes
+    # Juice Shop leans on.
+    #
+    # NOTE ON NAMING (integrity): the tool-visible `name`s below are CLASS-LEVEL
+    # only — the same generality as the juice-shop entries — so calling
+    # benchmark_targets('duck-store') hands out a scorecard target ("there is an
+    # SSRF class here"), NOT a step-by-step exploit map. This is a GRADING answer
+    # key, used by benchmark_score AFTER a run to compute coverage; it is never
+    # injected into an engagement. The concrete sinks (for the operator building
+    # or grading a run, not for the agent) are kept in this comment:
+    #   • BOLA/IDOR ....... GET /orders/{order_id} and GET /users/{user_uuid}
+    #                       ship with NO security requirement in the schema.
+    #   • BFLA ............ /admin/* reachable without the admin role.
+    #   • Mass assignment . PUT /users/me/profile accepts `role` -> user->admin.
+    #   • SSRF ............ GET /uploads/fetch-url?url= , POST /uploads/import-from-url
+    #   • SQLi ............ /products/filter/by-color `sort` (ORDER BY), search `q`
+    #   • Stored XSS ...... review/testimonial `content`, product-desc link preview
+    #   • Broken auth ..... /totp/verify code oracle, temp-token 2FA exchange
+    #   • File upload ..... /uploads/product|avatar|general accept arbitrary bytes
+    #   • Data exposure ... user enumeration via /users/, admin stats, account_credit
+    #   • Misconfig ....... /orders/{id}, /orders/referrer, /orders/coupons* unauth;
+    #                       no rate limiting on any endpoint.
+    #   • Business logic .. non-public coupons leaked + 100%-off coupon usable,
+    #                       referral-credit farming on register, negative /
+    #                       overflow cart quantity, sub-cent product price.
+    # Class list matches the 22-finding assessment in
+    # benchmarks/duck-store-assessment-2026-07-17.txt (findings dedup to classes).
+    "duck-store": {
+        "name": "Escape Duck Store (vulnerable API benchmark)",
+        "url_hint": "http://localhost:8080",
+        "vulns": [
+            _gt("ds-bola", "Broken Object Level Authorization (IDOR)", "access-control"),
+            _gt("ds-bfla", "Broken Function Level Authorization (admin routes)", "access-control"),
+            _gt("ds-massassign", "Mass assignment / privilege escalation", "access-control"),
+            _gt("ds-ssrf", "Server-Side Request Forgery", "ssrf"),
+            _gt("ds-sqli", "SQL Injection (sort / search)", "sqli"),
+            _gt("ds-xss", "Stored Cross-Site Scripting", "xss"),
+            _gt("ds-auth", "Broken Authentication (2FA / token handling)", "auth"),
+            _gt("ds-upload", "Unrestricted file upload", "file-upload"),
+            _gt("ds-expose", "Excessive data exposure / enumeration", "info-exposure"),
+            _gt("ds-misconfig", "Security misconfiguration (unauth routes / no rate limit)", "misconfig"),
+            _gt("ds-logic", "Business-logic flaws (coupon / referral / quantity / price)", "business-logic"),
         ],
     },
 }
