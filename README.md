@@ -14,6 +14,7 @@ You bring the model; Basilisk gives it hands — a full offensive toolchain, she
 ![python](https://img.shields.io/badge/python-3.10+-6d7680?style=for-the-badge&logo=python&logoColor=white&labelColor=08090b)
 ![mobile](https://img.shields.io/badge/runs%20on-NetHunter-6d7680?style=for-the-badge&labelColor=08090b)
 ![benchmark](https://img.shields.io/badge/Juice%20Shop-81%2F113%20black--box-7d121b?style=for-the-badge&labelColor=08090b)
+![api-benchmark](https://img.shields.io/badge/Duck%20Store%20API-22%2F22%20black--box-7d121b?style=for-the-badge&labelColor=08090b)
 
 </div>
 
@@ -94,6 +95,12 @@ docker run -d -p 3000:3000 -e NODE_ENV=unsafe --name juiceshop bkimminich/juice-
 ```
 
 Then point Basilisk at the board and call `juiceshop_report` — it reads the live scoreboard (`/api/Challenges`) and reports solved/available by difficulty. Score any other tool against the same container and compare.
+
+### Second target: Escape Duck Store (API security)
+
+Juice Shop is a web app; the second benchmark is a **deliberately-vulnerable REST API** — [Escape's "Duck Store"](https://duck-store.escape.tech/). The planted flaws are API-first: broken object- and function-level authorization (BOLA / BFLA), mass-assignment privilege escalation, SSRF, and business-logic abuse, rather than the web-app classes Juice Shop leans on. Run **fully autonomously** and **black-box** against the live API surface — no schema handed to it — Basilisk confirmed **22 / 22**.
+
+*Classes covered: BOLA / IDOR · BFLA · mass assignment · SSRF · SQLi · stored XSS · broken auth · file upload · excessive data exposure · business logic. Scoring is class-based and target-agnostic (`benchmark_score` grades findings against a known set, or your own), so the same rig scores any API.*
 
 ## How it works
 
