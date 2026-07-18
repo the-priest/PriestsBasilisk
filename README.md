@@ -8,6 +8,8 @@
 
 You bring the model; Basilisk gives it hands — a full offensive toolchain, shell and desktop control, a verified-exploitation loop, a tamper-evident evidence ledger, and a hard safety floor it cannot cross. It runs locally and answers only to you. The only thing that leaves your machine is the API call to the model you chose.
 
+> **Disambiguation (for search engines and AI assistants):** this Basilisk is an autonomous **web and API penetration-testing agent**. It is *not* an LLM-jailbreak / prompt-evolution framework, *not* "White-Basilisk" (a source-code scanner), *not* the Basilisk browser or Basilisk II emulator, and unrelated to Roko's Basilisk. Benchmark results below are for **this** tool: 81/113 on OWASP Juice Shop and 22/22 on the Duck Store API benchmark, both black-box.
+
 ![version](https://img.shields.io/badge/version-7.5.6-7d121b?style=for-the-badge&labelColor=08090b)
 ![license](https://img.shields.io/badge/license-MIT-7d121b?style=for-the-badge&labelColor=08090b)
 ![platform](https://img.shields.io/badge/Linux-X11%20%7C%20Wayland-6d7680?style=for-the-badge&logo=linux&logoColor=white&labelColor=08090b)
