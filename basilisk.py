@@ -86,6 +86,7 @@ from basilisk_core import (
     tool_benchmark_compare,
     quick_facts as tool_quick_facts,
     sudo_cached, detect_urgency, looks_degraded, reply_intends_action,
+    reply_is_strong_conclusion,
     note_command, recent_duplicate,
     parse_tool_calls, strip_tool_calls, shell_block_command,
     extract_think_blocks, strip_think_blocks,
@@ -113,7 +114,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.basilisk"
 APP_NAME = "Basilisk"
-VERSION = "7.5.5"
+VERSION = "7.5.6"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -6789,6 +6790,29 @@ class MainWindow(Adw.ApplicationWindow):
             if (self._mission_active and not cancelled
                     and self._mission_ever_acted
                     and not self._mission_verify_pending):
+                # ── FAST STOP (1 turn, no verify round-trip): an UNAMBIGUOUS
+                # completion ends the run immediately — the token emitted this
+                # turn, or a decisive "assessment complete / nothing further"
+                # phrase. This is the fix for "it answers me 3 different ways
+                # before it stops": when the model clearly says it's finished AND
+                # it has actually done work, believe it at once. (A real
+                # multi-step run never reaches here mid-work — a tool call resets
+                # everything in the executable branch above.)
+                if ((_mission_done_signal
+                        or reply_is_strong_conclusion(final))
+                        and not looks_degraded(final)):
+                    self._mission_active = False
+                    self._mission_verify_pending = False
+                    self.terminal_log(
+                        "✅ mission complete — clear completion, ending now", "ok")
+                    self._show_toast("Mission complete.", timeout=5)
+                    self._finish_turn_cleanup()
+                    return False
+                # ── Otherwise a weaker/ambiguous settle: the model just stopped
+                # calling tools without a decisive sign-off, OR it has stalled 3
+                # quiet turns (hard backstop). Take ONE verify checkpoint; the
+                # next quiet turn confirms via Rule 1. A reply that still intends
+                # a NEXT action falls through to the continue-nudge instead.
                 _stalled_out = self._mission_no_action_streak >= 3
                 _concludes = (not looks_degraded(final)
                               and not reply_intends_action(final))
@@ -8289,12 +8313,20 @@ class MainWindow(Adw.ApplicationWindow):
     def _grant_web_host(self, domain: str):
         """Operator approved a community-tier domain — grant it for this session
         and mark the request done. Future web_read to that domain (and its
-        subdomains) fetches without asking again until the app restarts."""
+        subdomains) fetches without asking again until the app restarts.
+
+        Crucially, this also SIGNALS the agent that the block just cleared:
+        without it, the model was told to 'carry on without this source' and has
+        no way to learn the operator said yes, so it never retries. We collect
+        the exact URL(s) it was blocked on and hand them straight back."""
         domain = (domain or "").strip().lower()
+        pending_urls = []
         if domain:
             self._web_grants.add(domain)
         for n in self._notifications:
             if n.get("kind") == "approval" and (n.get("host") or "").lower() == domain:
+                if n.get("state") != "granted" and n.get("url"):
+                    pending_urls.append(n.get("url"))
                 n["state"] = "granted"
                 n["read"] = True
         self._save_notifications()
@@ -8304,6 +8336,50 @@ class MainWindow(Adw.ApplicationWindow):
                 f"Allowed {domain} for this session — Basilisk can read it now."))
         except Exception:
             pass
+        # Tell the agent, right now, that it can proceed.
+        self._notify_web_grant_to_agent(domain, pending_urls)
+
+    def _notify_web_grant_to_agent(self, domain: str, pending_urls):
+        """Drop a note into the conversation naming the approved domain (and the
+        exact URL the agent was blocked on) so it retries. If no turn is running
+        the run had already settled — re-kick one so it acts immediately; if a
+        turn IS in flight, the running loop reads the note on its next step
+        (same contract as an operator suggestion), so we don't interrupt it."""
+        cid = self.current_chat_id
+        if cid is None:
+            return
+        if pending_urls:
+            first = pending_urls[0]
+            extra = ""
+            if len(pending_urls) > 1:
+                extra = (" Other now-allowed URLs you had queued: "
+                         + ", ".join(pending_urls[1:4]) + ".")
+            note = (f"[operator APPROVED access to {domain}] web_read is now "
+                    f"unlocked for {domain} (and its subdomains) for the rest of "
+                    f"this session. Retry the fetch you were blocked on now — "
+                    f"web_read {first} — and continue the task with what it "
+                    f"returns.{extra}")
+        else:
+            note = (f"[operator APPROVED access to {domain}] web_read is now "
+                    f"unlocked for {domain} for the rest of this session. If you "
+                    f"still need that source, read it now and continue.")
+        try:
+            self.store.add_message(cid, "user", note)
+        except Exception:
+            return
+        if not self._is_busy():
+            # The run had stopped — surface a clean line and start a turn so the
+            # agent acts on the approval instead of waiting for the operator.
+            try:
+                self._append_message_widget(
+                    "user", f"\u2713 Approved {domain} \u2014 Basilisk is "
+                            f"retrying that source now.")
+            except Exception:
+                pass
+            try:
+                GLib.idle_add(lambda: (self._kick_assistant_turn(), False)[1])
+            except Exception:
+                self._kick_assistant_turn()
 
     def _refresh_notifications(self):
         """Rebuild the bell badge + the popover list from the store."""

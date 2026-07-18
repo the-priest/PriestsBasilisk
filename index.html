@@ -3,365 +3,421 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Basilisk — Autonomous penetration-testing agent</title>
-<meta name="description" content="Basilisk turns an off-the-shelf LLM into a working penetration tester: a full offensive toolchain, a verified-exploitation loop that proves every exploit before it counts, and a hard safety floor. 81/113 on OWASP Juice Shop, fully autonomous and black-box.">
-<meta property="og:title" content="Basilisk — it doesn't guess, it confirms">
-<meta property="og:description" content="An autonomous pentester that runs as a native Linux app on your machine. 81/113 Juice Shop black-box · 22/22 Duck Store API · 14/14 OWASP classes.">
+
+<title>Basilisk — Autonomous AI Penetration-Testing Agent (open source, runs locally)</title>
+<meta name="description" content="Basilisk is an open-source autonomous AI penetration-testing agent: a native Linux desktop app that turns any LLM into a working pentester. Fully autonomous and black-box, it solves 81/113 on OWASP Juice Shop and 22/22 on the Duck Store API benchmark, verifying every exploit before it counts. Runs locally, MIT-licensed.">
+<meta name="keywords" content="AI penetration testing agent, autonomous pentest agent, LLM red team tool, open source security tool, automated exploitation, offensive security AI, OWASP Juice Shop benchmark, Kali Linux AI, DeepSeek pentest, Basilisk, AI hacking tool, autonomous security agent">
+<meta name="author" content="the-priest">
+<meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1">
+<link rel="canonical" href="https://the-priest.github.io/Basilisk/">
+<link rel="alternate" type="text/markdown" title="llms.txt — structured overview for AI assistants" href="/Basilisk/llms.txt">
+<meta name="theme-color" content="#070709">
+
+<!-- Open Graph / social + LLM link unfurls -->
 <meta property="og:type" content="website">
-<meta name="theme-color" content="#08090b">
+<meta property="og:site_name" content="Basilisk">
+<meta property="og:title" content="Basilisk — Autonomous AI Penetration-Testing Agent">
+<meta property="og:description" content="An open-source AI pentester that runs on your machine and proves every exploit. 81/113 OWASP Juice Shop black-box · 22/22 Duck Store API · 14/14 OWASP classes. MIT-licensed.">
+<meta property="og:url" content="https://the-priest.github.io/Basilisk/">
+<meta property="og:image" content="https://the-priest.github.io/Basilisk/banner.png">
+<meta property="og:image:alt" content="Basilisk — autonomous AI penetration-testing agent">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Basilisk — Autonomous AI Penetration-Testing Agent">
+<meta name="twitter:description" content="Open-source AI pentester, runs locally, proves every exploit. 81/113 OWASP Juice Shop black-box.">
+<meta name="twitter:image" content="https://the-priest.github.io/Basilisk/banner.png">
+
+<link rel="icon" href="basilisk-icon.png">
+<link rel="apple-touch-icon" href="basilisk-icon.png">
+
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<!-- ── Structured data for search engines & AI assistants ── -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": ["SoftwareApplication", "SoftwareSourceCode"],
+  "name": "Basilisk",
+  "alternateName": "Basilisk AI Pentest Agent",
+  "applicationCategory": "SecurityApplication",
+  "applicationSubCategory": "Autonomous Penetration Testing Agent",
+  "operatingSystem": "Linux (GTK4 / libadwaita, X11 or Wayland)",
+  "description": "Basilisk is an open-source autonomous AI penetration-testing agent. It is a native Linux desktop application that turns an off-the-shelf large language model into a working penetration tester: it runs recon, exploitation across every web-vulnerability class, verification, and a reproducible write-up on its own, locally, until the objective is confirmed. It scores 81/113 fully autonomous and black-box on OWASP Juice Shop and 22/22 on Escape's Duck Store API benchmark, verifying every exploit against ground truth before counting it.",
+  "url": "https://the-priest.github.io/Basilisk/",
+  "downloadUrl": "https://github.com/the-priest/Basilisk",
+  "codeRepository": "https://github.com/the-priest/Basilisk",
+  "programmingLanguage": "Python",
+  "softwareVersion": "7.5.6",
+  "license": "https://opensource.org/licenses/MIT",
+  "isAccessibleForFree": true,
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+  "author": { "@type": "Person", "name": "the-priest", "url": "https://github.com/the-priest" },
+  "image": "https://the-priest.github.io/Basilisk/banner.png",
+  "featureList": [
+    "Fully autonomous, black-box penetration testing (no target source required)",
+    "Provider-agnostic: bring your own LLM key (SiliconFlow, Groq)",
+    "Verified-exploitation loop: every exploit is proven against ground truth before it counts",
+    "Out-of-band canary listener for blind SSRF/RCE/XXE/OOB SQLi",
+    "Exploit builders for SQLi, JWT, NoSQL, XXE, SSTi, SSRF, deserialization/RCE, XSS, IDOR, race conditions, file upload, GraphQL, CORS",
+    "API-security classes: BOLA, BFLA, mass assignment, business-logic abuse",
+    "Tamper-evident evidence ledger with a hashed receipt per command",
+    "Hard safety floor: irreversible commands blocked in two places, no override",
+    "Runs locally on desktop Kali and on NetHunter Pro (phone)"
+  ]
+}
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "What is Basilisk?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Basilisk is an open-source, autonomous AI penetration-testing agent — a native Linux (GTK4) desktop app that turns an off-the-shelf large language model into a working pentester. Point it at an authorized target and it runs the full engagement (recon, exploitation across every web-vulnerability class, verification, and a reproducible write-up) on its own, locally, until the objective is confirmed or you stop it." }
+    },
+    {
+      "@type": "Question",
+      "name": "Is Basilisk free and open source?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Yes. Basilisk is MIT-licensed and free. It needs no account and nothing phones home — it is plain Python plus one shell script you can read before running." }
+    },
+    {
+      "@type": "Question",
+      "name": "How does Basilisk compare to other AI pentest agents?",
+      "acceptedAnswer": { "@type": "Answer", "text": "On OWASP Juice Shop, scored only when the exploit actually fires, Basilisk solves 81 of 113 challenges (71.7%) fully autonomously and black-box. On the same board scored the same way, Cascade (Windsurf) solved 36 and Claude Opus 4.8 solved 23. Published autonomous LLM pentest agents generally land around 20–30%. Basilisk also confirmed 22 of 22 on Escape's Duck Store API benchmark, black-box." }
+    },
+    {
+      "@type": "Question",
+      "name": "Which LLM models does Basilisk work with?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Basilisk is provider-agnostic — you bring your own API key. SiliconFlow (the default; DeepSeek, Qwen, Kimi) and Groq are supported. Keys stay only on your machine, in ~/.config/basilisk/settings.json." }
+    },
+    {
+      "@type": "Question",
+      "name": "Does Basilisk run locally and keep my data private?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Yes. Basilisk runs on your own machine and answers only to you. The only thing that leaves the machine is the API call to the model you chose. Every command it runs is hashed into a local, tamper-evident evidence ledger." }
+    },
+    {
+      "@type": "Question",
+      "name": "What vulnerabilities can Basilisk exploit?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Every major web-vulnerability class via general-purpose exploit builders: SQL injection (5 DBMS plus sqlmap), JWT attacks, NoSQL, XXE, SSTi, SSRF, insecure deserialization to RCE, prototype pollution, path traversal, cross-site scripting, OS command injection, IDOR / broken access control, race conditions, file-upload bypass, GraphQL abuse, open redirect and CORS misconfiguration — plus API-first classes such as BOLA, BFLA and mass assignment." }
+    },
+    {
+      "@type": "Question",
+      "name": "Is Basilisk safe to run? What stops it doing damage?",
+      "acceptedAnswer": { "@type": "Answer", "text": "The irreversible command class (disk wipes, fork bombs, raw block-device writes) is hard-blocked in two independent places with no 'Run anyway' option. Untrusted input is quarantined as data rather than instructions, self-written code runs in a bubblewrap jail, and Basilisk will not produce standalone weaponized malware. Use it only on systems you are authorized to test." }
+    },
+    {
+      "@type": "Question",
+      "name": "What are the requirements to run Basilisk?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Python 3.10+ and Linux with GTK4 / libadwaita (X11 or Wayland). It runs on desktop Kali and on NetHunter Pro (Phosh/Wayland) on a phone. Standard tooling like nmap and sqlmap is auto-detected." }
+    }
+  ]
+}
+</script>
+
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{
-    --void:#08090b; --ink:#0c0d11; --panel:#111219; --panel-2:#15161e;
-    --line:#20222b; --line-2:#2b2e39;
-    --bone:#eceae4; --bone-dim:#b8b5ad; --steel:#6d7680;
-    --blood:#7d121b; --blood-lit:#d5202e; --blood-glow:rgba(213,32,46,.30);
-    --confirmed:#4f9d54; --amber:#c9902f;
+    --void:#070709; --ink:#0b0b0f; --panel:#101017; --panel-2:#15151e;
+    --line:#20202b; --line-2:#2d2d3b;
+    --bone:#f0ede8; --bone-dim:#bbb7b0; --steel:#7a7480;
+    --neon:#ff2b3d;         /* primary neon crimson */
+    --neon-soft:#ff5a68;
+    --crimson:#c8102e;
+    --magenta:#ff2d6f;      /* secondary neon accent (from the art) */
+    --blood:#7d121b;
+    --glow:rgba(255,43,61,.55);
+    --glow-soft:rgba(255,43,61,.22);
+    --confirmed:#2bff88;    /* terminal success neon */
+    --amber:#ffb340;
     --font-display:'Chakra Petch',sans-serif;
     --font-body:'IBM Plex Sans',system-ui,-apple-system,sans-serif;
-    --font-mono:'IBM Plex Mono',ui-monospace,'SF Mono',Menlo,monospace;
-    --wrap:1160px;
-    --r:14px;
+    --font-mono:'IBM Plex Mono',ui-monospace,Menlo,monospace;
+    --wrap:1160px; --r:14px;
   }
   html{scroll-behavior:smooth}
   body{
     background:var(--void); color:var(--bone); font-family:var(--font-body);
-    line-height:1.65; -webkit-font-smoothing:antialiased; overflow-x:hidden;
-    font-size:16.5px;
+    line-height:1.65; -webkit-font-smoothing:antialiased; overflow-x:hidden; font-size:16.5px;
+    position:relative;
   }
-  body::before{ /* ambient depth: faint blood glow + vignette, fixed */
-    content:""; position:fixed; inset:0; z-index:-1; pointer-events:none;
+  /* layered neon ambience: crimson horizon glow + magenta pool + grid + scanlines */
+  body::before{
+    content:"";position:fixed;inset:0;z-index:-2;pointer-events:none;
     background:
-      radial-gradient(120vw 70vh at 50% -12%, rgba(125,18,27,.18), transparent 62%),
-      radial-gradient(90vw 60vh at 88% 8%, rgba(125,18,27,.07), transparent 60%),
-      linear-gradient(180deg,transparent 60%, rgba(0,0,0,.55));
+      radial-gradient(120vw 72vh at 50% -14%, rgba(255,43,61,.20), transparent 60%),
+      radial-gradient(80vw 55vh at 90% 4%, rgba(255,45,111,.10), transparent 58%),
+      radial-gradient(70vw 50vh at 6% 30%, rgba(200,16,46,.10), transparent 60%),
+      linear-gradient(180deg, transparent 55%, rgba(0,0,0,.6));
   }
+  body::after{
+    content:"";position:fixed;inset:-2px;z-index:-1;pointer-events:none;opacity:.5;
+    background-image:
+      linear-gradient(rgba(255,43,61,.045) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,43,61,.045) 1px, transparent 1px);
+    background-size:46px 46px;
+    -webkit-mask-image:radial-gradient(120vw 120vh at 50% 0%, #000 25%, transparent 75%);
+            mask-image:radial-gradient(120vw 120vh at 50% 0%, #000 25%, transparent 75%);
+    animation:grid 26s linear infinite;
+  }
+  @keyframes grid{from{background-position:0 0,0 0}to{background-position:46px 46px,46px 46px}}
+
   a{color:inherit;text-decoration:none}
   .wrap{max-width:var(--wrap);margin:0 auto;padding:0 24px}
   .mono{font-family:var(--font-mono)}
-  ::selection{background:var(--blood);color:#fff}
+  ::selection{background:var(--neon);color:#0a0a0a}
 
-  /* ── eyebrow / headings ── */
-  .eyebrow{
-    font-family:var(--font-mono); font-size:.74rem; letter-spacing:.24em;
-    text-transform:uppercase; color:var(--blood-lit); display:inline-flex;
-    align-items:center; gap:.6em;
-  }
-  .eyebrow::before{content:"//"; color:var(--steel); font-weight:600}
+  .eyebrow{font-family:var(--font-mono);font-size:.74rem;letter-spacing:.24em;text-transform:uppercase;
+    color:var(--neon-soft);display:inline-flex;align-items:center;gap:.6em;text-shadow:0 0 14px var(--glow-soft)}
+  .eyebrow::before{content:"//";color:var(--steel);text-shadow:none}
   h1,h2,h3{font-family:var(--font-display);line-height:1.04;letter-spacing:-.012em}
   h2{font-size:clamp(1.85rem,3.6vw,2.85rem);font-weight:600}
   h3{font-size:1.12rem;font-weight:600;letter-spacing:0}
-  .lead{color:var(--bone-dim);max-width:60ch;font-size:1.06rem}
+  .neon-text{color:var(--neon-soft);text-shadow:0 0 22px var(--glow),0 0 44px var(--glow-soft)}
 
-  /* ── nav ── */
-  header.nav{
-    position:sticky;top:0;z-index:50;
-    background:rgba(8,9,11,.72); backdrop-filter:blur(12px) saturate(140%);
-    border-bottom:1px solid var(--line);
-  }
+  /* nav */
+  header.nav{position:sticky;top:0;z-index:50;background:rgba(7,7,9,.72);
+    backdrop-filter:blur(12px) saturate(150%);border-bottom:1px solid var(--line)}
   .nav-in{display:flex;align-items:center;justify-content:space-between;height:62px}
-  .brand{display:flex;align-items:center;gap:.62rem;font-family:var(--font-display);
-    font-weight:700;font-size:1.16rem;letter-spacing:.02em}
-  .brand .glyph{width:26px;height:26px;flex:none}
-  .brand b{color:var(--bone)}
+  .brand{display:flex;align-items:center;gap:.6rem;font-family:var(--font-display);font-weight:700;font-size:1.16rem;letter-spacing:.02em}
+  .brand img{width:28px;height:28px;border-radius:7px;filter:drop-shadow(0 0 8px var(--glow))}
   .nav-links{display:flex;gap:1.7rem;align-items:center}
-  .nav-links a{font-size:.9rem;color:var(--bone-dim);transition:color .18s}
-  .nav-links a:hover{color:var(--bone)}
-  .nav-cta{
-    font-family:var(--font-mono);font-size:.82rem;color:var(--bone);
-    border:1px solid var(--line-2);padding:.5rem .9rem;border-radius:8px;
-    display:inline-flex;gap:.5rem;align-items:center;transition:.18s;
-  }
-  .nav-cta:hover{border-color:var(--blood-lit);box-shadow:0 0 0 1px var(--blood-glow)}
-  @media(max-width:820px){.nav-links a:not(.nav-cta){display:none}}
+  .nav-links a{font-size:.9rem;color:var(--bone-dim);transition:color .18s,text-shadow .18s}
+  .nav-links a:hover{color:var(--bone);text-shadow:0 0 12px var(--glow-soft)}
+  .nav-cta{font-family:var(--font-mono);font-size:.82rem;color:var(--bone);border:1px solid var(--line-2);
+    padding:.5rem .9rem;border-radius:8px;display:inline-flex;gap:.5rem;align-items:center;transition:.18s}
+  .nav-cta:hover{border-color:var(--neon);box-shadow:0 0 0 1px var(--glow),0 0 22px -4px var(--glow)}
+  @media(max-width:860px){.nav-links a:not(.nav-cta){display:none}}
 
-  /* ── hero ── */
-  .hero{padding:clamp(64px,11vw,120px) 0 clamp(40px,6vw,64px)}
-  .hero h1{font-size:clamp(2.7rem,7vw,5rem);font-weight:700;max-width:16ch}
-  .hero h1 .accent{color:var(--blood-lit)}
-  .hero .sub{margin-top:1.5rem;font-size:clamp(1.05rem,1.7vw,1.25rem);
-    color:var(--bone-dim);max-width:66ch}
+  /* hero */
+  .hero{padding:clamp(56px,10vw,104px) 0 clamp(30px,5vw,52px)}
+  .hero-grid{display:grid;grid-template-columns:1.05fr .95fr;gap:clamp(28px,5vw,64px);align-items:center}
+  @media(max-width:900px){.hero-grid{grid-template-columns:1fr;text-align:left}}
+  .hero h1{font-size:clamp(2.7rem,7vw,4.9rem);font-weight:700;max-width:15ch;margin-top:1.1rem}
+  .hero .sub{margin-top:1.4rem;font-size:clamp(1.04rem,1.6vw,1.2rem);color:var(--bone-dim);max-width:60ch}
   .hero .sub strong{color:var(--bone);font-weight:600}
-  .cta-row{display:flex;flex-wrap:wrap;gap:.9rem;margin-top:2.2rem;align-items:center}
-  .btn{
-    display:inline-flex;align-items:center;gap:.6rem;font-family:var(--font-mono);
-    font-size:.92rem;font-weight:500;padding:.85rem 1.35rem;border-radius:10px;
-    border:1px solid transparent;transition:.2s;cursor:pointer;
-  }
-  .btn-primary{background:var(--blood);color:#fff;border-color:var(--blood-lit)}
-  .btn-primary:hover{background:var(--blood-lit);box-shadow:0 8px 30px -8px var(--blood-glow);transform:translateY(-1px)}
+  .cta-row{display:flex;flex-wrap:wrap;gap:.9rem;margin-top:2rem;align-items:center}
+  .btn{display:inline-flex;align-items:center;gap:.6rem;font-family:var(--font-mono);font-size:.92rem;font-weight:500;
+    padding:.85rem 1.35rem;border-radius:10px;border:1px solid transparent;transition:.2s;cursor:pointer}
+  .btn-primary{background:linear-gradient(180deg,var(--neon),var(--crimson));color:#fff;
+    box-shadow:0 0 24px -6px var(--glow),inset 0 1px 0 rgba(255,255,255,.25)}
+  .btn-primary:hover{box-shadow:0 0 38px -4px var(--glow),0 8px 30px -10px var(--glow);transform:translateY(-1px)}
   .btn-ghost{border-color:var(--line-2);color:var(--bone)}
-  .btn-ghost:hover{border-color:var(--steel);background:var(--panel)}
+  .btn-ghost:hover{border-color:var(--neon);background:rgba(255,43,61,.06);box-shadow:0 0 20px -8px var(--glow)}
   .btn svg{width:16px;height:16px}
-
-  /* verify pull-line under hero */
-  .thesis{
-    margin-top:2.6rem;border-left:2px solid var(--blood);padding:.2rem 0 .2rem 1.2rem;
-    font-family:var(--font-mono);font-size:.98rem;color:var(--bone-dim);max-width:70ch;
-  }
+  .thesis{margin-top:2.2rem;border-left:2px solid var(--neon);padding:.2rem 0 .2rem 1.2rem;
+    font-family:var(--font-mono);font-size:.95rem;color:var(--bone-dim);max-width:66ch;
+    box-shadow:-10px 0 30px -22px var(--glow)}
   .thesis b{color:var(--bone);font-weight:600}
 
-  /* ── terminal (signature) ── */
-  .term-wrap{margin-top:clamp(38px,5vw,58px)}
-  .term{
-    background:linear-gradient(180deg,#0b0c10,#0a0b0e);
-    border:1px solid var(--line-2);border-radius:var(--r);overflow:hidden;
-    box-shadow:0 40px 90px -50px rgba(0,0,0,.9),0 0 0 1px rgba(213,32,46,.05),
-      inset 0 1px 0 rgba(255,255,255,.03);
-  }
-  .term-bar{
-    display:flex;align-items:center;gap:.7rem;padding:.7rem 1rem;
-    background:#0e0f13;border-bottom:1px solid var(--line);
-  }
-  .dot{width:11px;height:11px;border-radius:50%;background:#2a2d36}
-  .dot.r{background:#7d121b}
+  /* hero art */
+  .hero-art{position:relative;display:flex;justify-content:center;align-items:center;min-height:300px}
+  .hero-art .halo{position:absolute;width:min(105%,460px);aspect-ratio:1;border-radius:50%;
+    background:radial-gradient(circle, rgba(255,43,61,.32), rgba(255,45,111,.10) 45%, transparent 68%);
+    filter:blur(6px);animation:breathe 6s ease-in-out infinite}
+  @keyframes breathe{0%,100%{transform:scale(1);opacity:.9}50%{transform:scale(1.06);opacity:1}}
+  .hero-art img{position:relative;width:min(100%,430px);height:auto;
+    filter:drop-shadow(0 0 26px var(--glow)) drop-shadow(0 14px 40px rgba(0,0,0,.6));
+    animation:float 7s ease-in-out infinite}
+  @keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-12px)}}
+
+  /* stat strip */
+  .stats{display:grid;grid-template-columns:repeat(5,1fr);gap:1px;margin-top:clamp(30px,4vw,46px);
+    background:var(--line);border:1px solid var(--line);border-radius:var(--r);overflow:hidden;
+    box-shadow:0 0 40px -20px var(--glow)}
+  .stat{background:var(--ink);padding:1.3rem 1.15rem}
+  .stat .n{font-family:var(--font-display);font-weight:700;font-size:1.75rem;color:var(--bone);letter-spacing:-.02em;line-height:1}
+  .stat .n .slash{color:var(--neon);text-shadow:0 0 16px var(--glow)}
+  .stat .l{font-family:var(--font-mono);font-size:.7rem;letter-spacing:.12em;text-transform:uppercase;color:var(--steel);margin-top:.55rem}
+  @media(max-width:860px){.stats{grid-template-columns:repeat(2,1fr)}.stat:last-child{grid-column:1/-1}}
+
+  /* terminal */
+  .term-wrap{margin-top:clamp(30px,4vw,48px)}
+  .term{background:linear-gradient(180deg,#0a0a0e,#08080b);border:1px solid var(--line-2);border-radius:var(--r);overflow:hidden;
+    box-shadow:0 40px 90px -50px #000,0 0 0 1px var(--glow-soft),0 0 60px -30px var(--glow),inset 0 1px 0 rgba(255,255,255,.03)}
+  .term-bar{display:flex;align-items:center;gap:.7rem;padding:.7rem 1rem;background:#0c0c11;border-bottom:1px solid var(--line)}
+  .dot{width:11px;height:11px;border-radius:50%;background:#26262f}
+  .dot.r{background:var(--neon);box-shadow:0 0 10px var(--glow)}
   .term-title{margin-left:.4rem;font-family:var(--font-mono);font-size:.8rem;color:var(--steel)}
-  .term-title .live{color:var(--blood-lit)}
-  .term-live-dot{width:7px;height:7px;border-radius:50%;background:var(--blood-lit);
-    display:inline-block;margin-right:.4em;animation:pulse 1.8s ease-in-out infinite}
+  .term-title .live{color:var(--neon-soft);text-shadow:0 0 12px var(--glow-soft)}
+  .term-live-dot{width:7px;height:7px;border-radius:50%;background:var(--neon);display:inline-block;margin-right:.4em;
+    box-shadow:0 0 8px var(--glow);animation:pulse 1.8s ease-in-out infinite}
   @keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
-  .term-body{
-    padding:1.1rem 1.15rem 1.35rem;font-family:var(--font-mono);
-    font-size:.83rem;line-height:1.75;color:var(--bone-dim);
-    overflow-x:auto;white-space:pre;min-height:340px;
-  }
-  .term-body .ln{display:block;opacity:0;transform:translateY(4px);
-    transition:opacity .28s ease,transform .28s ease}
+  .term-body{padding:1.1rem 1.15rem 1.35rem;font-family:var(--font-mono);font-size:.83rem;line-height:1.75;
+    color:var(--bone-dim);overflow-x:auto;white-space:pre;min-height:340px}
+  .term-body .ln{display:block;opacity:0;transform:translateY(4px);transition:opacity .28s ease,transform .28s ease}
   .term-body .ln.show{opacity:1;transform:none}
-  .tag{color:var(--steel)}
-  .tag.recon{color:#7e93c8}.tag.fire{color:var(--blood-lit)}
-  .ok{color:var(--confirmed);font-weight:600}
-  .pend{color:var(--amber)}
-  .hash{color:var(--steel)}
-  .arrow{color:var(--blood-lit)}
-  .cursor{display:inline-block;width:8px;height:1.05em;background:var(--blood-lit);
-    vertical-align:-2px;margin-left:2px;animation:blink 1s steps(1) infinite}
+  .tag{color:var(--steel)}.tag.recon{color:#8fa2d6}.tag.fire{color:var(--neon-soft);text-shadow:0 0 12px var(--glow-soft)}
+  .ok{color:var(--confirmed);font-weight:600;text-shadow:0 0 14px rgba(43,255,136,.4)}
+  .pend{color:var(--amber)}.hash{color:var(--steel)}
+  .cursor{display:inline-block;width:8px;height:1.05em;background:var(--neon);vertical-align:-2px;margin-left:2px;
+    box-shadow:0 0 8px var(--glow);animation:blink 1s steps(1) infinite}
   @keyframes blink{50%{opacity:0}}
 
-  /* ── stat strip ── */
-  .stats{
-    display:grid;grid-template-columns:repeat(5,1fr);gap:1px;margin-top:clamp(34px,4.5vw,52px);
-    background:var(--line);border:1px solid var(--line);border-radius:var(--r);overflow:hidden;
-  }
-  .stat{background:var(--ink);padding:1.3rem 1.15rem}
-  .stat .n{font-family:var(--font-display);font-weight:700;font-size:1.75rem;color:var(--bone);
-    letter-spacing:-.02em;line-height:1}
-  .stat .n .slash{color:var(--blood-lit)}
-  .stat .l{font-family:var(--font-mono);font-size:.7rem;letter-spacing:.12em;
-    text-transform:uppercase;color:var(--steel);margin-top:.55rem}
-  @media(max-width:860px){.stats{grid-template-columns:repeat(2,1fr)}
-    .stat:last-child{grid-column:1/-1}}
-
-  /* ── section frame ── */
-  section.block{padding:clamp(66px,10vw,120px) 0;border-top:1px solid var(--line)}
-  .sec-head{max-width:74ch;margin-bottom:clamp(34px,5vw,54px)}
+  /* sections */
+  section.block{padding:clamp(64px,10vw,116px) 0;border-top:1px solid var(--line);position:relative}
+  section.block::before{content:"";position:absolute;top:-1px;left:0;right:0;height:1px;
+    background:linear-gradient(90deg,transparent,var(--glow-soft) 20%,var(--glow-soft) 80%,transparent)}
+  .sec-head{max-width:74ch;margin-bottom:clamp(32px,5vw,52px)}
   .sec-head h2{margin-top:1rem}
   .sec-head p{margin-top:1.1rem;color:var(--bone-dim);max-width:64ch}
 
-  /* generic cards */
   .grid{display:grid;gap:16px}
-  .g3{grid-template-columns:repeat(3,1fr)}
-  .g4{grid-template-columns:repeat(4,1fr)}
-  .g2{grid-template-columns:repeat(2,1fr)}
-  @media(max-width:900px){.g3,.g4{grid-template-columns:repeat(2,1fr)}}
-  @media(max-width:600px){.g2,.g3,.g4{grid-template-columns:1fr}}
-  .card{
-    background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
-    padding:1.5rem 1.4rem;transition:border-color .2s,transform .2s,box-shadow .2s;
-  }
-  .card:hover{border-color:var(--line-2);transform:translateY(-2px)}
-  .card .ic{width:34px;height:34px;color:var(--blood-lit);margin-bottom:1rem}
-  .card h3{margin-bottom:.5rem}
-  .card p{color:var(--bone-dim);font-size:.96rem}
-  .card p code,.inline-code{font-family:var(--font-mono);font-size:.86em;color:var(--bone);
-    background:var(--panel-2);padding:.05em .4em;border-radius:5px;border:1px solid var(--line)}
+  .g2{grid-template-columns:repeat(2,1fr)}.g3{grid-template-columns:repeat(3,1fr)}
+  @media(max-width:900px){.g3{grid-template-columns:repeat(2,1fr)}}
+  @media(max-width:600px){.g2,.g3{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:1.5rem 1.4rem;
+    transition:border-color .2s,transform .2s,box-shadow .2s}
+  .card:hover{border-color:var(--neon);transform:translateY(-2px);box-shadow:0 0 30px -14px var(--glow)}
+  .card .ic{width:34px;height:34px;color:var(--neon);margin-bottom:1rem;filter:drop-shadow(0 0 8px var(--glow-soft))}
+  .card h3{margin-bottom:.5rem}.card p{color:var(--bone-dim);font-size:.96rem}
+  .inline-code,.card p code{font-family:var(--font-mono);font-size:.86em;color:var(--bone);background:var(--panel-2);
+    padding:.05em .4em;border-radius:5px;border:1px solid var(--line)}
 
-  /* “truths” row */
   .truths{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
   @media(max-width:900px){.truths{grid-template-columns:repeat(2,1fr)}}
   @media(max-width:520px){.truths{grid-template-columns:1fr}}
-  .truth{border-top:2px solid var(--blood);padding-top:1rem}
+  .truth{border-top:2px solid var(--neon);padding-top:1rem;box-shadow:0 -10px 30px -26px var(--glow)}
   .truth b{display:block;font-family:var(--font-display);font-weight:600;font-size:1.05rem;margin-bottom:.35rem}
   .truth span{color:var(--bone-dim);font-size:.94rem}
 
-  /* ── benchmarks ── */
-  .bench-hero{display:flex;flex-wrap:wrap;align-items:flex-end;gap:1.4rem 2.4rem;
-    padding-bottom:1.6rem;margin-bottom:1.8rem;border-bottom:1px solid var(--line)}
-  .bignum{font-family:var(--font-display);font-weight:700;font-size:clamp(3.2rem,8vw,5.4rem);
-    line-height:.9;letter-spacing:-.03em}
-  .bignum .of{color:var(--steel)}
-  .bench-hero .meta{font-family:var(--font-mono);font-size:.86rem;color:var(--bone-dim);
-    padding-bottom:.5rem}
-  .bench-hero .meta .hi{color:var(--blood-lit)}
-
+  /* benchmarks */
+  .bench-hero{display:flex;flex-wrap:wrap;align-items:flex-end;gap:1.4rem 2.4rem;padding-bottom:1.6rem;margin-bottom:1.8rem;border-bottom:1px solid var(--line)}
+  .bignum{font-family:var(--font-display);font-weight:700;font-size:clamp(3.2rem,8vw,5.4rem);line-height:.9;letter-spacing:-.03em;
+    color:var(--bone);text-shadow:0 0 40px var(--glow-soft)}
+  .bignum .of{color:var(--steel);text-shadow:none}
+  .bench-hero .meta{font-family:var(--font-mono);font-size:.86rem;color:var(--bone-dim);padding-bottom:.5rem}
+  .bench-hero .meta .hi{color:var(--neon-soft);text-shadow:0 0 12px var(--glow-soft)}
   .diff{display:flex;flex-direction:column;gap:11px;margin-top:.4rem}
   .diff-row{display:grid;grid-template-columns:118px 1fr 84px;align-items:center;gap:1rem}
-  .diff-row .stars{font-size:.95rem;color:var(--blood-lit);letter-spacing:1px;white-space:nowrap}
+  .diff-row .stars{font-size:.95rem;color:var(--neon-soft);letter-spacing:1px;white-space:nowrap;text-shadow:0 0 12px var(--glow-soft)}
   .bar{height:12px;background:var(--panel-2);border:1px solid var(--line);border-radius:20px;overflow:hidden}
-  .bar i{display:block;height:100%;width:0;border-radius:20px;
-    background:linear-gradient(90deg,#7d121b,#d5202e);transition:width 1.1s cubic-bezier(.2,.7,.2,1)}
+  .bar i{display:block;height:100%;width:0;border-radius:20px;background:linear-gradient(90deg,var(--crimson),var(--neon));
+    box-shadow:0 0 16px -2px var(--glow);transition:width 1.1s cubic-bezier(.2,.7,.2,1)}
   .diff-row .val{font-family:var(--font-mono);font-size:.86rem;color:var(--bone-dim);text-align:right}
-  .diff-row .val b{color:var(--bone)}
-  .diff-row.peak .val b{color:var(--blood-lit)}
-  @media(max-width:560px){.diff-row{grid-template-columns:92px 1fr 70px;gap:.6rem}
-    .diff-row .stars{font-size:.8rem}}
-
-  .note{margin-top:1.7rem;color:var(--bone-dim);font-size:.98rem;max-width:74ch}
-  .note b{color:var(--bone)}
-
-  /* comparison table */
+  .diff-row .val b{color:var(--bone)}.diff-row.peak .val b{color:var(--neon-soft)}
+  @media(max-width:560px){.diff-row{grid-template-columns:92px 1fr 70px;gap:.6rem}.diff-row .stars{font-size:.8rem}}
+  .note{margin-top:1.7rem;color:var(--bone-dim);font-size:.98rem;max-width:74ch}.note b{color:var(--bone)}
   .cmp{margin-top:2.4rem;border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
   .cmp table{width:100%;border-collapse:collapse;font-size:.94rem}
   .cmp th,.cmp td{text-align:left;padding:.85rem 1.1rem;border-bottom:1px solid var(--line)}
-  .cmp thead th{font-family:var(--font-mono);font-size:.72rem;letter-spacing:.1em;
-    text-transform:uppercase;color:var(--steel);background:var(--ink)}
+  .cmp thead th{font-family:var(--font-mono);font-size:.72rem;letter-spacing:.1em;text-transform:uppercase;color:var(--steel);background:var(--ink)}
   .cmp td:not(:first-child),.cmp th:not(:first-child){text-align:right;font-family:var(--font-mono)}
   .cmp tr:last-child td{border-bottom:none}
-  .cmp .me{background:rgba(125,18,27,.12)}
-  .cmp .me td{color:var(--bone);font-weight:600}
-  .cmp .me td:first-child{color:var(--blood-lit)}
-  .cmp .muted td{color:var(--steel)}
-  .cmp small{color:var(--steel);font-family:var(--font-body)}
-
-  .progress-chips{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin-top:1.6rem;
-    font-family:var(--font-mono);font-size:.86rem;color:var(--bone-dim)}
+  .cmp .me{background:rgba(255,43,61,.10)}
+  .cmp .me td{color:var(--bone);font-weight:600}.cmp .me td:first-child{color:var(--neon-soft)}
+  .cmp .muted td{color:var(--steel)}.cmp small{color:var(--steel);font-family:var(--font-body)}
+  .progress-chips{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin-top:1.6rem;font-family:var(--font-mono);font-size:.86rem;color:var(--bone-dim)}
   .chip{border:1px solid var(--line-2);border-radius:20px;padding:.3rem .8rem;background:var(--panel)}
-  .chip.now{border-color:var(--blood-lit);color:var(--bone);background:rgba(125,18,27,.16)}
+  .chip.now{border-color:var(--neon);color:var(--bone);background:rgba(255,43,61,.14);box-shadow:0 0 18px -6px var(--glow)}
   .progress-chips .to{color:var(--steel)}
-
-  .callout{margin-top:2.4rem;background:var(--panel);border:1px solid var(--line);
-    border-left:3px solid var(--blood);border-radius:12px;padding:1.4rem 1.5rem;
-    display:flex;flex-wrap:wrap;gap:1rem 2rem;align-items:center}
+  .callout{margin-top:2.4rem;background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--neon);border-radius:12px;
+    padding:1.4rem 1.5rem;display:flex;flex-wrap:wrap;gap:1rem 2rem;align-items:center;box-shadow:-12px 0 40px -28px var(--glow)}
   .callout .big{font-family:var(--font-display);font-weight:700;font-size:1.5rem;color:var(--bone)}
-  .callout .big .hi{color:var(--blood-lit)}
+  .callout .big .hi{color:var(--neon-soft);text-shadow:0 0 18px var(--glow-soft)}
   .callout p{color:var(--bone-dim);font-size:.96rem;max-width:52ch}
-
-  /* second benchmark card (duck store) */
   .ds{margin-top:16px;display:grid;grid-template-columns:auto 1fr;gap:1.6rem;align-items:center}
   @media(max-width:640px){.ds{grid-template-columns:1fr}}
-  .ds .score{font-family:var(--font-display);font-weight:700;font-size:3rem;line-height:1;color:var(--bone)}
-  .ds .score .of{color:var(--steel)}
-  .ds .lab{font-family:var(--font-mono);font-size:.72rem;letter-spacing:.12em;
-    text-transform:uppercase;color:var(--steel);margin-top:.5rem}
+  .ds .score{font-family:var(--font-display);font-weight:700;font-size:3rem;line-height:1;color:var(--bone);text-shadow:0 0 30px var(--glow-soft)}
+  .ds .score .of{color:var(--steel);text-shadow:none}
+  .ds .lab{font-family:var(--font-mono);font-size:.72rem;letter-spacing:.12em;text-transform:uppercase;color:var(--steel);margin-top:.5rem}
   .ds .desc{color:var(--bone-dim);font-size:.96rem}
   .taxo{display:flex;flex-wrap:wrap;gap:.45rem;margin-top:.9rem}
-  .taxo span{font-family:var(--font-mono);font-size:.76rem;color:var(--bone-dim);
-    border:1px solid var(--line-2);border-radius:6px;padding:.22rem .55rem;background:var(--panel-2)}
+  .taxo span{font-family:var(--font-mono);font-size:.76rem;color:var(--bone-dim);border:1px solid var(--line-2);border-radius:6px;padding:.22rem .55rem;background:var(--panel-2)}
 
-  /* code block */
-  .code{background:#0a0b0e;border:1px solid var(--line-2);border-radius:12px;overflow:hidden;margin-top:1.2rem}
-  .code-bar{display:flex;justify-content:space-between;align-items:center;padding:.55rem .9rem;
-    border-bottom:1px solid var(--line);background:#0e0f13}
+  .code{background:#08080b;border:1px solid var(--line-2);border-radius:12px;overflow:hidden;margin-top:1.2rem;box-shadow:0 0 30px -20px var(--glow)}
+  .code-bar{display:flex;justify-content:space-between;align-items:center;padding:.55rem .9rem;border-bottom:1px solid var(--line);background:#0c0c11}
   .code-bar span{font-family:var(--font-mono);font-size:.74rem;color:var(--steel);letter-spacing:.08em}
-  .copy{font-family:var(--font-mono);font-size:.74rem;color:var(--bone-dim);background:none;
-    border:1px solid var(--line-2);border-radius:6px;padding:.28rem .6rem;cursor:pointer;transition:.18s}
-  .copy:hover{border-color:var(--blood-lit);color:var(--bone)}
-  .code pre{padding:1rem 1.1rem;overflow-x:auto;font-family:var(--font-mono);font-size:.85rem;
-    line-height:1.7;color:var(--bone)}
+  .copy{font-family:var(--font-mono);font-size:.74rem;color:var(--bone-dim);background:none;border:1px solid var(--line-2);border-radius:6px;padding:.28rem .6rem;cursor:pointer;transition:.18s}
+  .copy:hover{border-color:var(--neon);color:var(--bone)}
+  .code pre{padding:1rem 1.1rem;overflow-x:auto;font-family:var(--font-mono);font-size:.85rem;line-height:1.7;color:var(--bone)}
   .code pre .c{color:var(--steel)}
-  .code pre .p{color:var(--confirmed)}
 
-  /* how-it-works loop */
-  .loop{position:relative}
-  .loop-steps{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;position:relative;z-index:1}
+  /* how it works */
+  .loop-steps{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
   @media(max-width:820px){.loop-steps{grid-template-columns:1fr}}
-  .step{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:1.3rem 1.3rem;position:relative}
-  .step .idx{font-family:var(--font-mono);font-size:.78rem;color:var(--blood-lit);letter-spacing:.1em}
-  .step h3{margin:.5rem 0 .4rem}
-  .step p{color:var(--bone-dim);font-size:.93rem}
-  .loop-back{margin-top:1.4rem;display:flex;align-items:center;gap:.7rem;
-    font-family:var(--font-mono);font-size:.86rem;color:var(--steel)}
-  .loop-back svg{width:20px;height:20px;color:var(--blood-lit);flex:none}
+  .step{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:1.3rem;transition:.2s}
+  .step:hover{border-color:var(--neon);box-shadow:0 0 26px -14px var(--glow)}
+  .step .idx{font-family:var(--font-mono);font-size:.78rem;color:var(--neon-soft);letter-spacing:.1em;text-shadow:0 0 12px var(--glow-soft)}
+  .step h3{margin:.5rem 0 .4rem}.step p{color:var(--bone-dim);font-size:.93rem}
+  .loop-back{margin-top:1.4rem;display:flex;align-items:center;gap:.7rem;font-family:var(--font-mono);font-size:.86rem;color:var(--steel)}
+  .loop-back svg{width:20px;height:20px;color:var(--neon);flex:none;filter:drop-shadow(0 0 6px var(--glow))}
   .loop-back b{color:var(--bone-dim);font-weight:500}
-
-  /* builder chips */
+  .sub-h{margin:clamp(44px,5vw,64px) 0 0;font-size:1.05rem;color:var(--steel);font-family:var(--font-mono);letter-spacing:.1em;text-transform:uppercase}
   .builders{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:16px}
   @media(max-width:820px){.builders{grid-template-columns:1fr}}
   .bgroup{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:1.25rem 1.3rem}
-  .bgroup .t{font-family:var(--font-mono);font-size:.72rem;letter-spacing:.14em;text-transform:uppercase;
-    color:var(--steel);margin-bottom:.85rem}
+  .bgroup .t{font-family:var(--font-mono);font-size:.72rem;letter-spacing:.14em;text-transform:uppercase;color:var(--steel);margin-bottom:.85rem}
   .btags{display:flex;flex-wrap:wrap;gap:.4rem}
-  .btags span{font-family:var(--font-mono);font-size:.78rem;color:var(--bone);
-    background:var(--panel-2);border:1px solid var(--line);border-radius:6px;padding:.24rem .55rem;transition:.16s}
-  .btags span:hover{border-color:var(--blood-lit)}
-
-  .subsys{margin-top:16px}
+  .btags span{font-family:var(--font-mono);font-size:.78rem;color:var(--bone);background:var(--panel-2);border:1px solid var(--line);border-radius:6px;padding:.24rem .55rem;transition:.16s}
+  .btags span:hover{border-color:var(--neon);box-shadow:0 0 14px -6px var(--glow)}
+  .subsys .card .k{font-family:var(--font-mono);font-size:.72rem;color:var(--neon-soft);letter-spacing:.1em;text-transform:uppercase;display:block;margin-bottom:.55rem;text-shadow:0 0 12px var(--glow-soft)}
   .subsys .card p b{color:var(--bone)}
-  .subsys .card .k{font-family:var(--font-mono);font-size:.72rem;color:var(--blood-lit);
-    letter-spacing:.1em;text-transform:uppercase;display:block;margin-bottom:.55rem}
 
   /* providers */
   .prov{display:grid;grid-template-columns:repeat(2,1fr);gap:16px}
   @media(max-width:600px){.prov{grid-template-columns:1fr}}
   .prov .card{display:flex;flex-direction:column}
-  .prov .name{display:flex;align-items:center;gap:.6rem;font-family:var(--font-display);
-    font-weight:600;font-size:1.1rem}
-  .prov .badge{font-family:var(--font-mono);font-size:.66rem;letter-spacing:.08em;text-transform:uppercase;
-    color:#fff;background:var(--blood);border-radius:5px;padding:.15rem .45rem}
+  .prov .name{display:flex;align-items:center;gap:.6rem;font-family:var(--font-display);font-weight:600;font-size:1.1rem}
+  .prov .badge{font-family:var(--font-mono);font-size:.66rem;letter-spacing:.08em;text-transform:uppercase;color:#fff;
+    background:linear-gradient(180deg,var(--neon),var(--crimson));border-radius:5px;padding:.15rem .45rem;box-shadow:0 0 14px -4px var(--glow)}
   .prov p{margin-top:.7rem;color:var(--bone-dim);font-size:.94rem;flex:1}
-  .prov a.key{margin-top:1rem;font-family:var(--font-mono);font-size:.82rem;color:var(--blood-lit);
-    display:inline-flex;align-items:center;gap:.4rem}
-  .prov a.key:hover{text-decoration:underline}
-
-  /* requirements list */
+  .prov a.key{margin-top:1rem;font-family:var(--font-mono);font-size:.82rem;color:var(--neon-soft)}
+  .prov a.key:hover{text-decoration:underline;text-shadow:0 0 12px var(--glow-soft)}
   .reqs{list-style:none;margin-top:1.4rem;display:grid;gap:.7rem}
   .reqs li{display:flex;gap:.7rem;color:var(--bone-dim);font-size:.98rem}
-  .reqs li svg{width:18px;height:18px;color:var(--blood-lit);flex:none;margin-top:.2rem}
+  .reqs li svg{width:18px;height:18px;color:var(--neon);flex:none;margin-top:.2rem;filter:drop-shadow(0 0 5px var(--glow-soft))}
   .reqs li b{color:var(--bone);font-weight:600}
 
+  /* FAQ */
+  .faq{display:grid;gap:12px;margin-top:8px}
+  .faq details{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden;transition:border-color .2s,box-shadow .2s}
+  .faq details[open]{border-color:var(--line-2);box-shadow:0 0 30px -18px var(--glow)}
+  .faq summary{cursor:pointer;list-style:none;padding:1.15rem 1.35rem;font-family:var(--font-display);font-weight:600;font-size:1.06rem;
+    display:flex;justify-content:space-between;align-items:center;gap:1rem;color:var(--bone)}
+  .faq summary::-webkit-details-marker{display:none}
+  .faq summary .pl{color:var(--neon);font-family:var(--font-mono);font-weight:400;transition:transform .2s;flex:none;text-shadow:0 0 12px var(--glow-soft)}
+  .faq details[open] summary .pl{transform:rotate(45deg)}
+  .faq .a{padding:0 1.35rem 1.25rem;color:var(--bone-dim);font-size:.98rem;line-height:1.7}
+  .faq .a a{color:var(--neon-soft)}.faq .a a:hover{text-decoration:underline}
+
   /* footer */
-  footer{border-top:1px solid var(--line);padding:clamp(48px,7vw,80px) 0 3rem}
+  footer{border-top:1px solid var(--line);padding:clamp(48px,7vw,80px) 0 3rem;position:relative}
+  footer::before{content:"";position:absolute;top:-1px;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--glow-soft),transparent)}
   .foot-top{display:flex;flex-wrap:wrap;justify-content:space-between;gap:2rem;align-items:flex-start}
   .foot-brand{display:flex;align-items:center;gap:.6rem;font-family:var(--font-display);font-weight:700;font-size:1.2rem}
-  .foot-brand .glyph{width:26px;height:26px}
-  .foot-lic{font-family:var(--font-mono);font-size:.86rem;color:var(--bone-dim);margin-top:.8rem;max-width:44ch}
-  .foot-lic b{color:var(--bone)}
-  .foot-links{display:flex;gap:1.6rem;font-family:var(--font-mono);font-size:.86rem}
-  .foot-links a{color:var(--bone-dim);transition:color .18s}
-  .foot-links a:hover{color:var(--blood-lit)}
-  .disclaimer{margin-top:2.6rem;padding-top:1.6rem;border-top:1px solid var(--line);
-    font-size:.82rem;color:var(--steel);max-width:80ch;line-height:1.7}
+  .foot-brand img{width:28px;height:28px;border-radius:7px;filter:drop-shadow(0 0 8px var(--glow))}
+  .foot-lic{font-family:var(--font-mono);font-size:.86rem;color:var(--bone-dim);margin-top:.8rem;max-width:44ch}.foot-lic b{color:var(--bone)}
+  .foot-links{display:flex;gap:1.6rem;font-family:var(--font-mono);font-size:.86rem;flex-wrap:wrap}
+  .foot-links a{color:var(--bone-dim);transition:color .18s}.foot-links a:hover{color:var(--neon-soft)}
+  .disclaimer{margin-top:2.6rem;padding-top:1.6rem;border-top:1px solid var(--line);font-size:.82rem;color:var(--steel);max-width:80ch;line-height:1.7}
   .disclaimer b{color:var(--bone-dim)}
 
-  /* reveal */
   .reveal{opacity:0;transform:translateY(18px);transition:opacity .6s ease,transform .6s ease}
   .reveal.in{opacity:1;transform:none}
-
   @media(prefers-reduced-motion:reduce){
     *{animation:none!important;transition:none!important}
-    .reveal{opacity:1;transform:none}
-    .term-body .ln{opacity:1;transform:none}
-    .bar i{transition:none}
+    .reveal{opacity:1;transform:none}.term-body .ln{opacity:1;transform:none}.bar i{transition:none}
+    body::after{animation:none}
   }
-  :focus-visible{outline:2px solid var(--blood-lit);outline-offset:3px;border-radius:4px}
+  :focus-visible{outline:2px solid var(--neon);outline-offset:3px;border-radius:4px}
 </style>
 </head>
 <body>
 
-<!-- serpent glyph, reused -->
-<svg width="0" height="0" style="position:absolute" aria-hidden="true">
-  <symbol id="serpent" viewBox="0 0 32 32">
-    <path fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"
-      d="M22 7.5c-6 -3 -14 0 -14 7 0 5 4 8 8 8 3.4 0 6 -2 6 -5 0 -2.6 -2 -4.2 -4.4 -4.2 -1.9 0 -3.3 1.2 -3.3 2.8"/>
-    <circle cx="24.2" cy="6.6" r="1.7" fill="currentColor" stroke="none"/>
-  </symbol>
-</svg>
-
 <header class="nav">
   <div class="wrap nav-in">
     <a class="brand" href="#top" aria-label="Basilisk home">
-      <svg class="glyph" style="color:var(--blood-lit)"><use href="#serpent"/></svg>
-      <span><b>Basilisk</b></span>
+      <img src="basilisk-icon.png" alt="Basilisk logo" width="28" height="28">
+      <span>Basilisk</span>
     </a>
     <nav class="nav-links">
       <a href="#what">Overview</a>
       <a href="#benchmarks">Benchmarks</a>
       <a href="#how">How it works</a>
       <a href="#security">Security</a>
-      <a href="#install">Install</a>
+      <a href="#faq">FAQ</a>
       <a class="nav-cta" href="https://github.com/the-priest/Basilisk">
         <svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
         GitHub
@@ -374,22 +430,35 @@
 
   <!-- HERO -->
   <section class="hero">
-    <div class="wrap">
-      <span class="eyebrow">Autonomous offensive security · v7.5.5</span>
-      <h1>It doesn't guess.<br><span class="accent">It confirms.</span></h1>
-      <p class="sub">Basilisk turns an off-the-shelf LLM into a working penetration tester — a full offensive toolchain, a verified-exploitation loop, and a hard safety floor it cannot cross. <strong>It runs as a native Linux app on your own machine and answers only to you.</strong> The only thing that leaves is the API call to the model you chose.</p>
+    <div class="wrap hero-grid">
+      <div>
+        <span class="eyebrow">Autonomous offensive security · open source · v7.5.6</span>
+        <h1>It doesn't guess.<br><span class="neon-text">It confirms.</span></h1>
+        <p class="sub"><strong>Basilisk is an open-source, autonomous AI penetration-testing agent</strong> — a native Linux desktop app that turns any large language model into a working pentester. It runs the whole engagement on its own, on your machine, and answers only to you. The only thing that leaves is the API call to the model you chose.</p>
+        <div class="cta-row">
+          <a class="btn btn-primary" href="https://github.com/the-priest/Basilisk">
+            <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+            View on GitHub
+          </a>
+          <a class="btn btn-ghost" href="#benchmarks">See the numbers</a>
+        </div>
+        <p class="thesis"><b>Every exploit is armed with the marker that would prove it</b> — a dumped row, another user's token, an out-of-band callback — then fired and checked against ground truth <b>before it counts</b>. No partial credit. No assumed wins.</p>
+      </div>
+      <div class="hero-art reveal">
+        <span class="halo" aria-hidden="true"></span>
+        <img src="basilisk-logo.png" alt="Basilisk — crimson serpent emblem of the autonomous AI pentest agent" width="430" loading="eager">
+      </div>
+    </div>
 
-      <div class="cta-row">
-        <a class="btn btn-primary" href="https://github.com/the-priest/Basilisk">
-          <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
-          View on GitHub
-        </a>
-        <a class="btn btn-ghost" href="#benchmarks">See the numbers</a>
+    <div class="wrap">
+      <div class="stats reveal">
+        <div class="stat"><div class="n">81<span class="slash">/</span>113</div><div class="l">Juice Shop · black-box</div></div>
+        <div class="stat"><div class="n">22<span class="slash">/</span>22</div><div class="l">Duck Store API · black-box</div></div>
+        <div class="stat"><div class="n">14<span class="slash">/</span>14</div><div class="l">OWASP classes · F1 0.95</div></div>
+        <div class="stat"><div class="n">~46k</div><div class="l">Lines of Python</div></div>
+        <div class="stat"><div class="n">MIT</div><div class="l">Licensed · no account</div></div>
       </div>
 
-      <p class="thesis"><b>Every exploit is armed with the marker that would prove it</b> — a dumped row, another user's token, an out-of-band callback — then fired and checked against ground truth <b>before it counts</b>. No partial credit. No assumed wins.</p>
-
-      <!-- signature: live engagement terminal -->
       <div class="term-wrap reveal">
         <div class="term">
           <div class="term-bar">
@@ -398,15 +467,6 @@
           </div>
           <div class="term-body" id="term" aria-label="Example of an autonomous engagement log"></div>
         </div>
-      </div>
-
-      <!-- stat strip -->
-      <div class="stats reveal">
-        <div class="stat"><div class="n">81<span class="slash">/</span>113</div><div class="l">Juice Shop · black-box</div></div>
-        <div class="stat"><div class="n">22<span class="slash">/</span>22</div><div class="l">Duck Store API · black-box</div></div>
-        <div class="stat"><div class="n">14<span class="slash">/</span>14</div><div class="l">OWASP classes · F1 0.95</div></div>
-        <div class="stat"><div class="n">~46k</div><div class="l">Lines of Python</div></div>
-        <div class="stat"><div class="n">MIT</div><div class="l">Licensed · no account</div></div>
       </div>
     </div>
   </section>
@@ -417,7 +477,7 @@
       <div class="sec-head reveal">
         <span class="eyebrow">What it is</span>
         <h2>A GTK4 desktop app that gives a language model hands.</h2>
-        <p>Point it at an authorized target and it runs the engagement end to end — recon, exploitation across every web-vuln class, verification, and a reproducible write-up — turn after turn, on its own, until the objective is confirmed or you press Stop. It also audits your own code across ten scanners, hardens a host, and drives your shell and desktop.</p>
+        <p>Point it at an authorized target and it runs the engagement end to end — recon, exploitation across every web-vulnerability class, verification, and a reproducible write-up — turn after turn, on its own, until the objective is confirmed or you press Stop. It also audits your own code across ten scanners, hardens a host, and drives your shell and desktop.</p>
       </div>
       <div class="truths reveal">
         <div class="truth"><b>Local by default</b><span>Plain Python plus one shell script. No Docker, no daemon, no account, nothing phoning home.</span></div>
@@ -446,7 +506,6 @@
             <span style="color:var(--steel)">full board · NODE_ENV=unsafe · v7.5.3 · exploit builders + <span class="inline-code" style="font-size:.8em">run</span> only</span>
           </div>
         </div>
-
         <div class="diff" id="diff">
           <div class="diff-row"><span class="stars">★</span><div class="bar"><i data-pct="100"></i></div><span class="val"><b>13</b>/13 · 100%</span></div>
           <div class="diff-row"><span class="stars">★★</span><div class="bar"><i data-pct="89"></i></div><span class="val"><b>16</b>/18 · 89%</span></div>
@@ -455,11 +514,11 @@
           <div class="diff-row"><span class="stars">★★★★★</span><div class="bar"><i data-pct="68"></i></div><span class="val"><b>13</b>/19 · 68%</span></div>
           <div class="diff-row peak"><span class="stars">★★★★★★</span><div class="bar"><i data-pct="58"></i></div><span class="val"><b>7</b>/12 · 58%</span></div>
         </div>
-
         <p class="note">The curve is the honest part: it clears the easy and mid tiers almost completely, then thins as the chains get deeper — the shape a real tool should have. It takes <b>7 of 12 six-star</b> challenges (SSRF, SSTi, Forged Coupon, Forged Signed JWT, Login Support Team, Premium Paywall, Arbitrary File Write) and <b>13 of 19 five-star</b>. Misses cluster where one builder isn't enough and the chain runs long — RCE/DoS variants, NoSQL manipulation, and the LLM-chatbot challenges.</p>
 
         <div class="cmp">
           <table>
+            <caption class="mono" style="text-align:left;color:var(--steel);font-size:.78rem;padding:.7rem 1.1rem;background:var(--ink);border-bottom:1px solid var(--line)">Same board, same scoring — how autonomous agents compare</caption>
             <thead><tr><th>Agent</th><th>Black-box</th><th>White-box <small>(source given)</small></th></tr></thead>
             <tbody>
               <tr class="me"><td>Basilisk <small style="color:var(--steel)">v7.5.3</small></td><td>81 / 113</td><td>—</td></tr>
@@ -477,36 +536,29 @@
           <span class="chip">73 <small style="color:var(--steel)">v7.1</small></span><span class="to">→</span>
           <span class="chip now">81 <small style="color:var(--steel)">v7.5.3</small></span>
         </div>
-
         <div class="callout">
           <div class="big"><span class="hi">~72%</span> vs ~20–30%</div>
           <p>Published work generally puts fully-autonomous LLM pentest agents around 20–30% on comparable tasks. Basilisk clears roughly 72% on the full board, black-box — well above that line.</p>
         </div>
       </div>
 
-      <!-- second benchmark: duck store -->
       <div class="sec-head reveal" style="margin-top:clamp(52px,7vw,84px)">
         <span class="eyebrow">Second target · API security</span>
         <h2>Escape's Duck Store — a deliberately-vulnerable REST API.</h2>
       </div>
       <div class="card reveal" style="padding:1.8rem 1.7rem">
         <div class="ds">
-          <div>
-            <div class="score">22<span class="of">/22</span></div>
-            <div class="lab">Confirmed · black-box</div>
-          </div>
+          <div><div class="score">22<span class="of">/22</span></div><div class="lab">Confirmed · black-box</div></div>
           <div>
             <p class="desc">A different shape of target from Juice Shop: the planted flaws are API-first — broken object- and function-level authorization, mass-assignment privilege escalation, server-side request forgery, and business-logic abuse. Basilisk found every one working purely from the live API surface, no schema handed to it.</p>
             <div class="taxo">
-              <span>BOLA / IDOR</span><span>BFLA</span><span>Mass assignment</span><span>SSRF</span>
-              <span>SQLi</span><span>Stored XSS</span><span>Broken auth</span><span>File upload</span>
-              <span>Data exposure</span><span>Business logic</span>
+              <span>BOLA / IDOR</span><span>BFLA</span><span>Mass assignment</span><span>SSRF</span><span>SQLi</span>
+              <span>Stored XSS</span><span>Broken auth</span><span>File upload</span><span>Data exposure</span><span>Business logic</span>
             </div>
           </div>
         </div>
       </div>
 
-      <!-- reproduce -->
       <div class="sec-head reveal" style="margin-top:clamp(52px,7vw,84px)">
         <span class="eyebrow">Reproduce it</span>
         <h2>Don't take the number. Regenerate it.</h2>
@@ -527,12 +579,11 @@ docker run -d -p 3000:3000 -e NODE_ENV=unsafe \
       <div class="sec-head reveal">
         <span class="eyebrow">How it works</span>
         <h2>A closed loop, not a payload spray.</h2>
-        <p>Basilisk reads a target's behaviour to identify the vuln class, reaches for the matching exploit builder, fires it, and confirms the hit against ground truth before moving on. Every attempt and verdict lands in an exploitation oracle — so the loop never re-runs a solved bug and gets sharper about what's left.</p>
+        <p>Basilisk reads a target's behaviour to identify the vulnerability class, reaches for the matching exploit builder, fires it, and confirms the hit against ground truth before moving on. Every attempt and verdict lands in an exploitation oracle — so the loop never re-runs a solved bug and gets sharper about what's left.</p>
       </div>
-
-      <div class="loop reveal">
+      <div class="reveal">
         <div class="loop-steps">
-          <div class="step"><div class="idx">01</div><h3>Read the behaviour</h3><p>Fingerprint the stack and watch how the target responds — reflections, timing, error shapes — to name the vuln class.</p></div>
+          <div class="step"><div class="idx">01</div><h3>Read the behaviour</h3><p>Fingerprint the stack and watch how the target responds — reflections, timing, error shapes — to name the vulnerability class.</p></div>
           <div class="step"><div class="idx">02</div><h3>Match a builder</h3><p>Reach for the general-purpose exploit generator for that class, parameterised for this target — not a Juice-Shop-bound toy.</p></div>
           <div class="step"><div class="idx">03</div><h3>Arm the proof</h3><p>Bind the marker that would prove the bug: a dumped row, a foreign token, a status, a measurable difference, an OOB callback.</p></div>
           <div class="step"><div class="idx">04</div><h3>Fire</h3><p>Send the payload through the same gate every command passes — with the destructive class hard-blocked underneath it.</p></div>
@@ -545,16 +596,14 @@ docker run -d -p 3000:3000 -e NODE_ENV=unsafe \
         </div>
       </div>
 
-      <!-- builders -->
-      <h3 style="margin:clamp(44px,5vw,64px) 0 0;font-size:1.05rem;color:var(--steel);font-family:var(--font-mono);letter-spacing:.1em;text-transform:uppercase" class="reveal">Exploit builders</h3>
+      <h3 class="sub-h reveal">Exploit builders</h3>
       <div class="builders reveal">
         <div class="bgroup"><div class="t">Injection</div><div class="btags"><span>SQLi · 5 DBMS</span><span>sqlmap</span><span>NoSQL</span><span>OS command</span><span>XXE</span><span>SSTi</span><span>GraphQL</span></div></div>
-        <div class="bgroup"><div class="t">Auth &amp; access</div><div class="btags"><span>JWT alg:none</span><span>RS256→HS256</span><span>IDOR / BAC</span><span>Race (TOCTOU)</span><span>File-upload bypass</span></div></div>
+        <div class="bgroup"><div class="t">Auth &amp; access</div><div class="btags"><span>JWT alg:none</span><span>RS256→HS256</span><span>IDOR / BAC</span><span>BOLA / BFLA</span><span>Race (TOCTOU)</span><span>File-upload bypass</span></div></div>
         <div class="bgroup"><div class="t">Server-side &amp; client</div><div class="btags"><span>SSRF + metadata</span><span>Deserialization → RCE</span><span>Prototype pollution</span><span>Path traversal</span><span>XSS + CSP bypass</span><span>Open redirect</span><span>CORS</span></div></div>
       </div>
 
-      <!-- four subsystems -->
-      <h3 style="margin:clamp(44px,5vw,64px) 0 0;font-size:1.05rem;color:var(--steel);font-family:var(--font-mono);letter-spacing:.1em;text-transform:uppercase" class="reveal">Four subsystems bridge a CTF and a real host</h3>
+      <h3 class="sub-h reveal">Four subsystems bridge a CTF and a real host</h3>
       <div class="grid g2 subsys reveal">
         <div class="card"><span class="k">AST payload mutation</span><p>Parses a JSON or XML body, injects at <b>every</b> node, and serialises back to valid syntax — so the payload actually reaches each field instead of breaking the parser.</p></div>
         <div class="card"><span class="k">State-machine &amp; session</span><p>Extracts every dynamic token from a response — cookies, CSRF, bearer/JWT, nonces — and threads it into the next request, reaching steps a stateless scanner never gets to.</p></div>
@@ -623,7 +672,6 @@ docker run -d -p 3000:3000 -e NODE_ENV=unsafe \
         <h2>Read the installer. Then run it.</h2>
         <p>Basilisk runs shell commands as you — so it ships as plain Python plus one shell script you can read start to finish. The installer auto-detects your distro, parse-checks every file before it touches disk, and backs up your chat history. The same command updates in place.</p>
       </div>
-
       <div class="code reveal">
         <div class="code-bar"><span>one line</span><button class="copy" data-copy="curl -fsSL https://raw.githubusercontent.com/the-priest/Basilisk/main/install.sh | bash">Copy</button></div>
         <pre>curl -fsSL https://raw.githubusercontent.com/the-priest/Basilisk/main/install.sh | bash</pre>
@@ -635,16 +683,32 @@ cd basilisk
 less install.sh          <span class="c"># read it first</span>
 ./install.sh</pre>
       </div>
-      <div class="code reveal">
-        <div class="code-bar"><span>tests are stdlib-only — verify before you trust it</span><button class="copy" data-copy="for t in tests/test_*.py; do python3 &quot;$t&quot;; done">Copy</button></div>
-        <pre>for t in tests/test_*.py; do python3 "$t"; done</pre>
-      </div>
-
       <ul class="reqs reveal">
         <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg><span><b>Python 3.10+</b>, Linux with GTK4 / libadwaita (X11 or Wayland).</span></li>
         <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg><span>Runs on desktop Kali and on <b>NetHunter Pro</b> (Phosh/Wayland) on a phone.</span></li>
         <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg><span>Standard tooling (nmap, sqlmap, …) is auto-detected; missing tools are flagged with an install hint, never assumed.</span></li>
       </ul>
+    </div>
+  </section>
+
+  <!-- FAQ (human + machine readable) -->
+  <section class="block" id="faq">
+    <div class="wrap">
+      <div class="sec-head reveal">
+        <span class="eyebrow">FAQ</span>
+        <h2>Straight answers.</h2>
+        <p>Common questions about Basilisk as an AI penetration-testing agent — how it compares, what it runs on, and whether it's safe.</p>
+      </div>
+      <div class="faq reveal">
+        <details open><summary>What is Basilisk? <span class="pl">+</span></summary><div class="a">Basilisk is an open-source, autonomous AI penetration-testing agent — a native Linux (GTK4) desktop app that turns an off-the-shelf large language model into a working pentester. Point it at an authorized target and it runs the full engagement (recon, exploitation across every web-vulnerability class, verification, and a reproducible write-up) on its own, locally, until the objective is confirmed or you stop it.</div></details>
+        <details><summary>Is Basilisk free and open source? <span class="pl">+</span></summary><div class="a">Yes. Basilisk is MIT-licensed and free. It needs no account and nothing phones home — it's plain Python plus one shell script you can read before running.</div></details>
+        <details><summary>How does Basilisk compare to other AI pentest agents? <span class="pl">+</span></summary><div class="a">On OWASP Juice Shop, scored only when the exploit actually fires, Basilisk solves 81 of 113 challenges (71.7%) fully autonomously and black-box. On the same board scored the same way, Cascade (Windsurf) solved 36 and Claude Opus 4.8 solved 23. Published autonomous LLM pentest agents generally land around 20–30%. Basilisk also confirmed 22 of 22 on Escape's Duck Store API benchmark, black-box.</div></details>
+        <details><summary>Which LLM models does Basilisk work with? <span class="pl">+</span></summary><div class="a">Basilisk is provider-agnostic — you bring your own API key. SiliconFlow (the default; DeepSeek, Qwen, Kimi) and Groq are supported. Keys stay only on your machine, in <span class="inline-code">~/.config/basilisk/settings.json</span>.</div></details>
+        <details><summary>Does Basilisk run locally and keep my data private? <span class="pl">+</span></summary><div class="a">Yes. Basilisk runs on your own machine and answers only to you. The only thing that leaves the machine is the API call to the model you chose. Every command it runs is hashed into a local, tamper-evident evidence ledger.</div></details>
+        <details><summary>What vulnerabilities can Basilisk exploit? <span class="pl">+</span></summary><div class="a">Every major web-vulnerability class via general-purpose exploit builders: SQL injection (5 DBMS plus sqlmap), JWT attacks, NoSQL, XXE, SSTi, SSRF, insecure deserialization to RCE, prototype pollution, path traversal, cross-site scripting, OS command injection, IDOR / broken access control, race conditions, file-upload bypass, GraphQL abuse, open redirect and CORS misconfiguration — plus API-first classes such as BOLA, BFLA and mass assignment.</div></details>
+        <details><summary>Is Basilisk safe to run? What stops it doing damage? <span class="pl">+</span></summary><div class="a">The irreversible command class (disk wipes, fork bombs, raw block-device writes) is hard-blocked in two independent places with no "Run anyway" option. Untrusted input is quarantined as data rather than instructions, self-written code runs in a bubblewrap jail, and Basilisk will not produce standalone weaponized malware. Use it only on systems you're authorized to test.</div></details>
+        <details><summary>What are the requirements? <span class="pl">+</span></summary><div class="a">Python 3.10+ and Linux with GTK4 / libadwaita (X11 or Wayland). It runs on desktop Kali and on NetHunter Pro (Phosh/Wayland) on a phone. Standard tooling like nmap and sqlmap is auto-detected.</div></details>
+      </div>
     </div>
   </section>
 </main>
@@ -653,13 +717,14 @@ less install.sh          <span class="c"># read it first</span>
   <div class="wrap">
     <div class="foot-top">
       <div>
-        <div class="foot-brand"><svg class="glyph" style="color:var(--blood-lit)"><use href="#serpent"/></svg> Basilisk</div>
+        <div class="foot-brand"><img src="basilisk-icon.png" alt="Basilisk logo" width="28" height="28"> Basilisk</div>
         <p class="foot-lic"><b>MIT.</b> Take it, fork it, use it on what you're allowed to break.</p>
       </div>
       <div class="foot-links">
         <a href="https://github.com/the-priest/Basilisk">Repository</a>
         <a href="https://github.com/the-priest/Basilisk/blob/main/BASILISK_MANUAL.md">Manual</a>
         <a href="#benchmarks">Benchmarks</a>
+        <a href="#faq">FAQ</a>
         <a href="#install">Install</a>
       </div>
     </div>
@@ -672,7 +737,6 @@ less install.sh          <span class="c"># read it first</span>
   var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   var hasIO = 'IntersectionObserver' in window;
 
-  /* ---- copy buttons ---- */
   document.querySelectorAll('.copy').forEach(function(b){
     b.addEventListener('click', function(){
       var t = (b.getAttribute('data-copy')||'').replace(/&#10;/g,'\n');
@@ -686,31 +750,28 @@ less install.sh          <span class="c"># read it first</span>
   });
 
   function fillBars(){
-    var d = document.getElementById('diff');
-    if(d) d.querySelectorAll('.bar i').forEach(function(i){ i.style.width = i.getAttribute('data-pct') + '%'; });
+    var d=document.getElementById('diff');
+    if(d) d.querySelectorAll('.bar i').forEach(function(i){ i.style.width=i.getAttribute('data-pct')+'%'; });
   }
 
-  /* ---- reveal on scroll (with graceful fallback) ---- */
   if(!hasIO){
     document.querySelectorAll('.reveal').forEach(function(el){ el.classList.add('in'); });
     fillBars();
   } else {
-    var io = new IntersectionObserver(function(es){
+    var io=new IntersectionObserver(function(es){
       es.forEach(function(e){ if(e.isIntersecting){ e.target.classList.add('in'); io.unobserve(e.target);} });
     },{threshold:.12, rootMargin:'0px 0px -8% 0px'});
     document.querySelectorAll('.reveal').forEach(function(el){ io.observe(el); });
-
-    var diff = document.getElementById('diff');
+    var diff=document.getElementById('diff');
     if(diff){
-      var bo = new IntersectionObserver(function(es){
+      var bo=new IntersectionObserver(function(es){
         es.forEach(function(e){ if(e.isIntersecting){ fillBars(); bo.disconnect(); } });
       },{threshold:.3});
       bo.observe(diff);
     }
   }
 
-  /* ---- signature terminal ---- */
-  var lines = [
+  var lines=[
     ['$ basilisk --target https://shop.internal --autonomous',''],
     ['[recon]   Express 4 · PostgreSQL · JWT session','tag recon'],
     ['[analyze] /products?sort= reflects ORDER BY  →  SQLi','tag'],
@@ -724,43 +785,31 @@ less install.sh          <span class="c"># read it first</span>
     ['[oracle]  8831  →  CALLBACK RECEIVED ✓  proven','ok'],
     ['[done]    22/22 confirmed · 0 assumed · ledger sealed','ok']
   ];
-  var host = document.getElementById('term');
+  var host=document.getElementById('term');
   if(host){
-    // pre-render (progressive enhancement / no-JS already handled by empty node)
-    var nodes = lines.map(function(l){
-      var d = document.createElement('span');
-      d.className = 'ln';
-      // colourise the [tag] prefix separately from the rest
-      var m = l[0].match(/^(\[[^\]]+\]|\$)(\s*)(.*)$/);
+    var nodes=lines.map(function(l){
+      var d=document.createElement('span'); d.className='ln';
+      var m=l[0].match(/^(\[[^\]]+\]|\$)(\s*)(.*)$/);
       if(m){
-        var pre = document.createElement('span');
-        pre.className = l[1] || 'tag';
-        pre.textContent = m[1];
-        d.appendChild(pre);
-        d.appendChild(document.createTextNode(m[2]+m[3]));
-      } else { d.textContent = l[0]; }
-      host.appendChild(d);
-      return d;
+        var pre=document.createElement('span'); pre.className=l[1]||'tag'; pre.textContent=m[1];
+        d.appendChild(pre); d.appendChild(document.createTextNode(m[2]+m[3]));
+      } else { d.textContent=l[0]; }
+      host.appendChild(d); return d;
     });
-    var cursor = document.createElement('span');
-    cursor.className='cursor';
+    var cursor=document.createElement('span'); cursor.className='cursor';
     if(reduce || !hasIO){
       nodes.forEach(function(n){n.classList.add('show');});
       nodes[nodes.length-1].appendChild(cursor);
     } else {
       var i=0;
-      var reveal = function(){
+      var reveal=function(){
         if(cursor.parentNode) cursor.parentNode.removeChild(cursor);
         if(i<nodes.length){
-          nodes[i].classList.add('show');
-          nodes[i].appendChild(cursor);
-          i++;
-          setTimeout(reveal, i===1?550:(360 + Math.random()*220));
-        } else {
-          nodes[nodes.length-1].appendChild(cursor);
-        }
+          nodes[i].classList.add('show'); nodes[i].appendChild(cursor); i++;
+          setTimeout(reveal, i===1?550:(360+Math.random()*220));
+        } else { nodes[nodes.length-1].appendChild(cursor); }
       };
-      var to = new IntersectionObserver(function(es){
+      var to=new IntersectionObserver(function(es){
         es.forEach(function(e){ if(e.isIntersecting){ reveal(); to.disconnect(); }});
       },{threshold:.35});
       to.observe(host);

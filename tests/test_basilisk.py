@@ -80,12 +80,14 @@ class TestSettings(unittest.TestCase):
 
     def test_save_load_roundtrip(self):
         s = basilisk_core.load_settings()
-        s["active_provider"] = "groq"
+        s["active_provider"] = "groq"          # a deliberate Groq choice
+        s["_provider_pin_normalized"] = True   # already past the one-time heal
+        s["siliconflow_api_key"] = "sk-test"   # even with a SiliconFlow key present
         s["temperature"] = 0.42
         basilisk_core.save_settings(s)
 
         loaded = basilisk_core.load_settings()
-        self.assertEqual(loaded["active_provider"], "groq")
+        self.assertEqual(loaded["active_provider"], "groq")  # deliberate choice respected
         self.assertAlmostEqual(loaded["temperature"], 0.42)
         # Untouched defaults must survive a round-trip.
         self.assertIn("max_tokens", loaded)
@@ -96,15 +98,41 @@ class TestSettings(unittest.TestCase):
             list(Path(self._tmp.name).glob("*kali-tmp*"))
         self.assertEqual(leftovers, [], "atomic write left a temp file behind")
 
-    def test_migration_legacy_groq_only_install_kept_on_groq(self):
-        # DOCUMENTED behaviour: a pre-multi-provider config (no active_provider
-        # key at all) is an upgrader whose Groq setup already works, so the
-        # migration leaves them on Groq rather than silently switching them to
-        # a provider they have no key for. A *fresh* install never hits this —
-        # it gets siliconflow straight from DEFAULT_SETTINGS (tested above).
-        # This test locks that intent: changing it should be a conscious call.
+    def test_migration_missing_provider_defaults_to_siliconflow(self):
+        # A config with no active_provider key now defaults to the LOCKED
+        # PRIMARY — SiliconFlow / DeepSeek-V4-Flash. Groq is the fallback, never
+        # the automatic default (older builds put such installs on Groq here).
         merged = dict(basilisk_core.DEFAULT_SETTINGS)
-        raw = {"temperature": 0.7}  # no active_provider -> legacy install
+        raw = {"temperature": 0.7}  # no active_provider
+        basilisk_core._migrate_settings(merged, raw)
+        self.assertEqual(merged["active_provider"], "siliconflow")
+
+    def test_migration_heals_stuck_groq_when_siliconflow_key_present(self):
+        # Builds before the provider pin could auto-hop to Groq and persist it.
+        # The one-time self-heal restores the primary when a SiliconFlow key
+        # exists, and sets a marker so it runs only once.
+        merged = dict(basilisk_core.DEFAULT_SETTINGS)
+        merged["active_provider"] = "groq"
+        raw = {"active_provider": "groq", "siliconflow_api_key": "sk-x"}
+        basilisk_core._migrate_settings(merged, raw)
+        self.assertEqual(merged["active_provider"], "siliconflow")
+        self.assertTrue(merged["_provider_pin_normalized"])
+
+    def test_migration_respects_deliberate_groq_after_normalized(self):
+        # Once the marker is set, a deliberate Groq choice is always respected.
+        merged = dict(basilisk_core.DEFAULT_SETTINGS)
+        merged["active_provider"] = "groq"
+        raw = {"active_provider": "groq", "siliconflow_api_key": "sk-x",
+               "_provider_pin_normalized": True}
+        basilisk_core._migrate_settings(merged, raw)
+        self.assertEqual(merged["active_provider"], "groq")
+
+    def test_migration_keeps_groq_when_no_siliconflow_key(self):
+        # If Groq is the only key they have, don't strand them on a keyless
+        # primary — leave them on Groq.
+        merged = dict(basilisk_core.DEFAULT_SETTINGS)
+        merged["active_provider"] = "groq"
+        raw = {"active_provider": "groq"}  # no siliconflow key
         basilisk_core._migrate_settings(merged, raw)
         self.assertEqual(merged["active_provider"], "groq")
 
@@ -1041,6 +1069,29 @@ class TestMissionStopSignals(unittest.TestCase):
         self.assertTrue(basilisk_core.looks_degraded("a a a a a a a a a a"))
         self.assertFalse(basilisk_core.looks_degraded(
             "The login endpoint is vulnerable to SQL injection via the sort field."))
+
+    def test_strong_conclusion_stops_in_one_turn(self):
+        # decisive sign-offs end the run immediately (no verify round-trip)
+        for t in [
+            "Assessment complete. 22 vulnerabilities confirmed.",
+            "[[MISSION_COMPLETE]]",
+            "Nothing further to test on this target.",
+            "The objective has been achieved and verified.",
+            "That completes the engagement.",
+        ]:
+            self.assertTrue(basilisk_core.reply_is_strong_conclusion(t),
+                            f"should be a strong conclusion: {t!r}")
+
+    def test_weak_summary_is_not_a_strong_conclusion(self):
+        # a mid-report summary can precede more work → must NOT fast-stop
+        for t in [
+            "In summary, here is what I have found so far:",
+            "Here are the findings:",
+            "Let me check the admin routes next.",
+            "",
+        ]:
+            self.assertFalse(basilisk_core.reply_is_strong_conclusion(t),
+                             f"should NOT be a strong conclusion: {t!r}")
 
 
 if __name__ == "__main__":

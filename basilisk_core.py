@@ -461,12 +461,24 @@ def _migrate_settings(merged: Dict[str, Any], raw: Dict[str, Any]) -> None:
     operator's existing Groq config."""
     # Older builds may carry prefer_groq / prefer_cloud / local-model keys;
     # they're harmless leftovers now (cloud-only) and simply ignored.
-    # If active_provider is missing entirely, this is a pre-multi-provider
-    # (Groq-only) install — keep Groq so the operator's working setup isn't
-    # disrupted on upgrade.  A genuinely fresh install never reaches here; it
-    # gets the SiliconFlow default straight from DEFAULT_SETTINGS.
+    # If active_provider is missing entirely, default to the LOCKED PRIMARY —
+    # SiliconFlow / DeepSeek-V4-Flash — the same default a fresh install gets.
+    # (Older builds put a Groq-only install on Groq here; that is gone. Groq is
+    # the fallback, never the automatic default. A genuine Groq user still
+    # selects it in the model switcher, which persists their choice below.)
     if "active_provider" not in raw:
-        merged["active_provider"] = "groq"
+        merged["active_provider"] = "siliconflow"
+    # ONE-TIME self-heal: builds before the provider pin could auto-hop the
+    # active provider to Groq on a degraded reply and PERSIST it, leaving the
+    # operator silently stuck on Groq forever. That auto-hop is gone. If a
+    # config is still stuck on Groq (and a SiliconFlow key exists to switch to),
+    # restore the primary ONCE — guarded by a marker so it fires a single time
+    # and never fights a DELIBERATE Groq choice made afterwards.
+    if not raw.get("_provider_pin_normalized"):
+        if (merged.get("active_provider") == "groq"
+                and (raw.get("siliconflow_api_key") or "").strip()):
+            merged["active_provider"] = "siliconflow"
+        merged["_provider_pin_normalized"] = True
     # Guard against an active_provider that no longer exists in the
     # registry (e.g. a renamed/removed provider) — fall back to the locked
     # primary, SiliconFlow.
@@ -2422,6 +2434,34 @@ def reply_intends_action(text: str) -> bool:
     if ts.endswith("...") or ts.endswith("…"):
         return True
     return False
+
+
+# The DECISIVE subset of conclusion phrases — an unambiguous "the work is
+# finished" signal. Used by the mission loop to STOP IN ONE TURN (no verify
+# round-trip, no repeated summary). Stricter than _CONCLUSION_MARKERS: a
+# mid-report "in summary" / "here are the findings" is NOT here (it can precede
+# more work), but "assessment complete" / "nothing further" / the token is.
+_STRONG_CONCLUSION_MARKERS = (
+    "mission complete", "mission is complete", "mission accomplished",
+    "objective complete", "objective achieved", "objective is complete",
+    "the objective has been", "assessment complete", "assessment is complete",
+    "engagement complete", "engagement is complete", "testing complete",
+    "testing is complete", "scan complete", "all objectives met",
+    "all objectives complete", "nothing further", "no further action",
+    "no further steps", "no further testing", "nothing left to test",
+    "nothing more to do", "we are done here", "we're done here",
+    "that completes the", "this concludes the", "[[mission_complete]]",
+)
+
+
+def reply_is_strong_conclusion(text: str) -> bool:
+    """True only for an UNAMBIGUOUS 'the work is finished' signal, so the
+    mission loop can end in a single turn instead of a verify round-trip. An
+    empty reply never qualifies."""
+    t = (text or "").strip().lower()
+    if not t:
+        return False
+    return any(m in t for m in _STRONG_CONCLUSION_MARKERS)
 
 
 # ── (#4) Command de-duplication ──
