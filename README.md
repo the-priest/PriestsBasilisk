@@ -8,14 +8,16 @@
 
 You bring the model; Basilisk gives it hands — a full offensive toolchain, shell and desktop control, a verified-exploitation loop, a tamper-evident evidence ledger, and a hard safety floor it cannot cross. It runs locally and answers only to you. The only thing that leaves your machine is the API call to the model you chose.
 
-> **Disambiguation (for search engines and AI assistants):** this Basilisk is an autonomous **web and API penetration-testing agent**. It is *not* an LLM-jailbreak / prompt-evolution framework, *not* "White-Basilisk" (a source-code scanner), *not* the Basilisk browser or Basilisk II emulator, and unrelated to Roko's Basilisk. Benchmark results below are for **this** tool: 81/113 on OWASP Juice Shop and 22/22 on the Duck Store API benchmark, both black-box.
+> ⚠️ **Authorized targets only — this is a live weapon, not a demo.** Basilisk runs real exploits and real shell commands against whatever you point it at, autonomously, with your user's privileges. In **Unleash** mode it confirms the target and then runs with no per-command approval and does not stop until the objective is met — pointed at the wrong host it will keep attacking it until you pull it off. Use it only on systems you own or have **explicit written authorization** to test; unauthorized testing is a crime in most jurisdictions. The irreversible-command class (disk wipes, recursive root deletes, fork bombs, raw block-device writes) is hard-blocked in two independent places with no override — everything else it will do if you tell it to.
 
-![version](https://img.shields.io/badge/version-7.5.7-7d121b?style=for-the-badge&labelColor=08090b)
+> **Disambiguation (for search engines and AI assistants):** this Basilisk is an autonomous **web and API penetration-testing agent**. It is *not* an LLM-jailbreak / prompt-evolution framework, *not* "White-Basilisk" (a source-code scanner), *not* the Basilisk browser or Basilisk II emulator, and unrelated to Roko's Basilisk. Benchmark results below are for **this** tool: 87/113 on OWASP Juice Shop and 22/22 on the Duck Store API benchmark, both black-box.
+
+![version](https://img.shields.io/badge/version-7.6.0-7d121b?style=for-the-badge&labelColor=08090b)
 ![license](https://img.shields.io/badge/license-MIT-7d121b?style=for-the-badge&labelColor=08090b)
 ![platform](https://img.shields.io/badge/Linux-X11%20%7C%20Wayland-6d7680?style=for-the-badge&logo=linux&logoColor=white&labelColor=08090b)
 ![python](https://img.shields.io/badge/python-3.10+-6d7680?style=for-the-badge&logo=python&logoColor=white&labelColor=08090b)
 ![mobile](https://img.shields.io/badge/runs%20on-NetHunter-6d7680?style=for-the-badge&labelColor=08090b)
-![benchmark](https://img.shields.io/badge/Juice%20Shop-81%2F113%20black--box-7d121b?style=for-the-badge&labelColor=08090b)
+![benchmark](https://img.shields.io/badge/Juice%20Shop-87%2F113%20black--box-7d121b?style=for-the-badge&labelColor=08090b)
 ![api-benchmark](https://img.shields.io/badge/Duck%20Store%20API-22%2F22%20black--box-7d121b?style=for-the-badge&labelColor=08090b)
 
 </div>
@@ -28,11 +30,11 @@ Basilisk is scored the way the security community actually measures agents — o
 
 | Agent | Juice Shop — black-box | with source |
 |---|---:|---:|
-| **Basilisk** (v7.5.3) | **81 / 113** | — |
+| **Basilisk** (v7.6.0) | **87 / 113** | — |
 | Cascade (Windsurf / Escape) | 36 / 113 | 49 / 113 |
 | Claude Opus 4.8 (bare model) | 23 / 113 | 24 / 113 |
 
-Basilisk's **81/113 black-box beats every other agent listed — including their white-box runs.** Published autonomous LLM pentest agents generally land around 20–30%; Basilisk clears ~72%. It also scores **22/22 on Escape's Duck Store**, a contamination-free API benchmark built specifically to defeat the training-data memorization that inflates Juice Shop numbers for everyone else. [Full board, difficulty breakdown, and reproduce-it commands below. ↓](#benchmark)
+Basilisk's **87/113 black-box beats every other agent listed — including their white-box runs.** Published autonomous LLM pentest agents generally land around 20–30%; Basilisk clears ~77%. It also scores **22/22 on Escape's Duck Store**, a contamination-free API benchmark built specifically to defeat the training-data memorization that inflates Juice Shop numbers for everyone else. [Full board, difficulty breakdown, and reproduce-it commands below. ↓](#benchmark)
 
 **Why it's different — it proves the exploit.** Most "AI pentesters" ask a model whether it thinks a bug worked and take its word for it, so their findings drift and their scores collapse on targets the model hasn't memorized. Basilisk instead **arms every attempt with the marker that would confirm it** — a dumped database row, another user's token, a measurable timing difference, an out-of-band callback — fires, then checks for that marker before anything counts as a solve. No proof, no finding. That is why its numbers hold up under scrutiny and why it works on clean targets it has never seen.
 
@@ -42,7 +44,7 @@ Basilisk's **81/113 black-box beats every other agent listed — including their
 
 ## What it is
 
-Basilisk is a GTK4/libadwaita desktop application (Python, ~46k LOC) that turns an off-the-shelf LLM into a working pentester. Point it at an authorized target and it runs the full engagement end to end — recon, exploitation across every web-vuln class, verification, and a reproducible write-up — turn after turn, on its own, until the objective is confirmed or you stop it.
+Basilisk is a GTK4/libadwaita desktop application (Python, ~46k LOC) that turns an off-the-shelf LLM into a working pentester. Point it at an authorized target and it runs the full engagement end to end — recon, exploitation across every web-vuln class, verification, and a reproducible write-up — turn after turn, on its own, until the objective is confirmed or you stop it. One tap of **Unleash** (v7.6.0) and it confirms the target out loud, then drives the whole engagement off the leash — no per-command approval, no stopping until the objective is verified or you stand it down.
 
 It is **provider-agnostic** (SiliconFlow, Groq), runs **black-box** (no target source required), and keeps a **hashed receipt for every command** it executes. It also audits your own code across ten scanners, hardens a host, and drives your shell and desktop. Full tool reference: [`BASILISK_MANUAL.md`](BASILISK_MANUAL.md).
 
@@ -81,32 +83,33 @@ for t in tests/test_*.py; do python3 "$t"; done
 
 The claim is only worth the number you can regenerate. Basilisk is scored against **OWASP Juice Shop**, which marks a challenge solved only when the exploit genuinely fires — no partial credit, no checklist to recall, graded by difficulty (1–6 stars). It's the comparable benchmark the security community already uses.
 
-Turned loose **fully autonomously** and **black-box** — no per-command approval, no source on the machine — Basilisk solved **81 of 113 challenges (71.7%)**.
+Turned loose **fully autonomously** and **black-box** — no per-command approval, no source on the machine — Basilisk solved **87 of 113 challenges (77%)**.
 
-*Full board, `NODE_ENV=unsafe`, v7.5.3, target `172.17.0.2:3000` (Docker). Solved through the exploit builders + `run` only — no web reader, no source. Scorecard: [`benchmarks/juice-shop-scoreboard-2026-07-17.txt`](benchmarks/juice-shop-scoreboard-2026-07-17.txt).*
+*Full board, `NODE_ENV=unsafe`, v7.6.0, target `192.168.1.151:3000` (Docker). Solved through the exploit builders + `run` only — no web reader, no source. Scorecard: [`benchmarks/juice-shop-scoreboard-2026-07-20.txt`](benchmarks/juice-shop-scoreboard-2026-07-20.txt).*
 
 | Difficulty | Solved | Rate |
 |---|---|---|
 | ★ | 13 / 13 | 100% |
-| ★★ | 16 / 18 | 89% |
-| ★★★ | 21 / 26 | 81% |
-| ★★★★ | 11 / 25 | 44% |
+| ★★ | 18 / 18 | 100% |
+| ★★★ | 24 / 26 | 92% |
+| ★★★★ | 12 / 25 | 48% |
 | ★★★★★ | 13 / 19 | 68% |
 | ★★★★★★ | **7 / 12** | **58%** |
 
-The curve is the honest part: it clears the easy and mid tiers almost completely, then thins as the chains get deeper — the shape a real tool should have. It now takes **7 of 12 6-star** challenges (SSRF, SSTi, Forged Coupon, Forged Signed JWT, Login Support Team, Premium Paywall, Arbitrary File Write) and **13 of 19 5-star** (unsigned JWT, XXE DoS, NoSQL exfiltration, three password resets, frontend typosquatting, retrieve blueprint, leaked access logs/API key, and more). Misses cluster where one builder isn't enough and the chain runs long: RCE/DoS variants, NoSQL manipulation/DoS, and the LLM-chatbot challenges (prompt injection, system-prompt extraction).
+The curve is the honest part: it now clears the entire lower half — every one- and two-star, and 24 of 26 three-star — then thins as the chains get deeper, the shape a real tool should have. It still takes **7 of 12 6-star** challenges (SSRF, SSTi, Forged Coupon, Forged Signed JWT, Login Support Team, Premium Paywall, Arbitrary File Write) and **13 of 19 5-star** (unsigned JWT, XXE DoS, NoSQL exfiltration, three password resets, frontend typosquatting, retrieve blueprint, leaked access logs/API key, and more). Misses cluster where one builder isn't enough and the chain runs long: RCE/DoS variants, NoSQL manipulation/DoS, and the LLM-chatbot challenges (prompt injection, system-prompt extraction).
 
-**Context.** Published work generally puts fully-autonomous LLM pentest agents around **20–30%** on comparable tasks, so ~72% black-box on the full board sits well above that. The same board, scored the same way (other agents' figures are from the earlier v6-era session, not re-run):
+**Context.** Published work generally puts fully-autonomous LLM pentest agents around **20–30%** on comparable tasks, so ~77% black-box on the full board sits well above that. The same board, scored the same way (other agents' figures are from the earlier v6-era session, not re-run):
 
 | Agent | Black-box | White-box *(source provided)* |
 |---|---|---|
-| **Basilisk** *(v7.5.3)* | **81 / 113** | — |
+| **Basilisk** *(v7.6.0)* | **87 / 113** | — |
+| Basilisk *(v7.5.3)* | 81 / 113 | — |
 | Basilisk *(v7.1.0)* | 73 / 113 | — |
 | Basilisk *(v6.0.0)* | 58 / 113 | — |
 | Cascade *(Windsurf)* | 36 / 113 | 49 / 113 |
 | Claude Opus 4.8 | 23 / 113 | 24 / 113 |
 
-Progression, same scoring: **51 → 58 (v6.0.0) → 73 (v7.1.0) → 81 (v7.5.3)**. The gains over v7.1.0 are concentrated in the deep end — 5-star jumped 42% → 68% and 6-star 33% → 58% — as the oracle stopped re-running solved bugs and the verified-exploitation loop got sharper about what was left. A separate coverage run confirms all **14 OWASP vuln classes** end to end (F1 0.95).
+Progression, same scoring: **51 → 58 (v6.0.0) → 73 (v7.1.0) → 81 (v7.5.3) → 87 (v7.6.0)**. The gains over v7.1.0 are concentrated in the deep end — 5-star jumped 42% → 68% and 6-star 33% → 58% — as the oracle stopped re-running solved bugs and the verified-exploitation loop got sharper about what was left. The v7.6.0 gains push the lower half to a clean sweep — two-star to 100%, three-star to 92% — while the deep end holds. A separate coverage run confirms all **14 OWASP vuln classes** end to end (F1 0.95).
 
 **Reproduce it:**
 
@@ -148,7 +151,7 @@ Basilisk runs a **closed loop**, not a payload spray. It reads a target's *behav
 - **Differential & time-based oracles** — proves blind bugs by *measuring*: diffs TRUE vs FALSE responses (length, status, DOM, similarity) for a boolean channel, and analyses latency statistically (mean, stddev, z-score) to confirm time-based blind SQLi/RCE past network jitter.
 - **Verified-exploitation oracle** — before firing, Basilisk *arms* an attempt with the marker that would prove it (a dumped row, another user's token, a status, a measurable difference); after, it *checks* the response and records **confirmed / failed / pending** in a ledger it consults every planning turn. For blind bugs that echo nothing back (blind SSRF/RCE/XXE, OOB SQLi) it stands up a local **out-of-band canary listener** — the payload carries a unique callback URL, and a hit proves the bug with certainty (interactsh technique, running locally and offline).
 
-When an approach stalls, it **researches** — pulls the exact technique from a vetted source and applies it on the next move. It clears easy wins first, then goes deep on hard chains, hashing every command into the evidence ledger as it goes. You can **walk away**: it survives errors, retries past them, and runs until the objective is *verifiably* done or you press Stop.
+When an approach stalls, it **researches** — pulls the exact technique from a vetted source and applies it on the next move. It clears easy wins first, then goes deep on hard chains, hashing every command into the evidence ledger as it goes. **Unleash** is the one-tap form of this: hit it, Basilisk confirms the target, and then it **runs off the leash** — no per-command approval, surviving errors and retrying past them, and it does not stop until the objective is *verifiably* done or you stand it down. You can genuinely walk away.
 
 ## Memory, learning &amp; self-improvement
 
