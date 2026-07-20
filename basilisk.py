@@ -996,7 +996,14 @@ button.suggested-action {
 .chat-watermark { background: transparent; }
 /* Darker backdrop behind the dragon watermark -- reduces brightness only
    (a neutral scrim over the ember gradient), so the brighter dragon pops. */
-.chat-scrim { background-color: rgba(0, 0, 0, 0.45); }
+.chat-scrim { background-color: rgba(0, 0, 0, 0.62); }
+
+/* Tao Te Ching line under the chat list (sidebar) - quiet, muted, out of the way */
+.tao-quote {
+    color: #6d7680;
+    font-size: 11px;
+    font-style: italic;
+}
 
 /* Links (e.g. 'Get an API key') in Basilisk blue */
 link, button.link, *:link { color: #7d121b; }
@@ -4670,6 +4677,47 @@ class MainWindow(Adw.ApplicationWindow):
         sw.set_vexpand(True)
         sw.set_child(self.chat_listbox)
         sb.append(sw)
+
+        # A Tao Te Ching line under the chat list -- a different one is chosen
+        # each time the app launches (this runs once at window build).
+        import random as _rnd
+        _tao_lines = [
+            "The Tao that can be spoken is not the eternal Tao.",
+            "The journey of a thousand miles begins beneath one's feet.",
+            "He who knows others is wise; he who knows himself is enlightened.",
+            "He who conquers others is strong; he who conquers himself is mighty.",
+            "He who is contented is rich.",
+            "The soft and the yielding overcome the hard and the strong.",
+            "Nothing is softer than water, yet nothing is better at wearing down the hard.",
+            "He who knows does not speak; he who speaks does not know.",
+            "Do the difficult while it is easy; do the great while it is small.",
+            "The tree that fills a man's arms grew from a tiny sprout.",
+            "To know that you do not know is best.",
+            "The more the sage gives to others, the more he has.",
+            "Govern a great nation as you would cook a small fish.",
+            "The highest good is like water: it benefits all things and does not contend.",
+            "Fill your bowl to the brim and it will spill.",
+            "He who stands on tiptoe does not stand firm.",
+            "Manifest plainness, embrace simplicity, reduce selfishness, have few desires.",
+            "Returning to the root is stillness.",
+            "The sage puts himself last, and so finds himself in front.",
+            "Act without striving; work without meddling.",
+            "Knowing constancy is insight.",
+            "The way of Heaven is to benefit, and not to harm.",
+            "When the work is done, withdraw -- such is the way of Heaven.",
+            "A good traveler has no fixed plans and is not intent upon arriving.",
+        ]
+        _tao_lbl = Gtk.Label(label=_rnd.choice(_tao_lines))
+        _tao_lbl.add_css_class("tao-quote")
+        _tao_lbl.set_wrap(True)
+        _tao_lbl.set_justify(Gtk.Justification.CENTER)
+        _tao_lbl.set_xalign(0.5)
+        _tao_lbl.set_margin_top(10)
+        _tao_lbl.set_margin_bottom(12)
+        _tao_lbl.set_margin_start(14)
+        _tao_lbl.set_margin_end(14)
+        sb.append(_tao_lbl)
+
         return sb
 
     def _build_main(self):
@@ -4937,7 +4985,7 @@ class MainWindow(Adw.ApplicationWindow):
                 except Exception:
                     from gi.repository import Gio
                     tex = Gdk.Texture.new_from_file(Gio.File.new_for_path(path))
-                opacity = 0.9          # brighter — the dragon should read clearly
+                opacity = 0.5          # dimmed back so the scene sits behind the chat, not over it
             else:
                 tex = _svg_texture(path, 720)
                 opacity = 0.2
