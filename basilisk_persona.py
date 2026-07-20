@@ -1132,6 +1132,62 @@ _TARGET_RE = re.compile(
     r"\b[a-z0-9][a-z0-9-]*\.(?:com|net|org|io|dev|op|local|sh|xyz|me|co|app|"
     r"gov|edu|test|info|biz|cloud|api)\b")
 
+# The operator DRIVING an ongoing run — "do not stop", "don't stop until every
+# challenge is solved", "never stop till it's done", "keep going", "solve them
+# all". These are commands to PERSIST: the polar opposite of a question, and
+# they must force task/mission mode. This exists because several yes/no
+# question-starters ("do", "does", "did", "is", "will") live in _QUESTION_STARTS,
+# so a leading "DO NOT STOP …" would otherwise be read as a yes/no question,
+# flip the turn onto the direct-answer path, and silently end the autonomous run
+# — the exact "it stops two messages after I say DO NOT STOP" failure.
+_PERSIST_RE = re.compile(
+    r"(?:"
+    r"(?:do\s*n['’]?t|do\s+not|does\s+not|never|will\s+not|wo\s*n['’]?t|no\s+need\s+to)"
+    r"\s+(?:stop|halt|quit|pause|end|rest|wait|slow|give\s+up|check\s+in|ask\b)"
+    r"|keep\s+(?:going|at\s+it|attacking|pushing|working|on\s+it|hammering|grinding)"
+    r"|(?:carry|crack|press|power|soldier)\s+(?:on|through)"
+    r"|(?:until|till|til)\s+(?:every|all|each|it['’]?s|they|everything|the)\b"
+    r"|(?:until|till|til)\b[^.]{0,40}\b(?:solved|done|finished|complete|cleared|empty|pwned|gone)"
+    r"|(?:solve|clear|finish|complete|pwn|own)\s+(?:them\s+)?(?:all|every|each)\b"
+    r"|(?:every|all)\s+(?:the\s+|those\s+)?challenges?\b"
+    r")",
+    re.IGNORECASE,
+)
+# yes/no auxiliaries — if a message OPENS with one of these immediately followed
+# by a negation it's an imperative/statement, never a yes/no question.
+_YESNO_AUX = frozenset((
+    "do", "does", "did", "is", "are", "was", "were", "will", "would", "shall",
+    "should", "can", "could", "may", "might", "have", "has", "had", "am",
+))
+_NEG_CONTRACTIONS = frozenset((
+    "dont", "doesnt", "didnt", "wont", "cant", "couldnt", "wouldnt", "shant",
+    "shouldnt", "isnt", "arent", "wasnt", "werent", "havent", "hasnt", "hadnt",
+))
+
+
+def is_persistence_directive(text: str) -> bool:
+    """True when the operator is telling Basilisk to KEEP GOING rather than asking
+    a question. Forces task/mission mode (see _PERSIST_RE for why this is load-
+    bearing). High-precision: anchored so a mid-sentence "is not" can't trip it,
+    and the phrase set is persistence-specific, not any negation."""
+    raw = (text or "").strip()
+    if not raw:
+        return False
+    low = raw.lower().replace("’", "'")
+    if _PERSIST_RE.search(low):
+        return True
+    # Opening negated auxiliary → imperative/statement, not a question.
+    m = re.match(r"\s*(?:hey |hi |ok |okay |so |now |and |basilisk )*"
+                 r"([a-z']+)\s+([a-z']+)", low)
+    if m:
+        w1 = m.group(1).replace("'", "")
+        w2 = m.group(2)
+        if w1 in _NEG_CONTRACTIONS:
+            return True
+        if w1 in _YESNO_AUX and w2 in ("not", "never"):
+            return True
+    return False
+
 
 def direct_answer_turn(text: str) -> bool:
     """True when the message is a genuine QUESTION / informational request that
@@ -1146,6 +1202,12 @@ def direct_answer_turn(text: str) -> bool:
     """
     raw = (text or "").strip().lower()
     if not raw:
+        return False
+    # A command to KEEP GOING ("do not stop", "don't stop until every challenge
+    # is solved", "keep going") is never a question — force task/mission mode.
+    # Checked first so a leading yes/no auxiliary ("do"/"does"/"will") in the
+    # directive can't be misread as a question and end the run.
+    if is_persistence_directive(text):
         return False
     has_q = "?" in raw
     norm = re.sub(r"[^a-z0-9?]+", " ", raw).strip()
