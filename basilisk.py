@@ -1157,11 +1157,11 @@ link, button.link, *:link { color: #7d121b; }
    the emblem art carries its own carved-stone frame, so the button is
    transparent -- just a soft ember glow on hover, to match the rest. */
 .art-button {
-    background: transparent;
-    background-image: none;
-    border: none;
-    box-shadow: none;
-    padding: 2px;
+    background-color: rgba(12, 8, 9, 0.66);
+    background-image: linear-gradient(180deg, rgba(70, 24, 18, 0.24), rgba(9, 5, 6, 0) 66%);
+    border: 1px solid rgba(140, 26, 32, 0.50);
+    box-shadow: inset 0 1px 0 rgba(210, 90, 48, 0.07), 0 0 6px rgba(125, 18, 27, 0.20);
+    padding: 3px;
     border-radius: 12px;
     transition: all 150ms ease;
 }
@@ -1176,6 +1176,9 @@ link, button.link, *:link { color: #7d121b; }
 /* UNLEASH -- the big red dragon. A quiet ember when idle, a hot red glow when
    armed so it's unmistakable that Basilisk is off the leash. */
 .unleash-button {
+    background: transparent;
+    background-image: none;
+    border: none;
     border-radius: 999px;
     box-shadow: 0 0 6px rgba(205, 54, 28, 0.28);
 }
@@ -1195,11 +1198,11 @@ link, button.link, *:link { color: #7d121b; }
    inner button too: fully transparent, no border/shadow, ember glow on hover to
    match the plain art buttons. */
 menubutton.art-button > button {
-    background: transparent;
-    background-image: none;
-    border: none;
-    box-shadow: none;
-    padding: 2px;
+    background-color: rgba(12, 8, 9, 0.66);
+    background-image: linear-gradient(180deg, rgba(70, 24, 18, 0.24), rgba(9, 5, 6, 0) 66%);
+    border: 1px solid rgba(140, 26, 32, 0.50);
+    box-shadow: inset 0 1px 0 rgba(210, 90, 48, 0.07), 0 0 6px rgba(125, 18, 27, 0.20);
+    padding: 3px;
     min-width: 0;
     min-height: 0;
     border-radius: 12px;
@@ -1530,19 +1533,64 @@ headerbar {
 
 /* ---- Chat bubbles: charred body plus a breathing ember halo.  User and
         assistant flicker on different clocks so they never pulse in sync. ---- */
+.msg-user, .msg-assistant {
+    transition: box-shadow 240ms ease, border-color 240ms ease;
+}
 .msg-user {
-    background-color: rgba(30,12,8,0.55);
-    background-image: linear-gradient(0deg, rgba(150,50,16,0.12), rgba(60,18,8,0.05) 40%, rgba(0,0,0,0.0) 72%);
-    color: #f3e7de;
-    border: 1px solid rgba(190,72,28,0.50);
-    box-shadow: 0 0 13px rgba(205,70,22,0.34), inset 0 -7px 18px rgba(170,52,16,0.18);
+    color: #f5e9df;
+    border-radius: 16px 16px 4px 16px;
+    background-color: #0d0806;
+    background-image:
+        radial-gradient(ellipse at 92% -12%, rgba(226, 96, 34, 0.16), rgba(226, 96, 34, 0) 48%),
+        radial-gradient(ellipse at 4% 126%, rgba(150, 44, 14, 0.20), rgba(150, 44, 14, 0) 56%),
+        linear-gradient(0deg, rgba(150, 50, 16, 0.12), rgba(60, 18, 8, 0.05) 42%, rgba(0, 0, 0, 0.0) 74%);
+    border: 1px solid rgba(196, 78, 30, 0.54);
+    box-shadow:
+        inset 0 1px 0 rgba(240, 150, 90, 0.12),
+        inset 0 0 26px rgba(150, 46, 18, 0.16),
+        inset 0 -7px 18px rgba(170, 52, 16, 0.18),
+        0 0 0 1px rgba(0, 0, 0, 0.40),
+        0 8px 22px rgba(0, 0, 0, 0.50),
+        0 0 14px rgba(210, 72, 24, 0.30);
+    text-shadow: 0 0 9px rgba(220, 84, 34, 0.26), 0 1px 1px rgba(0, 0, 0, 0.55);
 }
 .msg-assistant {
-    background-color: rgba(22,9,7,0.55);
-    background-image: linear-gradient(0deg, rgba(170,55,16,0.11), rgba(70,20,8,0.05) 40%, rgba(0,0,0,0.0) 72%);
-    color: #f1e6de;
-    border: 1px solid rgba(175,56,22,0.48);
-    box-shadow: 0 0 13px rgba(198,64,20,0.32), inset 0 -7px 18px rgba(160,48,15,0.17);
+    color: #f2e7de;
+    border-radius: 4px 16px 16px 16px;
+    background-color: #0b0706;
+    background-image:
+        radial-gradient(ellipse at 6% -12%, rgba(206, 58, 28, 0.16), rgba(206, 58, 28, 0) 46%),
+        radial-gradient(ellipse at 104% 128%, rgba(130, 24, 26, 0.20), rgba(130, 24, 26, 0) 56%),
+        linear-gradient(0deg, rgba(170, 55, 16, 0.11), rgba(70, 20, 8, 0.05) 42%, rgba(0, 0, 0, 0.0) 74%);
+    border: 1px solid rgba(182, 58, 30, 0.52);
+    box-shadow:
+        inset 0 1px 0 rgba(232, 132, 80, 0.11),
+        inset 0 0 28px rgba(150, 40, 22, 0.16),
+        inset 0 -7px 18px rgba(160, 48, 15, 0.17),
+        0 0 0 1px rgba(0, 0, 0, 0.40),
+        0 8px 22px rgba(0, 0, 0, 0.50),
+        0 0 14px rgba(196, 60, 26, 0.28);
+    text-shadow: 0 0 9px rgba(202, 62, 34, 0.25), 0 1px 1px rgba(0, 0, 0, 0.55);
+}
+.msg-user:hover {
+    border-color: rgba(226, 96, 40, 0.72);
+    box-shadow:
+        inset 0 1px 0 rgba(240, 150, 90, 0.14),
+        inset 0 0 30px rgba(160, 50, 20, 0.20),
+        inset 0 -7px 18px rgba(180, 56, 18, 0.20),
+        0 0 0 1px rgba(0, 0, 0, 0.40),
+        0 10px 26px rgba(0, 0, 0, 0.52),
+        0 0 24px rgba(226, 84, 30, 0.48);
+}
+.msg-assistant:hover {
+    border-color: rgba(210, 66, 34, 0.72);
+    box-shadow:
+        inset 0 1px 0 rgba(232, 132, 80, 0.13),
+        inset 0 0 32px rgba(160, 44, 24, 0.20),
+        inset 0 -7px 18px rgba(170, 52, 18, 0.19),
+        0 0 0 1px rgba(0, 0, 0, 0.40),
+        0 10px 26px rgba(0, 0, 0, 0.52),
+        0 0 24px rgba(212, 66, 30, 0.46);
 }
 
 /* ---- The status line, reborn as a burning bar.  A flame gradient taller
