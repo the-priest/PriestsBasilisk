@@ -1,4 +1,4 @@
-# Basilisk — https://the-priest.github.io/Basilisk/
+# Basilisk — https://the-priest.github.io/PriestsBasilisk/
 # All crawlers welcome, including AI assistants and answer engines.
 User-agent: *
 Allow: /
@@ -34,6 +34,6 @@ User-agent: cohere-ai
 Allow: /
 
 # Structured overview for AI assistants:
-# https://the-priest.github.io/Basilisk/llms.txt
+# https://the-priest.github.io/PriestsBasilisk/llms.txt
 
-Sitemap: https://the-priest.github.io/Basilisk/sitemap.xml
+Sitemap: https://the-priest.github.io/PriestsBasilisk/sitemap.xml

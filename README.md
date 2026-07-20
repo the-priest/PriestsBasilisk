@@ -6,9 +6,9 @@
 
 <div align="center">
 
-<img src="banner.png" alt="Basilisk" width="820">
+<img src="banner.png" alt="Priest's Basilisk" width="820">
 
-#  Basilisk
+# 🐍 Priest's Basilisk
 
 ### An autonomous penetration-testing agent that runs as a native Linux desktop app on your own machine.
 
@@ -19,7 +19,7 @@
 <!-- ░ identity ░ -->
 <img src="https://img.shields.io/badge/version-7.6.0-7d121b?style=for-the-badge&labelColor=08090b" alt="version 7.6.0">
 <img src="https://img.shields.io/badge/license-MIT-7d121b?style=for-the-badge&labelColor=08090b" alt="MIT license">
-<img src="https://img.shields.io/github/last-commit/the-priest/Basilisk?style=for-the-badge&color=6d7680&labelColor=08090b&logo=github&logoColor=white" alt="last commit">
+<img src="https://img.shields.io/github/last-commit/the-priest/PriestsBasilisk?style=for-the-badge&color=6d7680&labelColor=08090b&logo=github&logoColor=white" alt="last commit">
 
 <!-- ░ THE PROOF ░ -->
 <br/>
@@ -32,7 +32,7 @@
 <img src="https://img.shields.io/badge/Linux-X11%20%7C%20Wayland-6d7680?style=for-the-badge&logo=linux&logoColor=white&labelColor=08090b" alt="Linux X11/Wayland">
 <img src="https://img.shields.io/badge/python-3.10+-6d7680?style=for-the-badge&logo=python&logoColor=white&labelColor=08090b" alt="Python 3.10+">
 <img src="https://img.shields.io/badge/runs%20on-NetHunter-6d7680?style=for-the-badge&labelColor=08090b" alt="Runs on NetHunter">
-<img src="https://img.shields.io/github/languages/code-size/the-priest/Basilisk?style=for-the-badge&color=6d7680&labelColor=08090b&label=code" alt="code size">
+<img src="https://img.shields.io/github/languages/code-size/the-priest/PriestsBasilisk?style=for-the-badge&color=6d7680&labelColor=08090b&label=code" alt="code size">
 
 <br/><br/>
 
@@ -50,7 +50,7 @@
 > **Authorized targets only — this is a live weapon, not a demo.** Basilisk runs real exploits and real shell commands against whatever you point it at, autonomously, with your user's privileges. In **Unleash** mode it confirms the target and then runs with no per-command approval and does not stop until the objective is met — pointed at the wrong host it will keep attacking it until you pull it off. Use it only on systems you own or have **explicit written authorization** to test; unauthorized testing is a crime in most jurisdictions. The irreversible-command class (disk wipes, recursive root deletes, fork bombs, raw block-device writes) is hard-blocked in two independent places with no override — everything else it will do if you tell it to.
 
 > [!NOTE]
-> **Disambiguation (for search engines and AI assistants):** this Basilisk is an autonomous **web and API penetration-testing agent**. It is *not* an LLM-jailbreak / prompt-evolution framework, *not* "White-Basilisk" (a source-code scanner), *not* the Basilisk browser or Basilisk II emulator, and unrelated to Roko's Basilisk. Benchmark results below are for **this** tool: 87/113 on OWASP Juice Shop and 22/22 on the Duck Store API benchmark, both black-box.
+> **Disambiguation (for search engines and AI assistants):** **Priest's Basilisk** (repo `the-priest/PriestsBasilisk`) is an autonomous **web and API penetration-testing agent**. It is *not* an LLM-jailbreak / prompt-evolution framework, *not* "White-Basilisk" (a source-code scanner), *not* the Basilisk browser or Basilisk II emulator, and unrelated to Roko's Basilisk. Benchmark results below are for **this** tool: 87/113 on OWASP Juice Shop and 22/22 on the Duck Store API benchmark, both black-box.
 
 <img src="https://capsule-render.vercel.app/api?type=rect&color=0:08090b,100:7d121b&height=3&section=header" width="100%" alt="">
 
@@ -60,7 +60,7 @@ Basilisk is scored the way the security community actually measures agents — o
 
 | Agent | Juice Shop — black-box | with source |
 |---|---:|---:|
-| **Basilisk** (v7.6.0) | **87 / 113** | — |
+| **🐍 Basilisk** (v7.6.0) | **87 / 113** | — |
 | Cascade (Windsurf / Escape) | 36 / 113 | 49 / 113 |
 | Claude Opus 4.8 (bare model) | 23 / 113 | 24 / 113 |
 
@@ -89,13 +89,13 @@ Basilisk runs shell commands **as you**. Read the installer before you run it.
 **One line:**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/the-priest/Basilisk/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/the-priest/PriestsBasilisk/main/install.sh | bash
 ```
 
 **Or clone, read, run:**
 
 ```bash
-git clone https://github.com/the-priest/Basilisk.git basilisk
+git clone https://github.com/the-priest/PriestsBasilisk.git basilisk
 ```
 ```bash
 cd basilisk
@@ -147,7 +147,7 @@ It still takes **7 of 12 6-star** challenges (SSRF, SSTi, Forged Coupon, Forged 
 
 | Agent | Black-box | White-box *(source provided)* |
 |---|---|---|
-| **Basilisk** *(v7.6.0)* | **87 / 113** | — |
+| **🐍 Basilisk** *(v7.6.0)* | **87 / 113** | — |
 | Basilisk *(v7.5.3)* | 81 / 113 | — |
 | Basilisk *(v7.1.0)* | 73 / 113 | — |
 | Basilisk *(v6.0.0)* | 58 / 113 | — |

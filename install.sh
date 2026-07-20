@@ -29,11 +29,11 @@
 #   ./install.sh --no-prompt         # skip ALL interactive prompts
 #
 # Env overrides:
-#   BASILISK_REPO=the-priest/Basilisk  BASILISK_BRANCH=main  ./install.sh
+#   BASILISK_REPO=the-priest/PriestsBasilisk  BASILISK_BRANCH=main  ./install.sh
 #   GROQ_API_KEY=gsk_...        ./install.sh    # preset key, no prompt
 #
 # One-liner install from GitHub:
-#   curl -fsSL https://raw.githubusercontent.com/the-priest/Basilisk/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/the-priest/PriestsBasilisk/main/install.sh | bash
 #
 
 set -eo pipefail   # NOTE: no -u — curl|bash leaves BASH_SOURCE empty
@@ -117,7 +117,7 @@ OPTIONAL_FILES=(org.thepriest.basilisk.svg basilisk-dragon.svg basilisk-watermar
 EXT_FILES=(__init__.py bench.py codescan.py engage.py exploits.py extman.py foresight.py headroom.py mcp.py memory.py \
            oracle.py juiceshop.py pentest.py reach.py sandbox.py skills.py verify.py webshield.py worker.py xbow.py \
            zdayfind.py)
-GITHUB_REPO="${BASILISK_REPO:-the-priest/Basilisk}"
+GITHUB_REPO="${BASILISK_REPO:-the-priest/PriestsBasilisk}"
 GITHUB_BRANCH="${BASILISK_BRANCH:-main}"
 
 # How to re-invoke this installer in the hints we print.  Under `curl|bash`
