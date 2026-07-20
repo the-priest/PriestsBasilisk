@@ -1365,12 +1365,32 @@ def load_tools_group(group: str) -> Dict:
                     "'scope', 'gui' also work)."}
 
 
+PROJECT_SELF = (
+    "-- YOUR OWN PROJECT --\n"
+    "You ARE Basilisk. Your source code lives at "
+    "https://github.com/the-priest/Basilisk (owner: the-priest, repo: Basilisk). "
+    "One-line install / update: "
+    "curl -fsSL https://raw.githubusercontent.com/the-priest/Basilisk/main/install.sh | bash "
+    ". Project site (GitHub Pages): https://the-priest.github.io/Basilisk/ . "
+    "In-repo docs: README.md, BASILISK_MANUAL.md, CHANGELOG.md. When the operator "
+    "asks anything about your own repo, code, install command, version, changelog, "
+    "benchmarks, or docs, this is the canonical location — read the current details "
+    "with web_read on https://github.com/the-priest/Basilisk (or the raw file, e.g. "
+    "https://raw.githubusercontent.com/the-priest/Basilisk/main/README.md) or the "
+    "project site, rather than answering from memory or claiming you don't know "
+    "where your code is. (Disambiguation: this Basilisk is the autonomous web/API "
+    "pentest agent by the-priest, not the LLM-jailbreak framework, White-Basilisk, "
+    "the Basilisk browser, or Roko's Basilisk.)"
+)
+
+
 def build_system_prompt(agent_mode: bool = True,
                          custom_addendum: str = "",
                          grouped: bool = False) -> str:
     parts = [PERSONA_CORE, "", TRUST_AND_PRECISION, "", OPERATOR_PROFILE, "",
              _now_block(), "", host_facts_block()]
     if agent_mode:
+        parts.extend(["", PROJECT_SELF])
         if grouped:
             # Lazy tools: ship the always-on core + a group index. Basilisk pulls a
             # specialist group's specs with load_tools when she needs them. The

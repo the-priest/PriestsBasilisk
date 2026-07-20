@@ -6362,34 +6362,51 @@ class MainWindow(Adw.ApplicationWindow):
                 "reply, you go full send. Seek no approval beyond confirming the "
                 "target.]").strip()
             self.terminal_log("🎯 unleash: confirming target", "dim")
-        # A question must never grind into a tool chain. Autonomous mode is
-        # uncapped for MISSIONS (relentless by design), but a question has no
-        # mission machinery to stop a runaway chain — and _feed_tool_result keeps
-        # re-kicking as long as the model calls tools. So cap it: after a few tool
-        # round-trips on a question, lock tools and force the answer THIS turn.
-        if _answer_only and self._tool_chain_depth > 4 and not self._tools_locked:
+        # ANSWER MODE (leashed) is a research-and-confirm SINGLE answer, not a
+        # one-shot memory dump: it may chain web_search / web_read / github as
+        # many times as it needs to actually find and verify the answer, then
+        # give ONE reply and stop. Only a runaway (a model that keeps calling
+        # tools without converging) needs breaking, so the cap is generous — lock
+        # tools and force the answer only after answer_tool_budget round-trips.
+        _ans_cap = self.settings.get("answer_tool_budget", 18)
+        if _answer_only and self._tool_chain_depth > _ans_cap and not self._tools_locked:
             self._tools_locked = True
-            addendum = (addendum + "\n\n[You've already used several tools on "
-                        "this question. Do NOT call any more tools — give your "
-                        "best, complete answer NOW from what you already have.]"
+            addendum = (addendum + "\n\n[You've used a lot of tools on this "
+                        "question without converging. Do NOT call any more — give "
+                        "your best, complete answer NOW from what you've gathered, "
+                        "and say plainly if any part is still unverified.]"
                         ).strip()
-            self.terminal_log("── question tool-cap reached; answering now", "dim")
-        if self.settings.get("approval_mode", "none") == "none" and _answer_only:
-            addendum = (addendum + "\n\n[AUTONOMOUS MODE — but THIS turn is a "
-                "QUESTION, not a task. The operator asked something; give them "
-                "the answer, don't launch an operation.\n"
-                "- Act directly if you do act: never use `propose`/`propose_edit` "
-                "cards; if you genuinely need one tool to answer (e.g. read a "
-                "file, look up one fact, run a single check), call it directly.\n"
-                "- Use AT MOST ONE tool — and only if you truly can't answer from "
-                "what you already know. If you can just answer, just answer.\n"
-                "- Then STOP. Do NOT chain tool calls, do NOT keep firing, do NOT "
-                "treat this as a mission to grind on. Ending your turn after a "
-                "complete answer is correct and expected here — there is no "
-                "completion token to emit, just answer and stop.\n"
-                "- Answer fully and concretely (this is an expert operator — be "
-                "technical and direct), but don't pad it into an essay.]").strip()
-            self.terminal_log("💬 direct-answer: question, not a mission", "dim")
+            self.terminal_log("── answer tool-cap reached; answering now", "dim")
+        if _answer_only:
+            addendum = (addendum + "\n\n[ANSWER MODE (leashed) — THIS turn is a "
+                "QUESTION / request, not an autonomous operation. Deliver ONE "
+                "complete, correct, verified answer, then STOP.\n"
+                "- CONFIRM, don't recall. Do NOT answer from memory for anything "
+                "that can change or is checkable: news, current events, prices, "
+                "software versions/releases, who currently holds a role, dates, "
+                "statistics, documentation, or anything about a specific project "
+                "or repo (including your own). SEARCH and READ the primary source "
+                "before you state it; if you can't verify something, say so "
+                "instead of guessing.\n"
+                "- You have UNRESTRICTED web here (no approval needed in this "
+                "mode): web_read fetches ANY public page in full — read the "
+                "primary source, docs, a GitHub page, a vendor blog, a news "
+                "article, anything. When you don't already have a URL, SEARCH by "
+                "reading a results page and following its links: web_read "
+                "\"https://html.duckduckgo.com/html/?q=YOUR+QUERY\" (or Wikipedia, "
+                "or the site's own search), then web_read the best result links in "
+                "full. Use image_search to show pictures. Chain as many reads as it "
+                "takes — there is NO small tool limit to stop short for. Keep going "
+                "until you've actually found and confirmed the answer.\n"
+                "- CITE what you used: name the source or paste the link so the "
+                "operator can check it, and prefer the most recent authoritative "
+                "one.\n"
+                "- Act directly, never via `propose`/`propose_edit` cards.\n"
+                "- When you have the verified answer, give it once — technical and "
+                "direct for an expert operator, no padding — and END your turn. Do "
+                "NOT latch a mission or keep grinding after answering; there is no "
+                "completion token here, just answer and stop.]").strip()
+            self.terminal_log("💬 answer mode: research, confirm, answer once", "dim")
         elif self.settings.get("approval_mode", "none") == "none":
             addendum = (addendum + "\n\n[AUTONOMOUS MODE — THIS OVERRIDES ANY "
                 "CONFLICTING INSTRUCTION ABOVE. The operator turned this on to "
@@ -8380,13 +8397,21 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _web_read_gated(self, url: str, max_chars: int):
         """Access gate for web_read, enforced HERE in code (never left to the
-        model): TRUSTED sources fetch immediately; ANY OTHER public host (GitHub,
-        Wikipedia, a vendor blog, a random site) is held OUTSIDE the autonomous
-        loop — it fetches only if the operator granted the domain this session,
-        otherwise it raises a non-blocking approval request (notification + Allow
-        button) and the agent is told to carry on without it. Internal / private
-        / metadata hosts are refused by tool_web_read regardless (SSRF floor)."""
-        if web_read_tier(url) == "community":
+        model).
+
+        LEASHED (normal) mode: the operator is in the loop for every single turn
+        and Basilisk gives one answer and stops, so the prompt-injection risk the
+        community gate defends against is minimal — read ANY public page directly
+        (GitHub, a vendor blog, a news site, any URL) so research is unrestricted.
+
+        UNLEASHED (autonomous) mode: the gate holds — TRUSTED sources fetch
+        immediately; any OTHER public host is held outside the autonomous loop and
+        needs a one-tap Allow, so a compromised page can't redirect a relentless
+        run to an unvetted host on its own.
+
+        Either mode: internal / private / metadata hosts are refused by
+        tool_web_read regardless (SSRF floor — no approval overrides that)."""
+        if self._unleashed and web_read_tier(url) == "community":
             dom = self._web_grant_domain(self._url_host(url))
             if dom and dom not in self._web_grants:
                 self._request_web_approval(dom, url)
@@ -8395,14 +8420,14 @@ class MainWindow(Adw.ApplicationWindow):
                     "pending_approval": True,
                     "host": dom,
                     "error": (
-                        f"'{dom}' isn't on the trusted-source list, so it's held "
-                        "outside the autonomous loop and I can't read it on my "
-                        "own. I've put an access request in the notifications "
-                        "bell — the operator can Allow it (which unlocks that "
-                        "domain for the rest of this session) or ignore it. It is "
-                        "NOT auto-granted: I'll continue without it and look for "
-                        "another way. Don't re-request it in a loop — move on, "
-                        "and if it gets approved I'll be able to read it."),
+                        f"'{dom}' isn't on the trusted-source list, so while "
+                        "UNLEASHED it's held outside the autonomous loop and I "
+                        "can't read it on my own. I've put an access request in "
+                        "the notifications bell — the operator can Allow it (which "
+                        "unlocks that domain for the rest of this session) or "
+                        "ignore it. It is NOT auto-granted: I'll continue without "
+                        "it and look for another way. Don't re-request it in a "
+                        "loop — move on, and if it gets approved I'll read it."),
                 }
         return tool_web_read(url, max_chars)
 
