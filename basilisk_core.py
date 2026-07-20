@@ -3492,12 +3492,47 @@ _WR_WS_RE = re.compile(r"[ \t\u00a0]+")
 _WR_NL_RE = re.compile(r"\n\s*\n\s*\n+")
 
 
+def _wr_unwrap_ddg(u: str) -> str:
+    """DuckDuckGo wraps every result link as `//duckduckgo.com/l/?uddg=<real>`.
+    Return the real destination so the model gets a directly-followable URL
+    (and doesn't have to guess one)."""
+    try:
+        import urllib.parse as _up
+        if "duckduckgo.com/l/" in u and "uddg=" in u:
+            q = _up.parse_qs(_up.urlparse(u).query)
+            if q.get("uddg"):
+                return _up.unquote(q["uddg"][0])
+    except Exception:
+        pass
+    return u
+
+
 def _wr_html_to_text(html_src: str) -> str:
-    """Compact HTML → readable text: drop script/style/head, turn block-closers
-    into newlines, strip remaining tags, unescape entities, collapse
-    whitespace.  Enough to actually read an advisory or a doc page."""
+    """Compact HTML → readable text: drop script/style/head, KEEP anchor URLs so
+    the model gets real followable/citable links (search results, advisories,
+    references) instead of just link text, turn block-closers into newlines,
+    strip remaining tags, unescape entities, collapse whitespace.  Enough to
+    actually read an advisory or a doc page — and to follow a search result."""
     import html as _h
     s = re.sub(r"(?is)<(script|style|noscript|svg|head)[^>]*>.*?</\1>", " ", html_src)
+
+    # Preserve links BEFORE stripping tags: <a href="URL">TEXT</a> -> "TEXT (URL)".
+    # Unwrap DuckDuckGo redirect wrappers to the real destination; skip empty /
+    # on-page / javascript / mailto anchors. This is the difference between the
+    # model getting real result URLs and having to invent them.
+    def _a(m):
+        href = _h.unescape(m.group(1)).strip()
+        txt = _WR_WS_RE.sub(" ", _h.unescape(re.sub(r"<[^>]+>", " ", m.group(2)))).strip()
+        if not href or href.startswith(("#", "javascript:", "mailto:", "tel:")):
+            return " " + txt + " "
+        if href.startswith("//"):
+            href = "https:" + href
+        href = _wr_unwrap_ddg(href)
+        if not txt or txt == href:
+            return " " + href + " "
+        return f" {txt} ({href}) "
+    s = re.sub(r'(?is)<a\b[^>]*\bhref\s*=\s*["\']([^"\']+)["\'][^>]*>(.*?)</a>', _a, s)
+
     s = re.sub(r"(?i)<(br|/p|/div|/li|/tr|/h[1-6]|/section)\s*/?>", "\n", s)
     s = _WR_TAG_RE.sub(" ", s)
     s = _h.unescape(s)
