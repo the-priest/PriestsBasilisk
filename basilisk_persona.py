@@ -1042,14 +1042,40 @@ def conversational_turn(text: str) -> bool:
     if not norm:
         return True  # just her name / a greeting + name
     words = norm.split()
-    if len(words) > 16:               # longer messages usually carry a task
+    # Peel leading acknowledgment / filler ("ok", "so", "yeah", "cool", "sure",
+    # "right", "please"...) -- these commonly PREFIX a real request ("ok show me
+    # my ip", "yeah whats running"); on their own they're just chatter. What is
+    # LEFT after peeling is what actually decides whether this is small talk.
+    i = 0
+    while i < len(words) and words[i] in _LEAD_FILLER:
+        i += 1
+    core = words[i:]
+    if not core:
+        return True                    # nothing but filler / a bare greeting
+    if len(core) > 16:                 # longer messages usually carry a task
         return False
-    padded = " " + norm + " "
+    padded = " " + " ".join(core) + " "
+    # Any explicit action / system keyword => a real request; keep the toolset.
     if any((" " + h.strip() + " ") in padded for h in _ACTION_HINTS):
         return False
-    for m in _CHAT_MARKERS:
-        if (" " + m + " ") in padded:
-            return True
+    # Whole-phrase social markers ("how are you", "what do you think", "who are
+    # you") are genuine small talk even though they open with a question word.
+    _social_phrase = any(
+        (" " + m + " ") in padded for m in _CHAT_MARKERS if " " in m)
+    if _social_phrase:
+        return True
+    # A leading question word ("what/how/why/where/is/are/do/can/should"...) means
+    # the user wants an ANSWER that may need a tool ("whats my ip", "whats
+    # running", "is 8080 open") -- keep the toolset rather than stripping it and
+    # forcing a describe-only, copy-this-command reply.
+    if core[0] in _QUESTION_STARTS:
+        return False
+    # Otherwise this is only conversational if EVERY remaining word is itself a
+    # social / chat / filler token (a bare "thanks", "cool cool", "yeah nice").
+    # A single substantive word among them means it's a real request -> keep the
+    # toolset so Basilisk can act instead of suggesting.
+    if all(w in _CHAT_MARKERS or w in _LEAD_FILLER for w in core):
+        return True
     return False
 
 
