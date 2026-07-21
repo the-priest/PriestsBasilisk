@@ -1000,9 +1000,10 @@ button.suggested-action {
 
 /* Tao Te Ching line under the chat list (sidebar) - quiet, muted, out of the way */
 .tao-quote {
-    color: #6d7680;
-    font-size: 11px;
+    color: #c2b28a;
+    font-size: 19px;
     font-style: italic;
+    line-height: 1.5;
 }
 
 /* Links (e.g. 'Get an API key') in Basilisk blue */
@@ -2465,6 +2466,87 @@ def _find_priest_png() -> Optional[str]:
 _PRIEST_PNG_PATH = _find_priest_png()
 
 
+# ── Arcane seal drawn faintly on each Basilisk reply (SVG -> always renders,
+#    no font dependency, so the "ancient sign" actually shows up). ──
+def _find_sigil_svg() -> Optional[str]:
+    for p in (os.path.expanduser("~/.local/share/basilisk/basilisk-sigil.svg"),
+              os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           "basilisk-sigil.svg")):
+        if os.path.isfile(p):
+            return p
+    return None
+
+
+_MSG_SIGIL_PATH = _find_sigil_svg()
+_MSG_SIGIL_TEX = None
+
+
+def _build_msg_sigil():
+    """A small, faint arcane sigil for the corner of a Basilisk reply. Cached
+    texture, non-interactive, never touches the streamed text. None if absent."""
+    global _MSG_SIGIL_TEX
+    if not _MSG_SIGIL_PATH:
+        return None
+    try:
+        if _MSG_SIGIL_TEX is None:
+            _MSG_SIGIL_TEX = _svg_texture(_MSG_SIGIL_PATH, 96)
+        if _MSG_SIGIL_TEX is None:
+            return None
+        pic = Gtk.Picture.new_for_paintable(_MSG_SIGIL_TEX)
+        pic.set_can_target(False)
+        pic.set_size_request(32, 32)
+        pic.set_halign(Gtk.Align.END)
+        pic.set_valign(Gtk.Align.END)
+        pic.set_margin_end(9)
+        pic.set_margin_bottom(7)
+        pic.set_opacity(0.5)
+        try:
+            pic.set_content_fit(Gtk.ContentFit.CONTAIN)
+        except Exception:
+            pass
+        pic.add_css_class("msg-sigil")
+        return pic
+    except Exception:
+        return None
+
+
+# ── HARD anti-hallucination gate (code-side): flag any question that turns on
+#    CURRENT / checkable facts, so the model is FORCED to verify online instead
+#    of answering from possibly-stale training. Deliberately eager: a needless
+#    search is cheap; a confident wrong memory answer is the failure we prevent.
+_VERIFY_MARKERS = (
+    "latest", "newest", "current", "currently", "today", "recent", "recently",
+    "as of", "up to date", "up-to-date", "nowadays", "these days", "this year",
+    "this month", "this week", "right now", "at the moment", "version",
+    "release", "released", "changelog", "release date", "price", "cost",
+    "how much is", "how much does", "worth", "market cap", "valuation",
+    "stock", "exchange rate", "who is the", "who's the", "ceo of",
+    "president of", "prime minister", "leader of", "score", "standings",
+    "weather", "forecast", "news", "when did", "when will", "when is the",
+    "still active", "still alive", "still around", "still maintained",
+    "deprecated", "end of life", "eol", "supported", "discontinued",
+    "new version", "update on", "status of", "did they release",
+    "latest version", "most recent", "as recent", "how old is",
+    "out yet", "released yet", "available yet", "is out", "came out",
+    "come out", "is there a new", "has there been", "any new",
+)
+
+
+def _needs_web_verification(text: str) -> bool:
+    """True when a question's answer depends on the present state of the world
+    and must be confirmed online rather than recalled from training."""
+    t = " " + (text or "").lower().strip() + " "
+    if len(t) < 5:
+        return False
+    if any(m in t for m in _VERIFY_MARKERS):
+        return True
+    # A year at/after the training era ("in 2025", "2026 roadmap") almost always
+    # implies a current-state query.
+    if re.search(r"\b20(2[4-9]|[3-9]\d)\b", t):
+        return True
+    return False
+
+
 def _svg_texture(path: str, px: int):
     """Rasterise an SVG file to a px-by-px Gdk.Texture using the pixbuf SVG
     loader (CPU / cairo).  Returns None on any failure.
@@ -2725,7 +2807,19 @@ class MessageWidget(Gtk.Box):
             # label's max-width-chars cap still wraps long replies.
             inner.set_halign(Gtk.Align.START)
             inner.set_hexpand(False)
-            content_box.append(inner)
+            # Arcane seal: a faint sigil in the corner of every Basilisk reply.
+            # Overlaid, non-interactive -> never touches the streamed text, which
+            # still targets `inner` (self._blocks_container below). No-op if the
+            # sigil art isn't on disk.
+            _seal = _build_msg_sigil()
+            if _seal is not None:
+                _seal_ov = Gtk.Overlay()
+                _seal_ov.set_halign(Gtk.Align.START)
+                _seal_ov.set_child(inner)
+                _seal_ov.add_overlay(_seal)
+                content_box.append(_seal_ov)
+            else:
+                content_box.append(inner)
             # Read-aloud control sits UNDERNEATH the message (left-aligned),
             # where it's easy to reach, rather than off on the far right.
             if self._on_speak is not None:
@@ -6485,6 +6579,19 @@ class MainWindow(Adw.ApplicationWindow):
                         ).strip()
             self.terminal_log("── answer tool-cap reached; answering now", "dim")
         if _answer_only:
+            if _needs_web_verification(_opening_user):
+                addendum = (addendum + "\n\n[!!! CHECK ONLINE FIRST -- this "
+                    "question is about current or checkable facts, and your "
+                    "training data may be OUT OF DATE. You are FORBIDDEN from "
+                    "answering it from memory. Your FIRST action MUST be to "
+                    "web_read a primary source (or web_read a search-results "
+                    "page and follow the best link), READ it, then answer from "
+                    "what you actually read and cite it. Do NOT state a version, "
+                    "date, price, name, score, or 'latest' anything from memory. "
+                    "If after searching you still cannot confirm it, say plainly "
+                    "that you could not verify it -- never guess. A confident "
+                    "answer from memory here is a hallucination and is wrong.]"
+                    ).strip()
             addendum = (addendum + "\n\n[ANSWER MODE (leashed) — THIS turn is a "
                 "QUESTION / request, not an autonomous operation. Deliver ONE "
                 "complete, correct, verified answer, then STOP.\n"
