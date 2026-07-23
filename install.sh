@@ -322,35 +322,65 @@ fi
 # but installing them up front means "do anything I ask" works on day
 # one.  This step is best-effort: failures here never abort the install.
 
-if [ $SKIP_HELPERS -eq 0 ] && command -v apt-get >/dev/null; then
+if [ $SKIP_HELPERS -eq 0 ]; then
   step "desktop-control helpers (optional)"
-  # Pick input/screenshot helpers by session type.
+  # Pick input/screenshot helpers by session type, then translate the package
+  # names to whatever package manager this box has (apt / pacman / dnf). The
+  # names genuinely differ (libnotify-bin vs libnotify, tesseract-ocr vs
+  # tesseract, kde-spectacle vs spectacle), so each manager gets its own set.
   SESS="${XDG_SESSION_TYPE:-}"
   DE="${XDG_CURRENT_DESKTOP:-}"
-  # libnotify-bin = notify-send (desktop notifications, all DEs)
-  COMMON="tesseract-ocr playerctl libnotify-bin"
-  if [ "$SESS" = "wayland" ] || [ -n "${WAYLAND_DISPLAY:-}" ]; then
-    HELPERS="$COMMON wtype wlrctl grim slurp ydotool"
-    say "Wayland session — installing: $HELPERS"
+  _is_kde=0
+  case "$DE" in *KDE*|*kde*|*plasma*|*Plasma*) _is_kde=1 ;; esac
+  _wayland=0
+  if [ "$SESS" = "wayland" ] || [ -n "${WAYLAND_DISPLAY:-}" ]; then _wayland=1; fi
+
+  if command -v apt-get >/dev/null; then
+    COMMON="tesseract-ocr playerctl libnotify-bin"
+    if [ $_wayland -eq 1 ]; then HELPERS="$COMMON wtype wlrctl grim slurp ydotool"
+    else HELPERS="$COMMON xdotool wmctrl scrot"; fi
+    [ $_is_kde -eq 1 ] && HELPERS="$HELPERS kde-spectacle"
+    say "apt — installing: $HELPERS"
+    # shellcheck disable=SC2086
+    if sudo apt-get install -y $HELPERS 2>/dev/null; then
+      ok "desktop helpers installed"
+    else
+      warn "some helpers unavailable on this mirror — Basilisk still runs;"
+      warn "missing tools just report themselves when used"
+    fi
+  elif command -v pacman >/dev/null; then
+    COMMON="tesseract tesseract-data-eng playerctl libnotify"
+    if [ $_wayland -eq 1 ]; then HELPERS="$COMMON wtype grim slurp ydotool"
+    else HELPERS="$COMMON xdotool wmctrl scrot"; fi
+    [ $_is_kde -eq 1 ] && HELPERS="$HELPERS spectacle"
+    say "pacman — installing: $HELPERS"
+    # shellcheck disable=SC2086
+    if sudo pacman -S --needed --noconfirm $HELPERS 2>/dev/null; then
+      ok "desktop helpers installed"
+    else
+      warn "some helpers aren't in the official repos (wlrctl is AUR-only) —"
+      warn "Basilisk still runs; missing tools just report themselves when used"
+    fi
+  elif command -v dnf >/dev/null; then
+    COMMON="tesseract playerctl libnotify"
+    if [ $_wayland -eq 1 ]; then HELPERS="$COMMON wtype grim slurp ydotool"
+    else HELPERS="$COMMON xdotool wmctrl scrot"; fi
+    [ $_is_kde -eq 1 ] && HELPERS="$HELPERS spectacle"
+    say "dnf — installing: $HELPERS"
+    # shellcheck disable=SC2086
+    if sudo dnf install -y $HELPERS 2>/dev/null; then
+      ok "desktop helpers installed"
+    else
+      warn "some helpers unavailable — Basilisk still runs;"
+      warn "missing tools just report themselves when used"
+    fi
   else
-    HELPERS="$COMMON xdotool wmctrl scrot"
-    say "X11 session — installing: $HELPERS"
-  fi
-  # On KDE, add Spectacle (screenshots) — it handles compositor quirks.
-  case "$DE" in
-    *KDE*|*kde*|*plasma*|*Plasma*)
-      HELPERS="$HELPERS kde-spectacle"
-      say "KDE Plasma detected — adding Spectacle" ;;
-  esac
-  # shellcheck disable=SC2086
-  if sudo apt-get install -y $HELPERS 2>/dev/null; then
-    ok "desktop helpers installed"
-  else
-    warn "some helpers unavailable on this mirror — Basilisk still runs;"
-    warn "missing tools just report themselves when used"
+    warn "unknown package manager — skipping optional desktop helpers"
+    warn "(install tesseract, playerctl, libnotify + grim/slurp/wtype or"
+    warn " xdotool/wmctrl/scrot manually for full device-control support)"
   fi
 else
-  [ $SKIP_HELPERS -eq 1 ] && warn "skipping desktop helpers (--no-helpers)"
+  warn "skipping desktop helpers (--no-helpers)"
 fi
 
 # ── 6c. UI fonts (the theme is literally built on these) ──────────

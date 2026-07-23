@@ -1602,6 +1602,210 @@ def tool_list_dir(path: str = ".") -> Dict[str, Any]:
         return {"ok": False, "error": f"{type(e).__name__}: {e}"}
 
 
+# ══════════════════════════════════════════════════════════════════════
+# DISTRO PORTABILITY LAYER  —  package manager + privilege escalation
+# ══════════════════════════════════════════════════════════════════════
+# Basilisk grew up on Kali (Debian/apt/classic-sudo). This layer lets the
+# exact same build run correctly on Arch-based boxes (CachyOS, Arch,
+# EndeavourOS, Manjaro), RPM (Fedora), and SUSE — WITHOUT hard-coding
+# `apt` or assuming classic `sudo` anywhere. Everything is detected once
+# from /etc/os-release + PATH, cached, and degrades to sane fallbacks. No
+# network and no privilege are needed to detect. Nothing here ever runs a
+# state-changing command — only `--version` / `-n` probes.
+
+def _osrelease_id() -> Tuple[str, str]:
+    """(ID, ID_LIKE) from /etc/os-release, lowercased. Empty strings if
+    unreadable (e.g. containers). Used only as a hint — PATH wins."""
+    _id = _like = ""
+    try:
+        with open("/etc/os-release", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                if line.startswith("ID=") and "=" in line:
+                    _id = line.split("=", 1)[1].strip().strip('"').lower()
+                elif line.startswith("ID_LIKE=") and "=" in line:
+                    _like = line.split("=", 1)[1].strip().strip('"').lower()
+    except Exception:
+        pass
+    return _id, _like
+
+
+# id, probe-binary, install verb, refresh verb, list-upgradable argv, needs-root
+_PKG_MGR_TABLE = [
+    ("pacman", "pacman", "pacman -S --needed --noconfirm", "pacman -Sy",
+     ["pacman", "-Qu"], True),
+    ("apt", "apt-get", "apt-get install -y", "apt-get update",
+     ["apt", "list", "--upgradable"], True),
+    ("dnf", "dnf", "dnf install -y", "dnf makecache",
+     ["dnf", "--refresh", "check-update"], True),
+    ("zypper", "zypper", "zypper install -y", "zypper refresh",
+     ["zypper", "list-updates"], True),
+    ("apk", "apk", "apk add", "apk update",
+     ["apk", "version", "-l", "<"], True),
+]
+
+_PKG_MGR_CACHE: Optional[Dict[str, Any]] = None
+
+
+def detect_pkg_mgr() -> Dict[str, Any]:
+    """The system package manager for THIS box. Detected from what is
+    actually on PATH; the os-release ID only breaks ties. Cached for the
+    process. Keys: id, bin, install, refresh, list_upgradable, aur
+    (an AUR helper name on Arch, else None), found (bool)."""
+    global _PKG_MGR_CACHE
+    if _PKG_MGR_CACHE is not None:
+        return _PKG_MGR_CACHE
+    _id, _like = _osrelease_id()
+    fam = f"{_id} {_like}"
+    # Preference order: if the distro family names a manager, try it first;
+    # otherwise fall through the table in listed order.
+    order = list(_PKG_MGR_TABLE)
+    if "arch" in fam:
+        order.sort(key=lambda r: r[0] != "pacman")
+    elif any(k in fam for k in ("debian", "ubuntu", "kali")):
+        order.sort(key=lambda r: r[0] != "apt")
+    elif any(k in fam for k in ("fedora", "rhel", "centos")):
+        order.sort(key=lambda r: r[0] != "dnf")
+    elif "suse" in fam:
+        order.sort(key=lambda r: r[0] != "zypper")
+    chosen = None
+    for pid, probe, inst, refr, lst, root in order:
+        if _have(probe):
+            chosen = (pid, probe, inst, refr, lst, root)
+            break
+    if chosen is None:
+        _PKG_MGR_CACHE = {"id": None, "bin": None, "install": None,
+                          "refresh": None, "list_upgradable": None,
+                          "aur": None, "found": False}
+        return _PKG_MGR_CACHE
+    pid, probe, inst, refr, lst, root = chosen
+    aur = None
+    if pid == "pacman":
+        for helper in ("paru", "yay", "pikaur", "trizen"):
+            if _have(helper):
+                aur = helper
+                break
+    _PKG_MGR_CACHE = {"id": pid, "bin": probe, "install": inst,
+                      "refresh": refr, "list_upgradable": lst,
+                      "aur": aur, "found": True}
+    return _PKG_MGR_CACHE
+
+
+def install_hint(name: str, *, aur: bool = False) -> str:
+    """A copy-pasteable install command for `name` on THIS box's package
+    manager (best-effort — package names occasionally differ across
+    distros, but most security tools share a name). On Arch, if the tool
+    is AUR/BlackArch-only and an AUR helper is present, use it."""
+    pm = detect_pkg_mgr()
+    if not pm["found"]:
+        return f"install {name} with your system package manager"
+    esc = priv_esc_prefix()
+    if pm["id"] == "pacman" and aur and pm["aur"]:
+        return f"{pm['aur']} -S {name}"          # AUR helpers must NOT run as root
+    return f"{esc}{pm['install']} {name}".strip()
+
+
+def translate_install_meta(meta: Dict[str, str]) -> str:
+    """Turn a tool's install-metadata dict ({apt, go, pipx, npm, ...}) into
+    the right hint for this box. The dicts were authored with Debian/apt
+    package names; on Arch/RPM we reuse that name (usually identical for
+    pentest tooling — nmap, nuclei, sqlmap, ffuf, gobuster …) via the
+    native manager, and only fall back to go/pipx/npm when there is no
+    system package name at all."""
+    pm = detect_pkg_mgr()
+    pkg = meta.get(pm["id"]) or meta.get("apt")   # allow a manager-specific override
+    if pkg and pm["found"]:
+        # BlackArch/AUR tools on Arch often need an AUR helper; hint both.
+        base = install_hint(pkg)
+        if pm["id"] == "pacman":
+            aur_alt = f"  (AUR/BlackArch: {pm['aur'] or 'yay'} -S {pkg})"
+            return base + aur_alt
+        return base
+    if meta.get("go"):
+        return f"go install -v {meta['go']}"
+    if meta.get("pipx"):
+        return f"pipx install {meta['pipx']}"
+    if meta.get("npm"):
+        return f"npm install -g {meta['npm']}"
+    if pkg:
+        return f"install {pkg} with your system package manager"
+    return ""
+
+
+# ── privilege escalation: sudo / sudo-rs / doas, detected not assumed ──
+_PRIV_ESC_CACHE: Optional[Dict[str, Any]] = None
+
+
+def detect_priv_esc() -> Dict[str, Any]:
+    """How to become root on THIS box. Arch/CachyOS may ship sudo-rs (the
+    Rust rewrite, which historically lacks `-A`/SUDO_ASKPASS on older
+    builds) or doas instead of classic sudo. Keys: tool
+    ('sudo'|'sudo-rs'|'doas'|None), bin, askpass (bool — does it support
+    -A/SUDO_ASKPASS), stdin (bool — does it read a password on stdin via
+    -S), version. Cached; runs only `--version`."""
+    global _PRIV_ESC_CACHE
+    if _PRIV_ESC_CACHE is not None:
+        return _PRIV_ESC_CACHE
+    tool = bin_ = None
+    version = ""
+    if _have("sudo"):
+        bin_ = "sudo"
+        try:
+            rc, out, err = _ro(["sudo", "--version"], timeout=5)
+            version = (out or err or "").splitlines()[0].strip() if (out or err) else ""
+        except Exception:
+            version = ""
+        tool = "sudo-rs" if "sudo-rs" in version.lower() else "sudo"
+    elif _have("doas"):
+        tool, bin_ = "doas", "doas"
+    # Capability flags. Classic sudo: both askpass and stdin. sudo-rs: stdin
+    # yes, askpass only on newer builds — detect by parsing --help once.
+    askpass = stdin = False
+    if tool == "sudo":
+        askpass = stdin = True
+    elif tool == "sudo-rs":
+        stdin = True
+        try:
+            rc, out, err = _ro(["sudo", "--help"], timeout=5)
+            askpass = "-A" in (out or "") or "askpass" in (out or "").lower()
+        except Exception:
+            askpass = False
+    elif tool == "doas":
+        askpass = stdin = False   # doas prompts the tty only
+    _PRIV_ESC_CACHE = {"tool": tool, "bin": bin_, "askpass": askpass,
+                       "stdin": stdin, "version": version}
+    return _PRIV_ESC_CACHE
+
+
+def priv_esc_prefix() -> str:
+    """The escalation prefix to PREPEND to a root command on this box, with
+    a trailing space: 'sudo ' or 'doas ' (or '' if neither exists). Used to
+    build install hints so we never emit `sudo apt …` on a doas-only Arch
+    box."""
+    pe = detect_priv_esc()
+    return f"{pe['bin']} " if pe["bin"] else ""
+
+
+def _sudo_ready() -> bool:
+    """True if we can escalate RIGHT NOW without a password — a NOPASSWD
+    sudoers rule, or a still-valid cached timestamp. Cheap (`sudo -n true`).
+    Not cached: validity is time-bound. When true, the whole
+    password-capture dance is unnecessary and the command just runs."""
+    pe = detect_priv_esc()
+    if pe["tool"] in ("sudo", "sudo-rs"):
+        try:
+            rc, _, _ = _ro(["sudo", "-n", "true"], timeout=5)
+            return rc == 0
+        except Exception:
+            return False
+    if pe["tool"] == "doas":
+        try:
+            rc, _, _ = _ro(["doas", "-n", "true"], timeout=5)
+            return rc == 0
+        except Exception:
+            return False
+    return False
+
+
 # Matches a `sudo` invocation at the start of the command or after a
 # shell separator (; | & && || ( newline), so we don't false-positive on
 # e.g. `echo "pseudo"` or a path like /opt/sudoku.  Also tolerates one or
@@ -1651,7 +1855,7 @@ def _inject_askpass(command: str) -> str:
 
 
 def _ensure_askpass_helper() -> Optional[str]:
-    """Write (once) a tiny askpass helper that echoes $KALI_SUDO_PW.
+    """Write (once) a tiny askpass helper that echoes $BASILISK_SUDO_PW.
     The script itself holds NO secret — the password is handed to it
     via the environment of the single sudo call, and only that call."""
     path = DATA_DIR / ".basilisk-askpass.sh"
@@ -1667,7 +1871,7 @@ def _ensure_askpass_helper() -> Optional[str]:
         fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o700)
         try:
             os.fchmod(fd, 0o700)   # defeat umask — owner-only, before content
-            os.write(fd, b'#!/bin/sh\nprintf "%s\\n" "$KALI_SUDO_PW"\n')
+            os.write(fd, b'#!/bin/sh\nprintf "%s\\n" "$BASILISK_SUDO_PW"\n')
         finally:
             os.close(fd)
         return str(path)
@@ -1697,15 +1901,26 @@ def _format_run_result(command: str, p, needs_sudo: bool) -> Dict[str, Any]:
 
 def _run_sudo_inline(command: str, password: str, timeout: int,
                      cwd: Optional[str]) -> Dict[str, Any]:
-    """Authenticate and run in ONE shell session so the cached sudo
+    """Authenticate and run in ONE shell session so the fresh sudo
     credential is guaranteed to apply to the command's own `sudo` calls.
 
     The password is fed once on stdin and consumed by `sudo -S -v`; the
     command then runs with that fresh credential.  Password never touches
     disk, env, the log, or the command's stdin (sudo -v eats the single
-    line we send; the command sees EOF)."""
+    line we send; the command sees EOF).
+
+    Portability: the escalation binary is detected (classic `sudo` vs
+    `sudo-rs`), and we `-k` first so a WRONG password can't ride a
+    coincidental cached timestamp and appear to succeed."""
+    pe = detect_priv_esc()
+    binname = pe["bin"] or "sudo"
     # rc 97 is our private sentinel for "authentication failed".
-    script = "sudo -S -p '' -v || exit 97\n" + command
+    # `-k` (no password needed) clears any stale timestamp so `-S -v` truly
+    # validates the password we pipe, then the command runs on that fresh
+    # credential. Both classic sudo and sudo-rs accept -k/-S/-p/-v.
+    script = (f"{binname} -k 2>/dev/null\n"
+              f"{binname} -S -p '' -v || exit 97\n"
+              + command)
     try:
         p = subprocess.run(
             ["bash", "-c", script],
@@ -1717,8 +1932,15 @@ def _run_sudo_inline(command: str, password: str, timeout: int,
             err = (p.stderr or "").strip().lower()
             if "not in the sudoers" in err or "not allowed" in err:
                 why = "this account is not permitted to use sudo"
-            else:
-                why = "incorrect sudo password"
+                return {"ok": False, "command": command, "rc": 97,
+                        "stdout": "", "stderr": p.stderr or why,
+                        "error": f"sudo: {why}", "needs_sudo": True,
+                        "auth_rejected": True, "not_in_sudoers": True}
+            # Password rejected. On Kali this almost always means a typo;
+            # on Arch/CachyOS it is also commonly a sudoers policy that asks
+            # for a DIFFERENT password than the one we have. Say so, since a
+            # bare "incorrect password" sends the operator chasing a typo.
+            why = "incorrect sudo password"
             return {"ok": False, "command": command, "rc": 97,
                     "stdout": "", "stderr": p.stderr or why,
                     "error": f"sudo: {why}", "needs_sudo": True,
@@ -1748,7 +1970,7 @@ def _run_sudo_askpass(command: str, password: str, timeout: int,
     cmd2 = _inject_askpass(command)
     env = dict(os.environ)
     env["SUDO_ASKPASS"] = helper
-    env["KALI_SUDO_PW"] = password
+    env["BASILISK_SUDO_PW"] = password
     try:
         p = subprocess.run(
             cmd2, shell=True,
@@ -1765,7 +1987,7 @@ def _run_sudo_askpass(command: str, password: str, timeout: int,
                 "error": f"{type(e).__name__}: {e}", "needs_sudo": True}
     finally:
         # Drop the secret from our env copy promptly.
-        env["KALI_SUDO_PW"] = ""
+        env["BASILISK_SUDO_PW"] = ""
 
 
 # ── command runtime awareness: how long should this take, and when to give up ──
@@ -1924,21 +2146,57 @@ def tool_run_command(command: str, timeout: int = 30,
 
     needs_sudo = command_needs_sudo(command)
 
-    if needs_sudo and sudo_password is not None:
-        result = _run_sudo_inline(command, sudo_password, timeout, cwd)
-        # If the password was simply wrong, report that — don't retry.
-        if result.get("auth_rejected"):
-            sudo_password = None
+    if needs_sudo:
+        pe = detect_priv_esc()
+        # (0) Can we already escalate WITHOUT a password — a NOPASSWD sudoers
+        # rule or a still-valid cached timestamp? Then the command's own
+        # sudo/doas just works; skip the password dance entirely. Common on
+        # single-user Arch/CachyOS boxes (%wheel ALL=(ALL) NOPASSWD: ALL).
+        if _sudo_ready():
+            pass  # fall through to the plain run below
+        elif pe["tool"] is None:
+            return {"ok": False, "command": command, "needs_sudo": True,
+                    "error": ("no privilege-escalation tool on PATH (looked for "
+                              "sudo, sudo-rs, doas). Install sudo, or launch "
+                              "Basilisk from a root shell.")}
+        elif pe["tool"] == "doas" and sudo_password is not None:
+            # doas has no stdin-password mode; a piped password can't drive it.
+            return {"ok": False, "command": command, "needs_sudo": True,
+                    "auth_rejected": False,
+                    "error": ("this box uses doas, which cannot read a password "
+                              "on stdin. Add a persist/nopass rule for your user "
+                              "in /etc/doas.conf (or install sudo). Basilisk will "
+                              "escalate the instant doas is ready.")}
+        elif sudo_password is not None:
+            # sudo / sudo-rs with a password in hand.
+            result = _run_sudo_inline(command, sudo_password, timeout, cwd)
+            # If inline rejected the password, OR authenticated-but-the-inner-
+            # sudo-still-failed, try askpass (when this build supports it).
+            # Askpass authenticates EACH inner sudo independently, so it is
+            # immune to the timestamp-carry failure — the single most common
+            # Kali->Arch break — and lets us tell "our mechanism can't drive
+            # this box's sudo" apart from "the password is genuinely wrong".
+            if (result.get("auth_rejected") or result.get("sudo_auth_failed")) \
+                    and not result.get("not_in_sudoers") and pe["askpass"]:
+                alt = _run_sudo_askpass(command, sudo_password, timeout, cwd)
+                if alt is not None and not alt.get("sudo_auth_failed") \
+                        and not alt.get("auth_rejected"):
+                    result = alt
+                elif result.get("auth_rejected"):
+                    # Both paths rejected → name the real Arch/CachyOS causes
+                    # instead of sending the operator chasing a typo.
+                    result["error"] = (
+                        "sudo: password rejected on both the inline and askpass "
+                        "paths. On Arch/CachyOS this is usually one of: (a) a "
+                        "genuine typo; (b) sudoers has `Defaults rootpw`/"
+                        "`targetpw`, so sudo wants root's (not your) password; "
+                        "(c) your user isn't in the wheel/sudo group. Verify "
+                        "manually:  sudo -k -v")
+            sudo_password = None  # drop reference
             return result
-        # If the inline path authenticated but the command's own sudo
-        # still couldn't get a credential (hardened sudoers), retry via
-        # askpass before giving up.
-        if result.get("sudo_auth_failed"):
-            alt = _run_sudo_askpass(command, sudo_password, timeout, cwd)
-            if alt is not None:
-                result = alt
-        sudo_password = None  # drop reference
-        return result
+        # else: needs_sudo, no password, not ready → fall through; the
+        # command's own sudo surfaces the auth failure, which the GUI turns
+        # into a one-time password request.
 
     try:
         p = subprocess.run(
@@ -2021,24 +2279,62 @@ def tool_system_info() -> Dict[str, Any]:
 # ═════════════════════════════════════════════════════════════════════
 
 def tool_check_updates() -> Dict[str, Any]:
-    """List packages with pending updates.  apt-based systems only."""
-    if not _have("apt"):
-        return {"ok": False, "error": "apt not installed on this system"}
-    rc, out, _ = _ro(["apt", "list", "--upgradable"], timeout=30)
-    if rc != 0:
-        return {"ok": False, "error": "apt list failed (try sudo apt update first)"}
-    pkgs = []
+    """List packages with pending updates. Works across apt / pacman / dnf /
+    zypper / apk — the manager is auto-detected. Read-only; no sync is
+    forced, so the list reflects the last DB refresh."""
+    pm = detect_pkg_mgr()
+    if not pm["found"]:
+        return {"ok": False,
+                "error": "no supported package manager found "
+                         "(apt/pacman/dnf/zypper/apk)"}
+    mgr = pm["id"]
+    rc, out, _err = _ro(pm["list_upgradable"], timeout=30)
+    pkgs: List[Dict[str, Any]] = []
     sec_count = 0
-    for line in out.splitlines():
-        if "/" not in line or "[upgradable" not in line:
-            continue
-        name = line.split("/", 1)[0].strip()
-        is_security = "-security" in line.lower()
-        if is_security:
-            sec_count += 1
-        pkgs.append({"name": name, "security": is_security})
-    return {"ok": True, "count": len(pkgs), "security_count": sec_count,
-            "packages": pkgs}
+    if mgr == "apt":
+        if rc != 0:
+            return {"ok": False,
+                    "error": "apt list failed (try sudo apt update first)"}
+        for line in out.splitlines():
+            if "/" not in line or "[upgradable" not in line:
+                continue
+            name = line.split("/", 1)[0].strip()
+            is_sec = "-security" in line.lower()
+            sec_count += int(is_sec)
+            pkgs.append({"name": name, "security": bool(is_sec)})
+    elif mgr == "pacman":
+        # `pacman -Qu` → "name old_ver -> new_ver"; rc 1 == nothing to update.
+        for line in out.splitlines():
+            line = line.strip()
+            if line:
+                pkgs.append({"name": line.split()[0], "security": False})
+    elif mgr == "dnf":
+        # `dnf check-update` exits 100 when updates exist, 0 when none.
+        if rc not in (0, 100):
+            return {"ok": False, "error": "dnf check-update failed"}
+        for line in out.splitlines():
+            parts = line.split()
+            if len(parts) >= 3 and "." in parts[0] and not line[:1].isspace() \
+                    and not line.startswith(("Last", "Obsolet", "Security")):
+                is_sec = "security" in line.lower()
+                sec_count += int(is_sec)
+                pkgs.append({"name": parts[0].rsplit(".", 1)[0],
+                             "security": bool(is_sec)})
+    elif mgr == "zypper":
+        for line in out.splitlines():
+            if " | " not in line:
+                continue
+            cols = [c.strip() for c in line.split("|")]
+            if len(cols) >= 3 and cols[0] in ("v", ""):
+                pkgs.append({"name": cols[2], "security": False})
+    elif mgr == "apk":
+        for line in out.splitlines():
+            line = line.strip()
+            if line and "<" in line:
+                pkgs.append({"name": line.split("-")[0], "security": False})
+    return {"ok": True, "manager": mgr, "count": len(pkgs),
+            "security_count": sec_count, "packages": pkgs,
+            "refresh_hint": f"{priv_esc_prefix()}{pm['refresh']}".strip()}
 
 
 def tool_recent_downloads(limit: int = 20) -> Dict[str, Any]:
@@ -5693,8 +5989,9 @@ def check_firewall() -> List[Finding]:
             "/etc/ufw/ufw.conf does not enable ufw, and the privileged "
             "tools could not be inspected as a regular user.  Re-run the "
             "audit with sudo for a definitive check.",
-            fix_hint=("sudo apt install ufw && sudo ufw default deny "
-                      "incoming && sudo ufw allow ssh && sudo ufw enable")))
+            fix_hint=(f"{install_hint('ufw')} && {priv_esc_prefix()}ufw "
+                      f"default deny incoming && {priv_esc_prefix()}ufw allow "
+                      f"ssh && {priv_esc_prefix()}ufw enable")))
     else:
         log(f"firewall detected via: {detected_via}")
     return fs

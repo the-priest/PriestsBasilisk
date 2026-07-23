@@ -91,6 +91,8 @@ _RISKY: List = [
 
 _UNDO_HINTS = {
     "apt": "reinstall with: apt install <pkg>  (apt keeps removed-pkg lists in /var/log/apt/history.log)",
+    "pacman": "reinstall with: sudo pacman -S <pkg>  (removed-pkg history is in /var/log/pacman.log; cached .pkg.tar.zst files under /var/cache/pacman/pkg let you reinstall the exact version offline)",
+    "dnf": "reinstall with: sudo dnf install <pkg>  (undo the whole transaction with: sudo dnf history undo last)",
     "iptables": "rules are not saved unless you persisted them; reboot or reload your saved ruleset to restore",
     "ufw": "re-enable with: ufw enable  (and reload your rule profile)",
     "systemctl": "restart/enable the unit: systemctl enable --now <unit>",

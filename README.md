@@ -251,8 +251,8 @@ Keys live only in `~/.config/basilisk/settings.json`, locked to your user — th
 ## 📋 Requirements
 
 - **Python 3.10+**, Linux with GTK4 / libadwaita (X11 or Wayland)
-- Runs on desktop Kali and on **NetHunter Pro** (Phosh/Wayland) on a phone
-- Standard offensive tooling (nmap, sqlmap, etc.) is auto-detected; missing tools are flagged with an install hint, never assumed
+- Runs on **Debian/Kali** *and* **Arch-based distros (CachyOS, Arch, EndeavourOS, Manjaro)**, plus Fedora/SUSE — the package manager (`apt`/`pacman`/`dnf`/`zypper`), privilege-escalation tool (`sudo`/`sudo-rs`/`doas`), and wordlist locations are all auto-detected, never assumed. Also runs on **NetHunter Pro** (Phosh/Wayland) on a phone
+- Standard offensive tooling (nmap, sqlmap, etc.) is auto-detected; missing tools are flagged with a distro-correct install hint (pacman/AUR on Arch, apt on Debian), never assumed
 
 ---
 

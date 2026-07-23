@@ -980,6 +980,30 @@ def host_facts_block() -> str:
         lines.append(f"  Session: {session or '?'} / {desktop or '?'}")
     if _detect_nethunter():
         lines.append("  NetHunter: yes")
+    # Package manager + escalation tool, so Basilisk issues the RIGHT commands
+    # on THIS distro (pacman -S on Arch/CachyOS, not apt install) instead of
+    # defaulting to Debian habits.
+    try:
+        from basilisk_core import detect_pkg_mgr, detect_priv_esc
+        pm = detect_pkg_mgr()
+        pe = detect_priv_esc()
+        if pm.get("found"):
+            pmline = f"  Package manager: {pm['id']} — install with: {pm['install']}"
+            if pm.get("aur"):
+                pmline += f" (AUR/BlackArch via {pm['aur']} -S <pkg>)"
+            lines.append(pmline)
+            if pm["id"] != "apt":
+                # Only worth saying on a non-Debian box, where Basilisk's
+                # apt habits would be wrong.
+                lines.append(f"  → this is NOT Debian/apt: use {pm['id']}, "
+                             f"never `apt`, for packages here")
+        if pe.get("tool"):
+            esc = f"  Escalation: {pe['tool']}"
+            if pe["tool"] == "doas":
+                esc += " — prefix root commands with `doas`, not sudo"
+            lines.append(esc)
+    except Exception:
+        pass
     _HOST_FACTS_CACHE = "\n".join(lines)
     return _HOST_FACTS_CACHE
 

@@ -158,6 +158,15 @@ _BIN_ALIAS = {"pip-audit": ["pip-audit", "pip_audit"], "npm": ["npm"],
 
 
 def _install_hint(meta: Dict[str, str]) -> str:
+    # Distro-aware when running inside Basilisk; apt fallback if core isn't
+    # importable (standalone test use).
+    try:
+        from basilisk_core import translate_install_meta as _tim
+        h = _tim(meta)
+        if h:
+            return h
+    except Exception:
+        pass
     if meta.get("apt"):
         return f"sudo apt install -y {meta['apt']}"
     if meta.get("pipx"):

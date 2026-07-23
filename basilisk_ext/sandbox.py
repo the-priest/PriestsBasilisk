@@ -221,8 +221,12 @@ def capabilities_report() -> Dict[str, Any]:
         tier = "unshare (net-off, rlimits, weak fs)"
     else:
         tier = "rlimit-only (bounded, NOT fs-confined)"
+    try:
+        from basilisk_core import install_hint as _ih
+        _bwrap_cmd = _ih("bubblewrap")
+    except Exception:
+        _bwrap_cmd = "sudo apt install bubblewrap"
     return {"tier": tier,
             "bwrap": _have("bwrap"),
             "unshare": _have("unshare"),
-            "advice": ("install bubblewrap for real isolation: "
-                       "apt install bubblewrap")}
+            "advice": f"install bubblewrap for real isolation: {_bwrap_cmd}"}

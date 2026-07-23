@@ -1,5 +1,58 @@
 # Changelog
 
+## v7.7.0 — runs on Arch now (CachyOS), not just Kali
+
+Basilisk grew up on Kali (Debian/apt/classic-sudo). This release makes the
+*exact same build* run correctly on Arch-based distros — **CachyOS**, Arch,
+EndeavourOS, Manjaro — plus Fedora/SUSE, with nothing distro-specific
+hard-coded. The package manager, the way root is obtained, and where
+wordlists live are all **detected, never assumed**.
+
+- **Privilege escalation is now portable and self-diagnosing.** The old path
+  assumed classic `sudo` and reported every failure as "incorrect sudo
+  password" — which on Arch/CachyOS was often *not* a wrong password at all.
+  Now:
+  - The escalation tool is detected: classic **sudo**, **sudo-rs** (the Rust
+    rewrite Arch/CachyOS may ship, which older builds lack `-A`/askpass on),
+    or **doas**.
+  - **NOPASSWD short-circuit:** if the box can already escalate without a
+    password (a `%wheel … NOPASSWD` rule or a live cached timestamp — common on
+    single-user Arch setups), the whole password dance is skipped and the
+    command just runs.
+  - **`sudo -k` before validating** so a *wrong* password can no longer ride a
+    coincidental cached timestamp and appear to work.
+  - **Askpass rescue on rejection:** if the inline credential is rejected, we
+    now retry via `SUDO_ASKPASS` (when the build supports it), which
+    authenticates each inner `sudo` independently and is immune to the
+    timestamp-carry failure — the single most common Kali→Arch break.
+  - **Honest errors:** when a password is genuinely rejected on both paths, the
+    message names the real Arch/CachyOS causes (a `Defaults rootpw`/`targetpw`
+    sudoers policy that wants root's password, or a user not in wheel/sudo) and
+    gives a one-line manual check (`sudo -k -v`) — instead of sending you
+    chasing a typo. `doas`-only boxes get a clear "add a persist rule" note.
+- **Package manager auto-detected** (`pacman`/`apt`/`dnf`/`zypper`/`apk`).
+  `check_updates` parses all of them; every "install X" hint — missing-tool
+  inventory, seclists, bubblewrap, ufw, code scanners — now emits the
+  **distro-correct** command (`sudo pacman -S …` + an AUR/BlackArch fallback on
+  Arch, `dnf`/`zypper` elsewhere), never a bare `sudo apt install` on a box
+  without apt.
+- **Basilisk is told the box's package manager + escalation tool** in the
+  auto-detected host-facts, so the agent issues `pacman -S` on CachyOS instead
+  of defaulting to Debian habits.
+- **Wordlist/SecLists discovery widened** beyond the Kali `/usr/share/wordlists`
+  layout to the AUR/BlackArch/Fedora and user-local locations; `rockyou` is now
+  found wherever it actually lives rather than at one hard-coded path.
+- **`install.sh` desktop-helper step** now has `pacman`/`dnf` branches with the
+  correct package names (`libnotify` vs `libnotify-bin`, `tesseract` vs
+  `tesseract-ocr`, `spectacle` vs `kde-spectacle`), not apt-only. GTK4/libadwaita
+  and font steps were already multi-distro.
+- Renamed the internal askpass env var `KALI_SUDO_PW` → `BASILISK_SUDO_PW`
+  (leftover from the pre-rename days; password handling and security properties
+  unchanged — never on disk, in the log, or in argv).
+- Suite green: `test_basilisk` 79/79 and all core/ext suites pass (the
+  pre-existing dead `test_kali.py` `kali_core` import and one pre-existing
+  lean-classifier case are unchanged by this release).
+
 ## v7.6.0 — Unleash: one button, off the leash
 
 The big red dragon lands in the composer bar. Two modes, one switch, no ambiguity.
