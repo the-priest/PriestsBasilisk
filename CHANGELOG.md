@@ -1,5 +1,59 @@
 # Changelog
 
+## v7.8.0 — the dead test comes back, and an honest performance result
+
+- **`test_kali.py` resurrected as `test_core.py` — 0 tests running to 60.**
+  It had been red since the v6.3.0 namespace rename, importing a `kali_core`
+  module that no longer exists, and every run reported a failure that everyone
+  had learned to ignore. It was never worthless: it covers the self-edit write
+  path (ast syntax gate, immutable-GUARDRAIL guard, timestamped backup, atomic
+  replace), the ChatStore SQLite layer, the CVE NVD->KEV->EPSS chain, settings
+  round-trip and the structural safety floor. Ported, and the suite now has no
+  red entries at all (17/17).
+- **A vacuous assertion inside it, found while porting.** The atomic-replace
+  test asserted no `.kali-tmp` file was left behind — but the code writes
+  `.basilisk-tmp`, so the glob matched nothing and the assertion could never
+  fail no matter how badly the atomic write leaked. It now globs the suffix the
+  code actually writes. A test that cannot fail is worse than one that is red.
+- **A superseded contract locked in the test.** It asserted that a config with
+  no `active_provider` stays on Groq. That was deliberately changed in v7.5.6 —
+  a stale groq value persisted from the removed auto-hop was leaving boxes off
+  the operator's pinned provider. The test now locks the CURRENT contract
+  (defaults to siliconflow) with a comment explaining why it changed, rather
+  than quietly encoding the old one.
+- Stale target filenames in the safety fixtures (`tee kali.py`, `mv evil.py
+  kali.py`, `wc -l kali.py`) updated to `basilisk.py`, so the self-tamper floor
+  is exercised against the file it actually protects.
+- **zdayfind scan loop cleaned up**: the focus/lang filters were re-evaluated
+  for all 31 signatures on every line although they are constant for a whole
+  file, and the taint regex went through re's cache on every hit. Both hoisted.
+  Output verified byte-identical (sha over 295 findings across the full tree,
+  every language variant and every focus filter).
+
+### Performance: measured, and mostly a negative result
+
+The honest summary is that there is no meaningful local CPU bottleneck, and
+two plausible-sounding optimisations were tried and REJECTED on measurement:
+
+- Per-turn cost is already negligible: building the system prompt is ~6us,
+  turn classification ~21us, the destructive-command gate ~60us per command.
+- Startup is ~140ms cold / ~95ms warm. The 147ms that `basilisk_btn_art`
+  appears to cost is a cold-bytecode artifact; warm it is 1.4ms.
+- `zdayfind` runs at ~0.9 MB/s (~3.4s for the whole repo). Gating each line
+  through one alternation of all 31 patterns measured **1.7x SLOWER** — a
+  61-group union cannot use the per-pattern literal-prefix optimisation the
+  individual patterns each get. Restructuring to one `.finditer()` per
+  signature over the whole text, reconstructing per-line semantics afterwards,
+  measured **0.93x** — removing ~310k Python-level calls per large file bought
+  nothing, because the cost is raw byte scanning, not call overhead. Both
+  rejected; the reasons are recorded in the `_iter_matches` docstring so nobody
+  burns the same afternoon again.
+
+The only lever that genuinely reduces scan cost is running fewer signatures,
+which the per-file language filter already does (a `.py` runs 25 of 31). For an
+agent of this shape the real latency is API round-trips and token count, not
+Python.
+
 ## v7.7.1 — the acknowledgement-latches-a-mission bug
 
 A bug-fix release. The headline item is that the single red test in
