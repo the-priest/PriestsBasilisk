@@ -194,7 +194,14 @@ def run_python(code_path: str,
                 os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
             except Exception:
                 proc.kill()
-            out, err = proc.communicate()
+            # Bound the post-kill drain. killpg normally reaps the whole
+            # session, but if that fell through to proc.kill() a grandchild
+            # can still hold the pipes open and an unbounded communicate()
+            # would block this worker thread forever.
+            try:
+                out, err = proc.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+                out, err = "", "sandbox: process did not exit after kill"
         dur = round(_t.time() - t0, 3)
         return {
             "ok": (proc.returncode == 0 and not timed_out),

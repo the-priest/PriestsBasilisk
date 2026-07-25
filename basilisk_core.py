@@ -1711,6 +1711,12 @@ def translate_install_meta(meta: Dict[str, str]) -> str:
     pentest tooling — nmap, nuclei, sqlmap, ffuf, gobuster …) via the
     native manager, and only fall back to go/pipx/npm when there is no
     system package name at all."""
+    # Public helper — a caller passing None or a bare package string must get
+    # an empty hint, not an AttributeError. Both _install_hint call sites
+    # swallow the exception but then hit meta.get() again unprotected, so the
+    # crash would surface there instead.
+    if not isinstance(meta, dict):
+        return ""
     pm = detect_pkg_mgr()
     pkg = meta.get(pm["id"]) or meta.get("apt")   # allow a manager-specific override
     if pkg and pm["found"]:

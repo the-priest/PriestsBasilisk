@@ -130,7 +130,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.basilisk"
 APP_NAME = "Basilisk"
-VERSION = "7.7.0"
+VERSION = "7.7.1"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -9929,11 +9929,20 @@ class MainWindow(Adw.ApplicationWindow):
         GLib.idle_add(_ui)
 
     def terminal_log_and_show(self, text: str, kind: str = "cmd"):
-        """Log and auto-reveal the panel so the operator can see live output."""
-        if not self._terminal_visible:
-            self._terminal_visible = True
-            self.terminal_panel.set_visible(True)
-            self.terminal_toggle_btn.add_css_class("active")
+        """Log and auto-reveal the panel so the operator can see live output.
+        Thread-safe: terminal_log already defers its whole body to the main
+        loop, but the reveal below touches widgets directly, so it is queued
+        the same way. Without this, the first worker thread to call this
+        helper would mutate GTK off the main loop and segfault. Queuing the
+        reveal BEFORE the log call preserves ordering — idle callbacks run in
+        the order they were added."""
+        def _reveal():
+            if not self._terminal_visible:
+                self._terminal_visible = True
+                self.terminal_panel.set_visible(True)
+                self.terminal_toggle_btn.add_css_class("active")
+            return False
+        GLib.idle_add(_reveal)
         self.terminal_log(text, kind)
 
     # ── toast ──────────────────────────────────────────────────

@@ -1,5 +1,61 @@
 # Changelog
 
+## v7.7.1 — the acknowledgement-latches-a-mission bug
+
+A bug-fix release. The headline item is that the single red test in
+`test_leanchat` — written off as "pre-existing" across several versions — was
+never cosmetic. It was a live autonomy defect.
+
+- **Acknowledging Basilisk while Unleashed started a new mission.**
+  `conversational_turn()` graded plain receipts ("yeah that makes sense",
+  "fair enough", "good point") as ACTION turns. That function drives the
+  Unleash mission latch (`basilisk.py` ~5993 and the toggle kickoff ~9669), so
+  while armed, *acknowledging what Basilisk just said* latched a fresh mission
+  with the acknowledgement itself as `_mission_objective` — and it then ground
+  on "yeah that makes sense" until MISSION_COMPLETE. Root cause was a coverage
+  gap in `_CHAT_MARKERS`: such messages fell through to the final all-words
+  test and failed it. Measured against a 76-phrase corpus of realistic
+  receipts, **62 were misclassified**. Now covered.
+- **Lead-filler peeling shredded multi-word social phrases before they could
+  match.** `nice`, `well` and `right` are all in `_LEAD_FILLER`, so "nice one",
+  "well done" and "right on" were peeled to `one` / `done` / `on` *before* the
+  phrase matcher ran — meaning no social phrase opening with a filler word
+  could ever match. Phrases are now matched against the unpeeled text as well.
+  Safe by construction: the action-keyword test still returns first, so an
+  explicit task verb continues to win over any social phrasing around it.
+- **Closed vocabulary drift between `_TASK_VERBS` and `_ACTION_HINTS`.** 35
+  verbs lived in the first table and had never been added to the second, so
+  "dump the db", "crack the hash", "fuzz the endpoint" and "escalate to root"
+  carried no action keyword at all. Deliberately omits `make` (collides with
+  the "makes sense" receipt), `own` and `map` (too common as ordinary words;
+  "map the network" is already caught by `network`), and `brute-force`
+  (normalisation turns the hyphen into a space, so only bare `brute` can
+  match).
+- Act-confirmations (`of course`, `absolutely`, `definitely`, `go for it`) are
+  deliberately **excluded** from the chatter set: in reply to "shall I scan?"
+  they mean GO, and grading them conversational would strip the toolset
+  mid-task.
+- **Sandbox could hang a worker thread forever.** The post-SIGKILL drain in
+  `basilisk_ext/sandbox.py` called `communicate()` unbounded. If `killpg` fell
+  through to `proc.kill()`, a grandchild still holding the pipes would block
+  that thread indefinitely. Now bounded at 5s.
+- **`translate_install_meta()` raised `AttributeError` on non-dict input.**
+  Both `_install_hint` call sites swallow the exception but then hit
+  `meta.get()` again unprotected, so the crash surfaced there instead. Latent
+  rather than live (all 59 `_TOOLS` entries are dicts), but it is public API.
+- **`terminal_log_and_show()` mutated GTK off the main loop.** It touched
+  `set_visible()` / `add_css_class()` raw while `terminal_log` beside it is
+  carefully deferred. Zero callers today, so it was a landmine rather than a
+  crash; the reveal is now queued on the main loop.
+
+Verification: classifier matrix 116/116 in both directions with zero
+action-side regressions; `test_leanchat` 88/1 -> **89/0**; full suite green
+except the long-dead `test_kali.py`. Prompt budgets byte-identical to v7.7.0
+(lean 2133, grouped 7024, non-grouped 20106) — the classifier tables are not
+prompt text. GUARDRAIL block verified byte-for-byte unchanged. The
+destructive-command gate was fuzzed with 40,000 adversarial shell strings:
+zero crashes.
+
 ## v7.7.0 — runs on Arch now (CachyOS), not just Kali
 
 Basilisk grew up on Kali (Debian/apt/classic-sudo). This release makes the

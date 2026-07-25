@@ -1033,6 +1033,17 @@ _ACTION_HINTS = (
     "try that", "try again", "run again", "again", "get to it", "get to work",
     "get going", "the next", "next one", "next host", "next target",
     "onto the", "on to the", "handle it", "sort it", "finish it",
+    # offensive task verbs that lived in _TASK_VERBS but had drifted out of
+    # this table, so a message like "dump the db" or "crack the hash" carried
+    # no action keyword and could be graded pure chatter. Deliberately omits
+    # "make" (collides with the "makes sense" receipt), "own" and "map" (too
+    # common as ordinary words; "map the network" is already caught by
+    # "network"), and "brute-force" (normalisation turns the hyphen into a
+    # space, so only the bare "brute" can ever match).
+    "pentest", "hack", "attack", "enum", "crack", "brute", "bruteforce",
+    "fuzz", "solve", "create", "fix", "compromise", "pwn", "breach", "recon",
+    "escalate", "bypass", "inject", "spray", "phish", "capture", "sniff",
+    "intercept", "deauth", "scrape", "harvest", "dump", "extract", "grab",
 )
 _CHAT_MARKERS = (
     "hi", "hey", "hello", "yo", "sup", "hiya", "howdy", "thanks", "thank you",
@@ -1043,6 +1054,35 @@ _CHAT_MARKERS = (
     "whats up", "who are you", "what do you think", "your opinion", "do you like",
     "good morning", "good night", "goodnight", "good evening", "see ya", "bye",
     "later", "gn", "morning", "welcome", "you there", "u there",
+) + (
+    # ── acknowledgement / receipt vocabulary ────────────────────────────
+    # A reply that only ACKNOWLEDGES what was just said ("makes sense",
+    # "fair enough", "good point") is chatter, not a new objective. Without
+    # these the final all-words test falls through and the turn is graded an
+    # ACTION — which (a) ships the full tool catalog for nothing and, far
+    # worse, (b) latches a MISSION under Unleash with the acknowledgement
+    # itself as the objective, so Basilisk grinds on "yeah that makes sense".
+    # Deliberately EXCLUDES act-confirmations ("of course", "absolutely",
+    # "definitely", "go for it") — in reply to "shall I scan?" those mean GO,
+    # and grading them conversational would strip the toolset mid-task.
+    # multi-word receipts (matched as whole phrases)
+    "makes sense", "make sense", "made sense", "makes total sense",
+    "i see", "i understand", "i get it", "i know",
+    "fair enough", "fair point", "good point", "valid point",
+    "no worries", "no problem", "no biggie", "my bad", "my fault",
+    "never mind", "all good", "its fine", "thats fine", "that is fine",
+    "thats good", "thats right", "thats true", "youre right", "you are right",
+    "sounds good", "sounds right", "sounds fair", "that works",
+    "works for me", "good job", "well done", "nice one", "nice work",
+    "good work", "not bad", "right on", "appreciate it", "much appreciated",
+    "good to know", "glad to hear", "fine by me", "no rush",
+    "take your time", "welcome back", "long time", "how have you been",
+    "hope youre well", "love it", "like it",
+    # single-word receipts
+    "understood", "interesting", "true", "agreed", "exactly", "indeed",
+    "same", "fair", "brilliant", "legend", "beautiful", "epic", "amazing",
+    "excellent", "fantastic", "solid", "neat", "sick", "sorry", "apologies",
+    "congrats", "thx", "tysm", "nevermind", "gotchu",
 )
 
 
@@ -1084,8 +1124,16 @@ def conversational_turn(text: str) -> bool:
         return False
     # Whole-phrase social markers ("how are you", "what do you think", "who are
     # you") are genuine small talk even though they open with a question word.
+    # Match against the UNPEELED text as well: several social phrases open with
+    # a word that is itself lead filler ("nice one", "well done", "right on",
+    # "no worries"), so peeling first would shred the phrase before it could
+    # ever match and the turn would fall through to ACTION. Checking both is
+    # safe because the action-keyword test above has already returned — an
+    # explicit task verb still wins over any social phrasing around it.
+    padded_all = " " + " ".join(words) + " "
     _social_phrase = any(
-        (" " + m + " ") in padded for m in _CHAT_MARKERS if " " in m)
+        (" " + m + " ") in padded or (" " + m + " ") in padded_all
+        for m in _CHAT_MARKERS if " " in m)
     if _social_phrase:
         return True
     # A leading question word ("what/how/why/where/is/are/do/can/should"...) means
