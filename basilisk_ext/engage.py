@@ -45,6 +45,7 @@ import os
 import re
 import threading
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -79,6 +80,7 @@ def _load(engagement: str, base_dir: Optional[Path]) -> Dict[str, Any]:
             d = json.load(f)
         # be forgiving about shape
         d.setdefault("scope", [])
+        d.setdefault("exclusions", [])
         d.setdefault("assets", {})
         d.setdefault("loot", [])
         d["engagement"] = _safe_name(engagement)
@@ -201,22 +203,136 @@ def scope_set(targets: Any, engagement: str = "default", mode: str = "replace",
                     "closed — anything not matched here is treated as out of scope."}
 
 
+def scope_exclude(targets: Any, engagement: str = "default",
+                  mode: str = "replace",
+                  base_dir: Optional[Path] = None) -> Dict[str, Any]:
+    """Record EXCLUSIONS — the carve-outs in the rules of engagement.
+
+    Real RoE is almost never a bare allowlist: "10.0.0.0/8 is in scope EXCEPT
+    the DC at 10.1.1.0/24" is the normal shape, and before this there was no way
+    to express it — the operator had to enumerate the permitted space by hand
+    and hope. Exclusions are checked BEFORE scope and beat it, so an excluded
+    host stays untouchable even when a broad CIDR would otherwise cover it.
+    """
+    if isinstance(targets, str):
+        parts = re.split(r"[\s,;]+", targets.strip())
+    elif isinstance(targets, (list, tuple)):
+        parts = list(targets)
+    else:
+        parts = []
+    cleaned = list(dict.fromkeys(
+        _norm_scope_entry(str(p).strip()) for p in parts if str(p or "").strip()))
+
+    st = _load(engagement, base_dir)
+    if mode == "add":
+        st["exclusions"] = list(dict.fromkeys(st.get("exclusions", []) + cleaned))
+    else:
+        st["exclusions"] = cleaned
+    ok = _save(st, base_dir)
+    return {"ok": ok, "engagement": st["engagement"],
+            "exclusions": st["exclusions"], "count": len(st["exclusions"]),
+            "note": "Exclusions OVERRIDE scope. A target matching one of these "
+                    "is refused at the execution primitive even if a scope "
+                    "entry would otherwise permit it."}
+
+
+def scope_window(start: str = "", end: str = "", engagement: str = "default",
+                 clear: bool = False,
+                 base_dir: Optional[Path] = None) -> Dict[str, Any]:
+    """Record the AUTHORISED TESTING WINDOW (ISO-8601, UTC assumed if naive).
+
+    Testing an in-scope host outside the agreed window is still unauthorised
+    testing — it is one of the most common ways a legitimate engagement turns
+    into an incident report. Outside the window every active command is refused.
+    """
+    st = _load(engagement, base_dir)
+    if clear:
+        st.pop("window", None)
+        ok = _save(st, base_dir)
+        return {"ok": ok, "engagement": st["engagement"], "window": None,
+                "note": "window cleared — scope alone now governs."}
+
+    def _norm(v: str) -> str:
+        v = (v or "").strip()
+        if not v:
+            return ""
+        try:
+            d = datetime.fromisoformat(v.replace("Z", "+00:00"))
+            if not d.tzinfo:
+                d = d.replace(tzinfo=timezone.utc)
+            return d.isoformat()
+        except Exception:
+            return ""
+
+    s, e = _norm(start), _norm(end)
+    if (start and not s) or (end and not e):
+        return {"ok": False, "error": "could not parse start/end — use ISO-8601 "
+                                      "(e.g. 2026-08-01T09:00:00Z)."}
+    win = {k: v for k, v in (("start", s), ("end", e)) if v}
+    if not win:
+        return {"ok": False, "error": "supply start and/or end, or clear=true."}
+    st["window"] = win
+    ok = _save(st, base_dir)
+    return {"ok": ok, "engagement": st["engagement"], "window": win,
+            "note": "Active commands are refused outside this window."}
+
+
+def scope_authorisation(client: str = "", authorised_by: str = "",
+                        reference: str = "", engagement: str = "default",
+                        base_dir: Optional[Path] = None) -> Dict[str, Any]:
+    """Record WHO authorised this engagement and under what paperwork.
+
+    Does not gate anything by itself — it exists so the evidence ledger and any
+    report generated from it can state the authority the testing was performed
+    under. An engagement record with scope but no authority is not evidence.
+    """
+    st = _load(engagement, base_dir)
+    auth = dict(st.get("authorisation") or {})
+    for k, v in (("client", client), ("authorised_by", authorised_by),
+                 ("reference", reference)):
+        if str(v or "").strip():
+            auth[k] = str(v).strip()
+    if not auth:
+        return {"ok": True, "engagement": st["engagement"],
+                "authorisation": st.get("authorisation") or {},
+                "note": "nothing supplied — returning what is on record."}
+    auth["recorded_at"] = datetime.now(timezone.utc).isoformat()
+    st["authorisation"] = auth
+    ok = _save(st, base_dir)
+    return {"ok": ok, "engagement": st["engagement"], "authorisation": auth}
+
+
 def scope_show(engagement: str = "default",
                base_dir: Optional[Path] = None) -> Dict[str, Any]:
     st = _load(engagement, base_dir)
     return {"ok": True, "engagement": st["engagement"],
-            "scope": st.get("scope", []), "count": len(st.get("scope", []))}
+            "scope": st.get("scope", []), "count": len(st.get("scope", [])),
+            "exclusions": st.get("exclusions", []),
+            "window": st.get("window") or None,
+            "authorisation": st.get("authorisation") or {},
+            "allow_loopback": st.get("allow_loopback", True)}
 
 
 def scope_check(target: str, engagement: str = "default",
                 base_dir: Optional[Path] = None) -> Dict[str, Any]:
     """Is `target` within the engagement's authorised scope?  FAILS CLOSED:
-    if scope is unset, or the target can't be parsed, or nothing matches, it is
-    reported OUT of scope.  Consult this before proposing any active command
-    against a target."""
+    if scope is unset, or the target can't be parsed, or nothing matches, or an
+    exclusion covers it, it is reported OUT of scope.  Consult this before
+    proposing any active command against a target."""
     st = _load(engagement, base_dir)
     scope = st.get("scope", [])
+    exclusions = st.get("exclusions", []) or []
     host = _host_of(target)
+
+    # Exclusions are checked FIRST and beat scope — an RoE carve-out is not
+    # overridden by a broader allowlist entry.
+    for rule in exclusions:
+        if host and _match_one(host, rule):
+            return {"ok": True, "target": target, "host": host, "in_scope": False,
+                    "matched": rule, "excluded": True,
+                    "reason": f"{host} matches EXCLUSION '{rule}' — explicitly "
+                              f"carved out of the rules of engagement. Do not "
+                              f"touch it, regardless of scope."}
     if not scope:
         return {"ok": True, "target": target, "host": host, "in_scope": False,
                 "matched": None,

@@ -1844,6 +1844,7 @@ from basilisk_safety import (              # noqa: E402
     is_catastrophic_command,
     command_tampers_self,
 )
+from basilisk_scope import enforce as _scope_enforce   # noqa: E402
 
 
 # Same matcher, but capturing the leading boundary so we can inject an
@@ -2148,6 +2149,35 @@ def tool_run_command(command: str, timeout: int = 30,
                           "source outside the guarded edit path. Use the file-"
                           "edit tool (it parse-checks and protects the "
                           "guardrail); raw shell writes to it are blocked."),
+                "command": command}
+
+    # ── AUTHORISATION BOUNDARY ───────────────────────────────────────────
+    # Scope used to be advice in the persona prompt plus one enforcing tool
+    # (sqlmap_plan). Everything else — nmap, nuclei, ffuf, hydra, curl — reached
+    # this function with nothing checking WHO it was aimed at. Under UNLEASH
+    # that is a prompt-level control on an autonomous loop, which is not a
+    # control. Enforce it here, at the primitive, like the destructive floor:
+    # the model cannot route around it, because this IS the execution path.
+    #
+    # Passive/local commands are not inspected at all, so ordinary work is
+    # unaffected. Active commands must resolve every target into the recorded
+    # scope. Fails closed. The remedy is scope_set, not an override — if you're
+    # authorised, record the authorisation.
+    try:
+        _verdict = _scope_enforce(command, engagement=_current_engagement())
+    except Exception as _e:   # a broken gate must not silently open
+        return {"ok": False, "refused": True, "out_of_scope": True,
+                "error": (f"REFUSED - the authorisation boundary could not be "
+                          f"evaluated ({type(_e).__name__}); refusing to run an "
+                          f"active command it could not check."),
+                "command": command}
+    if not _verdict.get("allowed", False):
+        return {"ok": False, "refused": True, "out_of_scope": True,
+                "scope_failure": _verdict.get("failure"),
+                "scope": _verdict,
+                "error": ("REFUSED - outside the authorised engagement scope. "
+                          + str(_verdict.get("reason", ""))
+                          + " " + str(_verdict.get("hint", ""))).strip(),
                 "command": command}
 
     needs_sudo = command_needs_sudo(command)
@@ -5435,6 +5465,55 @@ def tool_scope_set(targets: Any, mode: str = "replace") -> Dict[str, Any]:
                               mode=(mode or "replace").strip().lower())
     except Exception as e:
         return {"ok": False, "error": f"scope_set failed: {e}"}
+
+
+def tool_scope_exclude(targets: Any, mode: str = "replace") -> Dict[str, Any]:
+    """Record EXCLUSIONS for the current engagement — RoE carve-outs that are
+    NEVER touched even when a broader scope entry would cover them (e.g. the
+    production DB inside an in-scope /8). Exclusions beat scope and are enforced
+    at the execution primitive. `mode` = replace | add."""
+    try:
+        from basilisk_ext import engage as _eng
+    except Exception as e:
+        return {"ok": False, "error": f"engage module unavailable: {e}"}
+    try:
+        return _eng.scope_exclude(targets, engagement=_current_engagement(),
+                                  mode=(mode or "replace").strip().lower())
+    except Exception as e:
+        return {"ok": False, "error": f"scope_exclude failed: {e}"}
+
+
+def tool_scope_window(start: str = "", end: str = "",
+                      clear: bool = False) -> Dict[str, Any]:
+    """Record the AUTHORISED TESTING WINDOW (ISO-8601). Outside it, every active
+    command is refused even against an in-scope host. `clear=true` removes it."""
+    try:
+        from basilisk_ext import engage as _eng
+    except Exception as e:
+        return {"ok": False, "error": f"engage module unavailable: {e}"}
+    try:
+        return _eng.scope_window(start=start, end=end, clear=bool(clear),
+                                 engagement=_current_engagement())
+    except Exception as e:
+        return {"ok": False, "error": f"scope_window failed: {e}"}
+
+
+def tool_scope_authorisation(client: str = "", authorised_by: str = "",
+                             reference: str = "") -> Dict[str, Any]:
+    """Record WHO authorised this engagement and under what paperwork (client,
+    signatory, SoW/ticket reference). Appears in the evidence export so a report
+    can state the authority the testing was performed under."""
+    try:
+        from basilisk_ext import engage as _eng
+    except Exception as e:
+        return {"ok": False, "error": f"engage module unavailable: {e}"}
+    try:
+        return _eng.scope_authorisation(client=client,
+                                        authorised_by=authorised_by,
+                                        reference=reference,
+                                        engagement=_current_engagement())
+    except Exception as e:
+        return {"ok": False, "error": f"scope_authorisation failed: {e}"}
 
 
 def tool_scope_check(target: str) -> Dict[str, Any]:

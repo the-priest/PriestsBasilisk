@@ -1,5 +1,81 @@
 # Changelog
 
+## v7.9.0 — the authorisation boundary becomes structural
+
+### THE GAP
+Scope was advice. `basilisk_persona.py` told the model to `scope_check` before
+anything active, and exactly one tool (`tool_sqlmap_plan`) actually enforced it
+— behind an `except Exception: pass` that fell OPEN if the check threw. Every
+other active command (nmap, nuclei, ffuf, hydra, curl, masscan, smbmap…)
+reached `tool_run_command` with nothing checking who it was aimed at. The
+destructive-command floor stopped `rm -rf /`; nothing stopped `nmap 8.8.8.8`.
+
+On a leashed agent that's a docs problem. Under UNLEASH it's a prompt-level
+control on an autonomous loop — one bad parse, one poisoned page, one model
+slip from firing at a host nobody authorised. Authorisation is the only thing
+separating a pentest from an intrusion, and it was the one control not enforced
+in code.
+
+### NEW — basilisk_scope.py (enforced at the execution primitive)
+Wired into `tool_run_command` beside `is_catastrophic_command`, same no-override
+posture. The model cannot route around it because it *is* the execution path.
+  · Extracts every network target a command will touch — positional args, `-u`,
+    per-tool target flags, inline `--url=`, comma lists, `user@host`, `host:port`,
+    `[::1]`, CIDRs.
+  · Sees through `sh -c`, sudo/doas/proxychains/timeout/nohup prefixes, env
+    assignments, absolute paths, chained `;` `&&` `|`, and `$IFS` obfuscation —
+    reuses basilisk_safety's already-fuzzed tokeniser rather than growing a
+    second weaker one, so a bypass fixed in one gate is fixed in both.
+  · Inline interpreter code (`python3 -c "...nmap..."`) is refused, not parsed.
+  · FAILS CLOSED: no scope, unresolvable target, or `-iL targets.txt` ⇒ REFUSED.
+  · Passive/local commands are never inspected — `ls`, `cat`, `pytest`, `git`
+    are untouched, so this cannot break ordinary work.
+  · Loopback stays allowed by default (`allow_loopback`) so benchmark runs
+    against localhost:3000 keep working.
+
+### NEW — rules of engagement that match real paperwork
+  · `scope_exclude` — RoE carve-outs. Checked BEFORE scope and beat it, so
+    "10.0.0.0/8 except the DC at 10.1.1.0/24" is finally expressible. There was
+    previously no exclusion concept at all; scope was a bare allowlist.
+  · `scope_window` — authorised testing window (ISO-8601). Outside it every
+    active command is refused even against an in-scope host.
+  · `scope_authorisation` — client, signatory, SoW/ticket reference. Carried
+    into the evidence export so a report can state the authority it ran under.
+  · `scope_check` and `scope_show` now honour exclusions and report the full
+    RoE record.
+
+### BUGS FOUND WHILE BUILDING IT (in the new gate, by its own tests)
+  · `basilisk_safety._INTERPRETERS` is *language runtimes*; shells are in
+    `_SHELLS`. Importing the wrong one silently disabled `sh -c` recursion —
+    i.e. `sh -c 'nmap 8.8.8.8'` walked straight through. Caught by test_scope.
+  · Global target-flag set with a per-tool exception table got `nuclei -t
+    cves/2024/` wrong (`-t` is templates, not target). Rebuilt as unambiguous
+    globals + per-tool allowlists; `-u` is username on every AD/SMB tool.
+  · Blindly consuming a value-flag's next token dropped the target on
+    `curl -s https://evil.com` — a silent bypass, since `-s` is boolean. Now
+    peeks: if the next token is host-shaped it is never eaten.
+
+### REPO HYGIENE
+  · `tests/test_kali.py` DELETED. v7.8.0's changelog says it was removed after
+    being ported to test_core.py, but it is still on main — dead since the
+    v6.3.0 rename (`import kali_core` ⇒ ModuleNotFoundError), the only red entry
+    in the suite, and a 60-test duplicate of test_core.py. The deletion never
+    got pushed.
+  · `basilisk_scope.py` added to `REQUIRED_FILES` in install.sh. Note
+    REQUIRED_FILES has NO GitHub-contents-API backstop (only EXT_FILES does), so
+    a forgotten top-level module is fatal in remote-fetch mode, not self-healing.
+
+### VERIFICATION
+  · Suite 18/18, 750 tests, zero red entries (was 17 green + 1 dead).
+  · test_scope.py: 65 assertions — fail-closed, 16 bypass attempts, engagement
+    window, exclusion precedence, and a false-positive corpus of real local and
+    in-scope commands. Cross-checks its matcher against `engage._match_one` on a
+    grid so the gate and `scope_check` can never drift apart.
+  · 60k adversarial fuzz strings: 0 crashes, 0 fail-open leaks.
+  · Cost 10–99us/command (destructive gate is ~60us) — no measurable impact.
+  · GUARDRAIL byte-for-byte identical (sha256[:16] 2fee8a176746bf43).
+  · basilisk.py imports clean under a GTK stub. 46 files compile.
+
 ## v7.8.0 — the dead test comes back, and an honest performance result
 
 - **`test_kali.py` resurrected as `test_core.py` — 0 tests running to 60.**

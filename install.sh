@@ -103,7 +103,7 @@ OLD_CONFIG_DIR="${HOME}/.config/oracle"
 LEGACY_KALI_DATA="${HOME}/.local/share/kali"
 LEGACY_KALI_CONFIG="${HOME}/.config/kali"
 
-REQUIRED_FILES=(basilisk.py basilisk_core.py basilisk_safety.py basilisk_ledger.py basilisk_persona.py basilisk_voice.py)
+REQUIRED_FILES=(basilisk.py basilisk_core.py basilisk_safety.py basilisk_scope.py basilisk_ledger.py basilisk_persona.py basilisk_voice.py)
 # basilisk_btn_art.py (embedded button art) is handled as a best-effort copy
 # further down, not REQUIRED_FILES: marking it hard-required would make a
 # bare `curl|bash` install fail outright on any machine before this file has

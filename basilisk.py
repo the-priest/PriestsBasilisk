@@ -69,6 +69,7 @@ from basilisk_core import (
     tool_attack_writeup, tool_code_tooling_check, tool_code_scan_plan,
     tool_parse_scan, tool_triage_findings, tool_remediation_hint,
     tool_scope_set, tool_scope_check, tool_scope_show, tool_asset_record,
+    tool_scope_exclude, tool_scope_window, tool_scope_authorisation,
     tool_engagement_graph, tool_loot_record, tool_loot_list, tool_loot_reuse,
     tool_oracle_arm, tool_oracle_check, tool_oracle_status, tool_oracle_listen,
     tool_graph_ingest, tool_sqlmap_plan, tool_load_tools,
@@ -130,7 +131,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.basilisk"
 APP_NAME = "Basilisk"
-VERSION = "7.8.0"
+VERSION = "7.9.0"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -6247,6 +6248,9 @@ class MainWindow(Adw.ApplicationWindow):
         "remediation_hint":   "looking up the fix",
         "scope_set":          "recording authorised scope",
         "scope_check":        "checking scope",
+        "scope_exclude":      "recording exclusions",
+        "scope_window":       "recording testing window",
+        "scope_authorisation": "recording authorisation",
         "scope_show":         "showing scope",
         "asset_record":       "updating the engagement graph",
         "engagement_graph":   "reading the engagement graph",
@@ -7405,6 +7409,17 @@ class MainWindow(Adw.ApplicationWindow):
                 a.get("target", a.get("host", a.get("url", ""))))
         if n == "scope_show":
             return lambda: tool_scope_show()
+        if n == "scope_exclude":
+            return lambda: tool_scope_exclude(
+                a.get("targets", a.get("exclusions", a.get("hosts", []))),
+                a.get("mode", "replace"))
+        if n == "scope_window":
+            return lambda: tool_scope_window(
+                a.get("start", ""), a.get("end", ""), bool(a.get("clear", False)))
+        if n == "scope_authorisation":
+            return lambda: tool_scope_authorisation(
+                a.get("client", ""), a.get("authorised_by", a.get("authorized_by", "")),
+                a.get("reference", a.get("ref", "")))
         if n == "asset_record":
             return lambda: tool_asset_record(
                 a.get("host", a.get("target", "")), a.get("service", ""),
@@ -8128,6 +8143,19 @@ class MainWindow(Adw.ApplicationWindow):
                     a.get("target", a.get("host", a.get("url", ""))))),
             "scope_show":         lambda a: self._tool_simple(
                 lambda: tool_scope_show()),
+            "scope_exclude":      lambda a: self._tool_simple(
+                lambda: tool_scope_exclude(
+                    a.get("targets", a.get("exclusions", a.get("hosts", []))),
+                    a.get("mode", "replace"))),
+            "scope_window":       lambda a: self._tool_simple(
+                lambda: tool_scope_window(
+                    a.get("start", ""), a.get("end", ""),
+                    bool(a.get("clear", False)))),
+            "scope_authorisation": lambda a: self._tool_simple(
+                lambda: tool_scope_authorisation(
+                    a.get("client", ""),
+                    a.get("authorised_by", a.get("authorized_by", "")),
+                    a.get("reference", a.get("ref", "")))),
             "asset_record":       lambda a: self._tool_simple(
                 lambda: tool_asset_record(
                     a.get("host", a.get("target", "")), a.get("service", ""),
