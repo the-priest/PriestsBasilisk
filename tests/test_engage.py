@@ -1,8 +1,11 @@
 """Offline tests for basilisk_ext/engage.py — scope (fail-closed), asset graph,
 loot (redacted), in-scope-only reuse, and scan->state ingest."""
-import sys, tempfile
+import sys
+import tempfile
+import tempfile as _tempfile
 sys.path.insert(0, ".")
 from pathlib import Path
+from pathlib import Path as _Path
 from basilisk_ext import engage as e
 
 P = F = 0
@@ -65,6 +68,49 @@ ck("garbage -> ok:false", e.graph_ingest("not json", engagement=E2, base_dir=d2)
 print("== robustness ==")
 ck("asset needs host", e.asset_record(E, host="", base_dir=d)["ok"] is False)
 ck("empty graph ok", e.graph_query("none", base_dir=d)["host_count"] == 0)
+
+print("== concurrency: read-modify-write must be atomic ==")
+# Every mutator was `_load()` -> mutate -> `_save()` with the lock held only
+# INSIDE _save, so two tool calls on worker threads lost each other's writes.
+# Measured before the fix: 105 of 120 records lost, silently, no exception —
+# loot worst at 59 of 60 captured credentials dropped.
+import threading as _th
+
+_rd = _tempfile.mkdtemp()
+_rp = _Path(_rd)
+e.scope_set("acme.com", engagement="race", base_dir=_rp)
+_N = 40
+_errs = []
+
+
+def _mk_asset(i):
+    try:
+        e.asset_record(engagement="race", host=f"10.0.0.{i}", service="http",
+                       base_dir=_rp)
+    except Exception as ex:
+        _errs.append(ex)
+
+
+def _mk_loot(i):
+    try:
+        e.loot_record(engagement="race", host=f"10.0.0.{i}",
+                      username=f"u{i}", secret="x", base_dir=_rp)
+    except Exception as ex:
+        _errs.append(ex)
+
+
+_threads = ([_th.Thread(target=_mk_asset, args=(i,)) for i in range(_N)]
+            + [_th.Thread(target=_mk_loot, args=(i,)) for i in range(_N)])
+for _t in _threads:
+    _t.start()
+for _t in _threads:
+    _t.join()
+
+_st = e._load("race", _rp)
+ck("no lost asset writes", len(_st.get("assets", {})) == _N)
+ck("no lost loot writes", len(_st.get("loot", [])) == _N)
+ck("scope not clobbered by concurrent writes", _st.get("scope") == ["acme.com"])
+ck("no exceptions raised under contention", not _errs)
 
 print(f"\n  {P} passed, {F} failed")
 sys.exit(1 if F else 0)

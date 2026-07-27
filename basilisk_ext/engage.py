@@ -45,6 +45,7 @@ import os
 import re
 import threading
 import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -103,6 +104,25 @@ def _save(state: Dict[str, Any], base_dir: Optional[Path]) -> bool:
         return True
     except Exception:
         return False
+
+
+@contextmanager
+def _txn(engagement: str, base_dir: Optional[Path]):
+    """Atomic read-modify-write on one engagement's state.
+
+    Every mutator used to do `st = _load(...)` → mutate → `_save(st)` with the
+    lock held ONLY inside _save. Two tool calls in flight — and Basilisk runs
+    them on worker threads — meant the second load overwrote the first save.
+    Measured on 120 concurrent records: 105 lost, silently, no exception. loot
+    was worst (59 of 60 captured credentials dropped), which matters most in the
+    one place the tool exists to be authoritative.
+
+    _LOCK is an RLock, so _save's own acquisition nests harmlessly.
+    """
+    with _LOCK:
+        st = _load(engagement, base_dir)
+        yield st
+        _save(st, base_dir)
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -191,12 +211,13 @@ def scope_set(targets: Any, engagement: str = "default", mode: str = "replace",
         cleaned.append(_norm_scope_entry(p))
     cleaned = list(dict.fromkeys(cleaned))  # dedup, keep order
 
-    st = _load(engagement, base_dir)
-    if mode == "add":
-        st["scope"] = list(dict.fromkeys(st.get("scope", []) + cleaned))
-    else:
-        st["scope"] = cleaned
-    ok = _save(st, base_dir)
+    with _LOCK:   # atomic read-modify-write (see _txn)
+        st = _load(engagement, base_dir)
+        if mode == "add":
+            st["scope"] = list(dict.fromkeys(st.get("scope", []) + cleaned))
+        else:
+            st["scope"] = cleaned
+        ok = _save(st, base_dir)
     return {"ok": ok, "engagement": st["engagement"], "scope": st["scope"],
             "count": len(st["scope"]),
             "note": "Only test targets you are authorised to. scope_check fails "
@@ -223,12 +244,13 @@ def scope_exclude(targets: Any, engagement: str = "default",
     cleaned = list(dict.fromkeys(
         _norm_scope_entry(str(p).strip()) for p in parts if str(p or "").strip()))
 
-    st = _load(engagement, base_dir)
-    if mode == "add":
-        st["exclusions"] = list(dict.fromkeys(st.get("exclusions", []) + cleaned))
-    else:
-        st["exclusions"] = cleaned
-    ok = _save(st, base_dir)
+    with _LOCK:   # atomic read-modify-write (see _txn)
+        st = _load(engagement, base_dir)
+        if mode == "add":
+            st["exclusions"] = list(dict.fromkeys(st.get("exclusions", []) + cleaned))
+        else:
+            st["exclusions"] = cleaned
+        ok = _save(st, base_dir)
     return {"ok": ok, "engagement": st["engagement"],
             "exclusions": st["exclusions"], "count": len(st["exclusions"]),
             "note": "Exclusions OVERRIDE scope. A target matching one of these "
@@ -245,34 +267,35 @@ def scope_window(start: str = "", end: str = "", engagement: str = "default",
     testing — it is one of the most common ways a legitimate engagement turns
     into an incident report. Outside the window every active command is refused.
     """
-    st = _load(engagement, base_dir)
-    if clear:
-        st.pop("window", None)
+    with _LOCK:   # atomic read-modify-write (see _txn)
+        st = _load(engagement, base_dir)
+        if clear:
+            st.pop("window", None)
+            ok = _save(st, base_dir)
+            return {"ok": ok, "engagement": st["engagement"], "window": None,
+                    "note": "window cleared — scope alone now governs."}
+    
+        def _norm(v: str) -> str:
+            v = (v or "").strip()
+            if not v:
+                return ""
+            try:
+                d = datetime.fromisoformat(v.replace("Z", "+00:00"))
+                if not d.tzinfo:
+                    d = d.replace(tzinfo=timezone.utc)
+                return d.isoformat()
+            except Exception:
+                return ""
+    
+        s, e = _norm(start), _norm(end)
+        if (start and not s) or (end and not e):
+            return {"ok": False, "error": "could not parse start/end — use ISO-8601 "
+                                          "(e.g. 2026-08-01T09:00:00Z)."}
+        win = {k: v for k, v in (("start", s), ("end", e)) if v}
+        if not win:
+            return {"ok": False, "error": "supply start and/or end, or clear=true."}
+        st["window"] = win
         ok = _save(st, base_dir)
-        return {"ok": ok, "engagement": st["engagement"], "window": None,
-                "note": "window cleared — scope alone now governs."}
-
-    def _norm(v: str) -> str:
-        v = (v or "").strip()
-        if not v:
-            return ""
-        try:
-            d = datetime.fromisoformat(v.replace("Z", "+00:00"))
-            if not d.tzinfo:
-                d = d.replace(tzinfo=timezone.utc)
-            return d.isoformat()
-        except Exception:
-            return ""
-
-    s, e = _norm(start), _norm(end)
-    if (start and not s) or (end and not e):
-        return {"ok": False, "error": "could not parse start/end — use ISO-8601 "
-                                      "(e.g. 2026-08-01T09:00:00Z)."}
-    win = {k: v for k, v in (("start", s), ("end", e)) if v}
-    if not win:
-        return {"ok": False, "error": "supply start and/or end, or clear=true."}
-    st["window"] = win
-    ok = _save(st, base_dir)
     return {"ok": ok, "engagement": st["engagement"], "window": win,
             "note": "Active commands are refused outside this window."}
 
@@ -286,19 +309,20 @@ def scope_authorisation(client: str = "", authorised_by: str = "",
     report generated from it can state the authority the testing was performed
     under. An engagement record with scope but no authority is not evidence.
     """
-    st = _load(engagement, base_dir)
-    auth = dict(st.get("authorisation") or {})
-    for k, v in (("client", client), ("authorised_by", authorised_by),
-                 ("reference", reference)):
-        if str(v or "").strip():
-            auth[k] = str(v).strip()
-    if not auth:
-        return {"ok": True, "engagement": st["engagement"],
-                "authorisation": st.get("authorisation") or {},
-                "note": "nothing supplied — returning what is on record."}
-    auth["recorded_at"] = datetime.now(timezone.utc).isoformat()
-    st["authorisation"] = auth
-    ok = _save(st, base_dir)
+    with _LOCK:   # atomic read-modify-write (see _txn)
+        st = _load(engagement, base_dir)
+        auth = dict(st.get("authorisation") or {})
+        for k, v in (("client", client), ("authorised_by", authorised_by),
+                     ("reference", reference)):
+            if str(v or "").strip():
+                auth[k] = str(v).strip()
+        if not auth:
+            return {"ok": True, "engagement": st["engagement"],
+                    "authorisation": st.get("authorisation") or {},
+                    "note": "nothing supplied — returning what is on record."}
+        auth["recorded_at"] = datetime.now(timezone.utc).isoformat()
+        st["authorisation"] = auth
+        ok = _save(st, base_dir)
     return {"ok": ok, "engagement": st["engagement"], "authorisation": auth}
 
 
@@ -400,9 +424,10 @@ def asset_record(engagement: str = "default", host: str = "",
     (e.g. 'authenticated user', 'RCE as www-data', 'domain user')."""
     if not (_host_of(host) or (host or "").strip()):
         return {"ok": False, "error": "a host is required"}
-    st = _load(engagement, base_dir)
-    h = _apply_asset(st, host, service, port, finding, access, note)
-    ok = _save(st, base_dir)
+    with _LOCK:   # atomic read-modify-write (see _txn)
+        st = _load(engagement, base_dir)
+        h = _apply_asset(st, host, service, port, finding, access, note)
+        ok = _save(st, base_dir)
     return {"ok": ok, "engagement": st["engagement"], "host": h,
             "node": st["assets"].get(h)}
 
@@ -461,24 +486,25 @@ def loot_record(engagement: str = "default", host: str = "", kind: str = "creden
     h = _host_of(host) or (host or "").strip().lower()
     if not h and not username and not secret:
         return {"ok": False, "error": "need at least a host, username, or secret"}
-    st = _load(engagement, base_dir)
-    entry = {
-        "id": len(st.get("loot", [])) + 1,
-        "host": h, "kind": (kind or "credential").strip().lower(),
-        "username": str(username or "").strip(),
-        "secret": str(secret or ""),  # stored; never emitted raw by this module
-        "service": str(service or "").strip(),
-        "note": str(note or "").strip(),
-        "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-    }
-    st.setdefault("loot", []).append(entry)
-    # mirror the credential onto the asset as an access hint — same state,
-    # single save (do NOT call asset_record here; that would reload and clobber
-    # this loot append).
-    if h:
-        _apply_asset(st, host=h, service=entry["service"],
-                     note=f"loot: {entry['kind']} for {entry['username'] or '?'}")
-    ok = _save(st, base_dir)
+    with _LOCK:   # atomic read-modify-write (see _txn)
+        st = _load(engagement, base_dir)
+        entry = {
+            "id": len(st.get("loot", [])) + 1,
+            "host": h, "kind": (kind or "credential").strip().lower(),
+            "username": str(username or "").strip(),
+            "secret": str(secret or ""),  # stored; never emitted raw by this module
+            "service": str(service or "").strip(),
+            "note": str(note or "").strip(),
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        }
+        st.setdefault("loot", []).append(entry)
+        # mirror the credential onto the asset as an access hint — same state,
+        # single save (do NOT call asset_record here; that would reload and clobber
+        # this loot append).
+        if h:
+            _apply_asset(st, host=h, service=entry["service"],
+                         note=f"loot: {entry['kind']} for {entry['username'] or '?'}")
+        ok = _save(st, base_dir)
     view = dict(entry)
     view["secret"] = _redact_secret(entry["secret"])
     return {"ok": ok, "engagement": st["engagement"], "loot": view,
@@ -600,34 +626,35 @@ def graph_ingest(parsed: Any, engagement: str = "default",
     if not rows:
         return {"ok": False, "error": "no records found to ingest"}
 
-    st = _load(engagement, base_dir)
-    n_hosts = set()
-    n_services = 0
-    n_findings = 0
-    for row in rows:
-        host = _extract_host(row)
-        if not host:
-            continue
-        service = str(row.get("service") or row.get("tech") or
-                      row.get("webserver") or row.get("scheme") or "").strip()
-        port = row.get("port") or row.get("status_code") or ""
-        # a finding label: template/name/title, or a version banner
-        finding = str(row.get("name") or row.get("template") or
-                      row.get("title") or "").strip()
-        sev = str(row.get("severity") or "").strip()
-        if finding and sev:
-            finding = f"[{sev}] {finding}"
-        before = st["assets"].get(host, {})
-        before_svc = len(before.get("services", []))
-        before_find = len(before.get("findings", []))
-        _apply_asset(st, host=host, service=service,
-                     port=port if service or port else None,
-                     finding=finding)
-        after = st["assets"].get(host, {})
-        n_hosts.add(host)
-        n_services += len(after.get("services", [])) - before_svc
-        n_findings += len(after.get("findings", [])) - before_find
-    ok = _save(st, base_dir)
+    with _LOCK:   # atomic read-modify-write (see _txn)
+        st = _load(engagement, base_dir)
+        n_hosts = set()
+        n_services = 0
+        n_findings = 0
+        for row in rows:
+            host = _extract_host(row)
+            if not host:
+                continue
+            service = str(row.get("service") or row.get("tech") or
+                          row.get("webserver") or row.get("scheme") or "").strip()
+            port = row.get("port") or row.get("status_code") or ""
+            # a finding label: template/name/title, or a version banner
+            finding = str(row.get("name") or row.get("template") or
+                          row.get("title") or "").strip()
+            sev = str(row.get("severity") or "").strip()
+            if finding and sev:
+                finding = f"[{sev}] {finding}"
+            before = st["assets"].get(host, {})
+            before_svc = len(before.get("services", []))
+            before_find = len(before.get("findings", []))
+            _apply_asset(st, host=host, service=service,
+                         port=port if service or port else None,
+                         finding=finding)
+            after = st["assets"].get(host, {})
+            n_hosts.add(host)
+            n_services += len(after.get("services", [])) - before_svc
+            n_findings += len(after.get("findings", [])) - before_find
+        ok = _save(st, base_dir)
     return {
         "ok": ok,
         "engagement": st["engagement"],

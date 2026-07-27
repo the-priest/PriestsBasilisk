@@ -110,7 +110,7 @@ _NETWORK_TOOLS: Set[str] = {
     "gettgt.py", "secretsdump.py", "impacket-secretsdump",
     # generic transports that reach arbitrary hosts
     "curl", "wget", "nc", "ncat", "netcat", "socat", "telnet", "ssh", "scp",
-    "sftp", "ftp", "rsync", "openvpn", "proxychains", "proxychains4",
+    "sftp", "ftp", "rsync", "openvpn",
     # api / graphql
     "graphqlmap", "clairvoyance", "arjun", "paramspider", "kiterunner",
 }
@@ -146,17 +146,41 @@ _TOOL_NON_TARGET_FLAGS: Dict[str, Set[str]] = {
      "impacket-psexec", "impacket-secretsdump", "medusa", "ncrack", "patator")
 }
 
+# Flags that take NO value. This set exists because flag arity cannot be
+# guessed: `curl -s https://evil.com` and `nmap -p 80 host` look identical to a
+# parser that does not know `-s` is boolean and `-p` is not. Getting it wrong in
+# the boolean direction is a BYPASS — the flag eats the target and the command
+# sails through — so the common no-value flags are enumerated explicitly.
+_BOOLEAN_FLAGS: Set[str] = {
+    # curl / wget
+    "-s", "-S", "-k", "-L", "-I", "-v", "-f", "-g", "-N", "-q", "-4", "-6",
+    "--silent", "--insecure", "--location", "--head", "--verbose", "--fail",
+    "--compressed", "--no-check-certificate", "--globoff",
+    # nmap
+    "-Pn", "-sV", "-sC", "-sS", "-sT", "-sU", "-sn", "-A", "-O", "-v", "-vv",
+    "-n", "-R", "-F", "--open", "--reason", "--traceroute", "-T0", "-T1",
+    "-T2", "-T3", "-T4", "-T5",
+    # nuclei / httpx / ffuf / gobuster
+    "-silent", "-json", "-jsonl", "-nc", "-no-color", "-stats", "-follow-redirects",
+    "-status-code", "-title", "-tech-detect", "-probe", "-ip", "-cdn",
+    "--recursion", "-recursive", "-ac", "-r", "-D", "-fw",
+    # sqlmap / hydra / general
+    "--batch", "--random-agent", "--dbs", "--tables", "--dump", "--current-user",
+    "--is-dba", "--forms", "--crawl", "-V", "-h", "--help", "--version",
+}
+
 # Flags whose VALUE is definitively NOT a target (wordlists, output files,
 # ports, threads…).  Skipping these kills most false positives.
 _VALUE_FLAGS_NOT_TARGET: Set[str] = {
     "-w", "--wordlist", "-o", "-oN", "-oX", "-oG", "-oA", "-oJ", "--output",
-    "-p", "--ports", "--port", "-P", "--passwords", "--password", "-x", "-e",
+    "-p", "--ports", "--port", "-P", "--passwords", "--password",
     "-T", "--threads", "-c", "--cookie", "-b", "--data", "--data-raw",
-    "-A", "--user-agent", "-r", "--rate", "-s", "-S", "-m", "--method",
-    "-k", "--key", "-i", "--identity", "-f", "--format", "-n", "-j",
-    "--timeout", "--retries", "--delay", "--proxy", "--resolvers",
-    "-mc", "-fc", "-ms", "-fs", "-mr", "-fr", "-ac", "-recursion-depth",
+    "-A", "--user-agent", "--rate", "-m", "--method",
+    "--key", "-i", "--identity", "--format", "-j",
+    "--timeout", "--retries", "--delay", "--resolvers",
+    "-mc", "-fc", "-ms", "-fs", "-mr", "-fr", "-recursion-depth",
     "--severity", "--tags", "--templates", "-tags", "-severity", "-t",
+    "--level", "--risk", "--technique", "--dbms", "-e", "-x",
 }
 
 # Flags that name a FILE full of targets — statically unknowable, so uncertain.
@@ -173,6 +197,45 @@ _FILE_EXTS: Set[str] = {
     "gz", "bz2", "xz", "7z", "pem", "crt", "key", "pub", "png", "jpg",
     "jpeg", "gif", "svg", "pdf", "bak", "old", "tmp", "swp", "so", "bin",
 }
+
+# Commands that PREFIX a real command rather than being one. `env FOO=1 nmap`
+# looked like an invocation of `env` and sailed straight past the boundary
+# until this list grew; the backstop below exists because this list will never
+# be complete.
+_WRAPPERS: Set[str] = {
+    "sudo", "doas", "su", "runuser", "env", "time", "timeout", "nohup",
+    "stdbuf", "unbuffer", "setsid", "nice", "ionice", "chrt", "taskset",
+    "proxychains", "proxychains4", "torsocks", "firejail", "bwrap",
+    "flatpak-spawn", "command", "exec", "busybox", "watch", "xargs",
+    "script", "eatmydata", "systemd-run", "ssh-agent",
+}
+# Wrapper flags that consume the following token, so it is not the real command.
+_WRAPPER_VALUE_FLAGS: Set[str] = {
+    "-u", "--user", "-g", "--group", "-n", "-c", "--command", "-C", "--chdir",
+    "-S", "--split-string", "-p", "--policy", "-k", "--kill-after", "-s",
+    "--signal", "-N", "--name", "-a", "-l",
+}
+# Commands that legitimately take a scanner's NAME as an argument without
+# running it. Without this exemption the backstop would refuse `apt install
+# nmap` and `which nuclei`, which the agent does constantly during tooling_check.
+_TOOL_NAME_CONSUMERS: Set[str] = {
+    "which", "whereis", "type", "hash", "command", "man", "info", "whatis",
+    "apt", "apt-get", "apt-cache", "apt-mark", "apt-file", "aptitude",
+    "dpkg", "dpkg-query", "dnf", "yum", "rpm", "rpm-ostree", "pacman",
+    "pkg", "xbps-query", "xbps-install", "equery", "eix", "nix", "nix-env",
+    "guix", "conda", "poetry", "uv", "asdf", "mise", "update-alternatives",
+    "yay", "paru", "zypper", "apk", "brew", "port", "emerge", "snap",
+    "flatpak", "pip", "pip3", "pipx", "npm", "yarn", "gem", "cargo", "go",
+    "echo", "printf", "cat", "grep", "rg", "ag", "find", "ls", "stat", "file",
+    "systemctl", "service", "journalctl", "docker", "podman", "kubectl",
+    "git", "make", "cmake", "test", "wc", "head", "tail", "sed", "awk",
+}
+
+# Wrappers whose -c/--command argument is a COMMAND STRING to execute, so it
+# must be recursed into exactly like a shell's. `su -c 'nmap 8.8.8.8' root`
+# otherwise consumed the payload as an inert flag value and allowed the scan.
+_CMD_STRING_WRAPPERS: Set[str] = {"su", "runuser", "script", "systemd-run",
+                                  "flatpak-spawn", "watch"}
 
 _SCHEME_RE = re.compile(r"^([a-zA-Z][a-zA-Z0-9+.\-]*)://(.*)$", re.S)
 _HOSTNAME_RE = re.compile(
@@ -235,10 +298,16 @@ def _looks_like_target(token: str) -> bool:
         except (ValueError, IndexError):
             pass
 
-    # an existing path is a file, not a host
+    # A path-shaped token is a file, not a host.
+    #
+    # NOTE: this deliberately does NOT stat the filesystem. An earlier version
+    # called os.path.exists(t) here, which meant `touch evil.com && nmap
+    # 10.0.0.5 evil.com` silently dropped evil.com from the extracted set and
+    # the command was ALLOWED on the strength of the in-scope IP alone. An
+    # authorisation decision must be a pure function of the command string —
+    # the moment it depends on mutable disk state, anything that can create a
+    # file can move the boundary.
     if t.startswith(("/", "./", "../", "~")) or os.sep in t:
-        return False
-    if os.path.exists(t):
         return False
 
     if not _HOSTNAME_RE.match(host):
@@ -251,6 +320,30 @@ def _looks_like_target(token: str) -> bool:
     if len(tld) < 2:
         return False
     return True
+
+
+def _is_strong_target(token: str) -> bool:
+    """Unmistakably a network target: explicit scheme, bare IP, or CIDR.
+
+    Deliberately narrower than _looks_like_target — used only to stop a
+    value-flag from swallowing something that obviously is a host.
+    """
+    t = (token or "").strip()
+    if not t or t.startswith("-"):
+        return False
+    if _SCHEME_RE.match(t):
+        return True
+    host = _strip_to_host(t)
+    try:
+        ipaddress.ip_address(host)
+        return True
+    except ValueError:
+        pass
+    try:
+        ipaddress.ip_network(t, strict=False)
+        return "/" in t
+    except ValueError:
+        return False
 
 
 class Extraction:
@@ -274,29 +367,58 @@ class Extraction:
                 "tools": sorted(set(self.tools)), "reason": self.reason}
 
 
+def _resolve_command(argv: List[str]) -> Tuple[str, int]:
+    """Peel wrappers/env-assignments off the front and return (tool, index).
+
+    `sudo -u root nmap`, `env FOO=1 nmap`, `timeout 1.5 nmap`, `nice -n 10 nmap`
+    all resolve to nmap. Returns ("", -1) if nothing command-shaped is found.
+    """
+    idx = 0
+    n = len(argv)
+    guard = 0
+    while idx < n and guard < 40:
+        guard += 1
+        tok = argv[idx]
+        # VAR=value assignments (bare, or arguments to `env`)
+        if re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", tok):
+            idx += 1
+            continue
+        name = _base(tok).lower()
+        if name in _WRAPPERS:
+            idx += 1
+            # consume this wrapper's own flags and their values
+            while idx < n:
+                a = argv[idx]
+                if a.startswith("-"):
+                    flag = a.split("=", 1)[0]
+                    if "=" in a:
+                        idx += 1
+                    elif flag in _WRAPPER_VALUE_FLAGS:
+                        idx += 2
+                    else:
+                        idx += 1
+                    continue
+                # a bare duration for timeout/watch/sleep-like wrappers
+                if re.match(r"^\d+(\.\d+)?[smhd]?$", a):
+                    idx += 1
+                    continue
+                break
+            continue
+        if idx < n:
+            return name, idx
+        break
+    return ("", -1)
+
+
 def _extract_from_argv(argv: List[str], out: Extraction) -> None:
     if not argv:
         return
-    tool = _base(argv[0]).lower()
-
-    # step past leading env assignments:  FOO=bar nmap ...
-    idx = 0
-    while idx < len(argv) and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", argv[idx]):
-        idx += 1
-    if idx >= len(argv):
-        return
-    tool = _base(argv[idx]).lower()
-
-    # proxychains nmap ... → the real tool is the next word
-    while tool in ("proxychains", "proxychains4", "sudo", "doas", "time",
-                   "nohup", "stdbuf", "timeout") and idx + 1 < len(argv):
-        idx += 1
-        nxt = argv[idx]
-        if nxt.startswith("-") or re.match(r"^\d+[smhd]?$", nxt):
-            continue
-        tool = _base(nxt).lower()
-
-    if tool not in _NETWORK_TOOLS:
+    raw_head = _base(argv[0]).lower()
+    if raw_head in _TOOL_NAME_CONSUMERS and (
+            raw_head != "command" or any(a in ("-v", "-V") for a in argv[1:])):
+        return          # `which nmap`, `apt install nuclei`, `command -v ffuf`
+    tool, idx = _resolve_command(argv)
+    if not tool or idx < 0 or tool not in _NETWORK_TOOLS:
         return
     out.tools.append(tool)
 
@@ -331,20 +453,26 @@ def _extract_from_argv(argv: List[str], out: Extraction) -> None:
                 i += 1 if inline is not None else 2
                 continue
 
+            if flag in _BOOLEAN_FLAGS:
+                i += 1
+                continue
+
             if flag in _VALUE_FLAGS_NOT_TARGET:
                 if inline is not None:
                     i += 1
                     continue
-                # We cannot know from the flag alone whether it takes a value:
-                # curl's -s is boolean, nmap's -p is not. Blindly eating the
-                # next token means `curl -s https://evil.com` loses its target
-                # entirely — a silent BYPASS, not just a UX wart. So peek: if
-                # the next token looks like a target, leave it for the main
-                # loop. Over-collecting fails closed; under-collecting does not.
+                # Consume the value — but never swallow something unmistakably
+                # a target (explicit scheme, bare IP, CIDR). That backstops a
+                # flag mis-filed here as value-taking when it is really boolean;
+                # without it, one wrong entry in the set above is a silent
+                # bypass rather than a false positive.
                 nxt = rest[i + 1] if i + 1 < len(rest) else ""
-                i += 1 if (nxt and _looks_like_target(nxt)) else 2
+                i += 1 if (nxt and _is_strong_target(nxt)) else 2
                 continue
 
+            # Unknown flag: assume it takes no value. Over-collecting targets
+            # fails CLOSED (a false refusal the operator can fix with
+            # scope_set); under-collecting fails OPEN.
             i += 1
             continue
 
@@ -353,17 +481,74 @@ def _extract_from_argv(argv: List[str], out: Extraction) -> None:
         i += 1
 
 
-def extract_targets(command: str) -> Extraction:
+def _substitution_payloads(command: str) -> List[str]:
+    """Inner text of every `$(...)` and backtick substitution.
+
+    `echo $(nmap 8.8.8.8)` runs nmap. shlex hands back the token `$(nmap`,
+    whose basename matches nothing, so neither the walk nor the backstop saw
+    it. These spans are lifted out and re-parsed as commands in their own right.
+    """
+    out: List[str] = []
+    i, n = 0, len(command)
+    while i < n:
+        c = command[i]
+        if c == "\\" and i + 1 < n:
+            i += 2
+            continue
+        if c == "$" and i + 1 < n and command[i + 1] == "(":
+            depth, j = 1, i + 2
+            start = j
+            while j < n and depth:
+                if command[j] == "\\":
+                    j += 2
+                    continue
+                if command[j] == "(":
+                    depth += 1
+                elif command[j] == ")":
+                    depth -= 1
+                j += 1
+            if depth == 0:
+                out.append(command[start:j - 1])
+            i = j
+            continue
+        if c == "`":
+            j = i + 1
+            while j < n and command[j] != "`":
+                if command[j] == "\\":
+                    j += 2
+                    continue
+                j += 1
+            if j < n:
+                out.append(command[i + 1:j])
+            i = j + 1
+            continue
+        i += 1
+    return out
+
+
+def extract_targets(command: str, _depth: int = 0) -> Extraction:
     """Every network target `command` will touch, plus anything unknowable.
 
     Recurses into `sh -c "..."` exactly like the catastrophic gate, so wrapping
     a scan in a shell does not launder it past the boundary.
     """
     out = Extraction()
-    if not command or not command.strip():
+    if not command or not command.strip() or _depth > 6:
+        if _depth > 6:
+            out.uncertain.append("<substitution nesting too deep>")
         return out
     try:
         norm = _normalize(command)
+
+        # Command substitutions execute independently of the line that contains
+        # them — lift them out and parse each as its own command.
+        for payload in _substitution_payloads(norm):
+            if payload.strip():
+                inner = extract_targets(payload, _depth + 1)
+                out.targets.extend(inner.targets)
+                out.uncertain.extend(inner.uncertain)
+                out.tools.extend(inner.tools)
+
         for sub in _split_subcommands(norm):
             argv = _argv(sub)
             if argv is None:
@@ -383,14 +568,14 @@ def extract_targets(command: str) -> Extraction:
             # recurse into it. Without this, wrapping any scan in a shell walks
             # straight past the boundary.
             b = _base(argv[0]).lower()
-            if b in _SHELLS:
+            if b in _SHELLS or b in _CMD_STRING_WRAPPERS:
                 payload = None
                 for j in range(1, len(argv) - 1):
-                    if argv[j] == "-c":
+                    if argv[j] in ("-c", "--command", "-qc"):
                         payload = argv[j + 1]
                         break
                 if payload:
-                    inner = extract_targets(payload)
+                    inner = extract_targets(payload, _depth + 1)
                     out.targets.extend(inner.targets)
                     out.uncertain.extend(inner.uncertain)
                     out.tools.extend(inner.tools)
@@ -415,7 +600,67 @@ def extract_targets(command: str) -> Extraction:
                                 f"<inline {b} code invoking {t}>")
                             break
                     continue
+            _before = len(out.tools)
             _extract_from_argv(argv, out)
+
+            # ── BACKSTOP ────────────────────────────────────────────────
+            # The structured walk above depends on recognising the wrapper
+            # chain, and that recognition will never be complete — `env FOO=1
+            # nmap 8.8.8.8` was allowed until `env` was added to _WRAPPERS, and
+            # the next torsocks/firejail/chrt variant would have been too.
+            #
+            # So: if a network tool's name appears in a sub-command that the
+            # walk could not attribute AT ALL, refuse. That turns every present
+            # and future parsing gap from a SILENT BYPASS into a loud, fixable
+            # refusal — the only safe direction for a gap in an authorisation
+            # boundary.
+            #
+            # Only when the walk found nothing, though: `hydra -l admin -P
+            # pw.txt 10.0.0.5 ssh` names ssh as a PROTOCOL argument to an
+            # already-attributed tool, and second-guessing a successful parse
+            # just manufactures false refusals.
+            if len(out.tools) != _before:
+                continue
+
+            head, _hi = _resolve_command(argv)
+            raw_head = _base(argv[0]).lower()
+            # `command -v ffuf` is introspection; bare `command ffuf …` really
+            # runs it. Check the raw head as well as the resolved one, or the
+            # wrapper peel turns the former into an apparent ffuf invocation.
+            introspective = (raw_head in _TOOL_NAME_CONSUMERS
+                             and (raw_head != "command"
+                                  or any(a in ("-v", "-V") for a in argv[1:])))
+            if head in _TOOL_NAME_CONSUMERS or introspective:
+                continue
+
+            # Nothing was attributed, so a quoted argument may itself BE the
+            # command: `watch -n1 'nmap 8.8.8.8'` passes the scan positionally
+            # rather than behind -c, so neither the wrapper peel nor the name
+            # scan below sees it (the shlex token is the whole string
+            # "nmap 8.8.8.8", whose basename matches nothing).
+            _recursed = False
+            for tok in argv[1:]:
+                if _depth <= 6 and (" " in tok or "\t" in tok):
+                    inner = extract_targets(tok, _depth + 1)
+                    if inner.tools:
+                        out.targets.extend(inner.targets)
+                        out.uncertain.extend(inner.uncertain)
+                        out.tools.extend(inner.tools)
+                        _recursed = True
+            if _recursed:
+                continue
+
+            attributed = set(out.tools)
+            for tok in argv:
+                nm = _base(tok).lower()
+                if nm in _NETWORK_TOOLS and nm not in attributed:
+                    out.tools.append(nm)
+                    out.uncertain.append(
+                        f"<unattributed invocation of {nm}>")
+                    out.reason = ("a known network tool appears in the command "
+                                  "but could not be attributed to a parsed "
+                                  "invocation")
+                    break
     except Exception as e:  # never let the extractor crash the gate
         out.uncertain.append("<extractor error>")
         out.reason = f"extractor error: {type(e).__name__}"

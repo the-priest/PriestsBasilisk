@@ -5741,8 +5741,16 @@ def tool_sqlmap_plan(target: str = "", mode: str = "detect", data: str = "",
                         "scope": chk,
                         "hint": "add it with scope_set if you're authorised to "
                                 "test it; sqlmap will not be proposed otherwise."}
-        except Exception:
-            pass  # if scope can't be checked, fall through (builder still warns)
+        except Exception as _e:
+            # Previously `except Exception: pass` — the check fell OPEN, so any
+            # error in scope resolution silently produced an unchecked sqlmap
+            # command. A boundary that opens on its own failure is worse than no
+            # boundary, because it reads as enforced. Fail closed instead.
+            return {"ok": False,
+                    "error": (f"scope could not be evaluated for this target "
+                              f"({type(_e).__name__}) — refusing to propose an "
+                              f"active command that could not be checked."),
+                    "hint": "check the engagement state with scope_show."}
     try:
         return _pentest.sqlmap_plan(
             target=tgt, mode=(mode or "detect").strip().lower(), data=data,

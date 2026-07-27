@@ -1,5 +1,83 @@
 # Changelog
 
+## v7.9.1 — hardening the boundary shipped in v7.9.0, plus a severe data-loss race
+
+v7.9.0 made scope structural. Reviewing that work adversarially found four ways
+past it, all now closed and locked as regressions. A gate nobody has tried to
+break is a gate with unknown strength.
+
+### FOUR BYPASSES IN THE v7.9.0 SCOPE GATE
+  · FILESYSTEM DEPENDENCY (worst). `_looks_like_target()` called
+    `os.path.exists()`, so `touch evil.com && nmap 10.0.0.5 evil.com` dropped
+    evil.com from the extracted set and the command was ALLOWED on the strength
+    of the in-scope IP alone. An authorisation decision must be a pure function
+    of the command string — once it reads mutable disk state, anything that can
+    create a file can move the boundary, and the agent creates files. Removed.
+  · BOOLEAN FLAGS EATING TARGETS. Flag arity was guessed, so `curl -s
+    https://evil.com` lost its target to `-s` (which takes no value). Replaced
+    guessing with an explicit `_BOOLEAN_FLAGS` set plus a strong-target backstop,
+    so a misfiled flag is a false positive rather than a silent bypass.
+  · WRAPPER PREFIXES. `env FOO=1 nmap 8.8.8.8` walked straight through, as did
+    `sudo -u root`, `timeout 1.5` (a float broke the duration regex), nice,
+    ionice, setsid, unbuffer, xargs, watch, command, exec, busybox, torsocks,
+    firejail, chrt, `su -c '…'`, `script -qc`. Enumerating wrappers is
+    unwinnable, so the fix is architectural: if a known tool name appears in a
+    sub-command the parser could not attribute AT ALL, refuse. Every present and
+    future parsing gap now fails closed. `which`/`apt`/`apt-cache`/`man` and
+    friends are exempt so tooling_check still works.
+  · COMMAND SUBSTITUTION. `echo $(nmap 8.8.8.8)` and `X=$(nmap 8.8.8.8)` ran
+    unchecked — shlex yields the token `$(nmap`, whose basename matches nothing.
+    Substitution spans are now lifted out and re-parsed as commands.
+  · Also self-inflicted: `proxychains` was in BOTH the wrapper set and the tool
+    set, so the backstop fired on every legitimate `proxychains nmap`. There is
+    now an invariant test asserting the two sets never intersect.
+
+### CONCURRENCY — 105 OF 120 WRITES WERE BEING LOST
+Every engage.py mutator was `_load()` → mutate → `_save()` with `_LOCK` held
+only INSIDE `_save`. Tool calls run on worker threads, so the second load
+overwrote the first save. Measured on 120 concurrent records: 60 assets → 14
+survived, 60 loot → 1 survived. Silently. No exception. The worst case is loot,
+where the tool's entire job is being authoritative about captured credentials.
+Fixed with a `_txn` context manager holding the RLock across the whole
+read-modify-write; same test now 60/60 and 60/60, and concurrent `scope_set` is
+no longer clobbered by asset writes.
+
+### TWO MORE CONTROLS THAT FAILED OPEN
+  · `tool_sqlmap_plan`'s scope check was wrapped in `except Exception: pass`, so
+    any error in scope resolution silently produced an unchecked sqlmap command.
+    A boundary that opens on its own failure is worse than no boundary, because
+    it reads as enforced. Now fails closed.
+  · `mcp.py`'s prompt-injection firewall did the same. `webshield.sanitize` is
+    internally fail-safe and never raises, so that `try/except: pass` only ever
+    caught the IMPORT failing — meaning if webshield is missing from an install,
+    raw untrusted MCP output reached the model with no firewall and no marker.
+    Reachable, since EXT_FILES can omit a module. Now degrades LOUDLY: explicit
+    untrusted-content banner naming the failure, plus a zero-width/bidi stripper
+    as the minimum viable defence.
+
+### VERIFIED CLEAN (no action needed — do not re-flag)
+  · Evidence ledger is correct under concurrency: 120 threads, 0 lost events,
+    0 duplicate step numbers, `verify()` intact. It already held the lock across
+    `_next_step` + append.
+  · AST sweep of all 46 files: zero mutable default args, zero subprocess calls
+    without a timeout, `check_same_thread` set at every sqlite3.connect, zero
+    bare `except:`. The remaining ~155 `except: pass` sites are legitimate GUI
+    fail-safes; the security-relevant ones were the two fixed above.
+  · `nmap$IFS8.8.8.8` is NOT a bypass — bash reads `$IFS8` as an undefined
+    variable and yields `nmap.8.8.8`, which runs nothing. Checked against real
+    bash rather than patched on suspicion. The `${IFS}` form is real and was
+    already blocked.
+
+### VERIFICATION
+  · Suite 18/18, 809 tests, zero red entries.
+  · Bypass hunt: 28,080 combinations (20 tools x 26 prefixes x 18 wrappers) —
+    0 crashes, 0 fail-open leaks. 0 false positives across 44 real local /
+    tooling / benchmark / in-scope commands.
+  · test_scope.py 65 → 115 assertions; test_engage.py +4 concurrency;
+    test_webshield.py +5 MCP-degradation.
+  · Gate cost 11–65us/command. GUARDRAIL byte-for-byte (2fee8a176746bf43).
+  · basilisk.py imports clean under a GTK stub; 46 files compile.
+
 ## v7.9.0 — the authorisation boundary becomes structural
 
 ### THE GAP

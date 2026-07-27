@@ -133,7 +133,97 @@ for label, cmd in bypasses:
           f"allowed={v['allowed']} ext={v['extraction']}")
 
 
-# ── 7. unknowable targets fail closed ────────────────────────────────
+# ── 6b. bypasses found in this gate's own review ─────────────────────
+print("\n== regressions: bypasses this gate itself shipped with ==")
+import tempfile
+_cwd = os.getcwd()
+_tmp = tempfile.mkdtemp()
+os.chdir(_tmp)
+for _f in ("acme.com", "evil.com", "8.8.8.8"):
+    open(_f, "w").write("x")
+# The extractor must not stat the filesystem: `touch evil.com` once dropped the
+# host from the extracted set, and an in-scope IP alongside it carried the
+# whole command through.
+for label, cmd in [("decoy file masks host", "nmap 10.0.0.5 evil.com"),
+                   ("decoy file alone", "nmap evil.com"),
+                   ("decoy named as IP", "nmap 8.8.8.8")]:
+    v = S.check_command(cmd, {"scope": ["10.0.0.0/24"]})
+    check(f"decoy: {label}", not v["allowed"], str(v["extraction"]))
+os.chdir(_cwd)
+
+# Boolean flags must never swallow the target. `-s`/`-k` are no-value on curl;
+# treating them as value-taking ate the URL entirely.
+for label, cmd in [("curl -s", "curl -s https://evil.com"),
+                   ("curl -k", "curl -k https://evil.com"),
+                   ("curl -sk bundled", "curl -sk https://evil.com"),
+                   ("wget -q", "wget -q https://evil.com"),
+                   ("nmap -Pn", "nmap -Pn 8.8.8.8"),
+                   ("nmap -sV -T4", "nmap -sV -T4 8.8.8.8"),
+                   ("nuclei -silent", "nuclei -silent -u https://evil.com"),
+                   ("unknown flag", "nmap --some-future-flag 8.8.8.8")]:
+    v = S.check_command(cmd, SCOPE)
+    check(f"boolflag: {label}", not v["allowed"], str(v["extraction"]))
+
+
+
+# ── 6c. wrapper, substitution and quoted-command bypass classes ──────
+print("\n== wrapper / substitution bypass classes ==")
+_W = {"scope": ["10.0.0.0/24"]}
+for label, cmd in [
+    ("env assignment wrapper",  "env FOO=1 nmap 8.8.8.8"),
+    ("env -i",                  "env -i nmap 8.8.8.8"),
+    ("sudo -u takes a value",   "sudo -u root nmap 8.8.8.8"),
+    ("timeout float duration",  "timeout 1.5 nmap 8.8.8.8"),
+    ("nice -n",                 "nice -n 10 nmap 8.8.8.8"),
+    ("ionice",                  "ionice -c3 nmap 8.8.8.8"),
+    ("setsid",                  "setsid nmap 8.8.8.8"),
+    ("unbuffer",                "unbuffer nmap 8.8.8.8"),
+    ("torsocks",                "torsocks nmap 8.8.8.8"),
+    ("firejail",                "firejail nmap 8.8.8.8"),
+    ("chrt",                    "chrt -f 99 nmap 8.8.8.8"),
+    ("taskset",                 "taskset -c 0 nmap 8.8.8.8"),
+    ("busybox",                 "busybox nmap 8.8.8.8"),
+    ("command builtin",         "command nmap 8.8.8.8"),
+    ("exec",                    "exec nmap 8.8.8.8"),
+    ("su -c command string",    "su -c 'nmap 8.8.8.8' root"),
+    ("runuser -c",              "runuser -u x -c 'curl https://evil.com'"),
+    ("script -qc",              "script -qc 'nmap 8.8.8.8' /dev/null"),
+    ("watch positional cmd",    "watch -n1 'nmap 8.8.8.8'"),
+    ("xargs sh -c",             "xargs -I{} sh -c 'nmap 8.8.8.8'"),
+    ("$( ) substitution",       "echo $(nmap 8.8.8.8)"),
+    ("backtick substitution",   "echo `nmap 8.8.8.8`"),
+    ("assignment substitution", "X=$(nmap 8.8.8.8); echo $X"),
+    ("nested substitution",     "echo $(echo $(nmap 8.8.8.8))"),
+    ("substitution in args",    "nmap `curl -s https://evil.com`"),
+    ("${IFS} obfuscation",      "nmap${IFS}8.8.8.8"),
+]:
+    v = S.check_command(cmd, _W)
+    check(f"wrapper: {label}", not v["allowed"], str(v["extraction"]))
+
+print("\n== wrappers must not create FALSE refusals ==")
+for label, cmd in [
+    ("proxychains in-scope",  "proxychains nmap 10.0.0.5"),
+    ("sudo in-scope",         "sudo nmap -sV 10.0.0.5"),
+    ("env in-scope",          "env FOO=1 nmap 10.0.0.5"),
+    ("su -c in-scope",        "su -c 'nmap 10.0.0.5' root"),
+    ("which nmap",            "which nmap"),
+    ("apt install",           "apt install -y nuclei"),
+    ("apt-cache policy",      "apt-cache policy nmap"),
+    ("command -v",            "command -v ffuf"),
+    ("man page",              "man curl"),
+    ("hydra proto arg",       "hydra -l admin -P pw.txt 10.0.0.5 ssh"),
+    ("harmless substitution", "echo $(date +%s)"),
+    ("nested harmless subst", "cd $(dirname $(readlink -f x))"),
+]:
+    v = S.check_command(cmd, _W)
+    check(f"no-FP: {label}", v["allowed"], f"{v.get('reason','')[:60]} {v['extraction']}")
+
+# Structural invariant: a name cannot be both a wrapper and a tool, or the
+# backstop fires on every legitimate use of it (proxychains hit exactly this).
+check("no wrapper/tool set overlap", not (S._WRAPPERS & S._NETWORK_TOOLS),
+      str(S._WRAPPERS & S._NETWORK_TOOLS))
+
+
 print("\n== unknowable targets fail closed ==")
 for label, cmd in [("nmap -iL file", "nmap -iL targets.txt"),
                    ("unparseable quotes", "nmap -sV 'unclosed"),
