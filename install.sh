@@ -110,7 +110,16 @@ REQUIRED_FILES=(basilisk.py basilisk_core.py basilisk_safety.py basilisk_scope.p
 # been pushed to your own repo. It's still bundled directly in every zip
 # delivered to you, so a local-checkout install (the normal path) always has
 # it regardless of this manifest.
-OPTIONAL_FILES=(org.thepriest.basilisk.svg basilisk-dragon.svg basilisk-watermark.png basilisk-cross.svg basilisk-avatar.png basilisk-logo.png basilisk-priest.png basilisk-btn-settings.png basilisk-btn-bell.png basilisk-btn-terminal.png basilisk-btn-minimise.png basilisk-btn-close.png basilisk-btn-attach.png basilisk-btn-camera.png basilisk-btn-suggest.png basilisk-btn-sound.png basilisk-btn-unleash.png basilisk_btn_art.py)
+# Runtime art now lives in assets/app/ in the repo. The INSTALLED layout is
+# unchanged (flat in ${INSTALL_DIR}) so existing installs keep working —
+# only the fetch/copy source path moved. basilisk-sigil.svg and
+# basilisk-btn-expand.png are new to this list: basilisk.py has always
+# looked for them but they were in no install list, so remote installs
+# silently lacked them.
+ASSET_DIR="assets/app"
+OPTIONAL_ART=(org.thepriest.basilisk.svg basilisk-dragon.svg basilisk-watermark.png basilisk-cross.svg basilisk-avatar.png basilisk-logo.png basilisk-priest.png basilisk-sigil.svg basilisk-btn-settings.png basilisk-btn-bell.png basilisk-btn-terminal.png basilisk-btn-minimise.png basilisk-btn-close.png basilisk-btn-expand.png basilisk-btn-attach.png basilisk-btn-camera.png basilisk-btn-suggest.png basilisk-btn-sound.png basilisk-btn-unleash.png)
+OPTIONAL_FILES=(basilisk_btn_art.py)
+for _a in "${OPTIONAL_ART[@]}"; do OPTIONAL_FILES+=("${ASSET_DIR}/${_a}"); done
 # basilisk_ext sidecar modules — fetched in remote (curl|bash) mode so phones
 # and fresh boxes get the full toolset (headroom / verify / pentest plus the
 # memory/skills/foresight extensions), not just the core four files.
@@ -615,7 +624,10 @@ else
   done
   for f in "${OPTIONAL_FILES[@]}"; do
     url="https://raw.githubusercontent.com/${GITHUB_REPO}/${GITHUB_BRANCH}/${f}"
-    curl -fsSL "$url" -o "${TMP}/${f}" 2>/dev/null || true
+    # Flatten on landing: the repo nests art under assets/app/ but every step
+    # below expects ${SRC_DIR}/<bare-name>, so strip the directory here and the
+    # rest of the script is untouched by the reorganisation.
+    curl -fsSL "$url" -o "${TMP}/$(basename "${f}")" 2>/dev/null || true
   done
   # Sidecar (basilisk_ext): fetch the whole package so remote installs get the
   # headroom / verify / pentest features and the optional extensions, not
@@ -838,9 +850,13 @@ BASILISK_DRAGON_SVG_EOF
 # SRC_DIR for a local checkout, or was fetched into TMP for a curl|bash
 # install — both land in SRC_DIR).  Fall back to the embedded placeholder
 # only if the logo isn't there, so the app always has *an* icon.
-if [ -s "${SRC_DIR}/${APP_ID}.svg" ]; then
-  cp "${SRC_DIR}/${APP_ID}.svg" "${INSTALL_DIR}/${APP_ID}.svg"
-  cp "${SRC_DIR}/${APP_ID}.svg" "${ICON_DIR}/${APP_ID}.svg"
+_ICON_SRC=""
+for _cand in "${SRC_DIR}/${ASSET_DIR}/${APP_ID}.svg" "${SRC_DIR}/${APP_ID}.svg"; do
+  [ -s "${_cand}" ] && { _ICON_SRC="${_cand}"; break; }
+done
+if [ -n "${_ICON_SRC}" ]; then
+  cp "${_ICON_SRC}" "${INSTALL_DIR}/${APP_ID}.svg"
+  cp "${_ICON_SRC}" "${ICON_DIR}/${APP_ID}.svg"
   ok "icon installed from ${APP_ID}.svg"
 else
   write_dragon_svg "${INSTALL_DIR}/${APP_ID}.svg"
@@ -853,9 +869,16 @@ fi
 # Place the chat-background watermark and the emblem in the install dir so the
 # app finds them at runtime (best-effort — the chat simply has no watermark if
 # the file isn't there).
-for _art in basilisk-watermark.png basilisk-dragon.svg basilisk-cross.svg basilisk-avatar.png basilisk-logo.png basilisk-priest.png basilisk-btn-settings.png basilisk-btn-bell.png basilisk-btn-terminal.png basilisk-btn-minimise.png basilisk-btn-close.png basilisk-btn-attach.png basilisk-btn-camera.png basilisk-btn-suggest.png basilisk-btn-sound.png basilisk-btn-unleash.png; do
-  if [ -s "${SRC_DIR}/${_art}" ]; then
-    cp "${SRC_DIR}/${_art}" "${INSTALL_DIR}/${_art}" 2>/dev/null || true
+# Copy runtime art into the install dir (flat) so the app finds it. Source is
+# assets/app/ in the current repo layout, with a flat fallback so installing
+# from an older checkout still works.
+for _art in "${OPTIONAL_ART[@]}"; do
+  _src=""
+  for _cand in "${SRC_DIR}/${ASSET_DIR}/${_art}" "${SRC_DIR}/${_art}"; do
+    [ -s "${_cand}" ] && { _src="${_cand}"; break; }
+  done
+  if [ -n "${_src}" ]; then
+    cp "${_src}" "${INSTALL_DIR}/${_art}" 2>/dev/null || true
   fi
 done
 

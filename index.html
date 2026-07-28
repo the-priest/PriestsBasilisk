@@ -19,15 +19,15 @@
 <meta property="og:title" content="Basilisk — Autonomous AI Penetration-Testing Agent">
 <meta property="og:description" content="An open-source AI pentester that runs on your machine and proves every exploit. 87/113 OWASP Juice Shop black-box · 22/22 Duck Store API · 14/14 OWASP classes. MIT-licensed.">
 <meta property="og:url" content="https://the-priest.github.io/PriestsBasilisk/">
-<meta property="og:image" content="https://the-priest.github.io/PriestsBasilisk/banner.png">
+<meta property="og:image" content="https://the-priest.github.io/PriestsBasilisk/assets/brand/banner.png">
 <meta property="og:image:alt" content="Basilisk — autonomous AI penetration-testing agent">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Basilisk — Autonomous AI Penetration-Testing Agent">
 <meta name="twitter:description" content="Open-source AI pentester, runs locally, proves every exploit. 87/113 OWASP Juice Shop black-box.">
-<meta name="twitter:image" content="https://the-priest.github.io/PriestsBasilisk/banner.png">
+<meta name="twitter:image" content="https://the-priest.github.io/PriestsBasilisk/assets/brand/banner.png">
 
-<link rel="icon" href="basilisk-icon.png">
-<link rel="apple-touch-icon" href="basilisk-icon.png">
+<link rel="icon" href="assets/brand/basilisk-icon.png">
+<link rel="apple-touch-icon" href="assets/brand/basilisk-icon.png">
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -53,7 +53,7 @@
   "isAccessibleForFree": true,
   "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
   "author": { "@type": "Person", "name": "the-priest", "url": "https://github.com/the-priest" },
-  "image": "https://the-priest.github.io/PriestsBasilisk/banner.png",
+  "image": "https://the-priest.github.io/PriestsBasilisk/assets/brand/banner.png",
   "featureList": [
     "One-tap Unleash mode: Basilisk confirms the target, then runs fully autonomously and does not stop until the objective is verified-complete",
     "Top-of-board results on a cheap, fast model (DeepSeek-V4-Flash): the verified-exploitation scaffolding does the work, not an expensive frontier model",
@@ -424,7 +424,7 @@
 <header class="nav">
   <div class="wrap nav-in">
     <a class="brand" href="#top" aria-label="Basilisk home">
-      <img src="basilisk-icon.png" alt="Basilisk logo" width="28" height="28">
+      <img src="assets/brand/basilisk-icon.png" alt="Basilisk logo" width="28" height="28">
       <span>Basilisk</span>
     </a>
     <nav class="nav-links">
@@ -462,7 +462,7 @@
       </div>
       <div class="hero-art reveal">
         <span class="halo" aria-hidden="true"></span>
-        <img src="basilisk-logo.png" alt="Basilisk — crimson serpent emblem of the autonomous AI pentest agent" width="430" loading="eager">
+        <img src="assets/app/basilisk-logo.png" alt="Basilisk — crimson serpent emblem of the autonomous AI pentest agent" width="430" loading="eager">
       </div>
     </div>
 
@@ -614,7 +614,7 @@ docker run -d -p 3000:3000 -e NODE_ENV=unsafe \
         <p>Basilisk reads a target's behaviour to identify the vulnerability class, reaches for the matching exploit builder, fires it, and confirms the hit against ground truth before moving on. Every attempt and verdict lands in an exploitation oracle — so the loop never re-runs a solved bug and gets sharper about what's left.</p>
       </div>
       <div class="reveal" style="margin-bottom:clamp(30px,4vw,48px)">
-        <img src="architecture.svg" alt="Basilisk architecture pipeline: (1) the model reads the target's behaviour, picks the vulnerability class, and directs the next move; (2) deterministic exploit builders generate the payload; (3) the execution layer fires it through a hard safety gate that blocks destructive commands; (4) a verified-exploitation oracle arms a proof marker, fires, then confirms or discards the result; (5) an evidence ledger stores a hashed receipt and never re-runs a solved bug. The verdict feeds back to the model so nothing counts until it is proven." style="width:100%;height:auto;border:1px solid var(--line);border-radius:var(--r);box-shadow:0 0 40px -22px var(--glow)" loading="lazy">
+        <img src="assets/brand/architecture.svg" alt="Basilisk architecture pipeline: (1) the model reads the target's behaviour, picks the vulnerability class, and directs the next move; (2) deterministic exploit builders generate the payload; (3) the execution layer fires it through a hard safety gate that blocks destructive commands; (4) a verified-exploitation oracle arms a proof marker, fires, then confirms or discards the result; (5) an evidence ledger stores a hashed receipt and never re-runs a solved bug. The verdict feeds back to the model so nothing counts until it is proven." style="width:100%;height:auto;border:1px solid var(--line);border-radius:var(--r);box-shadow:0 0 40px -22px var(--glow)" loading="lazy">
       </div>
       <div class="reveal">
         <div class="loop-steps">
@@ -779,7 +779,7 @@ less install.sh          <span class="c"># read it first</span>
   <div class="wrap">
     <div class="foot-top">
       <div>
-        <div class="foot-brand"><img src="basilisk-icon.png" alt="Basilisk logo" width="28" height="28"> Basilisk</div>
+        <div class="foot-brand"><img src="assets/brand/basilisk-icon.png" alt="Basilisk logo" width="28" height="28"> Basilisk</div>
         <p class="foot-lic"><b>MIT.</b> Take it, fork it, use it on what you're allowed to break.</p>
       </div>
       <div class="foot-links">

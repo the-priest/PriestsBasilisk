@@ -131,7 +131,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.basilisk"
 APP_NAME = "Basilisk"
-VERSION = "7.9.1"
+VERSION = "7.9.2"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -2278,21 +2278,42 @@ class ProposedEditWidget(Gtk.Box):
         self.apply_btn.set_label("Apply")
 
 
+# ── asset resolution ──────────────────────────────────────────────────
+# Repo layout keeps runtime art in assets/app/; the INSTALLED layout stays flat
+# in ~/.local/share/basilisk (install.sh flattens on copy), so existing installs
+# are unaffected by the repo reorganisation. Both are searched, plus the legacy
+# alongside-this-file location for anyone running an old checkout in place.
+_APP_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def _asset_paths(filename: str) -> List[str]:
+    """Every place a runtime asset may live, most-specific first."""
+    return [
+        os.path.expanduser("~/.local/share/basilisk/" + filename),  # installed
+        os.path.join(_APP_DIR, "assets", "app", filename),          # repo layout
+        os.path.join(_APP_DIR, filename),                           # legacy flat
+    ]
+
+
+def _find_asset(filename: str) -> Optional[str]:
+    for _p in _asset_paths(filename):
+        if os.path.isfile(_p):
+            return _p
+    return None
+
+
 def _find_dragon_svg() -> Optional[str]:
     """Locate the dragon emblem SVG at runtime.  Checks the install dir,
     the icon theme dir, and the directory this script lives in (dev/run
     in place).  Returns None if not found so the avatar falls back to a
     letter."""
-    candidates = [
-        os.path.expanduser("~/.local/share/basilisk/basilisk-dragon.svg"),
+    candidates = _asset_paths("basilisk-dragon.svg") + [
         os.path.expanduser(
             "~/.local/share/icons/hicolor/scalable/apps/basilisk-dragon.svg"),
         os.path.expanduser(
             "~/.local/share/icons/hicolor/scalable/apps/"
             "org.thepriest.basilisk.svg"),
-        os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                     "basilisk-dragon.svg"),
-    ]
+    ] + _asset_paths("org.thepriest.basilisk.svg")
     for p in candidates:
         if os.path.isfile(p):
             return p
@@ -2306,12 +2327,7 @@ _DRAGON_SVG_PATH = _find_dragon_svg()
 def _find_btn_png(name: str) -> Optional[str]:
     """Locate a custom dragon-forged button icon (basilisk-btn-<name>.png), in the
     install dir or next to this module. None if it isn't on disk."""
-    fn = "basilisk-btn-%s.png" % name
-    for p in (os.path.expanduser("~/.local/share/basilisk/" + fn),
-              os.path.join(os.path.dirname(os.path.abspath(__file__)), fn)):
-        if os.path.isfile(p):
-            return p
-    return None
+    return _find_asset("basilisk-btn-%s.png" % name)
 
 
 _BTN_SETTINGS = _find_btn_png("settings") or "settings"
@@ -2385,11 +2401,7 @@ def _btn_art(name_or_path, px: int = 26):
 
 def _find_avatar_png() -> Optional[str]:
     """Locate the dragon PNG used as Basilisk's chat avatar (clean, no ring)."""
-    candidates = [
-        os.path.expanduser("~/.local/share/basilisk/basilisk-avatar.png"),
-        os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                     "basilisk-avatar.png"),
-    ]
+    candidates = _asset_paths("basilisk-avatar.png")
     for p in candidates:
         if os.path.isfile(p):
             return p
@@ -2401,11 +2413,7 @@ _AVATAR_PNG_PATH = _find_avatar_png()
 
 def _find_logo_png() -> Optional[str]:
     """Locate the BASILISK wordmark logo (death-metal art) for the header."""
-    candidates = [
-        os.path.expanduser("~/.local/share/basilisk/basilisk-logo.png"),
-        os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                     "basilisk-logo.png"),
-    ]
+    candidates = _asset_paths("basilisk-logo.png")
     for p in candidates:
         if os.path.isfile(p):
             return p
@@ -2418,14 +2426,8 @@ _LOGO_PNG_PATH = _find_logo_png()
 def _find_watermark_svg() -> Optional[str]:
     """Locate the dragon watermark for the chat background (PNG preferred,
     then SVG).  Falls back to the emblem SVG, then None (no watermark)."""
-    candidates = [
-        os.path.expanduser("~/.local/share/basilisk/basilisk-watermark.png"),
-        os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                     "basilisk-watermark.png"),
-        os.path.expanduser("~/.local/share/basilisk/basilisk-watermark.svg"),
-        os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                     "basilisk-watermark.svg"),
-    ]
+    candidates = (_asset_paths("basilisk-watermark.png")
+                  + _asset_paths("basilisk-watermark.svg"))
     for p in candidates:
         if os.path.isfile(p):
             return p
@@ -2437,11 +2439,7 @@ _WATERMARK_SVG_PATH = _find_watermark_svg()
 
 def _find_cross_svg() -> Optional[str]:
     """Locate the operator's cross emblem (shown as the user avatar)."""
-    candidates = [
-        os.path.expanduser("~/.local/share/basilisk/basilisk-cross.svg"),
-        os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                     "basilisk-cross.svg"),
-    ]
+    candidates = _asset_paths("basilisk-cross.svg")
     for p in candidates:
         if os.path.isfile(p):
             return p
@@ -2453,11 +2451,7 @@ _CROSS_SVG_PATH = _find_cross_svg()
 
 def _find_priest_png() -> Optional[str]:
     """Locate the operator's portrait (shown as the user avatar)."""
-    candidates = [
-        os.path.expanduser("~/.local/share/basilisk/basilisk-priest.png"),
-        os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                     "basilisk-priest.png"),
-    ]
+    candidates = _asset_paths("basilisk-priest.png")
     for p in candidates:
         if os.path.isfile(p):
             return p
@@ -2470,12 +2464,7 @@ _PRIEST_PNG_PATH = _find_priest_png()
 # ── Arcane seal drawn faintly on each Basilisk reply (SVG -> always renders,
 #    no font dependency, so the "ancient sign" actually shows up). ──
 def _find_sigil_svg() -> Optional[str]:
-    for p in (os.path.expanduser("~/.local/share/basilisk/basilisk-sigil.svg"),
-              os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                           "basilisk-sigil.svg")):
-        if os.path.isfile(p):
-            return p
-    return None
+    return _find_asset("basilisk-sigil.svg")
 
 
 _MSG_SIGIL_PATH = _find_sigil_svg()

@@ -1,5 +1,72 @@
 # Changelog
 
+## v7.9.2 — repo reorganisation (assets/, docs/) + a real .gitignore
+
+Layout only; no behaviour change. The INSTALLED layout is deliberately
+UNCHANGED — install.sh still flattens art into ~/.local/share/basilisk — so
+existing installs are unaffected and upgrading is a no-op for them.
+
+### MOVED
+  · assets/app/    — the 19 files basilisk.py loads at runtime (avatar, logo,
+    priest, watermark, cross, dragon, sigil, org.thepriest.basilisk.svg, and
+    all 11 basilisk-btn-*.png)
+  · assets/brand/  — web/README-only art (banner.png, basilisk-icon.png,
+    architecture.svg, dragon.png)
+  · docs/          — AUDIT.md, BASILISK_MANUAL.md
+  · Repo root drops from 24 loose images to zero.
+
+### STAYING AT ROOT ON PURPOSE
+index.html, robots.txt, sitemap.xml, .nojekyll, googleac*.html (Search Console
+verification), LICENSE, README.md, CHANGELOG.md, install.sh (the curl one-liner
+points straight at it), llms.txt, org.thepriest.basilisk.desktop. Moving any of
+these breaks Pages or verification SILENTLY — the site keeps serving, it just
+serves wrong.
+
+### RESOLUTION
+basilisk.py gained one `_asset_paths()` helper; every `_find_*` now routes
+through it and searches, in order: the installed flat dir, assets/app/, then
+alongside the module (legacy checkouts). Nine separate hand-rolled candidate
+lists collapsed into one.
+
+### install.sh
+  · `ASSET_DIR="assets/app"`; OPTIONAL_FILES is built from OPTIONAL_ART.
+  · Remote fetch flattens on landing (`-o "${TMP}/$(basename "${f}")"`) so every
+    later `${SRC_DIR}/<bare-name>` reference is untouched by the move.
+  · Local copy tries `${SRC_DIR}/assets/app/<f>` then `${SRC_DIR}/<f>`, so
+    installing from an OLD flat checkout still works.
+  · Icon install learned the new path with the same fallback.
+
+### TWO PRE-EXISTING GAPS FIXED WHILE IN HERE
+basilisk-sigil.svg and basilisk-btn-expand.png were referenced by basilisk.py
+(`_find_btn_png("expand")`, the sigil finder) but appeared in NO install list —
+so every remote install has silently lacked them. Both now ship.
+
+### .gitignore
+Rewritten from 11 lines to cover Python/venv/test caches, editors, OS cruft,
+backups, secrets (.env, *.key, *.pem, settings.json — a stray local config
+carries live API keys), and Basilisk's own runtime artefacts (chats.db,
+memory.db, evidence/, engagements/, loot/, *.log). Also excludes scan output
+(*.nmap, nuclei-*.txt, ffuf-*.json) — a committed scan dump leaks a client's
+estate. Negated safety nets re-include assets/, videos/, benchmarks/ and the
+root Pages files so no future rule can quietly drop them.
+
+Verified against a real git index: 99 files tracked, 0 __pycache__ leaked,
+assets 23/23, videos 2/2, benchmarks 8/8, .nojekyll present.
+
+### NEW TEST — tests/test_assets.py (53 assertions)
+Art loading fails SILENTLY (a missing PNG just falls back to a symbolic icon),
+which makes it exactly what rots after a reorganisation. Locks: every asset's
+location, no loose images at root, the root files Pages/Search Console need,
+runtime resolution of all 18 app assets through basilisk.py, that the installed
+flat path is STILL searched, that install.sh's OPTIONAL_ART covers everything
+basilisk.py wants, and that every image referenced by index.html/README.md
+exists on disk (absolute og:image URLs included).
+
+### VERIFICATION
+Suite 19/19, 862 tests, zero red. install.sh `bash -n` clean; all three install
+paths simulated (new layout, old flat checkout, remote flatten) → 19/19 each.
+GUARDRAIL byte-for-byte (2fee8a176746bf43). 47 files compile.
+
 ## v7.9.1 — hardening the boundary shipped in v7.9.0, plus a severe data-loss race
 
 v7.9.0 made scope structural. Reviewing that work adversarially found four ways

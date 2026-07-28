@@ -1,12 +1,12 @@
 <!-- ═══════════════════════════════════════════════════════════════════════════
      BASILISK · README   —   theme: crimson-on-black (#7d121b / #08090b / #6d7680)
      Banners/dividers = capsule-render · badges = shields.io · callouts = GitHub alerts.
-     All render on GitHub. Real repo assets (banner.png, architecture.svg) kept.
+     All render on GitHub. Real repo assets (assets/brand/) kept.
      ═══════════════════════════════════════════════════════════════════════════ -->
 
 <div align="center">
 
-<img src="banner.png" alt="Priest's Basilisk" width="820">
+<img src="assets/brand/banner.png" alt="Priest's Basilisk" width="820">
 
 # 🐍 Priest's Basilisk
 
@@ -180,7 +180,7 @@ Juice Shop is a web app; the second benchmark is a **deliberately-vulnerable RES
 Basilisk runs a **closed loop**, not a payload spray. It reads a target's *behaviour* to identify the vuln class, reaches for the matching **exploit builder**, fires it, and **confirms the hit against ground truth** before moving on. Every attempt and verdict lands in an exploitation oracle, so the loop never re-runs a solved bug and gets sharper about what's left.
 
 <div align="center">
-<img src="architecture.svg" alt="Basilisk architecture: the model plans and picks the vulnerability class; deterministic exploit builders generate the payload; the execution layer fires through a hard safety gate; a verified-exploitation oracle arms a proof marker and confirms or discards each result; an evidence ledger keeps a hashed receipt and never re-runs a solved bug; the verdict feeds back to the model." width="880">
+<img src="assets/brand/architecture.svg" alt="Basilisk architecture: the model plans and picks the vulnerability class; deterministic exploit builders generate the payload; the execution layer fires through a hard safety gate; a verified-exploitation oracle arms a proof marker and confirms or discards each result; an evidence ledger keeps a hashed receipt and never re-runs a solved bug; the verdict feeds back to the model." width="880">
 </div>
 
 <details>
