@@ -131,7 +131,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.basilisk"
 APP_NAME = "Basilisk"
-VERSION = "7.9.2"
+VERSION = "7.9.3"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -3289,7 +3289,7 @@ class SettingsDialog(Adw.PreferencesDialog):
         page.set_icon_name("network-server-symbolic")
 
         # ── Provider routing (which cloud provider is active) ──
-        self._model_rows = {}   # provider_key -> (combo_row, [names])
+        self._model_rows = {}   # provider_key -> (combo_row, [model_ids])
 
         rg = Adw.PreferencesGroup()
         rg.set_title("Provider routing")
@@ -4104,21 +4104,23 @@ class SettingsDialog(Adw.PreferencesDialog):
             lambda row, k=spec.key: self._on_provider_key(k, row.get_text()))
         g.add(key_row)
 
-        # Model picker
+        # Model picker.  The visible strings carry context + price so the
+        # choice is informed, which means the display text is NOT the model
+        # id — `self._model_rows` keeps the parallel id list and the handler
+        # indexes into that.  (The old code read the id back out of the
+        # widget label, so any label change would have silently written a
+        # bogus model into settings.)
         model_row = Adw.ComboRow()
         model_row.set_title("Model")
-        model_row.set_subtitle("Biggest first. Use ⟳ to fetch live list.")
-        names = list(spec.chain)
+        model_row.set_subtitle("Best first. Use \u27f3 to fetch the live list.")
+        ids = list(spec.pick_ids)
         saved = parent.settings.get(f"{spec.key}_model", spec.default_model)
-        if saved and saved not in names:
-            names.insert(0, saved)   # keep a custom/old selection visible
-        model_row.set_model(Gtk.StringList.new(names))
-        if saved in names:
-            model_row.set_selected(names.index(saved))
+        if saved and saved not in ids:
+            ids.insert(0, saved)   # keep a custom/old selection visible
+        self._populate_model_row(spec.key, model_row, ids, saved)
         model_row.connect(
             "notify::selected",
             lambda row, _ps, k=spec.key: self._on_provider_model(k, row))
-        self._model_rows[spec.key] = (model_row, names)
 
         # Refresh-from-API button lives as a suffix on the model row
         refresh_btn = Gtk.Button.new_from_icon_name("view-refresh-symbolic")
@@ -4282,14 +4284,51 @@ class SettingsDialog(Adw.PreferencesDialog):
             self.vision_model_row.set_text(models[i])
             self._set("vision_model", models[i])
 
+    def _model_row_text(self, spec, model_id):
+        """One combo line: name, then the numbers that decide the pick."""
+        info = spec.info(model_id) if hasattr(spec, "info") else None
+        short = (info.label if info is not None
+                 else (model_id.split("/")[-1] if "/" in model_id
+                       else model_id))
+        detail = self.win._model_detail(spec, model_id)
+        return f"{short}   \u2014   {detail}" if detail else short
+
+    def _populate_model_row(self, key, model_row, ids, saved):
+        """Fill a provider's model ComboRow and restore the saved selection.
+
+        GUARDED.  Gtk.ComboRow.set_model() resets `selected` to 0 and emits
+        notify::selected, so repopulating fired _on_provider_model with
+        whatever happened to be first and wrote it to disk -- a spurious
+        settings write on every Settings open, and a window where the wrong
+        model was persisted during a live refresh.  The vision picker
+        already had this guard; the provider picker did not.
+        """
+        spec = PROVIDERS_BY_KEY.get(key)
+        self._model_rows_refreshing = True
+        try:
+            model_row.set_model(Gtk.StringList.new(
+                [self._model_row_text(spec, i) for i in ids] if spec
+                else list(ids)))
+            if saved in ids:
+                model_row.set_selected(ids.index(saved))
+        finally:
+            self._model_rows_refreshing = False
+        self._model_rows[key] = (model_row, ids)
+
     def _on_provider_model(self, key, row):
-        m = row.get_model()
+        if getattr(self, "_model_rows_refreshing", False):
+            return
+        entry = self._model_rows.get(key)
+        if not entry:
+            return
+        _row, ids = entry
         idx = row.get_selected()
-        if m and 0 <= idx < m.get_n_items():
-            name = m.get_string(idx)
-            if name and not name.startswith("("):
-                self.win.settings[f"{key}_model"] = name
+        if 0 <= idx < len(ids):
+            model_id = ids[idx]
+            if model_id:
+                self.win.settings[f"{key}_model"] = model_id
                 save_settings(self.win.settings)
+                self.win._update_model_button()
 
     def _on_active_provider(self, row, _ps):
         idx = row.get_selected()
@@ -4330,13 +4369,10 @@ class SettingsDialog(Adw.PreferencesDialog):
         names = list(ids)
         if saved and saved not in names:
             names.insert(0, saved)
-        model_row.set_model(Gtk.StringList.new(names))
-        if saved in names:
-            model_row.set_selected(names.index(saved))
-        self._model_rows[key] = (model_row, names)
+        self._populate_model_row(key, model_row, names, saved)
         spec = PROVIDERS_BY_KEY.get(key)
         self.win._show_toast(
-            f"{spec.label if spec else key}: {len(ids)} models loaded.")
+            f"{spec.label if spec else key}: {len(ids)} chat models loaded.")
 
     def _on_temp(self, row, *args):
         self._set("temperature", float(row.get_value()))
@@ -5215,11 +5251,35 @@ class MainWindow(Adw.ApplicationWindow):
     def _provider_has_key(self, key: str) -> bool:
         return bool((self.settings.get(f"{key}_api_key", "") or "").strip())
 
+    _TIER_ORDER = ("flagship", "workhorse", "budget")
+    _TIER_LABEL = {
+        "flagship":  "FLAGSHIP  \u00b7  hard targets",
+        "workhorse": "WORKHORSE  \u00b7  everyday",
+        "budget":    "BUDGET  \u00b7  triage & bulk",
+    }
+
     def _models_priced_high_to_low(self, spec):
-        """Order a provider's models most-expensive (biggest) -> cheapest.
-        Bigger parameter counts cost more, so sort by the largest 'NNb' / 'NNB'
-        number in the model id, descending; ties keep the curated chain order."""
+        """Order a provider's models best/most-capable first.
+
+        WAS: parse the largest 'NNb' number out of the model id and sort on
+        it, on the theory that bigger == better == pricier.  That silently
+        failed on every id that doesn't carry a parameter count in its name
+        -- DeepSeek-V4-Flash, GLM-5.2, Kimi-K3, Hy3 all scored 0.0 and sank
+        to the BOTTOM of the operator's own picker, underneath a 72B legacy
+        model, while an MoE's total-parameter count told you nothing about
+        what it costs to run anyway.
+
+        NOW: a provider with a catalogue is already ordered by hand (tier,
+        then capability), so use that.  The regex survives only for
+        live-fetched ids we have no metadata for.
+
+        Kept under the old name because the popover calls it; see
+        `_models_by_tier` for the grouped view.
+        """
+        if spec.catalogue:
+            return list(spec.pick_ids)
         import re as _re
+
         def size_of(m):
             nums = _re.findall(r"(\d+(?:\.\d+)?)\s*[bB]\b", m)
             return max((float(n) for n in nums), default=0.0)
@@ -5227,6 +5287,40 @@ class MainWindow(Adw.ApplicationWindow):
             list(enumerate(spec.chain)),
             key=lambda im: (-size_of(im[1]), im[0]))
         return [m for _i, m in ordered]
+
+    def _models_by_tier(self, spec):
+        """[(tier_heading_or_None, [model_id, ...]), ...] for the popover.
+        A provider with no catalogue gets one unlabelled group, i.e. exactly
+        the old flat list."""
+        if not spec.catalogue:
+            return [(None, self._models_priced_high_to_low(spec))]
+        groups = []
+        for tier in self._TIER_ORDER:
+            ids = [m.id for m in spec.catalogue if m.tier == tier]
+            if ids:
+                groups.append((self._TIER_LABEL.get(tier, tier.upper()), ids))
+        # Any tier string that isn't one of the three known ones still shows.
+        stray = [m.id for m in spec.catalogue
+                 if m.tier not in self._TIER_ORDER]
+        if stray:
+            groups.append(("OTHER", stray))
+        return groups
+
+    @staticmethod
+    def _model_detail(spec, model_id):
+        """'1M ctx  .  $0.13/$0.28 per Mtok' — the two numbers that actually
+        decide a pick.  Empty string for an id with no metadata."""
+        info = spec.info(model_id) if hasattr(spec, "info") else None
+        if info is None:
+            return ""
+        ctx = (f"{info.ctx_k / 1024:.0f}M" if info.ctx_k >= 1000
+               else f"{info.ctx_k}K")
+        if info.in_usd <= 0 and info.out_usd <= 0:
+            price = "free"
+        else:
+            price = f"${info.in_usd:g}/${info.out_usd:g} per Mtok"
+        eye = "  \u00b7  vision" if info.vision else ""
+        return f"{ctx} ctx  \u00b7  {price}{eye}"
 
     def _open_model_switcher(self, *_):
         pop = Gtk.Popover()
@@ -5254,17 +5348,46 @@ class MainWindow(Adw.ApplicationWindow):
             hdr = Gtk.Label(label=spec.label.upper(), xalign=0.0)
             hdr.add_css_class("model-group-header")
             listbox.append(hdr)
-            for model in self._models_priced_high_to_low(spec):
-                short = model.split("/")[-1] if "/" in model else model
-                b = Gtk.Button(label=short)
-                b.add_css_class("model-pick-row")
-                b.set_halign(Gtk.Align.FILL)
-                if spec.key == cur_key and model == cur_model:
-                    b.add_css_class("model-pick-active")
-                b.connect("clicked",
-                          lambda _w, k=spec.key, m=model: self._switch_model(
-                              k, m, pop))
-                listbox.append(b)
+            for tier_label, ids in self._models_by_tier(spec):
+                if tier_label:
+                    sub = Gtk.Label(label="   " + tier_label, xalign=0.0)
+                    sub.add_css_class("model-group-header")
+                    sub.add_css_class("dim-label")
+                    listbox.append(sub)
+                for model in ids:
+                    info = spec.info(model) if hasattr(spec, "info") else None
+                    short = (info.label if info is not None
+                             else (model.split("/")[-1] if "/" in model
+                                   else model))
+                    detail = self._model_detail(spec, model)
+                    # Two-line row: name, then the ctx/price line that makes
+                    # the pick an informed one rather than a guess.
+                    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
+                                  spacing=0)
+                    name_lbl = Gtk.Label(label=short, xalign=0.0)
+                    name_lbl.set_ellipsize(Pango.EllipsizeMode.END)
+                    box.append(name_lbl)
+                    if detail:
+                        det_lbl = Gtk.Label(label=detail, xalign=0.0)
+                        det_lbl.add_css_class("dim-label")
+                        det_lbl.add_css_class("caption")
+                        det_lbl.set_ellipsize(Pango.EllipsizeMode.END)
+                        box.append(det_lbl)
+                    b = Gtk.Button()
+                    b.set_child(box)
+                    b.add_css_class("model-pick-row")
+                    b.set_halign(Gtk.Align.FILL)
+                    if info is not None and info.note:
+                        b.set_tooltip_text(f"{model}\n{info.note}")
+                    else:
+                        b.set_tooltip_text(model)
+                    if spec.key == cur_key and model == cur_model:
+                        b.add_css_class("model-pick-active")
+                    b.connect(
+                        "clicked",
+                        lambda _w, k=spec.key, m=model: self._switch_model(
+                            k, m, pop))
+                    listbox.append(b)
 
         if not any_provider:
             hint = Gtk.Label(
@@ -5286,8 +5409,12 @@ class MainWindow(Adw.ApplicationWindow):
         self._update_model_button()
         self.update_status_pills()
         spec = PROVIDERS_BY_KEY.get(provider)
-        short = model.split("/")[-1] if "/" in model else model
-        self._show_toast(f"Now using {spec.label if spec else provider} · {short}")
+        info = spec.info(model) if spec is not None else None
+        short = (info.label if info is not None
+                 else (model.split("/")[-1] if "/" in model else model))
+        detail = self._model_detail(spec, model) if spec is not None else ""
+        msg = f"Now using {spec.label if spec else provider} · {short}"
+        self._show_toast(f"{msg}  ({detail})" if detail else msg)
         if pop is not None:
             pop.popdown()
 

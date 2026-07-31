@@ -183,21 +183,135 @@ GROQ_FALLBACK_CHAIN = [
 # Verified against each provider's docs, May 2026.
 # ─────────────────────────────────────────────────────────────────────
 
-# Default is DeepSeek-V4-Flash (operator choice): newest DeepSeek MoE, 284B
-# total / 13B active, 1M context, fast.  V4 replaced V3 on SiliconFlow in
-# Apr 2026 — the old deepseek-chat/reasoner aliases retire Jul 2026.  Pro is
-# the heavier sibling kept as the first fallback for harder reasoning.
+@dataclass(frozen=True)
+class ModelInfo:
+    """One pickable model, with the metadata the picker needs to be useful.
+
+    ctx_k  = context window in THOUSANDS of tokens.
+    in_usd / out_usd = published price per MILLION tokens.
+
+    Prices and context windows drive ORDERING and the picker subtitle only —
+    never billing — so a figure that drifts costs a mis-sorted row and
+    nothing else.  Model IDs do matter (a wrong one 404s), which is why the
+    ⟳ button re-reads the provider's live /models catalogue.
+    """
+    id: str
+    label: str                    # short display name
+    ctx_k: int
+    in_usd: float
+    out_usd: float
+    note: str = ""                # one line: what it's actually FOR
+    vision: bool = False
+    tier: str = "workhorse"       # "flagship" | "workhorse" | "budget"
+
+
+# ── SiliconFlow catalogue, verified against siliconflow.com/models and the
+#    published pricing table, Jul 2026 ────────────────────────────────────
+#
+# WHY THIS IS A LIST OF ModelInfo AND NOT JUST IDS: the old flat chain was
+# doing three incompatible jobs at once — the Settings picker list, the
+# quick-switch popover list, AND the runtime rate-limit fallback walk.  That
+# coupling meant you could not add a model to pick from without also adding
+# it to the retry storm that fires when the provider is down.  They are now
+# separate: CATALOGUE is what you can PICK, CHAIN is what the backend WALKS.
+#
+# Three entries in the previous chain were dead and would have 404'd:
+#   Qwen/Qwen3-235B-A22B-*  discontinued 2025-12-31
+#   zai-org/GLM-4.6         discontinued (superseded by GLM-5.x)
+#   moonshotai/Kimi-K2.5    being discontinued; requests redirect to K2.6
+#
+# IDs marked (inferred) below follow the vendor's exact published naming
+# convention but were not seen verbatim in a SiliconFlow price/release
+# table.  If one 404s, hit ⟳ in Settings and pick the live id.
+SILICONFLOW_CATALOGUE: List[ModelInfo] = [
+    # ── Flagship: reach for these when the target is genuinely hard ──
+    ModelInfo("moonshotai/Kimi-K3", "Kimi-K3", 1049, 3.0, 15.0,
+              "2.8T params, biggest open model. Deep reasoning + vision.",
+              vision=True, tier="flagship"),
+    ModelInfo("deepseek-ai/DeepSeek-V4-Pro", "DeepSeek-V4-Pro", 1049,
+              1.50, 3.14,
+              "1.6T/49B MoE. Frontier reasoning and code. Same family as "
+              "the default, so prompts port with no retuning.",
+              tier="flagship"),
+    ModelInfo("zai-org/GLM-5.2", "GLM-5.2", 1049, 1.30, 4.09,
+              "Highest measured intelligence on this provider. Long-horizon "
+              "agentic engineering; holds project state across a long run.",
+              tier="flagship"),
+    ModelInfo("meituan-longcat/LongCat-2.0", "LongCat-2.0", 1049, 0.75, 2.95,
+              "1.6T/48B. Leads SWE-bench Pro; built for agentic coding.",
+              tier="flagship"),
+    ModelInfo("moonshotai/Kimi-K2.6", "Kimi-K2.6", 262, 0.77, 3.40,
+              "Sustains 4000+ tool calls over 12h+ runs. The pick for a "
+              "long unattended engagement.",
+              vision=True, tier="flagship"),
+    ModelInfo("moonshotai/Kimi-K2.7-Code", "Kimi-K2.7-Code", 262, 0.86, 3.80,
+              "Coding-focused K2.6 derivative, ~30% fewer thinking tokens.",
+              tier="flagship"),
+    ModelInfo("MiniMaxAI/MiniMax-M3", "MiniMax-M3", 1049, 0.30, 1.20,
+              "1M context at flagship quality for workhorse money — sparse "
+              "attention. (inferred id)",
+              vision=True, tier="flagship"),
+    ModelInfo("nex-agi/Nex-N2-Pro", "Nex-N2-Pro", 262, 0.0, 0.0,
+              "397B agentic-thinking MoE, adaptive reasoning depth. Listed "
+              "at $0 — free while the promo lasts.",
+              vision=True, tier="flagship"),
+
+    # ── Workhorse: the everyday tier. The pinned default lives here ──
+    ModelInfo("deepseek-ai/DeepSeek-V4-Flash", "DeepSeek-V4-Flash", 1049,
+              0.13, 0.28,
+              "PINNED DEFAULT. 284B/13B, 1M ctx. Every benchmark in the "
+              "README was produced on this — the scaffolding scores, not "
+              "the price tag.",
+              tier="workhorse"),
+    ModelInfo("tencent/Hy3", "Hy3", 262, 0.13, 0.53,
+              "295B/21B MoE with three reasoning modes. Cheapest credible "
+              "agentic model on the platform.",
+              tier="workhorse"),
+    ModelInfo("MiniMaxAI/MiniMax-M2.5", "MiniMax-M2.5", 197, 0.30, 1.20,
+              "80.2% SWE-bench Verified. (inferred id)",
+              tier="workhorse"),
+    ModelInfo("Qwen/Qwen3.5-397B-A17B", "Qwen3.5-397B-A17B", 262, 0.39, 2.34,
+              "Largest Qwen3.5 MoE, natively multimodal. (inferred id)",
+              vision=True, tier="workhorse"),
+    ModelInfo("Qwen/Qwen3.6-27B", "Qwen3.6-27B", 262, 0.30, 3.20,
+              "Dense, tuned for code + agent workflows; keeps reasoning "
+              "context across turns.",
+              vision=True, tier="workhorse"),
+    ModelInfo("Qwen/Qwen3.5-122B-A10B", "Qwen3.5-122B-A10B", 262, 0.26, 2.08,
+              "122B/10B hybrid MoE, multimodal. (inferred id)",
+              vision=True, tier="workhorse"),
+    ModelInfo("deepseek-ai/DeepSeek-V3.2", "DeepSeek-V3.2", 164, 0.27, 0.42,
+              "Previous generation. Keep as a known-good comparison run.",
+              tier="workhorse"),
+
+    # ── Budget: triage, bulk parsing, log summarisation ──
+    ModelInfo("Qwen/Qwen3.6-35B-A3B", "Qwen3.6-35B-A3B", 262, 0.20, 1.60,
+              "35B/3B MoE, thinking + non-thinking modes.",
+              tier="budget"),
+    ModelInfo("zai-org/GLM-4.5-Air", "GLM-4.5-Air", 131, 0.14, 0.86,
+              "106B/12B hybrid reasoning. Old but cheap and steady.",
+              tier="budget"),
+    ModelInfo("Qwen/Qwen3.5-9B", "Qwen3.5-9B", 262, 0.10, 0.15,
+              "Cheapest sane option. Bulk work only. (inferred id)",
+              vision=True, tier="budget"),
+    ModelInfo("Qwen/Qwen2.5-72B-Instruct", "Qwen2.5-72B", 33, 0.59, 0.59,
+              "Legacy. 33K context — it WILL truncate a long engagement.",
+              tier="budget"),
+]
+
+# The runtime rate-limit / outage fallback walk.  DELIBERATELY SHORT: every
+# entry is one more full round-trip the operator waits through when the
+# provider is having a bad day, and STREAM_IDLE_TIMEOUT_S applies to each.
+# Four live models is enough to survive a single-model 429; more is a
+# retry storm wearing a helpful hat.
+#
+# chain[0] is the PINNED DEFAULT and is locked by tests — do not reorder.
 SILICONFLOW_CHAIN = [
     "deepseek-ai/DeepSeek-V4-Flash",
     "deepseek-ai/DeepSeek-V4-Pro",
-    "Qwen/Qwen3-235B-A22B-Instruct-2507",
-    "moonshotai/Kimi-K2.5",
-    "zai-org/GLM-4.6",
-    "Qwen/Qwen2.5-72B-Instruct",
+    "zai-org/GLM-5.2",
+    "tencent/Hy3",
 ]
-
-
-
 
 
 @dataclass
@@ -209,14 +323,38 @@ class ProviderSpec:
     label: str            # UI display name, e.g. "Groq"
     blurb: str            # one-line description for Settings
     base_url: str         # OpenAI-compatible API root (no trailing slash)
-    chain: List[str]      # models, biggest/best first
+    chain: List[str]      # RUNTIME FALLBACK WALK, best first. Keep it short.
     key_url: str          # where the operator gets a key
     engine: str = "openai_compat"   # "openai_compat" or "groq"
     extra_headers: Optional[Dict[str, str]] = None
+    # Everything the operator may PICK, with metadata.  Empty => the picker
+    # falls back to `chain`, so a provider that never got a catalogue (Groq)
+    # behaves exactly as it did before.
+    catalogue: Tuple[ModelInfo, ...] = ()
 
     @property
     def default_model(self) -> str:
         return self.chain[0] if self.chain else ""
+
+    @property
+    def pick_ids(self) -> List[str]:
+        """Every model id this provider offers in the UI, best first."""
+        return [m.id for m in self.catalogue] or list(self.chain)
+
+    def info(self, model_id: str) -> Optional[ModelInfo]:
+        """Catalogue metadata for a model id, or None for a live-fetched or
+        hand-typed id we know nothing about."""
+        for m in self.catalogue:
+            if m.id == model_id:
+                return m
+        return None
+
+    def knows(self, model_id: str) -> bool:
+        """True if `model_id` is one this provider is configured to serve —
+        catalogue OR fallback chain.  Used to validate settings that name a
+        model (e.g. hard_engagement_model) so a valid pick outside the short
+        chain isn't silently ignored."""
+        return model_id in self.chain or self.info(model_id) is not None
 
 
 # UI display order only.  Groq is listed first for historical familiarity,
@@ -232,9 +370,11 @@ PROVIDERS: List[ProviderSpec] = [
         key_url="https://console.groq.com/keys"),
     ProviderSpec(
         key="siliconflow", label="SiliconFlow",
-        blurb="OpenAI-compatible. Big open models (DeepSeek, Qwen, Kimi).",
+        blurb="OpenAI-compatible. Big open models (DeepSeek, GLM, Kimi, "
+              "Qwen, MiniMax).",
         base_url="https://api.siliconflow.com/v1",
         chain=SILICONFLOW_CHAIN,
+        catalogue=tuple(SILICONFLOW_CATALOGUE),
         key_url="https://cloud.siliconflow.com/account/ak"),
 ]
 
@@ -244,13 +384,18 @@ PROVIDERS_BY_KEY: Dict[str, ProviderSpec] = {p.key: p for p in PROVIDERS}
 # Settings.  The vision-model field stays free-text so ANY current id can be
 # entered: provider line-ups shift (Groq's multimodal models especially rotate
 # and deprecate often), so if a picked one 404s, type the current id by hand.
-# SiliconFlow hosts the Qwen VL family under these exact ids.
+# Refreshed Jul 2026: the Qwen2.5-VL ids that used to be here are gone from
+# SiliconFlow's catalogue.  The Qwen3-VL family replaced them, and several
+# general-purpose models in SILICONFLOW_CATALOGUE now take image input
+# natively (vision=True) — those are listed first so the vision picker and
+# the chat picker can be the same model and save an API key round-trip.
 VISION_MODELS: Dict[str, List[str]] = {
     "siliconflow": [
-        "Qwen/Qwen2.5-VL-72B-Instruct",
-        "Qwen/Qwen2.5-VL-32B-Instruct",
-        "Qwen/Qwen2.5-VL-7B-Instruct",
-        "Qwen/Qwen2-VL-72B-Instruct",
+        "moonshotai/Kimi-K2.6",
+        "Qwen/Qwen3-VL-32B-Instruct",
+        "Qwen/Qwen3-VL-30B-A3B-Instruct",
+        "Qwen/Qwen3-VL-8B-Instruct",
+        "zai-org/GLM-4.5V",
     ],
     "groq": [
         "meta-llama/llama-4-scout-17b-16e-instruct",
@@ -746,16 +891,57 @@ class OpenAICompatBackend:
         return h
 
     def list_models(self) -> List[Dict[str, Any]]:
-        """Curated chain — instant, no network.  Used as the default
-        Settings list."""
-        return [{"name": m} for m in self.fallback_chain]
+        """Curated catalogue — instant, no network.  Used as the default
+        Settings list.  Falls back to the chain for a provider that has no
+        catalogue."""
+        return [{"name": m} for m in self.spec.pick_ids]
 
-    def list_models_live(self, timeout: float = 8.0) -> List[str]:
+    # Model ids that are real but useless as a CHAT model.  SiliconFlow's
+    # /models returns the whole platform — embeddings, rerankers, TTS/ASR,
+    # image and video generators — so an unfiltered list buried the eight
+    # models worth picking under two hundred that will 400 on a chat call.
+    _NON_CHAT_MARKERS = (
+        "embedding", "reranker", "rerank", "bge-", "bce-",
+        "tts", "speech", "voice", "audio", "whisper", "sensevoice",
+        "flux", "stable-diffusion", "sd3", "sdxl", "z-image",
+        "wan2", "hunyuanvideo", "cogvideo", "-image", "image-",
+        "video", "-ocr",
+    )
+    _LIVE_TTL_S = 120.0
+
+    @classmethod
+    def _is_chat_model(cls, mid: str) -> bool:
+        low = mid.lower()
+        return not any(mark in low for mark in cls._NON_CHAT_MARKERS)
+
+    def _rank_live(self, ids: List[str]) -> List[str]:
+        """Curated models first, in catalogue order, then the rest A-Z.
+        Alphabetical alone put 'ByteDance/...' above the flagship the
+        operator actually wants."""
+        order = {m.id: i for i, m in enumerate(self.spec.catalogue)}
+        for i, cid in enumerate(self.spec.chain):
+            order.setdefault(cid, len(order) + i)
+        known = len(order)
+        return sorted(ids, key=lambda m: (order.get(m, known), m.lower()))
+
+    def list_models_live(self, timeout: float = 8.0,
+                         force: bool = False) -> List[str]:
         """Query the provider's /models endpoint for the real, current
         catalogue.  Returns [] on any failure so the caller can fall
-        back to the curated chain."""
+        back to the curated list.
+
+        Cached for _LIVE_TTL_S: the refresh button is one click and the
+        catalogue does not change between two clicks, but each miss is an
+        8s-timeout network call on a background thread.
+        """
         if not self.api_key:
             return []
+        now = time.time()
+        cached = getattr(self, "_live_cache", None)
+        if (not force and cached
+                and now - cached[0] < self._LIVE_TTL_S
+                and cached[1] == self.api_key):
+            return list(cached[2])
         try:
             req = urllib.request.Request(
                 _join_url(self.base_url, "models"),
@@ -766,9 +952,11 @@ class OpenAICompatBackend:
             ids = []
             for it in items or []:
                 mid = it.get("id") if isinstance(it, dict) else None
-                if mid:
+                if mid and self._is_chat_model(mid):
                     ids.append(mid)
-            return sorted(ids)
+            ids = self._rank_live(ids)
+            self._live_cache = (now, self.api_key, list(ids))
+            return ids
         except Exception as e:
             log(f"{self.name} list_models_live failed: {e}")
             return []
@@ -1016,8 +1204,17 @@ class BackendRouter:
                     self.settings.get("effort_heavy_max_tokens", 4096))
                 heavy = (self.settings.get(
                     "hard_engagement_model", "") or "").strip()
-                chain = getattr(backend, "fallback_chain", None) or []
-                if heavy and heavy != model and heavy in chain:
+                # Validate against the provider's FULL offering (catalogue +
+                # fallback chain), not just the short chain.  Checking only
+                # the chain meant a perfectly valid heavy model picked from
+                # the catalogue was silently ignored and the escalation
+                # never fired — a no-op that looks exactly like a working
+                # feature from the outside.
+                _spec = PROVIDERS_BY_KEY.get(getattr(backend, "name", ""))
+                _ok = (_spec.knows(heavy) if _spec is not None
+                       else heavy in (getattr(backend, "fallback_chain", None)
+                                      or []))
+                if heavy and heavy != model and _ok:
                     log(f"effort: escalating {model} -> {heavy} "
                         f"(deep engagement)")
                     model = heavy

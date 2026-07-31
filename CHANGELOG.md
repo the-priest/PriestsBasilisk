@@ -1,5 +1,130 @@
 # Changelog
 
+## v7.9.3 — the model catalogue was half dead
+
+Provider routing only. No change to the persona, the GUARDRAIL block, the
+destructive-command floor, or basilisk_scope — those four files are
+byte-for-byte identical to v7.9.2.
+
+### HEADLINE — three of six SiliconFlow models were discontinued
+`SILICONFLOW_CHAIN` listed six models. Three of them 404 now:
+
+  · `Qwen/Qwen3-235B-A22B-Instruct-2507` — discontinued 2025-12-31
+  · `zai-org/GLM-4.6`                    — superseded by GLM-5.x
+  · `moonshotai/Kimi-K2.5`               — redirects to Kimi-K2.6
+
+They sat in the picker as pickable options, and in the outage fallback walk
+as three wasted round-trips before the retry reached anything live. Nothing
+in 862 tests noticed, because nothing asserted anything about the chain
+beyond "non-empty, starts with the pinned default".
+
+### CATALOGUE / CHAIN SPLIT
+The flat list was doing three incompatible jobs at once: the Settings picker,
+the quick-switch popover, AND the runtime rate-limit fallback walk. You could
+not add a model to pick from without also lengthening the retry storm that
+fires when the provider is down.
+
+  · `SILICONFLOW_CATALOGUE` — 19 models, each a `ModelInfo` carrying context
+    window, published $/Mtok in and out, vision support, tier, and a line on
+    what it is actually for. This is what you PICK from.
+  · `SILICONFLOW_CHAIN` — 4 live models. This is what the backend WALKS on a
+    429 or an outage, and it stays short on purpose: every entry is another
+    full round-trip bounded by STREAM_IDLE_TIMEOUT_S.
+  · `chain[0]` is still `deepseek-ai/DeepSeek-V4-Flash`. The pinned default
+    did not move and is still locked by tests.
+  · `ProviderSpec` gains `catalogue`, `pick_ids`, `info()`, `knows()`. Groq's
+    catalogue is empty, so `pick_ids` falls through to its chain and Groq
+    behaves exactly as it did before — verified by test.
+
+New in the picker, worth knowing about: `nex-agi/Nex-N2-Pro` (397B agentic
+MoE, listed at $0.00 in and out), `tencent/Hy3` ($0.13/$0.53, 262K, three
+reasoning modes), `zai-org/GLM-5.2` (highest measured intelligence on the
+platform, 1M ctx), `meituan-longcat/LongCat-2.0` (leads SWE-bench Pro),
+`moonshotai/Kimi-K3` (2.8T params, 1M ctx, vision).
+
+Four ids are marked `(inferred id)` in source: they follow the vendor's exact
+published naming convention but were not seen verbatim in a SiliconFlow price
+or release table. If one 404s, the refresh button picks up the live id.
+
+### FIXED — the picker sorted the pinned default LAST
+`_models_priced_high_to_low()` parsed the largest `NNb` out of the model id,
+on the theory that bigger equals better equals pricier. Every id without a
+parameter count in its NAME scored 0.0 — which in the current lineup means
+DeepSeek-V4-Flash, GLM-5.2, Kimi-K3 and Hy3, i.e. the pinned default and
+three of the four best models, all sorted BELOW a 72B legacy model. An MoE's
+total parameter count told you nothing about its cost anyway. Providers with
+a catalogue now use the curated order; the regex survives only for
+live-fetched ids with no metadata.
+
+### FIXED — repopulating a model picker wrote the wrong model to disk
+`Gtk.ComboRow.set_model()` resets `selected` to 0 and emits
+`notify::selected`. `_on_provider_model` had no re-entrancy guard, so every
+repopulate fired the handler with whatever happened to be first and called
+`save_settings()` on it before the correct selection was restored — a
+spurious disk write on every Settings open, and a real window during a live
+refresh where the wrong model was persisted. The vision picker already had
+this guard; the provider picker did not. Both paths now go through one
+guarded `_populate_model_row()`.
+
+Related: the visible strings now carry context and price, so display text is
+no longer the model id. `_model_rows` keeps a parallel id list and the
+handler indexes into that. The old code read the id back out of the widget
+label, so any label change would have silently written a bogus model id into
+settings.
+
+### FIXED — effort escalation was a silent no-op for catalogue models
+`hard_engagement_model` was validated with `heavy in chain`. Pick a valid
+heavy model from outside the short fallback chain and the escalation never
+fired — indistinguishable from a working feature. Now validated with
+`spec.knows()`, which accepts catalogue OR chain.
+
+### FIXED — the live /models list was unusable
+SiliconFlow's `/models` returns the whole platform: embeddings, rerankers,
+TTS voices, image and video generators, every one of which 400s on a chat
+call. Sorted A-Z, the eight models worth picking were buried under ~200 that
+are not chat models at all. Now filtered to chat models and ranked
+catalogue-first, with a 120s TTL cache keyed on the API key (so a key swap
+cannot serve another account's catalogue).
+
+### REFRESHED — vision model list
+The `Qwen2.5-VL` / `Qwen2-VL` ids in `VISION_MODELS` are gone from
+SiliconFlow's catalogue entirely. Replaced with the Qwen3-VL family,
+`zai-org/GLM-4.5V`, and `moonshotai/Kimi-K2.6` (several general-purpose
+catalogue models now take image input natively, so the vision model and the
+chat model can be the same one).
+
+### NEW TEST SUITE — tests/test_models.py, 62 assertions
+Locks what can be checked offline: catalogue/chain separation, the pinned
+default, id hygiene, an explicit retired-id blocklist, metadata sanity,
+`knows()`, the live-catalogue filter and ranking, cache invalidation on key
+change, tier grouping, and the picker ordering regression (including a
+reproduction of the old sort, so the bug is pinned rather than described).
+It cannot check that an id is currently SERVED — that needs the network and
+a key. The refresh button is the answer to drift.
+
+Found a false positive in this file's own first draft: the retired-id check
+used `startswith`, which flags every live SUCCESSOR — `GLM-4.5-Air` starts
+with the retired `GLM-4.5`, `MiniMax-M2.5` starts with the retired
+`MiniMax-M2`. Version numbers are not a prefix hierarchy. Now an exact-match
+set plus one explicit prefix for the Qwen3-235B family, where every suffixed
+variant went at once.
+
+### VERIFICATION
+  · 20/20 suites green, zero red entries (was 19/19; test_models.py is new)
+  · basilisk_persona.py, basilisk_safety.py, basilisk_scope.py,
+    basilisk_ledger.py, basilisk_voice.py sha256-identical to v7.9.2 —
+    GUARDRAIL untouched
+  · basilisk.py imports clean under the GTK stub
+  · No new top-level module, so install.sh REQUIRED_FILES and EXT_FILES are
+    unchanged
+
+### NOT DONE, DELIBERATELY
+`enable_thinking` / reasoning-effort control is not wired into the request
+payload. It is the real remaining optimisation for an agent of this shape —
+light turns do not need thinking tokens and output runs 2-3x input price —
+but it changes the streaming payload on the only working provider, and it
+wants to be opt-in with a 400-retry that strips the field before it ships.
+
 ## v7.9.2 — repo reorganisation (assets/, docs/) + a real .gitignore
 
 Layout only; no behaviour change. The INSTALLED layout is deliberately
