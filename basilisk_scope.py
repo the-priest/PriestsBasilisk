@@ -488,6 +488,8 @@ def _substitution_payloads(command: str) -> List[str]:
     whose basename matches nothing, so neither the walk nor the backstop saw
     it. These spans are lifted out and re-parsed as commands in their own right.
     """
+    UNTERMINATED = "\x00<unterminated substitution>"
+
     out: List[str] = []
     i, n = 0, len(command)
     while i < n:
@@ -509,6 +511,16 @@ def _substitution_payloads(command: str) -> List[str]:
                 j += 1
             if depth == 0:
                 out.append(command[start:j - 1])
+            else:
+                # UNTERMINATED.  `$(nmap evil.com` with no closing paren.  A
+                # real shell rejects this outright (syntax error), so it is
+                # not an exploitable bypass -- but the scan below has just
+                # CONSUMED the rest of the string, and the caller would grade
+                # what is left as a passive/local command. That is a
+                # fail-OPEN verdict reached by accident. Signal it instead
+                # and let the caller refuse.
+                out.append(UNTERMINATED)
+                out.append(command[start:])
             i = j
             continue
         if c == "`":
@@ -520,6 +532,12 @@ def _substitution_payloads(command: str) -> List[str]:
                 j += 1
             if j < n:
                 out.append(command[i + 1:j])
+            else:
+                # Same story for the legacy backtick form, which had the
+                # extra wrinkle that a SINGLE leading backtick swallowed the
+                # entire command.
+                out.append(UNTERMINATED)
+                out.append(command[i + 1:])
             i = j + 1
             continue
         i += 1
@@ -543,6 +561,11 @@ def extract_targets(command: str, _depth: int = 0) -> Extraction:
         # Command substitutions execute independently of the line that contains
         # them — lift them out and parse each as its own command.
         for payload in _substitution_payloads(norm):
+            if payload == "\x00<unterminated substitution>":
+                out.uncertain.append("<unterminated substitution>")
+                out.reason = ("command has an unterminated $( or backtick "
+                              "substitution and cannot be parsed")
+                continue
             if payload.strip():
                 inner = extract_targets(payload, _depth + 1)
                 out.targets.extend(inner.targets)

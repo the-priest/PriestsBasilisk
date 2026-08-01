@@ -1,5 +1,346 @@
 # Changelog
 
+## v7.11.0 — the fix LOOP: it verifies its own work now
+
+v7.10.0 gave Basilisk a repo. This gives it the thing that actually
+separates fixing code from editing it: a baseline, a verdict, and the
+discipline to not export a regression.
+
+GUARDRAIL byte-for-byte identical (fa3fb6b1480006cd). safety / scope /
+ledger / voice sha256-identical to v7.10.0.
+
+### FOUR NEW TOOLS
+    workspace_test_command — how does THIS repo run its tests, and what was
+                             that inferred from (so a wrong guess is
+                             correctable rather than silently wrong)
+    workspace_baseline     — run the tests BEFORE editing, record what
+                             already fails
+    workspace_verify       — re-run and classify vs baseline: fixed / BROKE
+                             / still failing
+    workspace_health       — static sweep for real bugs
+
+### THE BASELINE IS THE WHOLE IDEA
+Without it, every pre-existing failure looks like damage the agent just
+caused. Worse in practice: a test that was ALREADY red gets quietly
+"fixed" and folded into the change set, so the operator reviews a diff
+containing work he never asked for and cannot separate from the work he
+did. `workspace_baseline` must run before the first edit, and it warns
+loudly if taken on an already-modified tree, because a baseline taken after
+edits is not a baseline.
+
+### WHY NAMES AND NOT COUNTS
+`workspace_verify` tracks the SET OF FAILING TEST NAMES, not just totals.
+Counts cannot distinguish "fixed one, broke another" from "nothing
+changed" — both read as 2 failed. That distinction is the entire value of
+the loop, and it is asserted directly in the tests: a run with an unchanged
+failure count but a different failure SET is correctly reported as a
+regression.
+
+Four verdicts, and `broke` is read first: green / regression / progress /
+no-change. A regression verdict says DO NOT EXPORT in as many words. A
+no-change verdict says stop editing on the same hypothesis, because a
+second guess from the same reasoning is the same guess.
+
+### THE DANGEROUS DEFAULT, HANDLED
+An unknown test runner produces a log we have no pattern for. Treating
+"could not parse" as "passed" would be the worst thing this code could do,
+so the exit code is ground truth when parsing fails, and the verdict says
+plainly that it rests on rc alone.
+
+### EXECUTION STAYS IN ONE PLACE
+`workspace.py` still executes nothing. The core wrapper runs tests through
+`tool_run_command`, which means the destructive-command floor and the scope
+gate apply unchanged. This matters concretely: a repo's Makefile is
+untrusted input, and `make test` can contain anything. A second execution
+path would be a hole in the exact boundary v7.9.0 exists to close.
+
+### RACE FIXED — revert() could restore the wrong "original"
+`_stash_original()` was check-then-act: "if the original copy exists,
+return", then copy. Tool calls run on worker threads and `shutil.copy2`
+releases the GIL during I/O, so two threads editing the same file could
+BOTH pass the check, and the second would stash the ALREADY-EDITED content
+as the original. `revert()` would then restore a modified file and the
+operator's true baseline would be gone, silently.
+
+That is the worst bug this module could have, because the undo button is
+precisely what he reaches for when something has already gone wrong.
+`_mark()` had the same check-then-act shape, producing duplicate entries in
+the change list.
+
+Identical shape to the engage.py loot race fixed in v7.9.1 — which also did
+not look reproducible until it was measured, at 1 of 60 records surviving.
+This one did not reproduce in six trials either. Fixed anyway, on the shape
+rather than on the odds: an RLock across the whole stash → write → mark
+sequence, reentrant because revert() marks while already holding it. Now
+asserted at 16-way contention, 6/6 trials.
+
+Temp files also moved from a fixed `.bz-tmp` suffix to a thread-id-suffixed
+one, because two concurrent writes to the same path were racing on the temp
+file itself.
+
+### AND A BUG IN THAT FIX, CAUGHT BEFORE IT SHIPPED
+The first version of the revert() lock used a bare acquire/release pair. An
+exception between them leaves the lock held forever and every later edit
+deadlocks — strictly worse than the race being fixed. Rewritten as a
+`with` block.
+
+### workspace_health
+Static sweep of the open repo: mutable default arguments, bare excepts,
+subprocess without a timeout, `is` on a literal (identity where value was
+meant — works by accident via interning), and syntax errors. Deliberately
+NARROW. A checker that reports fifty style opinions trains the operator to
+ignore it, and then it reports a real bug on line 51 and he ignores that
+too.
+
+### THE METHOD, IN THE PERSONA
+The tool list was never the hard part. The persona now carries the loop as
+a method — baseline, search before reading, understand before editing, one
+change at a time, verify after every change, read `broke` first — plus
+honesty rules that matter more than the tools:
+
+  · Never claim a fix works because it looks right. It works when the tests
+    say so. If you could not run them, say you could not run them.
+  · Broke something and cannot fix it? Say so and revert. A reverted
+    attempt is a fine outcome; a silent regression is not.
+  · Don't touch his tests to make them pass. If a test looks wrong, say so
+    and let him decide — editing the test to match broken code is the
+    single worst thing an agent can do in a repo.
+
+### VERIFICATION
+  · 22/22 suites green, ~909 assertions, zero red
+  · test_workspace.py 87 -> 118 assertions
+  · Fuzz: 6,000 random inputs x 7 entry points, 0 crashes
+  · 200k-line test log parses in 122 ms; 5 MB blob in 143 ms; the search
+    regex does not backtrack pathologically on `(a+)+$`
+  · AST audit of the new code clean; compileall clean; install.sh bash -n
+  · Grouped prompt 7133 -> 7153 tokens
+
+## v7.10.0 — repo workspace: hand it a zip, get a fixed zip back
+
+New capability, so a minor bump. `basilisk_ext/workspace.py` (~830 LOC,
+pure stdlib, imports nothing from the core), 13 new tools under a new
+`workspace` tool group, and `tests/test_workspace.py` (87 assertions).
+
+The persona GUARDRAIL block is byte-for-byte identical. `basilisk_safety.py`,
+`basilisk_ledger.py` and `basilisk_voice.py` are sha256-identical to v7.9.4.
+
+### WHAT IT DOES
+    workspace_import   — unpack a repo .zip into a private tree
+    workspace_overview — languages, LOC, entry points, manifests, tests
+    workspace_search   — repo-wide grep (regex, glob, context)
+    workspace_tree     — file listing, build/vendor noise filtered
+    workspace_read     — read a file, or a line range
+    workspace_replace  — exact-substring edit, uniqueness enforced
+    workspace_write    — whole-file write / new file
+    workspace_delete   — remove a file (recoverable)
+    workspace_diff     — unified diff of everything changed
+    workspace_revert   — undo one file or all of them
+    workspace_export   — zip it back up
+    workspace_status / workspace_close
+
+Tests still run through the existing gated `run_command`, so the
+destructive-command floor and the scope gate apply to them unchanged. This
+module executes nothing itself.
+
+### THE CONTAINMENT BOUNDARY IS THE FEATURE
+This is the first thing in Basilisk that takes a FILE FROM OUTSIDE and
+writes its contents to disk under a name the file itself chooses. Every
+other input is a command string it parses. That difference is the whole
+design.
+
+`_confine()` is the single choke point: every read, write, move and delete
+goes through it, and it fails closed. Three properties, each a real CVE
+class:
+
+  · realpath BEFORE comparing, so a symlink inside the tree pointing out of
+    it is caught. Checking the literal string first and resolving later is
+    the bug in most naive implementations.
+  · commonpath, NOT startswith. "/home/u/repo-old" starts with
+    "/home/u/repo" and is a different directory.
+  · absolute paths refused out loud rather than silently re-rooted.
+
+Extraction refuses, before writing anything:
+  · ZIP SLIP — member names that traverse out of the destination
+    (CVE-2007-4559, still live in Python's own tarfile in 2022)
+  · SYMLINK ENTRIES — a zip can carry `docs -> /` and then `docs/etc/passwd`;
+    rejecting `..` does not catch this
+  · ZIP BOMBS — per-entry ratio ceiling plus a running total, because a
+    42 KB archive can decompress to petabytes
+
+Refusals are REPORTED, not silently dropped. If the operator's zip contains
+something this declines, he needs to know which file and why, or he will
+think the import merely lost data.
+
+The other reason the boundary is structural rather than prompt-level:
+Basilisk is autonomous under UNLEASH. A model that decides the fix belongs
+in ~/.bashrc is not misbehaving in any way it can detect. It is one wrong
+path away from editing the operator's home directory instead of his repo.
+
+### BUG FOUND BY THIS FILE'S OWN TESTS
+`~/.bashrc` was not an escape — it was worse. `os.path.join` treated `~` as
+an ordinary directory name, so the write landed at `<root>/~/.bashrc`.
+Contained, so the boundary held, but the operator asked to touch his shell
+config and would have got a junk directory named `~` inside his repo
+instead of an error. Now expanded before the check, which makes it absolute
+and therefore refused out loud. This is precisely the "silently re-rooting
+turns an obvious error into a confusing one" case named in the docstring
+two functions above the bug.
+
+### CREDENTIALS
+Repo zips routinely carry a stray `.env`. Files that look like credential
+stores are flagged on import, refused for reading (they are not going into
+a cloud model's context), excluded from search results, and excluded from
+the export unless `include_secrets=True` is passed deliberately.
+
+### DESIGN CALLS WORTH STATING
+  · `workspace_replace` REFUSES a non-unique match rather than picking one.
+    Guessing which of four similar blocks was meant is how an agent edits
+    the wrong call site.
+  · Python that would not parse is refused before anything is written,
+    mirroring the core's self-edit guard. A syntax error introduced at step
+    3 of a 30-step refactor gets blamed on step 27.
+  · Originals are stashed ONCE PER FILE, on first change — not per edit.
+    Per-edit would make revert walk back exactly one step and stop.
+  · A single wrapping top directory is hoisted, so paths match what the
+    operator sees on GitHub: "basilisk_core.py", not
+    "PriestsBasilisk-main/basilisk_core.py".
+  · No git. The operator's history is his; this hands back a zip and he
+    diffs it with tools he already trusts.
+
+### ONE ARG-MAPPER, NOT TWO
+basilisk.py has two dispatch paths — autonomous and approval-gated — and
+they have drifted before: a tool wired into one and not the other works
+perfectly until the operator flips approval mode, then vanishes with no
+error. All 13 tools route through one shared `_workspace_call()` mapper,
+which cannot drift from itself, and the test suite asserts that persona
+specs, core functions, the dispatch table and the mapper are the same set
+of 13 names.
+
+### VERIFICATION
+  · 22/22 suites green, ~878 assertions, zero red
+  · test_workspace.py: 87 assertions, ~70% of them the containment boundary
+  · GUARDRAIL byte-for-byte identical; safety/ledger/voice sha256-identical
+  · AST audit of the new module clean; compileall clean; install.sh bash -n
+  · workspace.py added to EXT_FILES (remote-fetch installs read only that
+    list, and a missing ext module is a silent capability gap)
+
+### KNOWN
+The grouped prompt moves 7024 -> 7133 tokens: one more line in the group
+directory. Specs load on demand as usual, so a turn that never touches a
+repo pays only that line.
+
+## v7.9.4 — the only speed lever that matters, plus a fail-open verdict
+
+Persona, safety floor and ledger are byte-for-byte identical to v7.9.3.
+`basilisk_scope.py` changed; that change is the fail-closed fix below.
+
+### THE HONEST ANSWER ON SPEED
+Local Python is not the bottleneck and measuring it again did not change
+that. Current numbers on this tree:
+
+  · destructive-command gate    ~52 us/command
+  · scope gate                  ~62 us/command
+  · turn classification         ~28 us/turn
+  · warm import of the core     ~70-90 ms, once, at launch
+
+Nothing there is worth optimising. A turn costs SECONDS, and essentially
+all of it is the API round-trip. Within that, the part under our control is
+OUTPUT TOKENS: they are generated one at a time, so token count IS latency,
+and output also runs 2-3x input price. That is the only lever with real
+leverage, so that is what this release pulls.
+
+### NEW — skip thinking on light turns (opt-in, default OFF)
+Setting `fast_light_turns`, and a matching switch in Settings under
+Adaptive effort. On a LIGHT turn — a receipt, a short conversational reply
+— models with a thinking toggle are asked to answer without
+chain-of-thought. Eleven of the nineteen catalogue models carry the toggle;
+the rest are left alone because their reasoning is architectural, not a
+mode, and inventing a field for them would just earn a 400.
+
+Heavy and standard turns are NEVER touched. That is where reasoning earns
+its keep, and it is the whole reason the effort ladder exists.
+
+Default OFF because this adds a non-standard field to the request body.
+Three properties make it safe to turn on, all asserted end-to-end against a
+faked HTTP layer rather than argued for in a comment:
+
+  1. OFF means the body is byte-identical to v7.9.3's. Opting out is free.
+  2. A 400 caused by our own field strips it and retries THE SAME MODEL.
+     This check sits deliberately in front of the stale-model-id recovery —
+     otherwise a rejected toggle would send the router hunting down the
+     fallback chain for a model that was never broken, burning a live
+     catalogue fetch on the way.
+  3. After one rejection the field is not sent to that model again for the
+     rest of the session. Three turns against a hostile provider cost four
+     requests, not six.
+
+The rejection memo is built in `__init__`, not lazily in `stream_chat`:
+tool calls run on worker threads, and two racing the lazy init would each
+build a fresh set and lose a rejection. `set.add` is atomic under the GIL,
+so no lock is needed once it exists.
+
+### FIXED — an unterminated substitution produced a fail-OPEN verdict
+`_substitution_payloads()` scans for `$(...)` and backtick spans and lifts
+them out to be parsed as commands in their own right. When the delimiter
+was never closed, both branches CONSUMED the rest of the string and then
+dropped it. A single leading backtick therefore swallowed the entire
+command, and `` `nmap evil.com `` came back as "passive/local command —
+scope boundary not engaged".
+
+Found by fuzzing: 34,400 inputs, 160 fail-open leaks, every one of them the
+unterminated-backtick shape.
+
+It is NOT an exploitable bypass — bash and sh both reject an unterminated
+backquote as a syntax error, checked against the real shells rather than
+assumed, the same way `$IFS8` was checked and dismissed in v7.9.1. But a
+fail-OPEN verdict arrived at by accident is exactly what this gate exists
+not to do, and "not exploitable today" is a bad thing for an authorisation
+boundary to rest on. An unterminated substitution now marks the command
+unparseable and the gate refuses. Re-fuzzed: 0 leaks, 0 crashes.
+
+Note the near miss in the same function: unbalanced QUOTES and a trailing
+backslash were already failing closed correctly. Only the substitution
+scanner had the swallow.
+
+### FIXED — host facts died on a C-locale box
+Six reads of `/etc/os-release` and `/proc/*` used `open()` with no
+encoding, so they inherited the locale. On a box running `LANG=C`, a
+`PRETTY_NAME` carrying a non-ASCII character raises UnicodeDecodeError and
+takes the whole host-facts block with it. Now pinned to utf-8 with
+`errors="replace"`.
+
+### DEBUG SWEEP — what came back clean
+Full-tree AST audit: zero mutable default arguments, zero bare excepts,
+zero `subprocess` calls without a timeout, zero `sqlite3.connect` without
+`check_same_thread`, zero regexes compiled inside a loop. The v7.9.1
+invariant that `_WRAPPERS` and `_NETWORK_TOOLS` never intersect still
+holds. Fuzz: 34,400 structured and random inputs through both gates, zero
+crashes.
+
+Cost of the scope fix, measured: 59 us -> 62 us per command. Noise.
+
+### NEW TEST SUITE — tests/test_effort.py, 23 assertions
+Drives the real router against a faked HTTP layer and asserts the request
+BODY, not the intent: default-off byte-identity, light-only application,
+standard and heavy untouched, no field invented for a model without a
+toggle, the light token cap still applied, strip-and-retry on the same
+model, the one-time memo, and — the case that proves the new check did not
+swallow the path it sits in front of — that a genuinely stale model id
+still walks the chain. Also pins the v7.9.3 catalogue-escalation fix.
+
+tests/test_scope.py +11 assertions for the unterminated forms, including
+six terminated and ordinary commands to prove the fix does not over-block.
+
+### VERIFICATION
+  · 21/21 suites green, ~791 assertions, zero red
+  · basilisk_persona.py, basilisk_safety.py, basilisk_ledger.py,
+    basilisk_voice.py sha256-identical to v7.9.3 — GUARDRAIL untouched
+  · compileall clean; no new top-level module, so install.sh is unchanged
+
+### STILL NOT DONE
+Deferring `urllib.request` and `concurrent.futures` would take ~35 ms off
+launch. Not worth the import-order risk for 35 ms that happens once.
+
 ## v7.9.3 — the model catalogue was half dead
 
 Provider routing only. No change to the persona, the GUARDRAIL block, the

@@ -203,6 +203,14 @@ class ModelInfo:
     note: str = ""                # one line: what it's actually FOR
     vision: bool = False
     tier: str = "workhorse"       # "flagship" | "workhorse" | "budget"
+    # JSON fragment that turns this model's chain-of-thought OFF, or None if
+    # it has no toggle (its reasoning is architectural, not a mode).  Only
+    # ever sent on a LIGHT turn, and only when the operator opts in via the
+    # fast_light_turns setting.  If a provider rejects it, the backend
+    # strips it, retries once, and remembers not to send it again -- so a
+    # wrong guess here costs one extra round-trip on one turn, not a
+    # broken model.
+    think_off: Optional[Dict[str, Any]] = None
 
 
 # ── SiliconFlow catalogue, verified against siliconflow.com/models and the
@@ -232,11 +240,13 @@ SILICONFLOW_CATALOGUE: List[ModelInfo] = [
               1.50, 3.14,
               "1.6T/49B MoE. Frontier reasoning and code. Same family as "
               "the default, so prompts port with no retuning.",
-              tier="flagship"),
+              tier="flagship",
+              think_off={"enable_thinking": False}),
     ModelInfo("zai-org/GLM-5.2", "GLM-5.2", 1049, 1.30, 4.09,
               "Highest measured intelligence on this provider. Long-horizon "
               "agentic engineering; holds project state across a long run.",
-              tier="flagship"),
+              tier="flagship",
+              think_off={"enable_thinking": False}),
     ModelInfo("meituan-longcat/LongCat-2.0", "LongCat-2.0", 1049, 0.75, 2.95,
               "1.6T/48B. Leads SWE-bench Pro; built for agentic coding.",
               tier="flagship"),
@@ -262,38 +272,47 @@ SILICONFLOW_CATALOGUE: List[ModelInfo] = [
               "PINNED DEFAULT. 284B/13B, 1M ctx. Every benchmark in the "
               "README was produced on this — the scaffolding scores, not "
               "the price tag.",
-              tier="workhorse"),
+              tier="workhorse",
+              think_off={"enable_thinking": False}),
     ModelInfo("tencent/Hy3", "Hy3", 262, 0.13, 0.53,
               "295B/21B MoE with three reasoning modes. Cheapest credible "
               "agentic model on the platform.",
-              tier="workhorse"),
+              tier="workhorse",
+              think_off={"enable_thinking": False}),
     ModelInfo("MiniMaxAI/MiniMax-M2.5", "MiniMax-M2.5", 197, 0.30, 1.20,
               "80.2% SWE-bench Verified. (inferred id)",
               tier="workhorse"),
     ModelInfo("Qwen/Qwen3.5-397B-A17B", "Qwen3.5-397B-A17B", 262, 0.39, 2.34,
               "Largest Qwen3.5 MoE, natively multimodal. (inferred id)",
-              vision=True, tier="workhorse"),
+              vision=True, tier="workhorse",
+              think_off={"enable_thinking": False}),
     ModelInfo("Qwen/Qwen3.6-27B", "Qwen3.6-27B", 262, 0.30, 3.20,
               "Dense, tuned for code + agent workflows; keeps reasoning "
               "context across turns.",
-              vision=True, tier="workhorse"),
+              vision=True, tier="workhorse",
+              think_off={"enable_thinking": False}),
     ModelInfo("Qwen/Qwen3.5-122B-A10B", "Qwen3.5-122B-A10B", 262, 0.26, 2.08,
               "122B/10B hybrid MoE, multimodal. (inferred id)",
-              vision=True, tier="workhorse"),
+              vision=True, tier="workhorse",
+              think_off={"enable_thinking": False}),
     ModelInfo("deepseek-ai/DeepSeek-V3.2", "DeepSeek-V3.2", 164, 0.27, 0.42,
               "Previous generation. Keep as a known-good comparison run.",
-              tier="workhorse"),
+              tier="workhorse",
+              think_off={"enable_thinking": False}),
 
     # ── Budget: triage, bulk parsing, log summarisation ──
     ModelInfo("Qwen/Qwen3.6-35B-A3B", "Qwen3.6-35B-A3B", 262, 0.20, 1.60,
               "35B/3B MoE, thinking + non-thinking modes.",
-              tier="budget"),
+              tier="budget",
+              think_off={"enable_thinking": False}),
     ModelInfo("zai-org/GLM-4.5-Air", "GLM-4.5-Air", 131, 0.14, 0.86,
               "106B/12B hybrid reasoning. Old but cheap and steady.",
-              tier="budget"),
+              tier="budget",
+              think_off={"enable_thinking": False}),
     ModelInfo("Qwen/Qwen3.5-9B", "Qwen3.5-9B", 262, 0.10, 0.15,
               "Cheapest sane option. Bulk work only. (inferred id)",
-              vision=True, tier="budget"),
+              vision=True, tier="budget",
+              think_off={"enable_thinking": False}),
     ModelInfo("Qwen/Qwen2.5-72B-Instruct", "Qwen2.5-72B", 33, 0.59, 0.59,
               "Legacy. 33K context — it WILL truncate a long engagement.",
               tier="budget"),
@@ -448,6 +467,13 @@ DEFAULT_SETTINGS = {
     "effort_light_max_tokens": 1536,     # cap for lean/conversational turns
     "effort_heavy_max_tokens": 4096,     # budget once deep in a tool chain
     "hard_effort_step": 3,               # escalate at this tool-chain depth
+    # Skip chain-of-thought on LIGHT turns.  Output tokens are generated
+    # serially, so a few hundred thinking tokens on "yeah, makes sense" is
+    # pure wall-clock the operator waits through -- and output runs 2-3x
+    # input price.  Heavy/standard turns are NEVER touched: that is where
+    # reasoning earns its keep.  Default OFF because it adds a field to the
+    # request body; the backend degrades safely if a provider rejects it.
+    "fast_light_turns": False,
     "hard_engagement_model": "deepseek-ai/DeepSeek-V4-Pro",  # heavier sibling
 
     # Behaviour
@@ -866,6 +892,12 @@ class OpenAICompatBackend:
         self.base_url = spec.base_url
         self.fallback_chain = list(spec.chain)
         self.extra_headers = dict(spec.extra_headers or {})
+        # Models that have 400'd on a non-standard request field.  Built here
+        # rather than lazily in stream_chat: tool calls run on worker threads,
+        # and two of them racing the lazy init would each build a fresh set,
+        # losing one model's rejection memo and costing a wasted round-trip.
+        # set.add is atomic under the GIL, so no lock is needed once it exists.
+        self._extras_rejected: set = set()
 
     def set_api_key(self, key: str) -> None:
         # Strip whitespace/newlines — pasting a key on mobile often appends
@@ -974,6 +1006,12 @@ class OpenAICompatBackend:
             "max_tokens": opts.get("max_tokens", 2048),
             "stream": True,
         }
+        # Optional non-standard fields (currently the thinking toggle).  These
+        # are NOT part of the OpenAI schema, so a provider is entitled to 400
+        # on them -- see the strip-and-retry in the HTTPError handler.  Once a
+        # model has rejected them we stop sending them for the rest of the
+        # session rather than paying a wasted round-trip every turn.
+        extra_body = dict(opts.get("extra_body") or {})
         order = [model] + [m for m in self.fallback_chain if m != model]
         last_err = None
         any_tokens_emitted = False
@@ -989,6 +1027,11 @@ class OpenAICompatBackend:
                 return
             payload = dict(body_base)
             payload["model"] = attempt_model
+            sent_extras = bool(
+                extra_body
+                and attempt_model not in getattr(self, "_extras_rejected", ()))
+            if sent_extras:
+                payload.update(extra_body)
             try:
                 data = json.dumps(payload).encode("utf-8")
                 req = urllib.request.Request(
@@ -1065,6 +1108,20 @@ class OpenAICompatBackend:
                              f"(HTTP {e.code}). Check the API key for this "
                              f"provider in Settings → Backends.")
                     return
+
+                # OUR OWN FAULT FIRST.  If we added a non-standard field and
+                # the provider 400'd, that is the likeliest cause -- strip it
+                # and retry the SAME model before blaming the model id.  This
+                # check must precede the stale-id recovery below, or a
+                # rejected thinking toggle sends us hunting for a replacement
+                # model that was never broken.
+                if e.code == 400 and sent_extras:
+                    self._extras_rejected.add(attempt_model)
+                    log(f"{self.name} {attempt_model} rejected "
+                        f"{sorted(extra_body)} -> retrying without it "
+                        f"(and not sending it again this session)")
+                    idx -= 1            # retry this same model
+                    continue
 
                 # 400/404 with no auth hint → maybe a stale model id.  Pull
                 # the live catalogue ONCE and retry with real models.
@@ -1187,6 +1244,7 @@ class BackendRouter:
                     effort: str = "standard") -> Tuple[str, str]:
         backend, model = self.pick()
         max_tokens = self.settings.get("max_tokens", 2048)
+        _extra: Dict[str, Any] = {}
         # ── Effort ladder: match capability + budget to the turn.  Light on
         #    plain chat (snappier, cheaper); heavy several tool-steps deep in a
         #    live engagement (escalate to the heavier sibling in the provider's
@@ -1198,6 +1256,15 @@ class BackendRouter:
                 max_tokens = min(
                     max_tokens,
                     self.settings.get("effort_light_max_tokens", 1536))
+                # Light turn: if this model has a thinking toggle and the
+                # operator opted in, turn it off.  The cap above already
+                # limits how much it can say; this stops it spending the
+                # budget reasoning about a receipt.
+                if self.settings.get("fast_light_turns", False):
+                    _spec = PROVIDERS_BY_KEY.get(getattr(backend, "name", ""))
+                    _info = _spec.info(model) if _spec is not None else None
+                    if _info is not None and _info.think_off:
+                        _extra = dict(_info.think_off)
             elif effort == "heavy" and not _auton:
                 max_tokens = max(
                     max_tokens,
@@ -1223,6 +1290,8 @@ class BackendRouter:
             "top_p": self.settings.get("top_p", 0.9),
             "max_tokens": max_tokens,
         }
+        if _extra:
+            opts["extra_body"] = _extra
         if backend is None:
             on_error("No provider configured. Add an API key in Settings.")
             return "none", ""
@@ -2459,7 +2528,7 @@ def tool_system_info() -> Dict[str, Any]:
         pass
     try:
         rel = {}
-        with open("/etc/os-release") as f:
+        with open("/etc/os-release", encoding="utf-8", errors="replace") as f:
             for line in f:
                 if "=" in line:
                     k, v = line.strip().split("=", 1)
@@ -2468,14 +2537,14 @@ def tool_system_info() -> Dict[str, Any]:
     except Exception:
         pass
     try:
-        with open("/proc/uptime") as f:
+        with open("/proc/uptime", encoding="utf-8", errors="replace") as f:
             up = float(f.read().split()[0])
         info["uptime_sec"] = int(up)
     except Exception:
         pass
     try:
         meminfo = {}
-        with open("/proc/meminfo") as f:
+        with open("/proc/meminfo", encoding="utf-8", errors="replace") as f:
             for line in f:
                 if ":" in line:
                     k, v = line.split(":", 1)
@@ -2487,7 +2556,7 @@ def tool_system_info() -> Dict[str, Any]:
     try:
         # CPU model + core count, read live so it's never guessed.
         model = None
-        with open("/proc/cpuinfo") as f:
+        with open("/proc/cpuinfo", encoding="utf-8", errors="replace") as f:
             for line in f:
                 if line.lower().startswith("model name") and ":" in line:
                     model = line.split(":", 1)[1].strip()
@@ -2500,7 +2569,7 @@ def tool_system_info() -> Dict[str, Any]:
     except Exception:
         pass
     try:
-        with open("/proc/loadavg") as f:
+        with open("/proc/loadavg", encoding="utf-8", errors="replace") as f:
             info["load"] = f.read().strip()
     except Exception:
         pass
@@ -2816,7 +2885,7 @@ def quick_facts(force: bool = False) -> Dict[str, Any]:
     except Exception:
         data["ip"] = ""
     try:
-        with open("/proc/uptime") as f:
+        with open("/proc/uptime", encoding="utf-8", errors="replace") as f:
             up = float(f.read().split()[0])
         h, rem = divmod(int(up), 3600)
         data["uptime"] = f"{h}h {rem // 60}m"
@@ -4679,6 +4748,229 @@ def tool_attack_writeup(access: Any = "", steps: Any = None, target: str = "",
             root_cause=(root_cause or "").strip(), ledger_events=ledger_events)
     except Exception as e:
         return {"ok": False, "error": f"attack_writeup failed: {e}"}
+
+
+# ═════════════════════════════════════════════════════════════════════
+# REPO WORKSPACE — import a zip, work the whole repo, export it back
+# ═════════════════════════════════════════════════════════════════════
+# Every one of these is a thin wrapper over basilisk_ext.workspace, which
+# owns the containment boundary.  The wrappers exist so the module stays
+# core-independent (it takes DATA_DIR by injection, not import) and so a
+# missing module degrades to a clear message instead of a traceback.
+
+def _ws():
+    from basilisk_ext import workspace as _w
+    _w.configure(str(DATA_DIR))
+    return _w
+
+
+def tool_workspace_import(zip_path: str, name: str = "") -> Dict[str, Any]:
+    """Unpack a repo .zip into a private workspace and make it active.
+    Refuses zip-slip paths, symlink entries and zip bombs; flags anything
+    that looks like a credential.  Everything after this call is confined
+    to that tree."""
+    try:
+        return _ws().import_zip(zip_path, name)
+    except Exception as e:
+        return {"ok": False, "error": f"workspace unavailable: {e}"}
+
+
+def tool_workspace_status() -> Dict[str, Any]:
+    """Which repo is open, how big, and what has changed so far."""
+    try:
+        return _ws().status()
+    except Exception as e:
+        return {"ok": False, "error": f"workspace unavailable: {e}"}
+
+
+def tool_workspace_overview() -> Dict[str, Any]:
+    """Languages, LOC, entry points, dependency manifests and test layout
+    of the open repo — one call instead of ten exploratory reads."""
+    try:
+        return _ws().overview()
+    except Exception as e:
+        return {"ok": False, "error": f"workspace unavailable: {e}"}
+
+
+def tool_workspace_tree(path: str = "", max_entries: int = 400) -> Dict[str, Any]:
+    """List files in the open repo, build/vendor noise filtered out."""
+    try:
+        return _ws().tree(max_entries=max_entries, path=path)
+    except Exception as e:
+        return {"ok": False, "error": f"workspace unavailable: {e}"}
+
+
+def tool_workspace_search(pattern: str, glob: str = "", regex: bool = False,
+                          max_results: int = 120,
+                          context: int = 0) -> Dict[str, Any]:
+    """Repo-wide grep. Use this BEFORE reading files — it is how you find
+    the right file instead of guessing its name."""
+    try:
+        return _ws().search(pattern, glob=glob, regex=regex,
+                            max_results=max_results, context=context)
+    except Exception as e:
+        return {"ok": False, "error": f"workspace unavailable: {e}"}
+
+
+def tool_workspace_read(path: str, start: int = 1, end: int = 0) -> Dict[str, Any]:
+    """Read a file from the open repo, optionally just a line range."""
+    try:
+        return _ws().read(path, start=start, end=end)
+    except Exception as e:
+        return {"ok": False, "error": f"workspace unavailable: {e}"}
+
+
+def tool_workspace_replace(path: str, old: str, new: str,
+                           count: int = 1) -> Dict[str, Any]:
+    """Exact-substring edit — the DEFAULT way to change repo code. Sends
+    only what changes. Refuses if `old` is not unique, so you never edit
+    the wrong one of four similar blocks."""
+    try:
+        return _ws().replace(path, old, new, count=count)
+    except Exception as e:
+        return {"ok": False, "error": f"workspace unavailable: {e}"}
+
+
+def tool_workspace_write(path: str, content: str,
+                         create: bool = False) -> Dict[str, Any]:
+    """Write a whole file in the open repo. Prefer workspace_replace for
+    edits; use this for new files or a full rewrite."""
+    try:
+        return _ws().write(path, content, create=create)
+    except Exception as e:
+        return {"ok": False, "error": f"workspace unavailable: {e}"}
+
+
+def tool_workspace_delete(path: str) -> Dict[str, Any]:
+    """Delete a file in the open repo. Recoverable with workspace_revert."""
+    try:
+        return _ws().delete(path)
+    except Exception as e:
+        return {"ok": False, "error": f"workspace unavailable: {e}"}
+
+
+def tool_workspace_diff(path: str = "") -> Dict[str, Any]:
+    """Unified diff of every change since import. Show this to the operator
+    before exporting — a change set he cannot see is one he cannot approve."""
+    try:
+        return _ws().diff(path)
+    except Exception as e:
+        return {"ok": False, "error": f"workspace unavailable: {e}"}
+
+
+def tool_workspace_revert(path: str = "") -> Dict[str, Any]:
+    """Undo edits back to the imported state — one file, or all of them."""
+    try:
+        return _ws().revert(path)
+    except Exception as e:
+        return {"ok": False, "error": f"workspace unavailable: {e}"}
+
+
+def tool_workspace_export(out_path: str = "", include_secrets: bool = False,
+                          changed_only: bool = False) -> Dict[str, Any]:
+    """Zip the working tree back up for the operator. Credential-looking
+    files are left out unless include_secrets=True."""
+    try:
+        return _ws().export_zip(out_path=out_path,
+                                include_secrets=include_secrets,
+                                changed_only=changed_only)
+    except Exception as e:
+        return {"ok": False, "error": f"workspace unavailable: {e}"}
+
+
+def tool_workspace_close(discard: bool = False) -> Dict[str, Any]:
+    """Close the workspace. Files stay on disk unless discard=True."""
+    try:
+        return _ws().close(discard=discard)
+    except Exception as e:
+        return {"ok": False, "error": f"workspace unavailable: {e}"}
+
+
+def _ws_run_tests(command: str, timeout: int) -> Dict[str, Any]:
+    """Run the repo's own test command inside the workspace.
+
+    Execution deliberately routes through tool_run_command, NOT subprocess
+    directly. That is the whole reason this wrapper lives in the core
+    instead of in workspace.py: the destructive-command floor and the scope
+    gate are enforced in tool_run_command, and a second execution path that
+    bypassed them would be a hole in the exact boundary v7.9.0 was built to
+    close. A repo's Makefile is untrusted input like any other -- `make
+    test` can contain anything.
+    """
+    _w = _ws()
+    st = _w.status()
+    if not st.get("open"):
+        return {"ok": False, "error": "no workspace open"}
+    return tool_run_command(command, timeout=timeout, cwd=st["root"])
+
+
+def tool_workspace_test_command() -> Dict[str, Any]:
+    """Work out how THIS repo runs its tests, and say what that was
+    inferred from so the operator can correct a wrong guess."""
+    try:
+        return _ws().detect_test_command()
+    except Exception as e:
+        return {"ok": False, "error": f"workspace unavailable: {e}"}
+
+
+def tool_workspace_baseline(command: str = "",
+                            timeout: int = 900) -> Dict[str, Any]:
+    """Run the repo's tests BEFORE editing and record what already fails.
+
+    THE MOST IMPORTANT CALL IN THE WHOLE LOOP. Without a baseline, every
+    pre-existing failure looks like damage you just caused, and a test that
+    was already broken gets silently 'fixed' into a diff the operator never
+    asked for and cannot separate from the work he did."""
+    try:
+        _w = _ws()
+        cmd = command or (_w.detect_test_command().get("command") or "")
+        if not cmd:
+            return {"ok": False,
+                    "error": "no test command detected — ask the operator "
+                             "how he runs his tests, then pass it in"}
+        r = _ws_run_tests(cmd, timeout)
+        if r.get("refused"):
+            return r
+        raw = (r.get("stdout", "") or "") + "\n" + (r.get("stderr", "") or "")
+        out = _w.record_baseline(raw, r.get("rc", 1), cmd)
+        out["command"] = cmd
+        out["rc"] = r.get("rc")
+        return out
+    except Exception as e:
+        return {"ok": False, "error": f"workspace unavailable: {e}"}
+
+
+def tool_workspace_verify(command: str = "",
+                          timeout: int = 900) -> Dict[str, Any]:
+    """Re-run the tests and classify the result AGAINST the baseline:
+    what you fixed, what you BROKE, what still fails. Call this after every
+    edit — a repo-wide change you did not verify is a guess."""
+    try:
+        _w = _ws()
+        bl = _w.baseline_status()
+        cmd = (command or (bl.get("baseline") or {}).get("command")
+               or _w.detect_test_command().get("command") or "")
+        if not cmd:
+            return {"ok": False, "error": "no test command known"}
+        r = _ws_run_tests(cmd, timeout)
+        if r.get("refused"):
+            return r
+        raw = (r.get("stdout", "") or "") + "\n" + (r.get("stderr", "") or "")
+        out = _w.compare_to_baseline(raw, r.get("rc", 1))
+        out["command"] = cmd
+        return out
+    except Exception as e:
+        return {"ok": False, "error": f"workspace unavailable: {e}"}
+
+
+def tool_workspace_health() -> Dict[str, Any]:
+    """Static sanity sweep of the open repo (mutable defaults, bare excepts,
+    subprocess without timeout, `is` on literals, syntax errors). Narrow on
+    purpose — real bugs only, no style opinions."""
+    try:
+        return _ws().health()
+    except Exception as e:
+        return {"ok": False, "error": f"workspace unavailable: {e}"}
 
 
 def tool_code_tooling_check() -> Dict[str, Any]:

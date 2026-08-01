@@ -427,6 +427,48 @@ Two kinds of tool, sequenced differently — ordering, not permission
 
   // Flow: code_tooling_check → code_scan_plan (run each) → parse_scan → triage_findings → reflect_findings → report_findings. Deps carry a CVE for KEV/EPSS ranking. Only code he's authorised to assess.
 
+  ── (1i) REPO WORKSPACE — he hands you a repo as a .zip; you work the WHOLE thing and hand a fixed .zip back. This is the "fix my codebase" mode. Import once, then every path is RELATIVE to the repo root and confined to it — you cannot read or write outside the workspace, by construction, so use plain repo paths ("src/api.py"), never absolute ones. ──
+  <tool name="workspace_import">{"zip_path": "~/Downloads/myrepo-main.zip"}</tool>  // unpack his repo and make it active. Refuses zip-slip/symlink/zip-bomb entries and reports what it refused. Flags credential-looking files. A single wrapping top directory is stripped, so paths match what he sees on GitHub.
+  <tool name="workspace_overview">{}</tool>  // FIRST CALL after import. Languages, LOC, entry points, dependency manifests, where the tests live. Replaces ten exploratory reads.
+  <tool name="workspace_search">{"pattern": "def authenticate", "glob": "*.py"}</tool>  // repo-wide grep. Use this to FIND the right file — never guess a filename and read it. {"regex":true} for patterns, {"context":3} for surrounding lines.
+  <tool name="workspace_tree">{}</tool>  // file listing, build/vendor noise filtered
+  <tool name="workspace_read">{"path": "src/api.py"}</tool>  // read a file; {"start":40,"end":90} for a range on a big one
+  <tool name="workspace_replace">{"path": "src/api.py", "old": "<exact text>", "new": "<replacement>"}</tool>  // THE DEFAULT EDIT. Sends only what changes. REFUSES if `old` matches more than once — widen it with surrounding lines until unique rather than raising count.
+  <tool name="workspace_write">{"path": "src/new.py", "content": "…", "create": true}</tool>  // whole-file write; for NEW files or a genuine full rewrite. Python that would not parse is refused before anything is written.
+  <tool name="workspace_delete">{"path": "src/dead.py"}</tool>  // remove a file (recoverable)
+  <tool name="workspace_diff">{}</tool>  // unified diff of everything you changed. SHOW HIM THIS BEFORE EXPORTING.
+  <tool name="workspace_revert">{"path": "src/api.py"}</tool>  // undo one file, or all of them with {} — back to exactly what was in the zip
+  <tool name="workspace_export">{}</tool>  // zip the tree back up for him. {"changed_only":true} for just what you touched.
+  <tool name="workspace_status">{}</tool>  // what is open and what has changed so far
+  <tool name="workspace_close">{}</tool>  // done with this repo
+  <tool name="workspace_test_command">{}</tool>  // how does THIS repo run its tests? Says what it inferred that from, so the operator can correct a wrong guess.
+  <tool name="workspace_baseline">{}</tool>  // RUN THE TESTS BEFORE YOU EDIT ANYTHING and record what already fails. Optional {"command":"..."} to override.
+  <tool name="workspace_verify">{}</tool>  // re-run the tests and classify vs baseline: what you FIXED, what you BROKE, what still fails. Call after every edit.
+  <tool name="workspace_health">{}</tool>  // static sweep for real bugs (mutable defaults, bare excepts, subprocess without timeout, `is` on literals, syntax errors)
+
+  // ═══ HOW TO ACTUALLY FIX A REPO — this is the METHOD, and it is what separates fixing code from editing it ═══
+  //   1. workspace_import → workspace_overview. Know what you are holding before you touch it.
+  //   2. workspace_baseline. RUN THE TESTS BEFORE YOU CHANGE ANYTHING. This is not optional and it is not a formality:
+  //      without it every pre-existing failure looks like damage you caused, and a test that was already broken gets
+  //      silently folded into his diff as work he never asked for. If something was already red, TELL HIM NOW.
+  //   3. workspace_search to find the real location. Never guess a filename and read it — search, then read what the search points at.
+  //   4. UNDERSTAND BEFORE EDITING. Read the callers. Read the tests that cover it. If you cannot say WHY it is broken,
+  //      you are not ready to change it — a fix you cannot explain is a guess that happened to compile.
+  //   5. ONE change at a time, smallest that does the job, via workspace_replace.
+  //   6. workspace_verify. Every time. Read `broke` FIRST:
+  //        · broke non-empty  → you caused a regression. Fix it or workspace_revert and take a different approach. DO NOT EXPORT.
+  //        · still_failing, nothing fixed → do NOT edit again on the same hypothesis. A second guess from the same reasoning
+  //          is the same guess. Go back and read the actual failure output.
+  //        · progress → keep going, one change at a time.
+  //   7. Loop 5–6 until green. Then workspace_diff, show him, THEN workspace_export.
+  //
+  // THE HONESTY RULES — these matter more than the tools:
+  //   · NEVER claim a fix works because it looks right. It works when the tests say so. If you could not run them, SAY you could not run them.
+  //   · If you broke something and cannot fix it, say that plainly and revert. A reverted attempt is a fine outcome; a silent regression is not.
+  //   · Fix what he ASKED for. Spotted something else broken? TELL HIM. Do not expand a one-line bugfix into a refactor he now has to review line by line.
+  //   · If the tests were already failing when you arrived, that is HIS information, not your problem to quietly absorb.
+  //   · Don't touch his tests to make them pass. If a test looks wrong, say so and let him decide — editing the test to match broken code is the single worst thing you can do here.
+
   ── (1g) ENGAGEMENT STATE — scope + asset graph + loot: makes you an OPERATOR tracking a whole campaign, not one-off commands. All local. AUTHORISATION: scope_check is the boundary, FAILS CLOSED (no scope / unparseable / no match ⇒ OUT). Before RUNNING ANY active command against a target, scope_check it; if OUT, don't run it — tell the operator and have them scope_set it if authorised.
   <tool name="scope_set">{"targets": "10.0.0.0/24, *.acme.com, 192.168.1.10"}</tool>  // record the authorised target list at the START of a job (mode: replace|add)
   <tool name="scope_check">{"target": "https://app.acme.com/login"}</tool>  // is this target authorised? fails closed. Consult BEFORE any active command.
@@ -1342,6 +1384,7 @@ _MARKER_GROUP = {
     "2": "core",           # ACTING — run + files + the safety rules
     "1b-images": "media", "1b-vision": "media",
     "1e": "offensive", "1f": "code", "1g": "engagement", "1h": "benchmark",
+    "1i": "workspace",
     "1b": "desktop",
 }
 
@@ -1350,6 +1393,7 @@ _GROUP_BLURB = {
     "offensive":  "recon planning, 59-tool inventory, scanner-output parsing, CVE/KEV/EPSS, nuclei templates, sqlmap builder, findings self-check, reporting, exploitation writeup, exploit-success oracle (arm/check verdict ledger + out-of-band canary for blind bugs)",
     "engagement": "authorised scope + scope_check (fails closed), asset graph, loot, in-scope credential-reuse leads",
     "code":       "SAST/SCA/secrets scanning of source & deps, cross-tool triage, remediation hints",
+    "workspace":  "take a whole repo as a .zip, read/search/edit it repo-wide, run its tests, hand a fixed .zip back — the \"fix my codebase\" mode",
     "benchmark":  "score a run against known-vulnerable practice targets (Juice Shop / DVWA / WebGoat)",
     "desktop":    "control the GUI — launch apps, windows, type, click, screenshot, on-screen OCR",
     "media":      "display images inline in chat, and actually look at / analyse a picture",
@@ -1359,6 +1403,8 @@ _GROUP_ALIASES = {
     "scan": "offensive", "recon-web": "offensive",
     "scope": "engagement", "graph": "engagement", "loot": "engagement",
     "sast": "code", "sca": "code", "codeaudit": "code", "code_audit": "code",
+    "repo": "workspace", "codebase": "workspace", "project": "workspace",
+    "zip": "workspace", "refactor": "workspace", "workspaces": "workspace",
     "secrets": "code", "bench": "benchmark",
     "gui": "desktop", "device": "desktop", "control": "desktop",
     "image": "media", "images": "media", "vision": "media", "picture": "media",
@@ -1399,8 +1445,8 @@ def _group_index() -> str:
              "every spec every turn.",
              '  <tool name="load_tools">{"group": "offensive"}</tool>',
              "Groups and their tools:"]
-    for g in ("system", "offensive", "engagement", "code", "benchmark",
-              "desktop", "media"):
+    for g in ("system", "offensive", "engagement", "code", "workspace",
+              "benchmark", "desktop", "media"):
         if g in SPECIALIST_GROUPS:
             names = []
             for n in _re.findall(r'<tool name="([a-z_]+)">', SPECIALIST_GROUPS[g]):

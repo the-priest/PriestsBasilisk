@@ -67,6 +67,13 @@ from basilisk_core import (
     tool_cheatsheet, tool_report_findings,
     tool_nuclei_template, tool_reflect_findings,
     tool_attack_writeup, tool_code_tooling_check, tool_code_scan_plan,
+    tool_workspace_import, tool_workspace_status, tool_workspace_overview,
+    tool_workspace_tree, tool_workspace_search, tool_workspace_read,
+    tool_workspace_replace, tool_workspace_write, tool_workspace_delete,
+    tool_workspace_diff, tool_workspace_revert, tool_workspace_export,
+    tool_workspace_close, tool_workspace_test_command,
+    tool_workspace_baseline, tool_workspace_verify,
+    tool_workspace_health,
     tool_parse_scan, tool_triage_findings, tool_remediation_hint,
     tool_scope_set, tool_scope_check, tool_scope_show, tool_asset_record,
     tool_scope_exclude, tool_scope_window, tool_scope_authorisation,
@@ -131,7 +138,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.basilisk"
 APP_NAME = "Basilisk"
-VERSION = "7.9.3"
+VERSION = "7.11.0"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -3322,6 +3329,22 @@ class SettingsDialog(Adw.PreferencesDialog):
             lambda r, _ps: self._set("adaptive_effort", r.get_active()))
         rg.add(self.adaptive_effort_row)
 
+        self.fast_light_row = Adw.SwitchRow()
+        self.fast_light_row.set_title("Skip thinking on light turns")
+        self.fast_light_row.set_subtitle(
+            "On short conversational turns, ask the model to answer without "
+            "chain-of-thought. Output tokens are generated one at a time, so "
+            "a few hundred thinking tokens on \"yeah, makes sense\" is pure "
+            "waiting \u2014 and output costs 2-3x input. Engagement work is "
+            "never touched. Needs Adaptive effort ON. If a model rejects it, "
+            "Basilisk retries without it and stops asking.")
+        self.fast_light_row.set_active(
+            bool(parent.settings.get("fast_light_turns", False)))
+        self.fast_light_row.connect(
+            "notify::active",
+            lambda r, _ps: self._set("fast_light_turns", r.get_active()))
+        rg.add(self.fast_light_row)
+
         self.auto_fallback_row = Adw.SwitchRow()
         self.auto_fallback_row.set_title("Auto-fallback on a bad reply")
         self.auto_fallback_row.set_subtitle(
@@ -6357,6 +6380,23 @@ class MainWindow(Adw.ApplicationWindow):
         "nuclei_template":  "writing a nuclei template",
         "reflect_findings": "double-checking the findings",
         "attack_writeup":     "writing the exploitation narrative",
+        "workspace_import":   "unpacking the repo",
+        "workspace_status":   "checking the workspace",
+        "workspace_overview": "sizing up the repo",
+        "workspace_tree":     "listing the repo",
+        "workspace_search":   "searching the repo",
+        "workspace_read":     "reading repo code",
+        "workspace_replace":  "editing repo code",
+        "workspace_write":    "writing repo code",
+        "workspace_delete":   "removing a repo file",
+        "workspace_diff":     "diffing the changes",
+        "workspace_revert":   "reverting changes",
+        "workspace_export":   "zipping the repo back up",
+        "workspace_close":    "closing the workspace",
+        "workspace_test_command": "finding the test runner",
+        "workspace_baseline": "running the tests (baseline)",
+        "workspace_verify":   "re-running the tests",
+        "workspace_health":   "sweeping the repo for bugs",
         "code_tooling_check": "checking code scanners",
         "code_scan_plan":     "planning the code scan",
         "parse_scan":         "parsing scanner output",
@@ -7409,6 +7449,101 @@ class MainWindow(Adw.ApplicationWindow):
 
     # ── tool execution ──────────────────────────────────────────
 
+    def _workspace_call(self, n, a):
+        """One arg-mapper for all 13 workspace tools, shared by BOTH dispatch
+        paths (autonomous and approval-gated).
+
+        Written once deliberately. The two dispatch sites in this file have
+        drifted before -- a tool wired into one and not the other works
+        perfectly until the operator flips approval mode, then vanishes. A
+        single mapper cannot drift from itself.
+
+        The generous key aliases exist because the model does not always
+        emit the exact parameter name: it will send `file`, `filename` or
+        `target` when the spec says `path`. Accepting the obvious synonyms
+        turns a failed tool call into a working one, and the cost is a dict
+        lookup.
+        """
+        def _p(*names, default=""):
+            for k in names:
+                if k in a and a[k] not in (None, ""):
+                    return a[k]
+            return default
+
+        def _b(*names, default=False):
+            v = _p(*names, default=None)
+            if v is None:
+                return default
+            if isinstance(v, bool):
+                return v
+            return str(v).strip().lower() in ("1", "true", "yes", "on")
+
+        def _i(*names, default=0):
+            try:
+                return int(_p(*names, default=default))
+            except (TypeError, ValueError):
+                return default
+
+        path = _p("path", "file", "filename", "target", "name")
+        if n == "workspace_import":
+            return lambda: tool_workspace_import(
+                _p("zip_path", "zip", "path", "file", "archive"),
+                _p("name", "workspace", "label"))
+        if n == "workspace_status":
+            return lambda: tool_workspace_status()
+        if n == "workspace_overview":
+            return lambda: tool_workspace_overview()
+        if n == "workspace_tree":
+            return lambda: tool_workspace_tree(
+                _p("path", "dir", "directory"),
+                _i("max_entries", "limit", "max", default=400))
+        if n == "workspace_search":
+            return lambda: tool_workspace_search(
+                _p("pattern", "query", "q", "text", "needle"),
+                _p("glob", "filter", "files", "include"),
+                _b("regex", "is_regex", "re"),
+                _i("max_results", "limit", "max", default=120),
+                _i("context", "ctx", "around", default=0))
+        if n == "workspace_read":
+            return lambda: tool_workspace_read(
+                path, _i("start", "from", "start_line", default=1),
+                _i("end", "to", "end_line", default=0))
+        if n == "workspace_replace":
+            return lambda: tool_workspace_replace(
+                path, _p("old", "old_str", "find", "search"),
+                _p("new", "new_str", "replace", "replacement"),
+                _i("count", "n", "occurrences", default=1))
+        if n == "workspace_write":
+            return lambda: tool_workspace_write(
+                path, _p("content", "text", "body", "source", "code"),
+                _b("create", "new", "create_new"))
+        if n == "workspace_delete":
+            return lambda: tool_workspace_delete(path)
+        if n == "workspace_diff":
+            return lambda: tool_workspace_diff(path)
+        if n == "workspace_revert":
+            return lambda: tool_workspace_revert(path)
+        if n == "workspace_export":
+            return lambda: tool_workspace_export(
+                _p("out_path", "out", "dest", "output", "zip_path"),
+                _b("include_secrets", "secrets"),
+                _b("changed_only", "only_changed", "changed"))
+        if n == "workspace_close":
+            return lambda: tool_workspace_close(_b("discard", "delete"))
+        if n == "workspace_test_command":
+            return lambda: tool_workspace_test_command()
+        if n == "workspace_baseline":
+            return lambda: tool_workspace_baseline(
+                _p("command", "cmd", "test_command"),
+                _i("timeout", "secs", default=900))
+        if n == "workspace_verify":
+            return lambda: tool_workspace_verify(
+                _p("command", "cmd", "test_command"),
+                _i("timeout", "secs", default=900))
+        if n == "workspace_health":
+            return lambda: tool_workspace_health()
+        return lambda: {"ok": False, "error": f"unknown workspace tool: {n}"}
+
     def _pure_tool_fn(self, call):
         """Return a zero-arg callable that produces a result dict for a
         read-only, side-effect-free tool that's safe to run in parallel and
@@ -7468,6 +7603,8 @@ class MainWindow(Adw.ApplicationWindow):
                 a.get("impact", ""), a.get("remediation", a.get("fix", "")),
                 a.get("root_cause", a.get("cause", "")),
                 a.get("ledger_events", a.get("events", None)))
+        if n.startswith("workspace_"):
+            return self._workspace_call(n, a)
         if n == "code_tooling_check":
             return lambda: tool_code_tooling_check()
         if n == "code_scan_plan":
@@ -8204,6 +8341,40 @@ class MainWindow(Adw.ApplicationWindow):
                     a.get("impact", ""), a.get("remediation", a.get("fix", "")),
                     a.get("root_cause", a.get("cause", "")),
                     a.get("ledger_events", a.get("events", None)))),
+            "workspace_import":   lambda a: self._tool_simple(
+                self._workspace_call("workspace_import", a)),
+            "workspace_status":   lambda a: self._tool_simple(
+                self._workspace_call("workspace_status", a)),
+            "workspace_overview": lambda a: self._tool_simple(
+                self._workspace_call("workspace_overview", a)),
+            "workspace_tree":     lambda a: self._tool_simple(
+                self._workspace_call("workspace_tree", a)),
+            "workspace_search":   lambda a: self._tool_simple(
+                self._workspace_call("workspace_search", a)),
+            "workspace_read":     lambda a: self._tool_simple(
+                self._workspace_call("workspace_read", a)),
+            "workspace_replace":  lambda a: self._tool_simple(
+                self._workspace_call("workspace_replace", a)),
+            "workspace_write":    lambda a: self._tool_simple(
+                self._workspace_call("workspace_write", a)),
+            "workspace_delete":   lambda a: self._tool_simple(
+                self._workspace_call("workspace_delete", a)),
+            "workspace_diff":     lambda a: self._tool_simple(
+                self._workspace_call("workspace_diff", a)),
+            "workspace_revert":   lambda a: self._tool_simple(
+                self._workspace_call("workspace_revert", a)),
+            "workspace_export":   lambda a: self._tool_simple(
+                self._workspace_call("workspace_export", a)),
+            "workspace_close":    lambda a: self._tool_simple(
+                self._workspace_call("workspace_close", a)),
+            "workspace_test_command": lambda a: self._tool_simple(
+                self._workspace_call("workspace_test_command", a)),
+            "workspace_baseline": lambda a: self._tool_simple(
+                self._workspace_call("workspace_baseline", a)),
+            "workspace_verify":   lambda a: self._tool_simple(
+                self._workspace_call("workspace_verify", a)),
+            "workspace_health":   lambda a: self._tool_simple(
+                self._workspace_call("workspace_health", a)),
             "code_tooling_check": lambda a: self._tool_simple(
                 lambda: tool_code_tooling_check()),
             "code_scan_plan":     lambda a: self._tool_simple(

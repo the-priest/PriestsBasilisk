@@ -298,5 +298,34 @@ except Exception as e:
     check("gate matcher == engage matcher on grid", False, f"import: {e}")
 
 
+# ── unterminated command substitution (v7.9.4) ───────────────────────
+# A single leading backtick made _substitution_payloads consume the REST of
+# the command string and then DROP it, so "`nmap evil.com" came back as
+# "passive/local command -- scope boundary not engaged". Not exploitable
+# (bash and sh both reject an unterminated backquote as a syntax error, and
+# that was checked against the real shells rather than assumed) -- but a
+# fail-OPEN verdict reached by accident is precisely what this gate exists
+# not to do. The unterminated "$(" form had the same shape.
+print("\n== unterminated substitution fails closed ==")
+for _c in ("`nmap evil.com",
+           "$(nmap evil.com",
+           "`nmap 10.0.0.5",          # in-scope target, still unparseable
+           "`curl https://evil.com",
+           "echo `nmap evil.com"):
+    _v = S.check_command(_c, SCOPE)
+    check(f"unterminated refused: {_c[:24]}", not _v.get("allowed"),
+          str(_v.get("reason"))[:70])
+
+# The fix must not sweep up terminated forms or ordinary commands.
+for _c, _want in (("echo `nmap evil.com`", False),
+                  ("echo $(nmap evil.com)", False),
+                  ("echo `nmap 10.0.0.5`", True),
+                  ("echo $(id)", True),
+                  ("ls -la", True),
+                  ("echo hello", True)):
+    _v = S.check_command(_c, SCOPE)
+    check(f"unchanged: {_c[:26]}", bool(_v.get("allowed")) is _want,
+          str(_v.get("reason"))[:60])
+
 print(f"\nscope boundary: {_passed} passed, {_failed} failed")
 sys.exit(1 if _failed else 0)
