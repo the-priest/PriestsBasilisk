@@ -13,17 +13,26 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@v2
         with:
-          python-version: '3.11'
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-python
+            mingw-w64-x86_64-python-pip
+            mingw-w64-x86_64-python-gobject
+            mingw-w64-x86_64-python-cairo
+            mingw-w64-x86_64-gtk4
+            mingw-w64-x86_64-libadwaita
 
-      - name: Install dependencies
+      - name: Install PyInstaller inside MSYS2
+        shell: msys2 {0}
         run: |
-          python -m pip install --upgrade pip
-          pip install pyinstaller pygobject pycairo
+          python -m pip install pyinstaller
 
       - name: Build Executable
+        shell: msys2 {0}
         run: |
           pyinstaller --onefile --add-data "assets;assets" basilisk.py
 
