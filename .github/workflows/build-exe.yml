@@ -25,6 +25,7 @@ jobs:
             mingw-w64-x86_64-python-cairo
             mingw-w64-x86_64-gtk4
             mingw-w64-x86_64-libadwaita
+            mingw-w64-x86_64-gobject-introspection
 
       - name: Install PyInstaller inside MSYS2
         shell: msys2 {0}
@@ -34,7 +35,11 @@ jobs:
       - name: Build Executable
         shell: msys2 {0}
         run: |
-          pyinstaller --onefile --add-data "assets;assets" basilisk.py
+          pyinstaller --onefile \
+            --collect-all gi \
+            --collect-all cairo \
+            --add-data "assets;assets" \
+            basilisk.py
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
