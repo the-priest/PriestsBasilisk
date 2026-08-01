@@ -1,3 +1,4 @@
+
 name: Build Windows EXE
 
 on:
@@ -26,6 +27,7 @@ jobs:
             mingw-w64-x86_64-gtk4
             mingw-w64-x86_64-libadwaita
             mingw-w64-x86_64-gobject-introspection
+            mingw-w64-x86_64-gsettings-desktop-schemas
 
       - name: Install PyInstaller inside MSYS2
         shell: msys2 {0}
@@ -38,6 +40,8 @@ jobs:
           pyinstaller --onefile \
             --collect-all gi \
             --collect-all cairo \
+            --add-data "/mingw64/lib/girepository-1.0;gi_typelibs" \
+            --add-data "/mingw64/share/glib-2.0/schemas;share/glib-2.0/schemas" \
             --add-data "assets;assets" \
             basilisk.py
 
