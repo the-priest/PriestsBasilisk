@@ -9,3 +9,8 @@ __pycache__/
 backups/
 .idea/
 .vscode/
+
+# PyInstaller
+build/
+dist/
+*.spec

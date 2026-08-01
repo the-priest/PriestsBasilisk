@@ -73,7 +73,7 @@ from basilisk_core import (
     tool_workspace_diff, tool_workspace_revert, tool_workspace_export,
     tool_workspace_close, tool_workspace_test_command,
     tool_workspace_baseline, tool_workspace_verify,
-    tool_workspace_health,
+    tool_workspace_health, _ws_path,
     tool_parse_scan, tool_triage_findings, tool_remediation_hint,
     tool_scope_set, tool_scope_check, tool_scope_show, tool_asset_record,
     tool_scope_exclude, tool_scope_window, tool_scope_authorisation,
@@ -138,7 +138,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.basilisk"
 APP_NAME = "Basilisk"
-VERSION = "7.11.0"
+VERSION = "9.0.0"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -7527,7 +7527,8 @@ class MainWindow(Adw.ApplicationWindow):
             return lambda: tool_workspace_export(
                 _p("out_path", "out", "dest", "output", "zip_path"),
                 _b("include_secrets", "secrets"),
-                _b("changed_only", "only_changed", "changed"))
+                _b("changed_only", "only_changed", "changed"),
+                _b("force", "override"))
         if n == "workspace_close":
             return lambda: tool_workspace_close(_b("discard", "delete"))
         if n == "workspace_test_command":
@@ -7614,7 +7615,7 @@ class MainWindow(Adw.ApplicationWindow):
                 a.get("intensity", a.get("depth", "normal")))
         if n == "zday_scan":
             return lambda: _zdayfind.zday_scan(
-                path=a.get("path", a.get("dir", a.get("target", ""))),
+                path=_ws_path(a.get("path", a.get("dir", a.get("target", "")))),
                 code=a.get("code", a.get("source", "")),
                 like=a.get("like", a.get("variant_of", a.get("snippet", ""))),
                 focus=a.get("focus", a.get("classes", "")),
@@ -8384,7 +8385,7 @@ class MainWindow(Adw.ApplicationWindow):
                     a.get("intensity", a.get("depth", "normal")))),
             "zday_scan":          lambda a: self._tool_simple(
                 lambda: _zdayfind.zday_scan(
-                    path=a.get("path", a.get("dir", a.get("target", ""))),
+                    path=_ws_path(a.get("path", a.get("dir", a.get("target", "")))),
                     code=a.get("code", a.get("source", "")),
                     like=a.get("like", a.get("variant_of", a.get("snippet", ""))),
                     focus=a.get("focus", a.get("classes", "")),

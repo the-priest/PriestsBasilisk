@@ -467,6 +467,65 @@ ck("module is still responsive after an error inside a locked section",
 W.close(discard=True)
 
 
+# ── 10e. THE EXPORT GATE ─────────────────────────────────────────────
+# The persona has always ASKED for one change at a time and for verifying
+# before export. Nothing enforced either, so a model could batch six edits,
+# verify once, and hand back a zip -- losing exactly the attribution the
+# loop exists to provide. The gate makes it structural at the one moment
+# that matters: export is when the operator's real repo is at risk, and
+# "the model said it was fine" is not evidence.
+print("\n== export gate ==")
+W.close(discard=True)
+_ZG = os.path.join(BASE, "gate.zip")
+_mkzip(_ZG, [("repo/a.py", "x = 1\n"),
+             ("repo/tests/test_a.py", "def test():\n    assert True\n")])
+W.import_zip(_ZG, "gate")
+
+ck("a CLEAN tree exports freely (nothing to verify)", W.export_zip().get("ok"))
+
+W.replace("a.py", "x = 1", "x = 2")
+_e = W.export_zip()
+ck("unverified changes are REFUSED", _e.get("refused") is True, str(_e)[:70])
+ck("and the reason is named", _e.get("reason") == "unverified")
+ck("status agrees export is blocked", W.status()["export_blocked"] is True)
+
+W.record_baseline("1 passed", 0, "t")
+W.compare_to_baseline("1 passed", 0)
+ck("after a GREEN verify, export is allowed", W.export_zip().get("ok"))
+ck("status agrees it is unblocked", W.status()["export_blocked"] is False)
+
+W.replace("a.py", "x = 2", "x = 3")
+W.record_baseline("1 passed", 0, "t")
+W.compare_to_baseline("FAILED tests/test_a.py::test\n1 failed", 1)
+_e2 = W.export_zip()
+ck("a REGRESSION is refused", _e2.get("refused") is True)
+ck("and named as a regression", _e2.get("reason") == "regression")
+
+_forced = W.export_zip(force=True)
+ck("force=True still works — the operator is never locked out", _forced.get("ok"))
+ck("but the export is FLAGGED as forced", _forced.get("forced") is True)
+ck("and carries a warning to relay", bool(_forced.get("force_warning")))
+
+# Batching is allowed but must be reported, or the operator cannot tell
+# which of six edits caused a failure.
+W.compare_to_baseline("1 passed", 0)
+for _i in range(5):
+    W.write("a.py", f"x = {_i + 10}\n")
+_c = W.compare_to_baseline("FAILED tests/test_a.py::test\n1 failed", 1)
+ck("batched edits are counted", _c.get("edits_covered") == 5, str(_c.get("edits_covered")))
+ck("and warned about — attribution is lost", bool(_c.get("attribution_warning")))
+_c2 = W.compare_to_baseline("1 passed", 0)
+ck("a green run does not nag about batching",
+   not _c2.get("attribution_warning"))
+
+# Accounting must not leak across repos.
+W.replace("a.py", f"x = {14}", "x = 99") if False else None
+W.import_zip(_ZG, "gate2")
+ck("edit accounting resets on import", W.status()["edits_since_verify"] == 0)
+ck("last verdict resets on import", W.status()["last_verdict"] == "")
+W.close(discard=True)
+
+
 # ── 11. WIRING PARITY ────────────────────────────────────────────────
 # basilisk.py has TWO dispatch paths (autonomous, and approval-gated) and
 # they have drifted before: a tool wired into one and not the other works

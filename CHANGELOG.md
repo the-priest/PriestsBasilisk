@@ -1,5 +1,94 @@
 # Changelog
 
+## v9.0.0 — the loop is enforced, the scanners see the repo, the README is honest
+
+Major bump. v7.10/7.11 added a second product surface (repo repair); this is
+the release where its discipline stops being advice and the front page stops
+claiming to be v7.6.0.
+
+GUARDRAIL byte-for-byte identical (fa3fb6b1480006cd). safety / ledger / voice
+sha256-identical to v7.11.0.
+
+### THE EXPORT GATE — soft rule becomes hard rule
+The persona has always asked for one change at a time and for verifying
+before export. Nothing enforced either, so a model could batch six edits,
+verify once, and hand back a zip — losing exactly the attribution the loop
+exists to provide. You learn something broke; you don't learn which change
+broke it.
+
+`workspace_export` now REFUSES when:
+  · edits have been made that were never verified, or
+  · the last verify reported a REGRESSION.
+
+Export is the one moment the operator's real repo is at risk, and "the model
+said it was fine" is not evidence. `force=True` exists so he is never locked
+out, but it has to be asked for, the result is flagged `forced`, and it
+carries a warning naming the check that was skipped.
+
+Batched edits are still allowed — sometimes a change genuinely spans four
+files — but `workspace_verify` now reports how many edits a run covered and
+warns when that number is large and the verdict isn't green.
+
+A clean tree exports freely: with nothing changed there is nothing to verify,
+and gating that would be theatre.
+
+### SCANNERS NOW SEE THE OPEN REPO
+`zday_scan` and `code_scan_plan` predate the workspace and default to `"."`,
+which is Basilisk's OWN working directory. With a repo open, "scan my repo"
+therefore scanned the wrong tree and returned a confidently empty result —
+the worst kind of wrong, because empty reads as clean.
+
+Both now resolve paths against the open workspace: a bare path means the repo
+root, a relative path resolves inside it, and a path that would walk out of
+the workspace is clamped back to the root rather than followed. With no
+workspace open, behaviour is exactly as before.
+
+### README REWRITTEN
+Kept every fact, number, benchmark, install path and security claim. Fixed
+what was wrong with it:
+
+  · The version badge said **7.6.0**. Six releases stale on the front page.
+  · The repo-repair mode — half the product since v7.10.0 — was not mentioned
+    anywhere at all.
+  · "Results first" restated the whole comparison table that "Benchmark" then
+    repeated verbatim two screens later. The board now appears once, with the
+    difficulty curve and reproduce-it steps folded into a collapsible.
+  · Prose tightened throughout. Same claims, fewer words, less breathlessness.
+  · New "What it does" opens on the actual thesis — do the thing, then prove
+    it worked — which is what unifies the pentest loop and the repair loop.
+  · New "Fixing your code" section with the tool flow, why the baseline
+    matters, why names beat counts, and the sandbox boundary in a collapsible.
+  · Security model gained the scope gate, which shipped in v7.9.0 and was
+    never written up.
+  · Test-suite claim is now a checked number (925 assertions, 22 suites)
+    rather than "all of it is pinned in the test suite".
+
+Verified after rewriting: all 21 load-bearing facts still present, all 6 nav
+anchors resolve, both local images exist.
+
+A note on that anchor check, because it nearly produced a wrong "fix": the
+first version of the checker `.strip()`ped the heading before slugging, so it
+reported all six links broken. GitHub does NOT strip — an emoji is removed
+but the space it leaves becomes a leading hyphen, which is why the anchors
+are `#-benchmark` and not `#benchmark`. The links were right and the checker
+was wrong. Running it against the OLD README, which demonstrably worked,
+settled it in one command.
+
+### VERIFICATION
+  · 22/22 suites green, 925 assertions, zero red
+  · test_workspace.py 118 -> 134 assertions (export gate: refuses unverified,
+    refuses regression, allows clean, force works and is flagged, batching is
+    counted and warned, accounting resets across repos)
+  · GUARDRAIL unchanged; compileall clean; install.sh bash -n clean
+  · Grouped prompt unchanged at 7153 tokens
+
+### A NOTE ON THE VERSION NUMBER
+This skips 8.x entirely, at the operator's instruction. Worth recording that
+in v7.8.0 I argued DOWN from a requested 8.0.0 because the change set did not
+justify it. This one does — a whole second product surface plus the
+enforcement that makes it trustworthy — but the jump past 8 is his call, not
+a claim the code makes about itself.
+
 ## v7.11.0 — the fix LOOP: it verifies its own work now
 
 v7.10.0 gave Basilisk a repo. This gives it the thing that actually

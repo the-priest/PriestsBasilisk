@@ -4867,13 +4867,16 @@ def tool_workspace_revert(path: str = "") -> Dict[str, Any]:
 
 
 def tool_workspace_export(out_path: str = "", include_secrets: bool = False,
-                          changed_only: bool = False) -> Dict[str, Any]:
-    """Zip the working tree back up for the operator. Credential-looking
-    files are left out unless include_secrets=True."""
+                          changed_only: bool = False,
+                          force: bool = False) -> Dict[str, Any]:
+    """Zip the working tree back up for the operator. REFUSES if the changes
+    were never verified or the last verify found a regression — force=True
+    overrides, but say so out loud. Credential-looking files are left out
+    unless include_secrets=True."""
     try:
         return _ws().export_zip(out_path=out_path,
                                 include_secrets=include_secrets,
-                                changed_only=changed_only)
+                                changed_only=changed_only, force=force)
     except Exception as e:
         return {"ok": False, "error": f"workspace unavailable: {e}"}
 
@@ -4987,6 +4990,36 @@ def tool_code_tooling_check() -> Dict[str, Any]:
         return {"ok": False, "error": f"code_tooling_check failed: {e}"}
 
 
+def _ws_path(path: str = "") -> str:
+    """Resolve a scanner path against the OPEN WORKSPACE when there is one.
+
+    zdayfind and codescan predate the workspace and default to ".", which
+    is Basilisk's own working directory -- so "scan my repo" with a repo
+    open scanned the wrong tree entirely and returned a confidently empty
+    result. With a workspace open, a bare or relative path now resolves
+    inside it; with none open, behaviour is exactly as before.
+    """
+    if path and os.path.isabs(os.path.expanduser(path)):
+        return os.path.expanduser(path)
+    try:
+        from basilisk_ext import workspace as _w
+        _w.configure(str(DATA_DIR))
+        st = _w.status()
+        if st.get("open"):
+            root = st["root"]
+            if not path or path in (".", "./"):
+                return root
+            cand = os.path.realpath(os.path.join(root, path))
+            # Never let a scanner path walk out of the workspace either.
+            if os.path.commonpath([os.path.realpath(root), cand]) \
+                    == os.path.realpath(root):
+                return cand
+            return root
+    except Exception:
+        pass
+    return path or "."
+
+
 def tool_code_scan_plan(path: str = ".", kind: str = "auto",
                         intensity: str = "normal") -> Dict[str, Any]:
     """Build an ordered, PROPOSED scan plan for a code path/app (kind = auto |
@@ -4998,7 +5031,7 @@ def tool_code_scan_plan(path: str = ".", kind: str = "auto",
     except Exception as e:
         return {"ok": False, "error": f"codescan module unavailable: {e}"}
     try:
-        return _cs.scan_plan((path or ".").strip(),
+        return _cs.scan_plan(_ws_path((path or "").strip()),
                              (kind or "auto").strip().lower(),
                              (intensity or "normal").strip().lower())
     except Exception as e:

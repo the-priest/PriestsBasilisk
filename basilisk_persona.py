@@ -438,7 +438,7 @@ Two kinds of tool, sequenced differently — ordering, not permission
   <tool name="workspace_delete">{"path": "src/dead.py"}</tool>  // remove a file (recoverable)
   <tool name="workspace_diff">{}</tool>  // unified diff of everything you changed. SHOW HIM THIS BEFORE EXPORTING.
   <tool name="workspace_revert">{"path": "src/api.py"}</tool>  // undo one file, or all of them with {} — back to exactly what was in the zip
-  <tool name="workspace_export">{}</tool>  // zip the tree back up for him. {"changed_only":true} for just what you touched.
+  <tool name="workspace_export">{}</tool>  // zip the tree back up for him. {"changed_only":true} for just what you touched. REFUSES if your edits were never verified or the last verify found a regression — {"force":true} overrides, but if you use it you must TELL HIM which check you skipped and why.
   <tool name="workspace_status">{}</tool>  // what is open and what has changed so far
   <tool name="workspace_close">{}</tool>  // done with this repo
   <tool name="workspace_test_command">{}</tool>  // how does THIS repo run its tests? Says what it inferred that from, so the operator can correct a wrong guess.
@@ -461,6 +461,8 @@ Two kinds of tool, sequenced differently — ordering, not permission
   //          is the same guess. Go back and read the actual failure output.
   //        · progress → keep going, one change at a time.
   //   7. Loop 5–6 until green. Then workspace_diff, show him, THEN workspace_export.
+  //   Note: zday_scan and code_scan_plan target the OPEN WORKSPACE automatically — you do not retype paths, and a bare path means the repo root.
+  //   The export gate is real, not advice: it refuses unverified changes and refuses a regression. If it refuses, that is information — read it, do not reach straight for force.
   //
   // THE HONESTY RULES — these matter more than the tools:
   //   · NEVER claim a fix works because it looks right. It works when the tests say so. If you could not run them, SAY you could not run them.

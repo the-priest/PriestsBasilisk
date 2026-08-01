@@ -208,6 +208,11 @@ class WorkspaceState:
     created: List[str] = field(default_factory=list)
     deleted: List[str] = field(default_factory=list)
     notes: List[str] = field(default_factory=list)
+    # Edits made since the last workspace_verify, and the verdict that run
+    # returned.  These drive the export gate below.
+    edits_since_verify: int = 0
+    last_verdict: str = ""
+    verify_count: int = 0
 
 
 _STATE = WorkspaceState()
@@ -417,6 +422,9 @@ def import_zip(zip_path: str, name: str = "") -> Dict[str, Any]:
         _STATE.created = []
         _STATE.deleted = []
         _STATE.notes = []
+        _STATE.edits_since_verify = 0
+        _STATE.last_verdict = ""
+        _STATE.verify_count = 0
         _BASELINE.clear()   # same reason as in close(): a baseline belongs
                             # to exactly one repo
 
@@ -455,7 +463,8 @@ def status() -> Dict[str, Any]:
     d = asdict(_STATE)
     d.update({"ok": True, "open": True,
               "dirty": bool(_STATE.modified or _STATE.created
-                            or _STATE.deleted)})
+                            or _STATE.deleted),
+              "export_blocked": _export_gate() is not None})
     return d
 
 
@@ -683,6 +692,13 @@ def _stash_original(root: str, fp: str, rel: str) -> None:
 
 
 def _mark(rel: str, kind: str) -> None:
+    # Every mutation invalidates the last verdict.  Counting them is what
+    # makes "one change at a time" enforceable instead of advisory: the
+    # persona has always ASKED for it, and nothing stopped the model
+    # batching six edits and verifying once, which loses exactly the
+    # attribution the loop exists to provide -- you learn something broke,
+    # not which change broke it.
+    _STATE.edits_since_verify += 1
     if kind == "created":
         if rel not in _STATE.created:
             _STATE.created.append(rel)
@@ -928,8 +944,33 @@ def revert(path: str = "") -> Dict[str, Any]:
 # EXPORT
 # ═════════════════════════════════════════════════════════════════════
 
+def _export_gate() -> Optional[Dict[str, Any]]:
+    """Reasons NOT to export.  None when it is safe to go."""
+    dirty = bool(_STATE.modified or _STATE.created or _STATE.deleted)
+    if not dirty:
+        return None                      # nothing changed: harmless
+    if _STATE.last_verdict == "regression":
+        return {"ok": False, "refused": True, "reason": "regression",
+                "error": ("REFUSED: the last verify said you BROKE tests "
+                          "that passed at baseline. Fix them or "
+                          "workspace_revert. Pass force=True only if the "
+                          "operator has explicitly accepted the regression."),
+                "last_verdict": _STATE.last_verdict}
+    if _STATE.edits_since_verify > 0:
+        return {"ok": False, "refused": True, "reason": "unverified",
+                "edits_since_verify": _STATE.edits_since_verify,
+                "error": (f"REFUSED: {_STATE.edits_since_verify} edit(s) have "
+                          f"not been verified. Run workspace_verify. If the "
+                          f"repo genuinely has no tests, say so to the "
+                          f"operator and pass force=True — do not pass it "
+                          f"silently."),
+                "last_verdict": _STATE.last_verdict or "(never verified)"}
+    return None
+
+
 def export_zip(out_path: str = "", include_secrets: bool = False,
-               changed_only: bool = False) -> Dict[str, Any]:
+               changed_only: bool = False,
+               force: bool = False) -> Dict[str, Any]:
     """Zip the working tree back up for the operator to drop over his repo.
 
     Excludes build noise, and excludes anything that looks like a
@@ -947,6 +988,18 @@ def export_zip(out_path: str = "", include_secrets: bool = False,
         if not dest.endswith(".zip"):
             dest += ".zip"
         os.makedirs(os.path.dirname(dest), exist_ok=True)
+
+        # ── EXPORT GATE ────────────────────────────────────────────────
+        # Refuse to hand back a zip whose changes were never verified, or
+        # whose last verified state was a REGRESSION.  This is the one
+        # place a soft rule becomes a hard one, and it is deliberate: the
+        # export is the moment the operator's real repo is at risk, and
+        # "the model said it was fine" is not evidence. `force=True` is
+        # available and reported, so an operator who knows better is never
+        # locked out -- but he has to say so.
+        gate = _export_gate()
+        if gate and not force:
+            return gate
 
         wanted = None
         if changed_only:
@@ -981,7 +1034,13 @@ def export_zip(out_path: str = "", include_secrets: bool = False,
             "changed_only": changed_only,
             "modified": _STATE.modified, "created": _STATE.created,
             "deleted": _STATE.deleted,
+            "last_verdict": _STATE.last_verdict or "(never verified)",
+            "forced": bool(force and _export_gate()),
         }
+        if out["forced"]:
+            out["force_warning"] = (
+                "Exported with force=True — the verification gate was "
+                "bypassed. Tell the operator exactly which check was skipped.")
         if skipped_secrets:
             out["excluded_secrets"] = skipped_secrets[:20]
             out["note"] = ("Credential-looking files were left OUT. Pass "
@@ -1215,6 +1274,9 @@ def compare_to_baseline(raw: str, rc: int = 0) -> Dict[str, Any]:
     wearing a fix's clothes, and counts alone will not show it.
     """
     p = parse_test_output(raw, rc)
+    _STATE.verify_count += 1
+    _pending = _STATE.edits_since_verify
+    _STATE.edits_since_verify = 0
     if not _BASELINE:
         return {"ok": True, "no_baseline": True, "current": p,
                 "warning": ("No baseline recorded, so nothing can be "
@@ -1236,7 +1298,14 @@ def compare_to_baseline(raw: str, rc: int = 0) -> Dict[str, Any]:
         "counts_before": _BASELINE.get("counts"),
         "exceptions": p["exceptions"], "tail": p["tail"],
         "changed_files": sorted(set(_STATE.modified + _STATE.created)),
+        "edits_covered": _pending,
     }
+    _STATE.last_verdict = verdict
+    if _pending > 3 and verdict != "green":
+        out["attribution_warning"] = (
+            f"This run covers {_pending} edits at once. If something broke, "
+            f"you cannot tell which edit did it. Make ONE change per verify "
+            f"— that is the whole point of the loop.")
     if broke:
         out["action"] = (
             f"YOU BROKE {len(broke)} test(s) that passed at baseline: "
