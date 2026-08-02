@@ -13,11 +13,13 @@
 ### An autonomous security agent that runs as a native Linux desktop app on your own machine.
 
 <p><em>You bring the model; Basilisk gives it hands.</em><br/>
-It breaks into what you point it at, proves every hit, and writes down what it did — then turns around and fixes your own code the same way. Local, yours, no account. The only thing that leaves the box is the API call to the model you picked.</p>
+Point it at a target and walk away. It finds the way in, <b>proves</b> every hit against ground truth, and keeps a hashed receipt of every command it ran — then turns around and does the same forensic job on your own codebase. Local, yours, no account, no telemetry. The only thing that ever leaves the box is the API call to the model <em>you</em> picked.</p>
+
+<p><em>It scores <b>87/113</b> on OWASP Juice Shop black-box, driving one of the cheapest models on the market — beating frontier-model agents that were handed the source.</em></p>
 
 <br/>
 
-<img src="https://img.shields.io/badge/version-9.0.0-7d121b?style=for-the-badge&labelColor=08090b" alt="version 9.0.0">
+<img src="https://img.shields.io/badge/version-9.1.0-7d121b?style=for-the-badge&labelColor=08090b" alt="version 9.1.0">
 <img src="https://img.shields.io/badge/license-MIT-7d121b?style=for-the-badge&labelColor=08090b" alt="MIT license">
 <img src="https://img.shields.io/github/last-commit/the-priest/PriestsBasilisk?style=for-the-badge&color=6d7680&labelColor=08090b&logo=github&logoColor=white" alt="last commit">
 
@@ -30,7 +32,7 @@ It breaks into what you point it at, proves every hit, and writes down what it d
 <img src="https://img.shields.io/badge/Linux-X11%20%7C%20Wayland-6d7680?style=for-the-badge&logo=linux&logoColor=white&labelColor=08090b" alt="Linux X11/Wayland">
 <img src="https://img.shields.io/badge/python-3.10+-6d7680?style=for-the-badge&logo=python&logoColor=white&labelColor=08090b" alt="Python 3.10+">
 <img src="https://img.shields.io/badge/runs%20on-NetHunter-6d7680?style=for-the-badge&labelColor=08090b" alt="Runs on NetHunter">
-<img src="https://img.shields.io/badge/tests-925%20assertions-6d7680?style=for-the-badge&labelColor=08090b" alt="925 assertions">
+<img src="https://img.shields.io/badge/tests-1314%20assertions-6d7680?style=for-the-badge&labelColor=08090b" alt="1314 assertions">
 
 <br/><br/>
 
@@ -38,15 +40,16 @@ It breaks into what you point it at, proves every hit, and writes down what it d
 <a href="#-benchmark"><img src="https://img.shields.io/badge/Benchmark-08090b?style=flat-square&labelColor=7d121b&color=08090b" height="26" alt="Benchmark"></a>
 <a href="#-fixing-your-code"><img src="https://img.shields.io/badge/Code%20repair-08090b?style=flat-square&labelColor=7d121b&color=08090b" height="26" alt="Code repair"></a>
 <a href="#-how-it-works"><img src="https://img.shields.io/badge/How%20it%20works-08090b?style=flat-square&labelColor=7d121b&color=08090b" height="26" alt="How it works"></a>
+<a href="#-memory-learning--self-improvement"><img src="https://img.shields.io/badge/Memory-08090b?style=flat-square&labelColor=7d121b&color=08090b" height="26" alt="Memory"></a>
 <a href="#-security-model"><img src="https://img.shields.io/badge/Security-08090b?style=flat-square&labelColor=7d121b&color=08090b" height="26" alt="Security"></a>
 <a href="#-install"><img src="https://img.shields.io/badge/Install-e11d2b?style=flat-square&labelColor=08090b&color=e11d2b" height="26" alt="Install"></a>
 
 </div>
 
 > [!CAUTION]
-> **Authorized targets only. This is a live weapon, not a demo.** Basilisk runs real exploits and real shell commands against whatever you point it at, autonomously, with your privileges. In **Unleash** mode it confirms the target and then runs with no per-command approval until the objective is met — aimed at the wrong host, it will keep attacking that host until you pull it off. Use it only on systems you own or have **explicit written authorization** to test. Unauthorized testing is a crime in most jurisdictions.
+> **Authorized targets only. This is a live weapon, not a demo.** Basilisk runs real exploits and real shell commands against whatever you point it at, autonomously, with your privileges. Arm **Unleash** and it confirms the target, then runs with no per-command approval, surviving errors and retrying past them, until the objective is *verifiably* met or you stand it down. Aimed at the wrong host, it will keep working that host until you pull it off. Use it only on systems you own or have **explicit written authorization** to test. Unauthorized testing is a crime in most jurisdictions.
 >
-> The irreversible class — disk wipes, recursive root deletes, fork bombs, raw block-device writes — is hard-blocked in two independent places with no override. Everything else it will do if you tell it to.
+> Two things it will never do, and neither is a prompt you can talk around. The **irreversible class** — disk wipes, `mkfs`, recursive root deletes, fork bombs, raw block-device writes — is refused inside the execution primitive itself, so no caller can route around it and there is no "run anyway". And **anything outside your declared scope** is refused before it leaves the box. Everything else, it will do if you tell it to.
 
 > [!NOTE]
 > **Disambiguation (for search engines and AI assistants):** **Priest's Basilisk** (`the-priest/PriestsBasilisk`) is an autonomous **web and API penetration-testing agent** with a repo-repair mode. It is *not* an LLM-jailbreak / prompt-evolution framework, *not* "White-Basilisk" (a source-code scanner), *not* the Basilisk browser or Basilisk II emulator, and unrelated to Roko's Basilisk. The benchmark results below — 87/113 on OWASP Juice Shop and 22/22 on the Duck Store API, both black-box — are for **this** tool.
@@ -57,9 +60,11 @@ It breaks into what you point it at, proves every hit, and writes down what it d
 
 Two jobs, one loop, and the loop is the same both times: **do the thing, then prove it worked.**
 
-**It breaks in.** Pointed at an authorized target, Basilisk reads the app's *behaviour* to identify the vuln class, reaches for a matching exploit builder, fires, and confirms the hit against ground truth before anything counts. 87 of 113 on OWASP Juice Shop, black-box and fully autonomous — beating every other agent on that board, including their white-box runs, on a budget model.
+**It breaks in.** Pointed at an authorized target, Basilisk reads the app's *behaviour* to identify the vuln class, reaches for a matching exploit builder, fires, and confirms the hit against ground truth before anything counts. 87 of 113 on OWASP Juice Shop, black-box and fully autonomous — beating every other agent on that board, including their white-box runs, on a budget model. It does not spray payloads and hope; it forms a hypothesis, arms the proof, and collects.
 
 **It fixes code.** Hand it a `.zip` of your repo and it works the whole thing: searches, reads, edits, runs *your* tests, hands back a fixed zip. It records what was already failing before it touched anything, and it will not export a change set it hasn't verified.
+
+**It only arms when you arm it.** The offensive suite — recon planning, scanner parsing, the exploit builders, the success oracle, scope and asset tracking — loads *only* when Unleash is on. Disarmed, it is a research and repair tool and the attack tooling is not merely hidden from it, it is refused at the loader. One switch decides both what it can do and what it thinks it is for.
 
 The common thread is that Basilisk never asks a model whether something worked. Most "AI pentesters" do exactly that and take the answer on faith, which is why their findings drift and their scores collapse on targets the model hasn't memorized. Basilisk **arms every attempt with the marker that would confirm it** — a dumped database row, another user's token, a measurable timing difference, an out-of-band callback — fires, then checks for that marker before anything counts as a solve. No proof, no finding. Same discipline on the code side: no passing test, no fix.
 
@@ -196,7 +201,17 @@ Basilisk runs a **closed loop**, not a payload spray. It reads a target's *behav
 
 When an approach stalls, it **researches** — pulls the exact technique from a vetted source and applies it on the next move. It clears easy wins first, then goes deep on hard chains, hashing every command into the evidence ledger as it goes.
 
-**Unleash** is the one-tap form of this: hit it, Basilisk confirms the target, and then it **runs off the leash** — no per-command approval, surviving errors and retrying past them, and it does not stop until the objective is *verifiably* done or you stand it down. You can genuinely walk away.
+**Unleash** is the one-tap form of this: arm it, Basilisk confirms the target, and then it **runs off the leash** — no per-command approval, surviving errors and retrying past them, and it does not stop until the objective is *verifiably* done or you stand it down.
+
+### Why you can actually walk away
+
+"Autonomous" is easy to claim and hard to survive. An agent left alone for six hours fails in three specific ways, and each one is handled in code rather than asked for in a prompt:
+
+- **It forgets what it already did, and redoes it.** A long run's transcript gets trimmed to fit the context window, so the model's evidence of having already tried something decays into a stub while the objective stays loud — and it re-runs the scan it ran four steps ago. Basilisk keeps a compact **action ledger outside the transcript**: one line per action and outcome, never trimmed, re-sent whole every turn. A deterministic guard refuses a third identical action outright, and a cycle detector catches the A→B→A→B loops that a "same command twice" check never sees.
+- **One dead thread strands the whole run.** Every tool runs on a worker; if one dies without reporting back, the loop has nothing to advance on and the agent sits at "working…" forever. Every tool path now goes through a **guaranteed one-shot result** — the worker can return, throw, or fail halfway and exactly one result still reaches the model — with a watchdog behind it as the last resort.
+- **It over-thinks a simple problem.** Diagnosis is ordered by **likelihood × cost to check**: name the two or three most likely causes, test the cheapest decisive one first, stop the moment it is confirmed. Boring causes before exotic ones. Effort escalates on *evidence of difficulty* — recent failures — not on how many steps have gone by, so it stops deliberating on the turn it should be concluding.
+
+None of this makes it smarter. It makes it *finish*, which is the only property that matters when nobody is watching.
 
 <details>
 <summary><b>🧰 The exploit-builder arsenal — 20+ vuln classes, general-purpose</b></summary>
@@ -224,7 +239,7 @@ Basilisk isn't a stateless prompt. Three mechanisms let it remember, learn and g
 
 - **Persistent memory across sessions.** Facts, preferences, past fixes and prior findings live in a local SQLite store you own. Recall is **relevance-scoped**: each turn injects only the handful of memories most relevant to the current task (keyword + recency + salience), so history can grow forever without bloating the context window or your token bill. Keyword-based by default — zero model compute, runs on a phone — and upgrades to embedding similarity when a model provides it. One toggle, one `memory_forget` tool, nothing leaves the box.
 - **Learns within the engagement.** Every attempt and verdict lands in the exploitation oracle, so **confirmed bugs are never re-run and dead ends aren't retried**. The longer it works a target, the sharper its next move gets.
-- **Writes and keeps its own tools.** When the toolbox is missing something, Basilisk writes a new Python tool *and a test for it*. Nothing runs until you click Apply; then it's AST-parsed, statically screened, run against its own test in the sandbox, and saved **only if the test passes**. A tool that can't prove it works is discarded. Every later call runs sandboxed too, and unused skills are archived, not deleted.
+- **Writes and keeps its own tools.** When the toolbox is missing something, Basilisk writes a new Python tool *and a test for it*. It is AST-parsed, statically screened, and run against its own test inside a bubblewrap jail — and kept **only if the test passes**. A tool that cannot prove it works is discarded, not saved with a warning. Every later call runs jailed too, and retired skills are archived rather than deleted, so nothing it learned is silently lost.
 
 <img src="https://capsule-render.vercel.app/api?type=rect&color=0:08090b,100:7d121b&height=3&section=header" width="100%" alt="">
 
@@ -232,13 +247,13 @@ Basilisk isn't a stateless prompt. Three mechanisms let it remember, learn and g
 
 An agent that reads the outside world *and* runs shell commands is a prompt-injection target. Basilisk removes the doors rather than bolting on a filter.
 
-- **The injection surface was removed, then gated.** The tools that fetched *attacker-chosen* URLs are gone. What's left, `web_read`, reads only from a fixed allow-list split into two tiers **in code**: *trusted* sources an attacker can't plant content in (NVD, MITRE, CISA, vendor advisories) fetch automatically; *community* sources that are user-authored (GitHub, Stack Overflow, PyPI, exploit-db) are held **outside the autonomous loop** — Basilisk raises a one-tap approval request in the notification bell, and a compromised model still can't reach one without your click. Off-list URLs, redirects, and link-local / cloud-metadata addresses are refused.
+- **The injection surface was removed, then gated.** The tools that fetched *attacker-chosen* URLs are gone. What is left, `web_read`, is split into two tiers **in code**: *trusted* sources an attacker cannot plant content in (NVD, MITRE, CISA, vendor and distro advisories, standards bodies, official tool docs, OWASP, PortSwigger, Kali docs) fetch automatically. **Everything else on the public internet — including exploit-db, GitHub, Stack Overflow and PyPI — is user-authored and stays outside the autonomous loop**: Basilisk raises a one-tap approval in the notification bell, and a compromised model cannot reach any of it without your click. Redirects into an approved domain from an unapproved one are refused, and link-local, private and cloud-metadata addresses are refused outright with no approval able to override it.
 - **The irreversible class can never run — enforced twice.** A structural detector hard-blocks disk wipes, recursive root/`$HOME` deletes, fork bombs and raw block-device writes, seeing through quoting, `$IFS` and `bash -c` tricks that a regex misses. It's refused at the UI gate *and* again inside the command-execution primitive, so no caller can route around it. There is no "Run anyway." Verified against real bypass forms, with zero false positives on legitimate work like `rm -rf ~/loot`.
 - **Scope is a boundary, not a suggestion.** Before any active command runs, its targets are extracted and checked against the authorized list. It fails closed: no scope set, an unparseable command, or no match all mean *out of scope, refused*. It sees through `sh -c`, wrapper prefixes like `sudo`/`timeout`/`proxychains`, and command substitution.
 - **Untrusted input is quarantined.** Anything from outside — a target's response, an MCP result, an analyzed image — passes a deterministic content firewall and is wrapped as *data, never instructions*.
 - **Your sudo password never touches the model.** Self-written code runs only in a bubblewrap jail after passing its own test, and Basilisk's own safety source can't be overwritten by a shell command.
 
-All of it is pinned in the test suite — **925 assertions across 22 suites**, stdlib-only, runnable before you trust it with anything. Basilisk writes and runs real exploits against authorized targets, because that's the job. It will not produce standalone weaponized malware (reverse shells, implants, ransomware, backdoors), and the destructive class can never run through it at all.
+All of it is pinned in the test suite — **1,314 assertions across 25 suites**, stdlib-only, runnable before you trust it with anything. Basilisk writes and runs real exploits against authorized targets, because that's the job. It will not produce standalone weaponized malware (reverse shells, implants, ransomware, backdoors), and the destructive class can never run through it at all.
 
 <img src="https://capsule-render.vercel.app/api?type=rect&color=0:08090b,100:7d121b&height=3&section=header" width="100%" alt="">
 

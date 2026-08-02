@@ -125,7 +125,7 @@ for _a in "${OPTIONAL_ART[@]}"; do OPTIONAL_FILES+=("${ASSET_DIR}/${_a}"); done
 # memory/skills/foresight extensions), not just the core four files.
 EXT_FILES=(__init__.py bench.py codescan.py engage.py exploits.py extman.py foresight.py headroom.py mcp.py memory.py \
            oracle.py juiceshop.py pentest.py reach.py sandbox.py skills.py verify.py webshield.py worker.py xbow.py \
-           zdayfind.py workspace.py)
+           zdayfind.py workspace.py recall.py)
 GITHUB_REPO="${BASILISK_REPO:-the-priest/PriestsBasilisk}"
 GITHUB_BRANCH="${BASILISK_BRANCH:-main}"
 

@@ -794,11 +794,18 @@ def replace(path: str, old: str, new: str, count: int = 1) -> Dict[str, Any]:
             return {"ok": False, "error": f"no such file: {path}"}
         if not old:
             return {"ok": False, "error": "empty search string"}
-        _LOCK.acquire()
-        with open(fp, "r", encoding="utf-8", errors="replace") as f:
-            body = f.read()
-        found = body.count(old)
-        try:
+        # The whole read-modify-write is ONE critical section, and it is taken
+        # with `with`, not acquire()/release().  The previous version acquired
+        # the lock and only THEN entered the try — so an OSError from the open()
+        # below (file deleted between the isfile check and here, permission
+        # change, a decode fault) escaped with the lock still held, and every
+        # later workspace edit from any thread blocked on it forever.  Exactly
+        # the shape v7.11.0 established as the rule: never a bare acquire in an
+        # error-prone path.
+        with _LOCK:
+            with open(fp, "r", encoding="utf-8", errors="replace") as f:
+                body = f.read()
+            found = body.count(old)
             if found == 0:
                 return {"ok": False, "path": rel,
                         "error": "search string not found — read the file "
@@ -820,8 +827,6 @@ def replace(path: str, old: str, new: str, count: int = 1) -> Dict[str, Any]:
                 f.write(updated)
             os.replace(tmp, fp)
             _mark(rel, "modified")
-        finally:
-            _LOCK.release()
         diff = list(difflib.unified_diff(
             body.splitlines(), updated.splitlines(),
             fromfile=f"a/{rel}", tofile=f"b/{rel}", lineterm="", n=2))

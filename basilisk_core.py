@@ -466,7 +466,12 @@ DEFAULT_SETTINGS = {
     "adaptive_effort": True,
     "effort_light_max_tokens": 1536,     # cap for lean/conversational turns
     "effort_heavy_max_tokens": 4096,     # budget once deep in a tool chain
-    "hard_effort_step": 3,               # escalate at this tool-chain depth
+    # Depth at which a run becomes ELIGIBLE for effort escalation. Depth
+    # alone no longer escalates — the recent results must also show it is
+    # struggling. Depth is a proxy for time spent, not for difficulty, and
+    # escalating on it told the model to deliberate on the very turn it
+    # should have been concluding.
+    "hard_effort_step": 6,               # eligible for escalation at this depth
     # Skip chain-of-thought on LIGHT turns.  Output tokens are generated
     # serially, so a few hundred thinking tokens on "yeah, makes sense" is
     # pure wall-clock the operator waits through -- and output runs 2-3x
@@ -514,6 +519,25 @@ DEFAULT_SETTINGS = {
     "skills_enabled":          True,    # self-written, sandbox-tested skills
     "foresight_enabled":       True,    # predict consequences before acting
     "foresight_model":         False,   # add a model pass on top of the rules
+    # Deadline for that model pass.  It is a network round-trip; without a
+    # bound, a hung one used to strand the whole turn (nothing downstream ever
+    # fed a tool result back).  On timeout the deterministic rules decide.
+    "foresight_timeout_s":     20.0,
+    # Sidecar completions are short structured answers on behalf of a caller
+    # that is blocked waiting; they get their own (real) deadline and budget.
+    "ext_complete_timeout_s":  18.0,
+    "ext_complete_max_tokens": 320,
+    # ── anti-repetition ──
+    # action_recall injects the durable "already done this run" list into every
+    # turn; without it the model's only record of its own actions is the
+    # transcript, which is trimmed and compressed, so it redoes work.
+    "action_recall":           True,
+    "action_recall_entries":   40,
+    # Deterministic backstop: how many executions of the SAME action are
+    # permitted in one run before it is refused. 0 disables. Two is deliberate —
+    # re-checking after a change is verification, not a loop — so the third
+    # identical execution is the one that gets refused.
+    "repeat_block_after":      2,
     "mcp_enabled":             False,   # connect external MCP tool servers (OFF
                                         # by default — MCP is an RCE surface;
                                         # tool args are safety-screened + logged)
@@ -747,7 +771,8 @@ class Backend(Protocol):
                     on_error: Callable[[str], None],
                     options: Optional[Dict[str, Any]] = None,
                     cancel_event: Optional[threading.Event] = None,
-                    on_reasoning: Optional[Callable[[str], None]] = None
+                    on_reasoning: Optional[Callable[[str], None]] = None,
+                    single_model: bool = False
                     ) -> None: ...
 
 
@@ -782,7 +807,8 @@ class GroqBackend:
         return [{"name": m} for m in self.fallback_chain]
 
     def stream_chat(self, model, messages, on_token, on_done, on_error,
-                    options=None, cancel_event=None, on_reasoning=None) -> None:
+                    options=None, cancel_event=None, on_reasoning=None,
+                    single_model=False) -> None:
         if not self._client:
             on_error("groq not configured")
             return
@@ -791,8 +817,12 @@ class GroqBackend:
         top_p = opts.get("top_p", 0.9)
         max_tokens = opts.get("max_tokens", 2048)
 
-        # Build a model order: requested first, then any fallbacks not equal
-        order = [model] + [m for m in self.fallback_chain if m != model]
+        # Build a model order: requested first, then any fallbacks not equal.
+        # single_model=True (sidecar completions) means one attempt only — a
+        # short JSON verdict is not worth walking a fallback chain for, and the
+        # caller is usually a turn that is blocked waiting on it.
+        order = [model] if single_model else \
+            [model] + [m for m in self.fallback_chain if m != model]
         last_err = None
         any_tokens_emitted = False  # see below
 
@@ -994,7 +1024,8 @@ class OpenAICompatBackend:
             return []
 
     def stream_chat(self, model, messages, on_token, on_done, on_error,
-                    options=None, cancel_event=None, on_reasoning=None) -> None:
+                    options=None, cancel_event=None, on_reasoning=None,
+                    single_model=False) -> None:
         if not self.api_key:
             on_error(f"{self.name} not configured (no API key)")
             return
@@ -1012,7 +1043,12 @@ class OpenAICompatBackend:
         # model has rejected them we stop sending them for the rest of the
         # session rather than paying a wasted round-trip every turn.
         extra_body = dict(opts.get("extra_body") or {})
-        order = [model] + [m for m in self.fallback_chain if m != model]
+        # single_model=True (sidecar completions) means ONE attempt.  Those calls
+        # ask for a couple of dozen tokens of JSON on behalf of a turn that is
+        # blocked waiting for the answer; letting one walk a four-model chain
+        # turned a sub-second refinement into minutes of retries.
+        order = [model] if single_model else \
+            [model] + [m for m in self.fallback_chain if m != model]
         last_err = None
         any_tokens_emitted = False
         recovered_live = False   # only refresh the live catalogue once
@@ -1241,9 +1277,24 @@ class BackendRouter:
 
     def stream_chat(self, messages, on_token, on_done, on_error,
                     cancel_event=None, on_reasoning=None,
-                    effort: str = "standard") -> Tuple[str, str]:
+                    effort: str = "standard",
+                    max_tokens_override: Optional[int] = None,
+                    single_model: bool = False) -> Tuple[str, str]:
+        """Route one streamed completion to the active provider.
+
+        max_tokens_override / single_model exist for the SIDECAR completions
+        (memory consolidation, the foresight consequence pass).  Those ask for a
+        few dozen tokens of JSON, but used to be billed and budgeted exactly
+        like a full chat turn: the whole `max_tokens` budget, and — worse — the
+        right to walk the entire fallback chain, so one flaky provider could
+        turn a one-line verdict into several minutes of retries while the turn
+        that requested it sat waiting.  A sidecar call now asks for what it
+        needs and gets one attempt.
+        """
         backend, model = self.pick()
         max_tokens = self.settings.get("max_tokens", 2048)
+        if max_tokens_override:
+            max_tokens = int(max_tokens_override)
         _extra: Dict[str, Any] = {}
         # ── Effort ladder: match capability + budget to the turn.  Light on
         #    plain chat (snappier, cheaper); heavy several tool-steps deep in a
@@ -1285,6 +1336,10 @@ class BackendRouter:
                     log(f"effort: escalating {model} -> {heavy} "
                         f"(deep engagement)")
                     model = heavy
+        if max_tokens_override:
+            # An explicit ask wins over the effort ladder's clamps — the ladder
+            # tunes a CHAT turn, and this is not one.
+            max_tokens = int(max_tokens_override)
         opts = {
             "temperature": self.settings.get("temperature", 0.7),
             "top_p": self.settings.get("top_p", 0.9),
@@ -1306,7 +1361,8 @@ class BackendRouter:
             except Exception as _e:
                 log(f"headroom: skipped ({_e})")
         backend.stream_chat(model, messages, on_token, on_done, on_error,
-                            opts, cancel_event, on_reasoning=on_reasoning)
+                            opts, cancel_event, on_reasoning=on_reasoning,
+                            single_model=single_model)
         return backend.name, model
 
 
@@ -5949,17 +6005,21 @@ def tool_xbow_report(scored: Any = None) -> Dict[str, Any]:
         return {"ok": False, "error": f"xbow_report failed: {e}"}
 
 
-def tool_load_tools(group: str = "") -> Dict[str, Any]:
+def tool_load_tools(group: str = "", unleashed: bool = True) -> Dict[str, Any]:
     """Load a specialist tool group's full specs so they can be called. Used
     when grouped tools are enabled: the base prompt lists the groups, and this
-    pulls one in on demand (group ∈ system|offensive|engagement|code|benchmark|
-    recon|desktop|media; aliases accepted)."""
+    pulls one in on demand (group ∈ system|code|workspace|desktop|media, plus
+    offensive|engagement|benchmark when UNLEASH is armed; aliases accepted).
+
+    `unleashed` defaults True so every existing caller and test keeps its
+    behaviour; the GUI passes the real switch state. The refusal lives in
+    load_tools_group, not here — one gate, not two that can drift."""
     try:
         from basilisk_persona import load_tools_group
     except Exception as e:
         return {"ok": False, "error": f"tool groups unavailable: {e}"}
     try:
-        return load_tools_group(group or "")
+        return load_tools_group(group or "", unleashed=unleashed)
     except Exception as e:
         return {"ok": False, "error": f"load_tools failed: {e}"}
 

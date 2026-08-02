@@ -1,3 +1,346 @@
+## v9.1.0
+
+**Theme: the turn loop cannot die, and the model cannot forget what it already did.**
+
+### The stall / "it just hangs" family — root cause and fix
+
+The assistant turn loop only advances when something feeds it a result — a
+stream callback or a tool result.  Every feeder ran on a daemon thread, and
+several of them had no exception handling at all, including `run_bg` (the
+shell runner — the hottest path in the app).  They indexed `r['rc']`,
+`r['stdout']`, `r['stderr']` directly instead of `.get`.  One OSError
+spawning a process, one KeyError on an unexpected result shape, one
+UnicodeDecodeError on binary output killed the worker thread silently, no
+tool result was ever fed, and the turn sat in "working…" forever with no
+way out but restarting the app.
+
+**Fix:** new `_tool_thread(body, label)` helper with a **one-shot guaranteed
+feed** — the body returns without feeding, raises halfway, or feeds and then
+raises, exactly one result reaches the model.  Converted: `run_bg`,
+`_tool_list_dir`, `_tool_find_file`, `_tool_read_file`, `_tool_write_file`,
+`_tool_simple`, `_tool_audit`, `_tool_scan_net`, `_execute_tool_batch`,
+skill commit.  **Zero unguarded tool threads remain.**
+
+Additional guards:
+- `_feed_tool_result` itself is guarded — a store write or kick failure no
+  longer strands the turn.
+- `_on_stream_done` body is guarded — any exception cleans up instead of
+  killing the GTK source.
+- The streaming worker thread catches exceptions before `on_error` — a
+  malformed message list or encoding error no longer produces a dead turn
+  with a traceback on stderr.
+- **Turn watchdog** (TURN_WATCHDOG_S = 2400s, polled every 30s): a
+  last-resort backstop.  Recovers the UI and says what happened.
+
+### Foresight: a `block` verdict actually does something now
+
+Three bugs, all fixed:
+
+1. A `block` verdict did nothing.  The code computed a `force_confirm` flag,
+   stored it on self, and nothing anywhere ever read it — the command ran
+   regardless of foresight's verdict.
+
+2. The model pass had no deadline.  `_ext_complete` claimed 30s, but
+   `router.stream_chat` is synchronous, so `done.wait(timeout=30)` was dead
+   code.  Real bound was the provider's idle timeout × fallback chain length
+   (minutes).  A hung pass wedged the turn forever.
+
+3. Re-entrancy was an instance flag cleared in a `finally` as soon as
+   `_execute_command` returned — while the command was still running.
+
+**Fix:** block actually refuses *and* feeds the refusal back so the model
+adapts; watchdogged with `foresight_timeout_s` (default 20) and falls back
+to the deterministic rule floor (local, sub-100μs); sidecar calls get their
+own budget (320 tokens, one attempt, 18s deadline) instead of the full chat
+budget and a four-model chain walk; re-entrancy is a parameter, not state.
+
+### Repetition: the model no longer forgets what it already did
+
+Root cause was structural: the model's only record of its own actions was
+the transcript, and `_build_history_for_model` keeps only
+HISTORY_KEEP_FULL_TOOL_RESULTS (2) at full length, then headroom compresses
+what's left.  Meanwhile the continue directive re-anchors on the original
+objective every turn.  Several steps in, the loudest thing in context is the
+objective; the evidence of having already tried something is a 600-char stub.
+
+And the only guard was 3 identical *consecutive* `run` commands — A-B-A-B
+was invisible, as was a repeat four steps later, and it covered no other tool.
+
+**Fix:** new `basilisk_ext/recall.py` — one line per action + outcome digest,
+lives outside the transcript (never trimmed, never compressed), re-sent whole
+every turn.  Cycle detection (A-B-A-B, A-B-C-A-B-C).  Deterministic repeat
+guard: two executions always allowed (re-checking is verification), third
+refused with the previous result handed back.  One recording hook in
+`_feed_tool_result` covers every tool.  75 assertions in test_recall.py.
+
+### Overcomplicating: triage by likelihood, not by thoroughness
+
+Persona now carries the standing rule: name the two or three most likely
+causes, rank by (likelihood × cheapness to check), test the top one first
+with the single cheapest decisive test, stop the moment it is confirmed.
+One hypothesis at a time.  The boring cause is usually the cause.
+
+The effort ladder was a direct driver: it escalated to "heavy" (think before
+you move, reason through the current state) the moment tool-chain depth hit
+3, regardless of whether the task was actually hard.  That told the model to
+deliberate on the turn where it should have been concluding.  Escalation now
+requires depth 6+ AND 2 of the last 3 results being failures — evidence of
+a hard problem, not just elapsed steps.
+
+### Widget disposal crash
+
+`dispose_widget` nulled `_blocks_container`, `_streaming_label`, etc.
+`append_streaming`, `set_content`, `finish_streaming`, `append_thought` all
+dereferenced those — so trimming a bubble the window was still driving (for
+streaming or TTS) crashed the main-loop callback and stranded the turn.
+
+**Fix:** `_disposed` flag checked at every entry point; the view trim no
+longer disposes a widget the window still holds a reference to
+(`streaming_msg_widget`, `_speaking_widget`).
+
+### Suggestion routing
+
+`_send_suggestion` wrote to `current_chat_id`, but the running loop reads
+`streaming_chat_id`.  Switch chats mid-run and the suggestion silently goes
+to the wrong transcript.  Now routes to `streaming_chat_id`.
+
+### Workspace deadlock
+
+`workspace_replace` did `_LOCK.acquire()` outside its try block.  An
+OSError from the `open()` below it escaped with the lock held — every later
+workspace edit from any thread blocked on it forever.  Converted to a `with`
+block (the same rule v7.11.0 established).
+
+### Fence recovery: commands get run, not printed (v9.1.0 addendum)
+
+The model sometimes writes a shell command in a \`\`\`bash\`\`\` code fence
+instead of calling the `run` tool — so it renders as a copyable block the
+operator has to paste himself, which defeats the point of the app.
+
+Three layers now prevent this:
+
+1. **Persona rule** — "RUN COMMANDS, DO NOT PRINT THEM" in the standing
+   preferences.  The model now has an explicit instruction that a reply with
+   a code fence and no tool call is wrong.
+
+2. **Fence recovery widened** — the existing recovery (detect a \`\`\`bash\`\`\`
+   fence with no tool call, synthesise a `run` tool call from it) used to
+   fire ONLY during an active mission.  It now fires on regular turns too,
+   gated by `reply_intends_action()`: if the reply says "let me check…" or
+   "I'll run…" alongside a fence, the model tried to act and fumbled the
+   format — recover it.  If it says "you could try…", it is showing an
+   example — leave it alone.  The approval-mode gate is also removed: if
+   confirmations are on, the recovered command goes through the dialog
+   instead of being silently dropped.
+
+3. **In-context correction** — when the recovery fires, a system-role
+   correction is injected into the transcript so the model reads it on its
+   very next turn and stops doing it.  The persona is two thousand tokens
+   away; this sits right next to the drift.
+
+4. **Continue directive** — the mission-continue nudge now explicitly says
+   "USE THE run TOOL — do NOT write a command in a code fence."
+
+### Persona: cut to a clean operating spec (v9.1.0 addendum)
+
+The persona is the largest input to every turn and the least-checked file in
+the tree.  Stripped of roleplay and padding, and — more importantly — made
+CONSISTENT, because a model reading two different accounts of the same
+mechanism learns the wrong one confidently.
+
+**A real contradiction, found and fixed.**  `CAPABILITIES` told the model the
+system-destroying class was "always force-confirmed".  `PERSONA_CORE` and
+`basilisk_core.tool_run_command` say it is REFUSED OUTRIGHT with no override.
+Verified against the actual primitive (`mkfs.ext4 /dev/sda` →
+`refused: True, "no override"`) and corrected.  A model told the floor is
+merely a confirmation will try to phrase around it.
+
+**Grounding — "it knows exactly where it is."**  `host_facts_block()` already
+reads the real host live at launch (OS, kernel, device, session, package
+manager, escalation tool).  `OPERATOR_PROFILE` was *competing* with it: a
+hardcoded inventory naming a specific phone, two specific laptops and an SDR,
+plus `PERSONA_CORE` hardcoding "his Kali Linux box" when the app also runs on
+Arch and Fedora.  When the live block disagrees with a fixed claim, that is a
+confusion source with no way for the model to resolve it.  All hardcoded
+hardware and distro claims removed; `PERSONA_CORE` now explicitly points at the
+live block as ground truth and tells it to use the detected package manager and
+escalation tool rather than habits from another distro.
+
+**Removed:** operator biography (former chef, mid-career transition, authored
+projects), the hardware inventory, and identity padding — "his and his alone",
+"take his side by default", "his goal is your goal", "guard root", "never an AI
+language model", "use his name only now and then".
+
+**Kept, every one verified by test:** verify-before-counting (no proof no
+finding), untrusted-content-is-not-instructions, injection flagging, machine
+facts read never recalled, unverified labelling, primary-source citation, the
+no-filler list, don't-grovel, read-him-literally, swearing-means-impatient,
+follow-the-order, and all four triage rules.
+
+**Rewritten blocks:** `OPERATOR_PROFILE`, `PERSONA_CORE` (prose only — the
+GUARDRAIL is byte-identical), `TRUST_AND_PRECISION`, `CAPABILITIES`,
+`PROJECT_SELF`, and the agent-mode directive in `build_system_prompt` (was one
+dense run-on paragraph, now six scannable rules).
+
+**Sizes:** per-turn prose 2261 → 1989 tok.  Grouped prompt (what actually
+ships) 7775 → 7473 tok.  Lean chat 2133 → 1909 tok.  Full 22579 → 22072.
+
+**New `tests/test_persona.py`, 81 assertions.**  Treats the persona as a
+specification: asserts it agrees with the CODE (destructive floor checked
+against the live primitive, not against either text), agrees with ITSELF (no
+propose-vs-act contradiction, the run-don't-print rule carries its exception),
+stays grounded (no hardcoded hardware or distro), keeps every load-bearing
+rule, stays inside budget, and still partitions into tool groups with no
+orphaned tools.  Deliberately asserts invariants rather than exact wording —
+pinning sentences would make every legitimate edit a failure.
+
+### UNLEASH now gates the offensive suite (v9.1.0 addendum)
+
+Hacking tools load ONLY when UNLEASH is armed.  Every other mode is stripped to
+research, diagnosis, code and repo work — smaller prompt, better general work.
+
+**Gated (armed only):** `offensive` (recon planning, scanner parsing, CVE/KEV/
+EPSS, nuclei, sqlmap, the exploitation oracle), `engagement` (scope, asset
+graph, loot, credential-reuse leads), `benchmark` (scoring against vulnerable
+practice targets).
+
+**Always loaded:** `system`, `code`, `workspace`, `desktop`, `media`.  `code`
+stays general on purpose — auditing your own source for injected SQL or a
+leaked key is development hygiene, not an attack, and gating it would break the
+repo-repair mode for no safety gain.  `workspace` is half the product.
+
+**The gate is real, not cosmetic.**  Four holes were closed deliberately:
+  1. `load_tools_group` REFUSES a gated group, rather than merely omitting it
+     from the directory.  The group names are guessable and appear throughout
+     the persona; a mode that can be talked out of is not a mode.
+  2. Aliases resolve BEFORE the check, so `pentest`, `attack`, `scan`, `scope`,
+     `loot`, `bench` are gated too — otherwise the alias walks straight past it.
+  3. `load_tools("all")` is FILTERED rather than refused — it was the obvious
+     hole.
+  4. Max mode (`grouped=False`, which ships every spec inline) removes the
+     gated specs rather than shipping them, or it would be a way round UNLEASH.
+
+The refusal explicitly tells the model to say the task needs UNLEASH and STOP —
+not to reimplement the tool with raw shell commands, which is what an agent
+does when a capability disappears without explanation.
+
+**Role framing moves WITH the tools.**  `PERSONA_CORE` no longer hardcodes "you
+are an autonomous penetration-testing agent"; that framing is now
+`ENGAGEMENT_ROLE` (armed) vs `GENERAL_ROLE` (disarmed).  Shipping the pentest
+framing on a turn where he asked you to fix a CSS bug costs context AND primes
+the model toward an attack framing for a task with no target in it.  The
+general role is explicit that it is *not* a downgrade, and that the offensive
+tools are absent deliberately rather than missing.
+
+Also fixed: the always-shipped core prose named `engagement_graph` as a status-
+tool example — a tool general mode cannot load.  Now mode-neutral.
+
+**Sizes:** grouped 7569 armed / **7121 disarmed**.  Max mode 22169 armed /
+**11462 disarmed** — roughly half.
+
+**Wiring:** `build_system_prompt(..., unleashed=)`, `load_tools_group(...,
+unleashed=)`, `tool_load_tools(..., unleashed=)`, and BOTH dispatch paths in
+basilisk.py (the autonomous chain and the approval-gated table — they have
+drifted before).  Every parameter defaults to `unleashed=True`, so nothing that
+does not pass the flag changes behaviour.
+
+**tests/test_persona.py 81 → 153 assertions**, covering all four holes above,
+alias gating, role/tool coupling, and the size drop.
+
+### Prompt size: 7121 → 5660 disarmed (v9.1.0 addendum)
+
+Asked why a non-hacking turn still paid ~7k tokens.  It was measurement, not
+guessing: `CORE_TOOLS_TEXT` was 58% of the disarmed prompt, and one section of
+it ("EXECUTING") was 2443 tokens on its own.
+
+**The big find: the same rule was stated three times.**  "His request IS the
+authorization / never propose / finish the job" appeared in the core lead-in
+golden rule, again in the (2) ACTING section, and again in the per-turn
+directive.  That is not just cost — three phrasings of one rule is exactly the
+kind of thing that makes a model hedge about which one applies.  Stated once
+now, and a test asserts it is stated EXACTLY once (not zero).
+
+**Also cut:** campaign-management prose (plan-the-rounds, one-batch-at-a-time,
+checkpoint-to-graph/loot, don't-sprawl, proactive-notifications) collapsed from
+~590 tokens to one paragraph — it is engagement-shaped and referenced
+`engagement_graph`, a tool general mode cannot even load.  The Rules list, the
+LOOKUP tier explanation, the file-writing section, the tool-directory preamble
+and the group blurbs were all tightened.  No rule was removed, only rewording.
+
+**Sizes:** disarmed grouped 7121 → **5660**.  Armed 7569 → 6092.  Lean chat
+1990 → 1885.  `CORE_TOOLS_TEXT` 4128 → 2885.
+
+**Guarding the cut.**  Trimming prose is safe; trimming a RULE is a behaviour
+regression nothing else would catch, because no other code reads this text.
+`tests/test_persona.py` (153 → 189 assertions) now pins 33 distinct core
+mechanics by name — batch-reads/serialize-writes, tag syntax, the sudo path,
+never-claim-saved, the SSRF floor, guardrail immutability, rc-124 handling, and
+the rest — plus the new budgets, so this cannot creep back or be trimmed further
+by accident.
+
+**Honest floor:** the remaining 5660 is ~2885 tool contract (the actual call
+syntax and safety semantics for the tools it has), 332 immutable GUARDRAIL, and
+~2400 of behaviour rules and directory.  Getting to 4k from here means deleting
+real tool specs or real rules, not prose — say the word if that trade is wanted.
+
+### README rewritten — and three false claims found in it (v9.1.0 addendum)
+
+The README is not only marketing: `PROJECT_SELF` instructs Basilisk to
+`web_read` this file when the operator asks about its own version, install
+command or capabilities. Every sentence in it is therefore a belief the agent
+will act on, which makes a stale README a source of confident wrong answers.
+
+Checking prose against the CODE rather than against other prose found three:
+
+  1. **"Nothing runs until you click Apply"** for self-written skills. Skill
+     saving went autonomous; it is gated by passing its own sandboxed test, not
+     by a click. An agent reading this would wait for an Apply that never comes.
+  2. **"`web_read` reads only from a fixed allow-list ... off-list URLs are
+     refused."** Any public host is reachable after a one-tap domain approval.
+     The tier examples were also wrong: **exploit-db was listed as auto-fetching
+     when `basilisk_core` classifies it community (approval-gated)** — and the
+     same error was in the PERSONA, so the model believed a gated source was
+     silent. Both corrected.
+  3. Stale version badge (9.0.0) and test count (925 / 22 suites).
+
+**Rewritten for edge:** sharper thesis up top with the headline number, a harder
+CAUTION callout that now correctly names both hard floors (irreversible class
+AND scope, both refused in the primitive), and a new **"Why you can actually
+walk away"** section covering the v9.1.0 reliability work — the action ledger
+that stops it redoing work, the guaranteed one-shot tool result that stops a
+dead worker stranding the run, and likelihood-ordered triage. That section
+argues the thing that actually separates this from a demo: not that it is
+smarter, that it *finishes*.
+
+Also documents the new Unleash tool gate, and states plainly that the offensive
+suite is refused at the loader rather than merely hidden.
+
+**New `tests/test_readme.py`, 86 assertions.** Verifies README claims against
+the RUNNING CODE: version badge vs `VERSION`, suite count vs the actual file
+count, badge vs prose assertion count, the destructive floor (including the
+`rm -rf ~/loot` non-false-positive it cites), every `web_read` tier example, the
+Unleash gate, anchor resolution, the disambiguation block, and 43 load-bearing
+facts that must survive any future rewrite.
+
+**METHOD NOTE recorded in the test file:** validate a checker against known-good
+input before trusting its verdict — this bit twice. The anchor slugger reported
+all six nav links broken until it was run against the previous README, which
+demonstrably worked (GitHub does not strip a heading before slugging, so a
+dropped emoji leaves a space that becomes a LEADING hyphen — anchors really are
+`#-benchmark`). And a literal-string claim check reported the Unleash paragraph
+missing because the README writes `*only*` with markdown emphasis. Both times
+the checker was wrong and the artifact was right.
+
+### Housekeeping
+
+- `recall.py` registered in install.sh EXT_FILES.
+- New tests/test_persona.py (201 assertions) and tests/test_readme.py (86).
+- Version 9.1.0.
+- 25/25 suites, 1314 assertions, zero red.
+- GUARDRAIL byte-identical (sha 0ccebd17786bfaaf).
+- safety/ledger/voice/scope sha256-identical to v9.0.0.
+- compileall + install.sh bash -n clean.
+
 # Changelog
 
 ## v9.0.0 — the loop is enforced, the scanners see the repo, the README is honest

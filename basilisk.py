@@ -36,6 +36,8 @@ import threading
 import urllib.request
 import datetime
 import base64
+import traceback
+import time
 try:
     from basilisk_btn_art import BTN_ART_B64
 except Exception:
@@ -122,6 +124,13 @@ from basilisk_persona import (
 
 # Variant-analysis / zero-day-class source scanner (read-only, stdlib-only).
 from basilisk_ext import zdayfind as _zdayfind
+# Action recall: the per-run list of what has already been done.  Imported
+# defensively — a missing sidecar file must degrade the anti-repetition help,
+# never stop the app from starting.
+try:
+    from basilisk_ext import recall as _recall
+except Exception:      # pragma: no cover - only on a broken/partial install
+    _recall = None
 # Direct handle for newer offensive generators wired below.
 from basilisk_ext import exploits as _exploits
 
@@ -138,7 +147,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.basilisk"
 APP_NAME = "Basilisk"
-VERSION = "9.0.0"
+VERSION = "9.1.0"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -151,6 +160,32 @@ VERSION = "9.0.0"
 # it's overridable per-user via the "max_tool_steps" setting, and it resets
 # every turn so "keep going" always grants a fresh budget.
 MAX_TOOL_CHAIN = 150
+# Foresight: how long the (optional) consequence-prediction model pass may take
+# before the turn stops waiting for it.  A model pass is a full network round
+# trip; without a deadline a hung one wedged the whole turn forever, because
+# nothing downstream of it ever fed a tool result back.  On timeout we fall back
+# to foresight's deterministic rules, which are local pattern matching and take
+# microseconds.  The catastrophic floor at the execution primitive is separate
+# and always applies.
+FORESIGHT_TIMEOUT_S = 20.0
+# Sidecar completions (memory consolidation, the foresight model pass) are
+# short structured answers on behalf of something that is BLOCKED waiting for
+# them.  They get a real deadline and a small budget, not the chat turn's.
+EXT_COMPLETE_TIMEOUT_S = 18.0
+EXT_COMPLETE_MAX_TOKENS = 320
+# Turn watchdog: the assistant turn loop advances only when something feeds it —
+# a stream callback or a tool result.  Every feeder runs on a daemon thread, so
+# an exception in one used to strand the turn in "working…" with no way out but
+# restarting the app.  This is the last-resort backstop for a loop that has
+# genuinely died.
+#
+# The value is chosen so it CANNOT fire on real work: the longest hard timeout
+# estimate_runtime hands out is 1800s, and tool_run_command enforces it, so any
+# command returns by then; a model stream is bounded by STREAM_MAX_WALL_S.  With
+# 40 minutes of complete silence, nothing legitimate is still running — the loop
+# is dead and the operator is staring at a spinner.
+TURN_WATCHDOG_S = 2400.0
+TURN_WATCHDOG_POLL_S = 30
 # In autonomous walk-away mode (no per-command approval — the default) the run
 # is UNCAPPED: it keeps going until the task is actually finished (the model
 # stops calling tools) or the operator presses Stop. Stop and the catastrophic-
@@ -171,7 +206,10 @@ _MISSION_CONTINUE_DIRECTIVE = (
     "Your last turn ended without completing it. There is NO operator watching "
     "and NOTHING to wait for. Do NOT ask a question, do NOT say you'll wait, do "
     "NOT restate progress and stop. Take the very NEXT concrete action toward "
-    "the objective RIGHT NOW with a tool call.\n"
+    "the objective RIGHT NOW with a tool call. USE THE run TOOL — do NOT "
+    "write a command in a ```bash``` code fence for the operator to copy. "
+    "You have a run tool; use it. A reply with a code block and no tool "
+    "call is WRONG.\n"
     "If this is an exploitation run: consult oracle_status to see what's already "
     "CONFIRMED (never redo a proven exploit) and what's still open, and "
     "oracle_check every hit against its success marker before you count it — a "
@@ -2709,6 +2747,9 @@ class MessageWidget(Gtk.Box):
         self._thoughts_container: Optional[Gtk.Box] = None
         self._thoughts_label: Optional[Gtk.Label] = None
         self._show_thoughts: bool = show_thoughts
+        # Set by dispose_widget when the view trims this bubble. Every method
+        # that touches a container checks it — see dispose_widget.
+        self._disposed: bool = False
         self.add_css_class("msg-row")
         self._build_shell()
         if content and role != "tool":
@@ -2721,7 +2762,17 @@ class MessageWidget(Gtk.Box):
         trimmed from the view. It holds callbacks back to the window and heavy
         child containers; nulling them breaks any reference cycle so CPython
         reclaims the widget (and its TextViews / code blocks / images) instead of
-        letting it linger in RAM. Display-only — the message stays in the store."""
+        letting it linger in RAM. Display-only — the message stays in the store.
+
+        DISPOSAL IS ONE-WAY AND THE WIDGET MUST SURVIVE BEING USED AFTER IT.
+        The window keeps its own references to bubbles (streaming_msg_widget,
+        _speaking_widget) that are independent of the view's rolling trim, so a
+        disposed bubble can still receive a late token or a state change. Every
+        method that touches a nulled container checks _disposed first and
+        becomes a no-op, because the alternative is an AttributeError on
+        `None.get_first_child()` inside a GLib callback — which strands whatever
+        turn was driving it."""
+        self._disposed = True
         self._on_run_command = None
         self._on_apply_edit = None
         self._on_speak = None
@@ -2866,6 +2917,11 @@ class MessageWidget(Gtk.Box):
             self._blocks_container = inner
 
     def set_content(self, text: str):
+        if getattr(self, "_disposed", False) or self._blocks_container is None:
+            # Trimmed out of the view already; the message itself is safe in
+            # the store and will render from there if the chat is reopened.
+            self._content = text or ""
+            return
         self._content = text
         if self.role == "tool" or self._blocks_container is None:
             return
@@ -3063,6 +3119,8 @@ class MessageWidget(Gtk.Box):
             self.speak_btn.remove_css_class("speaking")
 
     def start_streaming(self):
+        if getattr(self, "_disposed", False) or self._blocks_container is None:
+            return
         child = self._blocks_container.get_first_child()
         while child is not None:
             nxt = child.get_next_sibling()
@@ -3075,8 +3133,12 @@ class MessageWidget(Gtk.Box):
         self._content = ""
 
     def append_streaming(self, token: str):
+        if getattr(self, "_disposed", False):
+            return
         if self._streaming_label is None:
             self.start_streaming()
+        if self._streaming_label is None:      # disposed / no container
+            return
         self._content += token
         # Hide both tool XML and any inline <think> reasoning from the live
         # reply.  The reasoning (if any) gets captured at finish_streaming /
@@ -3087,14 +3149,15 @@ class MessageWidget(Gtk.Box):
     def finish_streaming(self) -> str:
         final = self._content
         self._streaming_label = None
-        self.set_content(final)
+        if not getattr(self, "_disposed", False):
+            self.set_content(final)
         return final
 
     # ── thoughts (model reasoning) ─────────────────────────────────
     def append_thought(self, token: str):
         """Accumulate a reasoning token (from a reasoning_content stream)
         and reveal/refresh the collapsed thoughts expander live."""
-        if not token:
+        if not token or getattr(self, "_disposed", False):
             return
         self._thoughts += token
         self._render_thoughts()
@@ -4648,6 +4711,22 @@ class MainWindow(Adw.ApplicationWindow):
         self._mission_objective: str = ""
         self._mission_kicks: int = 0            # consecutive no-progress re-kicks
         self._recent_commands: list = []        # tail of run commands, for loop-break
+        # ACTION RECALL — the durable record of what this run has already done.
+        # The transcript is NOT that record: _build_history_for_model keeps only
+        # HISTORY_KEEP_FULL_TOOL_RESULTS full tool results and headroom
+        # compresses what survives, so several steps in, the model's evidence of
+        # having already tried something is a truncated stub while the loudest
+        # thing in its context is still the original objective. That is what
+        # made it redo work from a few turns back. One line per action lives
+        # here instead, outside the transcript, and is re-sent whole every turn.
+        self._action_log = _recall.ActionLog() if _recall else None
+        # The action currently in flight, so the result that comes back can be
+        # attached to it. Set at dispatch, consumed in _feed_tool_result — one
+        # hook covers every tool instead of instrumenting each of them.
+        self._pending_action: Optional[str] = None
+        # Liveness marker for the turn watchdog — bumped whenever the turn
+        # actually advances (a token, a tool result, a new step).
+        self._turn_progress_ts: float = time.monotonic()
         self._mission_verify_pending: bool = False   # first completion signal seen
         self._mission_no_action_streak: int = 0      # turns in a row with no tool call
         self._mission_directive: str = ""       # transient nudge for the next kick
@@ -4722,6 +4801,59 @@ class MainWindow(Adw.ApplicationWindow):
             self._refresh_sidebar()
         return removed
 
+    def _mark_turn_progress(self):
+        """Something advanced the current turn.  Cheap enough to call anywhere."""
+        self._turn_progress_ts = time.monotonic()
+
+    def _turn_watchdog(self):
+        """Recover a turn whose loop has died.
+
+        The assistant turn loop is a chain of hand-offs — stream callback feeds
+        a tool call, tool thread feeds a result, result kicks the next stream —
+        and every link runs on a daemon thread.  Before this existed, one
+        unhandled exception anywhere in that chain ended the turn silently: no
+        error, no toast, just "working…" forever and a Stop button that only
+        cleared a flag nothing was reading any more.  The individual links are
+        all guarded now (_tool_thread, _feed_tool_result, the stream worker),
+        but a chain of guards is a promise, and this is the check.
+
+        It only fires after TURN_WATCHDOG_S of TOTAL silence, which is longer
+        than the longest command the runtime estimator will ever wait for, so it
+        cannot cut real work short.  It does not retry anything — retrying an
+        unknown failure blind is how you get duplicate side effects.  It hands
+        the UI back and says what happened.
+        """
+        try:
+            if self.streaming_chat_id is None and not self._is_busy():
+                return True
+            last = getattr(self, "_turn_progress_ts", None)
+            if last is None:
+                self._turn_progress_ts = time.monotonic()
+                return True
+            idle = time.monotonic() - last
+            if idle < TURN_WATCHDOG_S:
+                return True
+            self.terminal_log(
+                f"■ turn watchdog: nothing has advanced this turn for "
+                f"{int(idle)}s — the step that should have reported back never "
+                f"did. Ending the turn so the app is usable again.", "error")
+            self._show_toast(
+                "That step never reported back — turn ended. Send again to "
+                "retry.", timeout=8)
+            self._stop_requested = True
+            self._mission_active = False
+            try:
+                if self.streaming_cancel:
+                    self.streaming_cancel.set()
+            except Exception:
+                pass
+            self._finish_turn_cleanup()
+            self._stop_requested = False
+            self._turn_progress_ts = time.monotonic()
+        except Exception:
+            log(f"turn watchdog: {traceback.format_exc()}")
+        return True
+
     def _periodic_retention(self):
         """Hourly sweep so a long-running session still honours the
         retention window (a startup-only purge would miss it)."""
@@ -4739,6 +4871,8 @@ class MainWindow(Adw.ApplicationWindow):
         # Roll old chats hourly so a session left open for days still
         # honours the retention window.
         GLib.timeout_add_seconds(3600, self._periodic_retention)
+        # Liveness backstop for the turn loop.  See _turn_watchdog.
+        GLib.timeout_add_seconds(TURN_WATCHDOG_POLL_S, self._turn_watchdog)
 
     # ── UI construction ─────────────────────────────────────────
 
@@ -5880,10 +6014,18 @@ class MainWindow(Adw.ApplicationWindow):
                 if old is None or old is w:
                     break
                 if isinstance(old, MessageWidget):
-                    try:
-                        old.dispose_widget()
-                    except Exception:
-                        pass
+                    # Never dispose a bubble the WINDOW still holds a live
+                    # reference to. The view's rolling trim and the window's
+                    # streaming/speaking pointers are independent, so trimming
+                    # could null the containers out from under a widget that is
+                    # still receiving tokens or TTS state changes. Unparent it
+                    # (frees the layout cost) but leave its innards intact.
+                    if old is not self.streaming_msg_widget \
+                            and old is not self._speaking_widget:
+                        try:
+                            old.dispose_widget()
+                        except Exception:
+                            pass
                 self.msg_box.remove(old)
                 trimmed += 1
                 extra -= 1
@@ -6135,6 +6277,7 @@ class MainWindow(Adw.ApplicationWindow):
             self._mission_objective = text
             self._mission_kicks = 0
             self._recent_commands = []      # fresh objective — clear loop history
+            self._reset_action_log()
             self._mission_verify_pending = False
             self._mission_no_action_streak = 0
             self._mission_directive = ""
@@ -6163,19 +6306,40 @@ class MainWindow(Adw.ApplicationWindow):
         if not self._is_busy():
             self._send_user_message()      # idle → ordinary send
             return
-        if self.current_chat_id is None:
+        # ROUTE TO THE CHAT THAT IS WORKING, not the one being looked at.
+        # This used to write to current_chat_id. The running loop reads
+        # streaming_chat_id, and those differ the moment the operator scrolls
+        # back to another conversation while a mission runs — so the suggestion
+        # landed in the wrong transcript, the mission never saw it, and the
+        # toast still said it had been delivered. A silently discarded
+        # instruction is worse than a refused one.
+        cid = self.streaming_chat_id or self.current_chat_id
+        if cid is None:
+            self._show_toast("No chat is running — nothing to suggest to.")
             return
         buf.set_text("")
-        cid = self.current_chat_id
         # Stored with a tag so the model reads it as a live operator nudge, not a
         # brand-new request. No _kick_assistant_turn — the running loop picks it
         # up on its next step; the model is NOT interrupted.
-        self.store.add_message(cid, "user",
-                               "[operator suggestion, mid-run — weave this in "
-                               "without stopping]: " + text)
-        self._append_message_widget("user", text)
-        self._show_toast("Suggestion sent — Basilisk will fold it in on its "
-                         "next step (still working).", timeout=4)
+        try:
+            self.store.add_message(cid, "user",
+                                   "[operator suggestion, mid-run — weave this "
+                                   "in without stopping]: " + text)
+        except Exception as e:
+            log(f"suggestion not stored: {e}")
+            self._show_toast("Couldn't deliver that suggestion — try again.",
+                             timeout=5)
+            buf.set_text(text)             # don't eat what he typed
+            return
+        # Only draw the bubble if he is actually looking at the chat it went to;
+        # otherwise it would appear in an unrelated conversation.
+        if cid == self.current_chat_id:
+            self._append_message_widget("user", text)
+            self._show_toast("Suggestion sent — Basilisk will fold it in on "
+                             "its next step (still working).", timeout=4)
+        else:
+            self._show_toast("Suggestion sent to the running chat (you're "
+                             "viewing a different one).", timeout=5)
 
     # ── voice (speech in / speech out) ──────────────────────────
     def _on_tts_toggled(self, btn):
@@ -6534,24 +6698,61 @@ class MainWindow(Adw.ApplicationWindow):
     def _ext_complete(self, system: str, user: str) -> str:
         """Short, synchronous, non-streaming completion for the sidecar
         (memory consolidation; the optional foresight model pass).  Routes
-        through the existing BackendRouter so it inherits the fallback chain.
-        Blocks the CALLING thread — the sidecar only ever calls this from a
-        background thread, never the UI thread.  Tolerant of failure: returns
-        "" on any error or timeout so a flaky model never wedges a feature."""
+        through the existing BackendRouter so it inherits the operator's pinned
+        provider.  Blocks the CALLING thread — the sidecar only ever calls this
+        from a background thread, never the UI thread.  Tolerant of failure:
+        returns "" on any error or timeout, so a flaky model degrades a feature
+        instead of wedging it.
+
+        THE TIMEOUT IS REAL NOW.  The previous version called
+        `router.stream_chat(...)` and then `done.wait(timeout=30)` — but
+        stream_chat is SYNCHRONOUS: it does not return until the stream is
+        finished, so `done` was already set by the time we waited on it and the
+        30s bound was dead code.  The true bound was the provider's own idle
+        timeout times the fallback chain length, i.e. minutes.  The call now
+        runs on a worker, the wait carries the deadline, and blowing it SETS THE
+        CANCEL EVENT so the socket is actually abandoned rather than left to
+        finish into a buffer nobody reads.
+
+        Sidecar calls also ask for what they need — a short JSON object — rather
+        than the full chat token budget, and take ONE attempt instead of walking
+        the fallback chain.  Nothing here is a conversation."""
         try:
             if not self.router.any_available():
                 return ""
+            deadline = max(1.0, float(
+                self.settings.get("ext_complete_timeout_s",
+                                  EXT_COMPLETE_TIMEOUT_S)
+                or EXT_COMPLETE_TIMEOUT_S))
             msgs = [{"role": "system", "content": system},
                     {"role": "user", "content": user}]
             buf = {"t": ""}
             done = threading.Event()
-            self.router.stream_chat(
-                msgs,
-                lambda tok: buf.__setitem__("t", buf["t"] + tok),
-                lambda meta: done.set(),
-                lambda err: done.set(),
-                threading.Event())
-            done.wait(timeout=30)
+            cancel = threading.Event()
+
+            def _run():
+                try:
+                    self.router.stream_chat(
+                        msgs,
+                        lambda tok: buf.__setitem__("t", buf["t"] + tok),
+                        lambda meta: done.set(),
+                        lambda err: done.set(),
+                        cancel,
+                        max_tokens_override=self.settings.get(
+                            "ext_complete_max_tokens",
+                            EXT_COMPLETE_MAX_TOKENS),
+                        single_model=True)
+                except Exception as e:
+                    log(f"ext_complete: {type(e).__name__}: {e}")
+                finally:
+                    done.set()
+
+            t = threading.Thread(target=_run, daemon=True)
+            t.start()
+            if not done.wait(timeout=deadline):
+                cancel.set()
+                log(f"ext_complete: timed out after {deadline:.0f}s")
+                return ""
             return buf["t"]
         except Exception:
             return ""
@@ -6600,6 +6801,7 @@ class MainWindow(Adw.ApplicationWindow):
         threading.Thread(target=_run, daemon=True).start()
 
     def _kick_assistant_turn(self):
+        self._mark_turn_progress()
         # If the operator hit stop between tool turns, don't start another.
         if self._stop_requested:
             self._finish_turn_cleanup()
@@ -6910,21 +7112,48 @@ class MainWindow(Adw.ApplicationWindow):
             except Exception:
                 _hard_now = False
 
+        # ── EFFORT: match it to the JOB, not to elapsed steps ──
+        # The old rule escalated to "hard engagement" as soon as the tool chain
+        # reached depth 3.  Depth is a proxy for TIME SPENT, not for DIFFICULTY:
+        # a plain diagnosis that happened to need four cheap reads got the same
+        # "think before you move, reason through the current state" push as a
+        # live exploitation run, three steps into a job that was nearly done.
+        # That is a direct driver of overcomplication — the turn where the model
+        # should be concluding is the exact turn it was being told to deliberate.
+        #
+        # Escalate on EVIDENCE of a hard problem instead:
+        #   · the operator's own words say it is hard (_hard_now), or
+        #   · it is deep AND the recent results show it is actually struggling.
+        # Going deep while things keep working is not struggling, it is progress.
+        _struggling = False
+        if self._tool_chain_depth >= self.settings.get("hard_effort_step", 6):
+            try:
+                _last = [m.get("content", "") for m in history
+                         if "<tool_result>" in (m.get("content") or "")][-3:]
+                _struggling = sum(
+                    1 for tr in _last
+                    if ('"ok": false' in tr.lower() or '"ok":false' in tr.lower()
+                        or "error" in tr.lower()[:400]
+                        or "(rc=1)" in tr or "not found" in tr.lower()[:400])
+                ) >= 2
+            except Exception:
+                _struggling = False
         if _lean:
             _effort = "light"
         elif (self.current_agent_mode and not self._tools_locked
-              and (_hard_now or self._tool_chain_depth
-                   >= self.settings.get("hard_effort_step", 3))):
+              and (_hard_now or _struggling)):
             _effort = "heavy"
-            addendum = (addendum + "\n\n[HARD ENGAGEMENT: this is a complex "
-                        "operation - think before you move. Reason through the "
-                        "current state, form a SPECIFIC hypothesis about what "
-                        "to try and why, then act on it. Read each tool result "
-                        "carefully instead of skimming, and when something "
-                        "fails use what it told you to choose the next move "
-                        "rather than repeating blindly. Balance it: enough "
-                        "thought to aim, enough action to keep the loop "
-                        "moving.]").strip()
+            addendum = (addendum + "\n\n[HARD ENGAGEMENT: this one is not "
+                        "going smoothly, so slow the aim down (not the pace). "
+                        "State the SINGLE most likely reason it is failing, "
+                        "based on what the last results actually said, and test "
+                        "that one thing next. Rank by likelihood x cost to "
+                        "check, cheapest decisive test first, boring causes "
+                        "before exotic ones. Read each result properly instead "
+                        "of skimming, and when something fails use what it told "
+                        "you to pick the next move rather than repeating "
+                        "blindly. One hypothesis per turn; stop the moment it "
+                        "is confirmed.]").strip()
         else:
             _effort = "standard"
 
@@ -6963,6 +7192,26 @@ class MainWindow(Adw.ApplicationWindow):
                         "describe it - then diff to confirm and keep moving.]"
                         ).strip()
 
+        # ── ALREADY DONE — the durable action list ──
+        # This is the counterweight to history trimming. _build_history_for_model
+        # keeps only the last HISTORY_KEEP_FULL_TOOL_RESULTS tool results at full
+        # length and headroom compresses the rest, so by step five the model's
+        # evidence of having already tried something is a 600-char stub while the
+        # mission directive is still shouting the original objective at it. That
+        # asymmetry is what made it redo work from a few turns back. One line per
+        # action, never trimmed, placed immediately before the directive so it is
+        # the last thing read before "take the next action".
+        if (self._action_log is not None
+                and self.settings.get("action_recall", True)
+                and not self._tools_locked):
+            try:
+                _done = self._action_log.prompt_block(
+                    int(self.settings.get("action_recall_entries", 40)))
+                if _done:
+                    addendum = (addendum + "\n\n" + _done).strip()
+            except Exception:
+                pass
+
         if self._mission_active and self._mission_directive:
             addendum = (addendum + "\n\n" + self._mission_directive).strip()
             self._mission_directive = ""
@@ -6970,7 +7219,11 @@ class MainWindow(Adw.ApplicationWindow):
         sysprompt = build_system_prompt(
             agent_mode=(False if _lean else self.current_agent_mode),
             custom_addendum=addendum,
-            grouped=(not self.settings.get("max_mode", False)))
+            grouped=(not self.settings.get("max_mode", False)),
+            # UNLEASH decides the role framing AND which tool groups exist.
+            # Off = ordinary work on his machine, offensive suite not loaded:
+            # cheaper, and it stops a general task being framed as an attack.
+            unleashed=self._unleashed)
         full = assemble_messages(sysprompt, history)
         # Splice in relevance-scoped recall (top-k memories for THIS turn).
         # No-op unless memory is enabled; never grows with history length.
@@ -7018,9 +7271,23 @@ class MainWindow(Adw.ApplicationWindow):
             GLib.idle_add(self._on_stream_reasoning, tok)
 
         def _bg():
-            self.router.stream_chat(full, _on_tok, _on_done, _on_err,
-                                    self.streaming_cancel,
-                                    on_reasoning=_on_reason, effort=_effort)
+            # The turn advances ONLY through _on_done / _on_err.  router.
+            # stream_chat calls one of them on every path it knows about, but if
+            # it raises on a path it does not — a malformed message list, a
+            # provider object in a bad state, an encoding error building the
+            # payload — this thread would die with a traceback on stderr and
+            # neither callback would ever fire.  The reply would sit at
+            # "thinking…" forever.  Route any such escape into the error
+            # callback, which is the path already built for "this turn failed".
+            try:
+                self.router.stream_chat(full, _on_tok, _on_done, _on_err,
+                                        self.streaming_cancel,
+                                        on_reasoning=_on_reason,
+                                        effort=_effort)
+            except Exception as e:
+                log(f"stream worker died: {traceback.format_exc()}")
+                _on_err(f"internal error starting the reply: "
+                        f"{type(e).__name__}: {e}")
 
         self.streaming_thread = threading.Thread(target=_bg, daemon=True)
         self.streaming_thread.start()
@@ -7029,6 +7296,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.terminal_log("── stream start", "dim")
 
     def _on_stream_token(self, tok):
+        self._mark_turn_progress()
         if self.streaming_msg_widget:
             self.streaming_msg_widget.append_streaming(tok)
             # Only scroll if user is on the chat that owns this stream
@@ -7091,9 +7359,29 @@ class MainWindow(Adw.ApplicationWindow):
             return ""
 
     def _on_stream_done(self, meta):
+        self._mark_turn_progress()
         if not self.streaming_msg_widget:
             self._finish_turn_cleanup()
             return False
+        # THE WHOLE BODY IS GUARDED. This callback runs on the main loop —
+        # an unhandled exception here kills the GTK source, and with it the
+        # turn: no tool result, no continue-nudge, no error toast.  Every exit
+        # path from this method either chains the next step (a tool call or
+        # another kick) or cleans up (stop / error / completion), so a failure
+        # anywhere must land at the cleanup rather than silently dying.
+        try:
+            self._on_stream_done_body(meta)
+        except Exception:
+            log(f"_on_stream_done crashed: {traceback.format_exc()}")
+            self.terminal_log("✗ internal error finishing that reply — turn "
+                              "ended", "error")
+            try:
+                self._finish_turn_cleanup()
+            except Exception:
+                pass
+        return False
+
+    def _on_stream_done_body(self, meta):
         final = self.streaming_msg_widget.finish_streaming()
         # Mission completion signal: strip the token from what's shown/stored/
         # spoken, but remember that it fired this turn.
@@ -7157,19 +7445,35 @@ class MainWindow(Adw.ApplicationWindow):
         # writes the shell command in a ```bash``` fence. parse_tool_calls finds
         # no tool tag, so it renders as a copyable code block and NEVER executes —
         # the "it gives me commands with a copy banner instead of running them"
-        # bug. In autonomous walk-away mode (the operator opted into acting), if
-        # NOTHING executable was emitted but the output carries a shell block,
-        # recover the first command and run it through the SAME gate (the
-        # catastrophic floor in _execute_command still applies). This is
-        # deterministic — it doesn't depend on the model getting the format right.
-        # ...and only during an ACTIVE MISSION (a task being worked). On a
-        # question turn (_mission_active is False, the direct-answer path) the
-        # model may legitimately SHOW an example command in a fence — recovering
-        # that would auto-run something the operator only ASKED about. So the
-        # recovery is scoped to tasks, where acting is the whole point.
+        # bug.
+        #
+        # This recovery fires in TWO tiers:
+        #
+        #   1. MISSION (walk-away): always recover. The operator unleashed it; a
+        #      printed command is never the right answer during autonomous work.
+        #
+        #   2. REGULAR TURN (agent mode on, no mission): recover ONLY when the
+        #      reply's own wording says it is ACTING, not EXPLAINING.  "Let me
+        #      check…" + a fence = the model tried to act and fumbled the format;
+        #      recover it.  "You could try running…" + a fence = it is showing an
+        #      example to the operator; leave it alone.  The detector is
+        #      reply_intends_action(), the same one the mission loop already uses,
+        #      so the two judgments are consistent.
+        #
+        # The catastrophic floor in _execute_command still applies to anything
+        # recovered here.  The approval mode gate still applies (if confirmations
+        # are on, the recovered command goes through the confirmation dialog, not
+        # straight to execution).
+        _recover_fence = False
         if (not executable and not cancelled and self.current_agent_mode
-                and not self._tools_locked and self._mission_active
-                and self.settings.get("approval_mode", "none") == "none"):
+                and not self._tools_locked):
+            if self._mission_active:
+                # Tier 1: mission — always recover.
+                _recover_fence = True
+            elif reply_intends_action(final):
+                # Tier 2: regular turn, but the reply says it is acting.
+                _recover_fence = True
+        if _recover_fence:
             _cmd = self._shell_block_command(final)
             if _cmd and not is_catastrophic_command(_cmd):
                 synthetic = ('<tool name="run">' + json.dumps({
@@ -7182,6 +7486,25 @@ class MainWindow(Adw.ApplicationWindow):
                     self.terminal_log(
                         "↩ recovered a printed shell block into a run call "
                         "(model wrote a code block instead of executing)", "error")
+                    # Persist a correction so the model reads it on the NEXT
+                    # turn and stops doing it.  This is the short-term fix —
+                    # the persona carries the standing rule, but a model that
+                    # has already drifted once needs the slap close to the
+                    # drift, not two thousand tokens away in the system prompt.
+                    try:
+                        _corr_cid = (self.streaming_chat_id
+                                     or self.current_chat_id)
+                        if _corr_cid:
+                            self.store.add_message(
+                                _corr_cid, "user",
+                                "[system correction] You wrote a shell command "
+                                "in a ```bash``` code fence instead of calling "
+                                "the run tool. The host recovered it this time. "
+                                "On every future turn: CALL the run tool. Never "
+                                "print a command for the operator to copy.",
+                                meta={"kind": "system"})
+                    except Exception:
+                        pass
         # Honour the agent-mode toggle and the stop button.  If the user
         # turned agent mode off or hit stop, don't execute even if the
         # model emitted a tool tag.
@@ -7407,6 +7730,7 @@ class MainWindow(Adw.ApplicationWindow):
         return False
 
     def _on_stream_error(self, err):
+        self._mark_turn_progress()
         self.terminal_log(f"✗ stream error: {err}", "error")
         if self.streaming_msg_widget:
             # Preserve any tokens that already streamed in.  Wiping the
@@ -7742,7 +8066,8 @@ class MainWindow(Adw.ApplicationWindow):
                 a.get("runs", a.get("results", a.get("items", []))))
         if n == "load_tools":
             return lambda: tool_load_tools(
-                a.get("group", a.get("name", a.get("groups", ""))))
+                a.get("group", a.get("name", a.get("groups", ""))),
+                unleashed=self._unleashed)
         if n == "submit_flag":
             return lambda: tool_submit_flag(
                 a.get("flag", a.get("value", "")), a.get("challenge", ""))
@@ -8019,8 +8344,12 @@ class MainWindow(Adw.ApplicationWindow):
                 meta={"kind": "call"})
         names = ", ".join(c.name for c in calls)
         self.terminal_log(f"→ batch: {names} ({len(calls)} in parallel)", "info")
+        # A parallel batch is one action from the loop's point of view: it feeds
+        # exactly one combined result, so it gets one recall entry.
+        self._pending_action = " + ".join(
+            self._action_label(c) for c in calls)[:400]
 
-        def _bg():
+        def _bg(feed):
             import concurrent.futures
             results: list = [None] * len(calls)
 
@@ -8042,22 +8371,39 @@ class MainWindow(Adw.ApplicationWindow):
                             run_one, list(enumerate(calls))):
                         results[idx] = (name, txt)
             except Exception as e:
-                GLib.idle_add(self._feed_tool_result,
-                              f"batch error: {e}")
+                feed(f"batch error: {e}")
                 return
 
             blocks = []
-            for n, (name, txt) in enumerate(results, 1):
+            for n, slot in enumerate(results, 1):
+                # A slot is None only if ex.map skipped one — unpacking it
+                # blind raised inside this worker thread, and an exception here
+                # means no tool result is ever fed and the turn hangs.
+                if slot is None:
+                    blocks.append(f"[tool {n}/{len(results)}: unknown]\n"
+                                  f"error: no result returned")
+                    continue
+                name, txt = slot
                 blocks.append(f"[tool {n}/{len(results)}: {name}]\n{txt}")
             combined = "\n\n".join(blocks)
             GLib.idle_add(lambda: self.terminal_log(
                 f"✓ batch done ({len(calls)} tools)", "ok") or False)
-            GLib.idle_add(self._feed_tool_result, combined)
+            feed(combined)
 
-        threading.Thread(target=_bg, daemon=True).start()
+        self._tool_thread(_bg, f"batch({names})")
 
     def _execute_tool_calls(self, calls):
         call = calls[0]
+        # ── ACTION RECALL: name the action, then check we are not redoing it ──
+        # Set BEFORE dispatch so the result that comes back can be attached to
+        # it in _feed_tool_result. The guard sits here rather than at each tool
+        # because this is the one place every single-tool call passes through.
+        self._pending_action = self._action_label(call)
+        _blocked = self._repeat_guard(self._pending_action)
+        if _blocked is not None:
+            self._pending_action = None
+            self._feed_tool_result(_blocked)
+            return
         # `propose` and `propose_edit` are advisory — the card (command or
         # diff) already rendered and carries its own Run/Apply button.
         # They never execute here; if one slips through, end the turn so
@@ -8485,7 +8831,8 @@ class MainWindow(Adw.ApplicationWindow):
                     a.get("runs", a.get("results", a.get("items", []))))),
             "load_tools":         lambda a: self._tool_simple(
                 lambda: tool_load_tools(
-                    a.get("group", a.get("name", a.get("groups", ""))))),
+                    a.get("group", a.get("name", a.get("groups", ""))),
+                    unleashed=self._unleashed)),
             "submit_flag":        lambda a: self._tool_simple(
                 lambda: tool_submit_flag(
                     a.get("flag", a.get("value", "")), a.get("challenge", ""))),
@@ -8738,13 +9085,37 @@ class MainWindow(Adw.ApplicationWindow):
             self._feed_tool_result(f"Unknown tool '{call.name}'.")
 
     def _feed_tool_result(self, result_text):
+        # ACTION RECALL: attach this result to whatever action produced it. One
+        # hook here covers every tool, instead of instrumenting each of the
+        # thirty-odd dispatch sites (which is how they drift apart).
+        try:
+            if self._action_log is not None and self._pending_action:
+                self._action_log.record(self._pending_action, result_text or "")
+        except Exception:
+            pass
+        finally:
+            self._pending_action = None
+
+        self._mark_turn_progress()
         # Route to the chat this turn was started in.  Resolved from
         # streaming_chat_id; if the turn was torn down (stop / delete)
         # it's None and we fall back to the current chat.
-        chat_id = self.streaming_chat_id or self.current_chat_id
-        self.store.add_message(chat_id, "user",
-                                f"<tool_result>\n{result_text}\n</tool_result>",
-                                meta={"kind": "tool_result"})
+        #
+        # EVERYTHING BELOW IS GUARDED. This method is the ONLY thing that
+        # advances the turn loop after a tool runs; if it raised — a store write
+        # failing, a deleted chat id, a full disk — _kick_assistant_turn was
+        # never reached and the turn hung in "working…" with no way out but
+        # restarting the app. A failure here must still hand the loop back.
+        try:
+            chat_id = self.streaming_chat_id or self.current_chat_id
+            self.store.add_message(
+                chat_id, "user",
+                f"<tool_result>\n{result_text}\n</tool_result>",
+                meta={"kind": "tool_result"})
+        except Exception as e:
+            log(f"feed_tool_result: store write failed: {e}")
+            self.terminal_log(f"✗ could not record the tool result: {e}",
+                              "error")
         self.streaming_msg_widget = None
         self.streaming_msg_db_id = None
         # If the operator stopped while the tool was running, record the
@@ -8753,7 +9124,127 @@ class MainWindow(Adw.ApplicationWindow):
             self._finish_turn_cleanup()
             return
         # streaming_chat_id stays set — _kick_assistant_turn will preserve it
-        self._kick_assistant_turn()
+        try:
+            self._kick_assistant_turn()
+        except Exception:
+            log(f"kick after tool result failed: {traceback.format_exc()}")
+            self.terminal_log("✗ could not start the next step — turn ended",
+                              "error")
+            self._finish_turn_cleanup()
+
+    # ── action recall ───────────────────────────────────────────
+    def _reset_action_log(self):
+        """A new objective was latched — the previous run's actions are no
+        longer 'what we already tried'."""
+        if self._action_log is not None:
+            self._action_log.reset()
+        self._pending_action = None
+
+    def _action_label(self, call) -> str:
+        """One short, comparable line describing a tool call.
+
+        This is what the repeat check compares and what the model reads back, so
+        it has to carry the ARGUMENT that makes the call distinct — `run` alone
+        is not an action, `run: nmap -sV 10.0.0.5` is.
+        """
+        n = (getattr(call, "name", "") or "tool").strip()
+        a = getattr(call, "args", None) or {}
+        for k in ("command", "cmd", "path", "url", "query", "target",
+                  "pattern", "name", "host"):
+            v = a.get(k)
+            if v:
+                return f"{n}: {str(v).strip()[:180]}"
+        if a:
+            try:
+                return f"{n}: {json.dumps(a, sort_keys=True, default=str)[:180]}"
+            except Exception:
+                pass
+        return n
+
+    def _repeat_guard(self, label: str):
+        """Deterministic backstop for a model that ignores the already-done list.
+
+        Returns the text to feed back INSTEAD of running, or None to proceed.
+
+        Two executions of the same action are always allowed: re-running a check
+        after changing something is how verification works, and blocking that
+        would break correct behaviour. A THIRD is not verification — by then the
+        result is not being read, and running it again costs a round-trip, real
+        side effects, and (on a scanner) minutes.
+        """
+        if self._action_log is None or not label:
+            return None
+        limit = int(self.settings.get("repeat_block_after", 2) or 0)
+        if limit <= 0:
+            return None
+        if not self._action_log.should_block(label, limit):
+            return None
+        prev = self._action_log.previous(label) or {}
+        self.terminal_log(f"⛔ repeat guard: {label[:70]} already run "
+                          f"{self._action_log.times_run(label)}× — not "
+                          f"running it again", "error")
+        return (f"NOT RUN — repeat guard. You have already performed this exact "
+                f"action {self._action_log.times_run(label)} times this run:\n"
+                f"    {label}\n"
+                f"Its result last time was:\n    {prev.get('outcome', 'n/a')}\n"
+                f"Running it a third time cannot tell you anything new. Read "
+                f"the ALREADY DONE list, pick a DIFFERENT next action — verify "
+                f"the state another way, change the parameters, or conclude "
+                f"with what you have.")
+
+    def _tool_thread(self, body, label="tool"):
+        """Run a tool body on a worker thread with a GUARANTEED tool result.
+
+        THIS IS THE FIX FOR "IT JUST HANGS".  The assistant turn loop only ever
+        advances when something feeds it — a stream callback, or a tool result.
+        Every tool runs on a daemon thread, and before this helper existed each
+        one was individually responsible for making sure a result came back.
+        Several did not: `tool_run_command` (the hottest path in the app),
+        `tool_list_dir`, `tool_find_file` and `tool_write_file` were all called
+        with no exception handling, and their results indexed with `r['rc']` /
+        `r['entries']` / `r['size']` rather than `.get`.  An OSError spawning a
+        process, a KeyError on an unexpected result shape, a UnicodeDecodeError
+        on binary output — any of them killed the worker thread silently, no
+        tool result was ever fed, and the turn sat in "working…" forever with no
+        way out but restarting the app.
+
+        `body(feed)` receives a ONE-SHOT feed callable.  Whatever the body does
+        — returns without feeding, raises halfway, feeds and then raises —
+        exactly one result reaches the model, so the loop always advances and
+        the failure is something the model can read and route around.
+        """
+        state = {"fed": False}
+        lock = threading.Lock()
+
+        def feed(text):
+            with lock:
+                if state["fed"]:
+                    return
+                state["fed"] = True
+            GLib.idle_add(self._feed_tool_result, text)
+
+        def _run():
+            try:
+                body(feed)
+            except Exception as e:
+                log(f"tool thread [{label}] failed: {traceback.format_exc()}")
+                try:
+                    GLib.idle_add(
+                        lambda m=str(e): self.terminal_log(
+                            f"✗ {label} failed: {m}", "error") or False)
+                except Exception:
+                    pass
+                feed(f"error: {label} failed with "
+                     f"{type(e).__name__}: {e}\nThe tool did not complete. "
+                     f"Do not retry it identically — check the arguments or "
+                     f"use a different approach.")
+            finally:
+                # Belt and braces: a body that returns without feeding (an early
+                # `return` down some branch) would otherwise strand the turn.
+                feed(f"error: {label} produced no result (internal fault). "
+                     f"Treat this as a failure and try a different approach.")
+
+        threading.Thread(target=_run, daemon=True).start()
 
     def _bg_feed_text(self, fn):
         """Run fn() — which returns the final result STRING — on a background
@@ -9161,21 +9652,15 @@ class MainWindow(Adw.ApplicationWindow):
         return spec.base_url if spec else ""
 
     def _tool_simple(self, fn):
-        def _bg():
-            try:
-                GLib.idle_add(lambda: self.terminal_log(f"→ running {fn.__name__ if hasattr(fn, '__name__') else 'tool'}…", "info") or False)
-                result = fn()
-                text = json.dumps(result, indent=2, default=str)
-                GLib.idle_add(lambda: self.terminal_log("✓ done", "ok") or False)
-            except Exception as e:
-                # Capture the message NOW — `e` is deleted when this except
-                # block exits, but the idle_add lambda runs later in the main
-                # loop, so referencing `e` inside it raises NameError.
-                msg = str(e)
-                text = f"error: {msg}"
-                GLib.idle_add(lambda m=msg: self.terminal_log(f"✗ {m}", "error") or False)
-            GLib.idle_add(self._feed_tool_result, text)
-        threading.Thread(target=_bg, daemon=True).start()
+        name = fn.__name__ if hasattr(fn, "__name__") else "tool"
+        def _bg(feed):
+            GLib.idle_add(lambda: self.terminal_log(
+                f"→ running {name}…", "info") or False)
+            result = fn()
+            text = json.dumps(result, indent=2, default=str)
+            GLib.idle_add(lambda: self.terminal_log("✓ done", "ok") or False)
+            feed(text)
+        self._tool_thread(_bg, name)
 
     def _action_tool(self, name, fn, description):
         """Run an action tool (one with side effects: launching apps,
@@ -9210,7 +9695,7 @@ class MainWindow(Adw.ApplicationWindow):
                 self._feed_tool_result(f"operator declined saving skill {name!r}")
                 return
 
-            def _bg():
+            def _bg(feed):
                 try:
                     r = self._ext.commit_skill(name, code, test, desc, caps)
                 except Exception as e:
@@ -9220,10 +9705,10 @@ class MainWindow(Adw.ApplicationWindow):
                                       f"(sandbox: {r.get('tier')})", "ok")
                 else:
                     self.terminal_log(f"✗ skill rejected: "
-                                      f"{r.get('reason') or r.get('error')}", "error")
-                GLib.idle_add(self._feed_tool_result,
-                              json.dumps(r, indent=2, default=str))
-            threading.Thread(target=_bg, daemon=True).start()
+                                      f"{r.get('reason') or r.get('error')}",
+                                      "error")
+                feed(json.dumps(r, indent=2, default=str))
+            self._tool_thread(_bg, f"skill_save {name}")
 
         descr = (f"save self-written skill '{name}'"
                  + (f" (caps: {', '.join(caps)})" if caps else "")
@@ -9239,10 +9724,9 @@ class MainWindow(Adw.ApplicationWindow):
             self._feed_tool_result("error: no path")
             return
         def do_read():
-            def _bg():
-                r = tool_read_file(path)
-                GLib.idle_add(self._render_read, r)
-            threading.Thread(target=_bg, daemon=True).start()
+            def _bg(feed):
+                feed(self._format_read(tool_read_file(path)))
+            self._tool_thread(_bg, "read_file")
         if is_sensitive_path(path):
             confirm_sensitive_read_dialog(self, path, lambda allow:
                 do_read() if allow
@@ -9250,43 +9734,53 @@ class MainWindow(Adw.ApplicationWindow):
         else:
             do_read()
 
-    def _render_read(self, r):
+    def _format_read(self, r):
+        """Turn a tool_read_file result into the text the model sees.
+
+        Was _render_read, which fed the result itself and indexed r["content"] /
+        r["path"] / r["size"] directly — so an unexpected result shape raised
+        inside a worker thread and the turn hung.  Now it only FORMATS; the
+        feeding (and the guarantee that one happens) belongs to _tool_thread."""
+        r = r or {}
         if not r.get("ok"):
-            self._feed_tool_result(f"read_file error: {r.get('error')}")
-            return
-        body = r["content"]
-        header = (f"file: {r['path']} ({r['size']} bytes"
-                  f"{' truncated' if r['truncated'] else ''})")
-        self._feed_tool_result(f"{header}\n\n{body}")
+            return f"read_file error: {r.get('error')}"
+        body = r.get("content", "")
+        header = (f"file: {r.get('path')} ({r.get('size')} bytes"
+                  f"{' truncated' if r.get('truncated') else ''})")
+        return f"{header}\n\n{body}"
 
     def _tool_list_dir(self, path):
-        def _bg():
+        def _bg(feed):
             self.terminal_log(f"→ list_dir {path}", "info")
-            r = tool_list_dir(path)
+            r = tool_list_dir(path) or {}
             if not r.get("ok"):
                 text = f"list_dir error: {r.get('error')}"
                 self.terminal_log(f"✗ {r.get('error')}", "error")
             else:
-                lines = [f"dir: {r['path']}", ""]
-                for e in r["entries"]:
-                    sz = "" if e["is_dir"] else f"  ({e['size']}B)"
-                    lines.append(f"  {e['name']}{sz}")
+                entries = r.get("entries") or []
+                lines = [f"dir: {r.get('path', path)}", ""]
+                for e in entries:
+                    sz = "" if e.get("is_dir") else f"  ({e.get('size')}B)"
+                    lines.append(f"  {e.get('name')}{sz}")
                 text = "\n".join(lines)
-                self.terminal_log(f"✓ {len(r['entries'])} entries", "ok")
-            GLib.idle_add(self._feed_tool_result, text)
-        threading.Thread(target=_bg, daemon=True).start()
+                self.terminal_log(f"✓ {len(entries)} entries", "ok")
+            feed(text)
+        self._tool_thread(_bg, "list_dir")
 
     def _tool_find_file(self, pattern, search_path, max_results=50,
                         min_size_kb=0, max_size_kb=0,
                         modified_within_days=0):
-        def _bg():
+        def _bg(feed):
             self.terminal_log(f"→ find {pattern} in {search_path}", "info")
             r = tool_find_file(pattern, search_path, max_results,
-                               min_size_kb, max_size_kb, modified_within_days)
+                               min_size_kb, max_size_kb,
+                               modified_within_days) or {}
             if r.get("ok"):
-                lines = [f"find {pattern} in {r['search_path']}: "
-                         f"{r['count']} hit(s)"]
-                for hit in r["found"]:
+                found = r.get("found") or []
+                count = r.get("count", len(found))
+                lines = [f"find {pattern} in {r.get('search_path', search_path)}: "
+                         f"{count} hit(s)"]
+                for hit in found:
                     if isinstance(hit, dict):
                         sz = hit.get("size")
                         szs = f"  ({sz}B)" if sz is not None else ""
@@ -9294,12 +9788,12 @@ class MainWindow(Adw.ApplicationWindow):
                     else:
                         lines.append(f"  {hit}")
                 text = "\n".join(lines)
-                self.terminal_log(f"✓ {r['count']} found", "ok")
+                self.terminal_log(f"✓ {count} found", "ok")
             else:
                 text = f"find_file error: {r.get('error')}"
                 self.terminal_log(f"✗ {r.get('error')}", "error")
-            GLib.idle_add(self._feed_tool_result, text)
-        threading.Thread(target=_bg, daemon=True).start()
+            feed(text)
+        self._tool_thread(_bg, "find_file")
 
     def _tool_run(self, command, reason):
         # Reached only when the model emits <tool name="run"> after the
@@ -9356,16 +9850,16 @@ class MainWindow(Adw.ApplicationWindow):
         self._set_working(True, "writing file…")
         self._set_send_mode(True)
 
-        def _bg():
-            r = tool_write_file(path, content)
+        def _bg(feed):
+            r = tool_write_file(path, content) or {}
             if r.get("ok"):
-                parts = [f"wrote {r['path']} ({r['size']} bytes)"]
+                parts = [f"wrote {r.get('path', path)} ({r.get('size')} bytes)"]
                 if r.get("created"):
                     parts.append("(new file created)")
                 if r.get("backup"):
                     parts.append(f"backup: {r['backup']}")
                 if r.get("is_python"):
-                    base = os.path.basename(r["path"])
+                    base = os.path.basename(r.get("path") or path)
                     if base == "basilisk_persona.py":
                         if self._reload_persona():
                             parts.append("Persona reloaded live — the new "
@@ -9382,8 +9876,8 @@ class MainWindow(Adw.ApplicationWindow):
                 out = "\n".join(parts)
             else:
                 out = f"write failed for {path}\nerror: {r.get('error')}"
-            GLib.idle_add(self._feed_tool_result, out)
-        threading.Thread(target=_bg, daemon=True).start()
+            feed(out)
+        self._tool_thread(_bg, f"write_file {path}")
 
     def _run_proposed_command(self, command, explanation="", card=None):
         """Called when the operator clicks Run on a proposed-command card.
@@ -9433,13 +9927,35 @@ class MainWindow(Adw.ApplicationWindow):
         self._sudo_pw = None
         self._sudo_pw_time = 0.0
 
-    def _execute_command(self, command, reason, from_card=False):
+    def _foresight_rule_floor(self, command):
+        """Foresight's DETERMINISTIC verdict only — no model, no network.
+
+        Used when the optional model pass blows its deadline.  Falling back to
+        this rather than to a bare `allow` matters: the rule floor is the tier
+        that catches the irreversible shapes (mkfs, dd onto a block device,
+        partition edits, fork bombs), and the model pass may only ever ESCALATE
+        above it.  So a timeout costs us the refinement, never the floor."""
+        try:
+            from basilisk_ext.foresight import _rule_floor
+            return _rule_floor(command or "")
+        except Exception:
+            return {"verdict": "allow", "reasons": ["foresight unavailable"]}
+
+    def _execute_command(self, command, reason, from_card=False,
+                         _foresight=None):
         """Confirm (with sudo password if needed), run, feed result back.
         Shared by the model's `run` tool and the card's Run button.
 
         from_card=True means the operator already approved by clicking Run,
         so we skip the redundant y/n and only surface a dialog when the
-        command needs root (to collect the password)."""
+        command needs root (to collect the password).
+
+        _foresight is internal: None means "not assessed yet" and a dict means
+        "already assessed, don't re-enter the gate".  It is a PARAMETER rather
+        than instance state deliberately — the previous instance-flag version
+        was cleared in a `finally` as soon as this method returned, which is
+        while the command it launched is still running on a worker thread."""
+        self._mark_turn_progress()
         if not command:
             self._feed_tool_result("error: no command")
             return
@@ -9465,54 +9981,111 @@ class MainWindow(Adw.ApplicationWindow):
 
         # ── foresight gate ──
         # Predict consequences before running.  Off unless foresight_enabled.
-        # Runs in a background thread so the optional model pass can't freeze
-        # the UI, then resumes here.  A `block` (catastrophic / irreversible)
-        # refuses outright; a `caution` is surfaced and then proceeds through
-        # the normal confirm path.  The _fs_cleared flag stops re-entry.
-        if (not getattr(self, "_fs_cleared", False)
+        #
+        # Three things were wrong with the old version of this block and all
+        # three are fixed here:
+        #
+        #  1. A `block` verdict did NOTHING.  The old code computed a
+        #     `force_confirm` flag, stored it on self as `_fs_force_confirm`,
+        #     and then no code anywhere ever read that attribute — so foresight
+        #     printed an alarming card and ran the command regardless.  A safety
+        #     layer that logs and proceeds is not a safety layer.  A block now
+        #     actually refuses, AND the refusal is fed back as a tool result so
+        #     the model can pick a different approach instead of the turn simply
+        #     dangling with nothing to answer.
+        #
+        #  2. The assessment had NO deadline.  With the optional model pass on,
+        #     `_ext.foresight()` makes a full network round-trip; if that hung,
+        #     `_resume` never ran, the command never executed, no tool result was
+        #     ever fed back, and the whole turn sat in "working" until the app
+        #     was restarted.  The assessment is now watchdogged: if it does not
+        #     land inside `foresight_timeout_s`, we proceed on the deterministic
+        #     rule floor (instant, local, and the part that actually carries the
+        #     safety weight) and say so in the log.  Latency never wedges a turn.
+        #
+        #  3. Re-entrancy rode on an INSTANCE flag (`_fs_cleared`) that was
+        #     cleared in a `finally` the moment `_execute_command` returned —
+        #     which is long before the command it started has finished.  The
+        #     verdict is now passed down as a parameter, so it belongs to this
+        #     one call and cannot be clobbered by a concurrent one.
+        if (_foresight is None
                 and getattr(self, "_ext", None)
                 and self.settings.get("foresight_enabled", False)):
+            _fs_deadline = max(
+                1.0, float(self.settings.get("foresight_timeout_s",
+                                             FORESIGHT_TIMEOUT_S) or
+                           FORESIGHT_TIMEOUT_S))
+            _slot = {"v": None}
+            _landed = threading.Event()
+
             def _fbg():
                 try:
-                    v = self._ext.foresight(command)
+                    _slot["v"] = self._ext.foresight(command)
+                except Exception as e:
+                    _slot["v"] = {"verdict": "allow",
+                                  "reasons": [f"foresight error: {e}"]}
+                finally:
+                    _landed.set()
+
+            def _resume():
+                v = _slot["v"]
+                timed_out = v is None
+                if timed_out:
+                    # The assessment is still in flight.  Fall back to the
+                    # deterministic rule floor, which is pure pattern matching
+                    # over the command string: no network, no model, sub-100us.
+                    # The catastrophic floor at the execution primitive is
+                    # untouched by any of this and still applies.
+                    v = self._foresight_rule_floor(command)
+                    self.terminal_log(
+                        f"⏱ foresight model pass exceeded {_fs_deadline:.0f}s "
+                        f"— proceeding on the deterministic rules", "error")
+                try:
+                    from basilisk_ext.foresight import render_card
                 except Exception:
-                    v = {"verdict": "allow"}
-                def _resume():
-                    try:
-                        from basilisk_ext.foresight import render_card
-                    except Exception:
-                        render_card = lambda x: ""
-                    verdict = v.get("verdict")
-                    force_confirm = False
-                    if verdict in ("block", "caution"):
-                        # Show the consequence card either way so the operator
-                        # sees foresight's read in the log.
-                        card = render_card(v)
-                        if card:
-                            self.terminal_log(card, "error")
-                        # In autonomous walk-away mode, foresight's CAUTION layer
-                        # is advisory ONLY — it logs and lets the command run, so
-                        # risky-but-normal pentest commands (curl|bash to fetch a
-                        # tool, kill -9 a hung scan, a firewall/route tweak) never
-                        # interrupt an unattended engagement. A BLOCK verdict
-                        # (disk wipe, mkfs, partition edit, fork bomb — never a
-                        # hacking command) still stops for an explicit OK, on top
-                        # of the no-override catastrophic floor already enforced
-                        # at the execution primitive. Supervised mode stops on
-                        # both, as before.
-                        force_confirm = (verdict == "block"
-                                         or _APPROVAL_MODE != "none")
-                    self._fs_cleared = True
-                    self._fs_force_confirm = force_confirm
-                    try:
-                        self._execute_command(command, reason,
-                                              from_card=from_card)
-                    finally:
-                        self._fs_cleared = False
-                        self._fs_force_confirm = False
+                    render_card = lambda x: ""
+                verdict = (v or {}).get("verdict", "allow")
+                if verdict in ("block", "caution"):
+                    # Show the consequence card either way so the operator
+                    # sees foresight's read in the log.
+                    card = render_card(v)
+                    if card:
+                        self.terminal_log(card, "error")
+                if verdict == "block":
+                    # BLOCK is the whole point of the layer: an irreversible,
+                    # system-destroying shape (disk wipe, mkfs, partition edit,
+                    # fork bomb) — never an ordinary hacking command, and never
+                    # something the model can argue down, because the rule floor
+                    # sets it and the model may only escalate.  Refuse, and TELL
+                    # THE MODEL, so it adapts rather than waiting on a result
+                    # that would never come.
+                    _why = "; ".join((v or {}).get("reasons") or []) \
+                        or "predicted irreversible damage to this machine"
+                    self.terminal_log(
+                        "■ BLOCKED by foresight — not run", "error")
+                    self._feed_tool_result(
+                        "REFUSED by foresight. Predicted consequence: " + _why
+                        + ".\nThis command was NOT run. Do not retry it as-is. "
+                        "Use a reversible form, narrow the target, or ask the "
+                        "operator to do it himself in a real terminal.\n\n  "
+                        + command)
                     return False
+                # In autonomous walk-away mode, foresight's CAUTION layer is
+                # advisory ONLY — it logs and lets the command run, so risky-
+                # but-normal pentest commands (curl|bash to fetch a tool,
+                # kill -9 a hung scan, a firewall/route tweak) never interrupt
+                # an unattended engagement.  Supervised mode still stops on a
+                # caution through the normal confirm path below.
+                self._execute_command(command, reason, from_card=from_card,
+                                      _foresight=(v or {"verdict": "allow"}))
+                return False
+
+            def _watch():
+                _landed.wait(_fs_deadline)
                 GLib.idle_add(_resume)
+
             threading.Thread(target=_fbg, daemon=True).start()
+            threading.Thread(target=_watch, daemon=True).start()
             return
 
         # ── (#4) command de-duplication ──
@@ -9559,13 +10132,13 @@ class MainWindow(Adw.ApplicationWindow):
                 "(append ' &') so it doesn't block.", timeout=6)
 
         def run_bg(password=None):
-            def _bg():
+            def _bg(feed):
                 # Log the command but DON'T force the panel open — the
                 # operator opens the log themselves with the toggle when
                 # they want it.  The command still shows in the status line.
                 self.terminal_log(f"$ {command}", "cmd")
                 r = tool_run_command(command, timeout=timeout,
-                                     sudo_password=password)
+                                     sudo_password=password) or {}
                 # Record to the evidence ledger (fail-safe: a ledger error must
                 # never affect the command result the operator sees).
                 try:
@@ -9575,16 +10148,23 @@ class MainWindow(Adw.ApplicationWindow):
                 except Exception:
                     pass
                 if r.get("ok"):
-                    parts = [f"$ {command}", f"(rc={r['rc']})"]
-                    if r["stdout"]:
+                    # `.get` throughout, not `r['rc']`.  This runs on a worker
+                    # thread whose only job is to produce a tool result; a
+                    # KeyError here used to kill the thread, and with it the
+                    # turn — the loop has no other way to advance.
+                    rc = r.get("rc")
+                    stdout = r.get("stdout") or ""
+                    stderr = r.get("stderr") or ""
+                    parts = [f"$ {command}", f"(rc={rc})"]
+                    if stdout:
                         # Stream stdout to terminal log line by line
-                        for line in r["stdout"].splitlines()[:80]:
+                        for line in stdout.splitlines()[:80]:
                             GLib.idle_add(lambda l=line: self.terminal_log(l, "stdout") or False)
-                        parts.append(r["stdout"])
-                    if r["stderr"]:
-                        for line in r["stderr"].splitlines()[:20]:
+                        parts.append(stdout)
+                    if stderr:
+                        for line in stderr.splitlines()[:20]:
                             GLib.idle_add(lambda l=line: self.terminal_log(l, "stderr") or False)
-                        parts.append(f"stderr:\n{r['stderr']}")
+                        parts.append(f"stderr:\n{stderr}")
                     if r.get("sudo_auth_failed"):
                         parts.append(
                             "\n[note] sudo could not authenticate "
@@ -9595,13 +10175,15 @@ class MainWindow(Adw.ApplicationWindow):
                         # command asks for it again instead of failing silently.
                         GLib.idle_add(self._clear_sudo_pw)
                     else:
-                        self.terminal_log(f"✓ rc={r['rc']}", "ok" if r['rc'] == 0 else "error")
+                        self.terminal_log(f"✓ rc={rc}",
+                                          "ok" if rc == 0 else "error")
                     out = "\n".join(parts)
                 else:
                     out = f"$ {command}\nerror: {r.get('error')}"
                     self.terminal_log(f"✗ {r.get('error')}", "error")
-                GLib.idle_add(self._feed_tool_result, out)
-            threading.Thread(target=_bg, daemon=True).start()
+                feed(out)
+            self._tool_thread(_bg, f"run {command.strip().split()[0]}"
+                              if command.strip() else "run")
 
         def decide(allow, password=None):
             if not allow:
@@ -9656,36 +10238,30 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _tool_audit(self):
         self._show_toast("Auditing…")
-        def _bg():
-            try:
-                def _prog(title, done, total):
-                    self.terminal_log(f"[{done}/{total}] {title}", "info")
-                audit = run_security_audit(on_progress=_prog)
-                text = format_audit_for_chat(audit)
-                self.terminal_log(f"✓ audit complete — grade {audit['grade']}", "ok")
-            except Exception as e:
-                text = f"audit failed: {type(e).__name__}: {e}"
-                self.terminal_log(f"✗ audit failed: {e}", "error")
-            GLib.idle_add(self._feed_tool_result, text)
-        threading.Thread(target=_bg, daemon=True).start()
+        def _bg(feed):
+            def _prog(title, done, total):
+                self.terminal_log(f"[{done}/{total}] {title}", "info")
+            audit = run_security_audit(on_progress=_prog)
+            text = format_audit_for_chat(audit)
+            self.terminal_log(f"✓ audit complete — grade {audit.get('grade')}", "ok")
+            feed(text)
+        self._tool_thread(_bg, "audit")
 
     def _tool_scan_net(self, cidr=None):
         self._show_toast("Scanning network…")
-        def _bg():
-            try:
-                def _prog(msg):
-                    self.terminal_log(f"nmap: {msg}", "info")
-                scan = run_network_scan(cidr, on_progress=_prog)
-                text = format_scan_for_chat(scan)
-                if scan.get("ok"):
-                    self.terminal_log(f"✓ scan complete — {len(scan.get('hosts', []))} hosts", "ok")
-                else:
-                    self.terminal_log(f"✗ scan failed: {scan.get('error')}", "error")
-            except Exception as e:
-                text = f"scan failed: {type(e).__name__}: {e}"
-                self.terminal_log(f"✗ {e}", "error")
-            GLib.idle_add(self._feed_tool_result, text)
-        threading.Thread(target=_bg, daemon=True).start()
+        def _bg(feed):
+            def _prog(msg):
+                self.terminal_log(f"nmap: {msg}", "info")
+            scan = run_network_scan(cidr, on_progress=_prog)
+            text = format_scan_for_chat(scan)
+            if scan.get("ok"):
+                self.terminal_log(f"✓ scan complete — "
+                                  f"{len(scan.get('hosts', []))} hosts", "ok")
+            else:
+                self.terminal_log(f"✗ scan failed: {scan.get('error')}",
+                                  "error")
+            feed(text)
+        self._tool_thread(_bg, "scan_net")
 
     # ── user-initiated chip actions ─────────────────────────────
 
@@ -9987,6 +10563,7 @@ class MainWindow(Adw.ApplicationWindow):
                 self._mission_objective = last
                 self._mission_kicks = 0
                 self._recent_commands = []
+                self._reset_action_log()
                 self._mission_verify_pending = False
                 self._mission_no_action_streak = 0
                 self._mission_directive = ""

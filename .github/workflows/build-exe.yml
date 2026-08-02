@@ -1,3 +1,4 @@
+
 name: Build Windows EXE
 
 on:
@@ -25,16 +26,20 @@ jobs:
             mingw-w64-x86_64-python-cairo
             mingw-w64-x86_64-gtk4
             mingw-w64-x86_64-libadwaita
-
-      - name: Install PyInstaller inside MSYS2
-        shell: msys2 {0}
-        run: |
-          python -m pip install pyinstaller
+            mingw-w64-x86_64-gobject-introspection
+            mingw-w64-x86_64-gsettings-desktop-schemas
+            mingw-w64-x86_64-pkgconf
+            mingw-w64-x86_64-python-pyinstaller
 
       - name: Build Executable
         shell: msys2 {0}
         run: |
-          pyinstaller --onefile --add-data "assets;assets" basilisk.py
+          pyinstaller --onefile \
+            --collect-all gi \
+            --add-data "/mingw64/lib/girepository-1.0;lib/girepository-1.0" \
+            --add-data "/mingw64/share/glib-2.0/schemas;share/glib-2.0/schemas" \
+            --add-data "assets;assets" \
+            basilisk.py
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
