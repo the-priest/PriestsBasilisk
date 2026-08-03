@@ -331,12 +331,191 @@ dropped emoji leaves a space that becomes a LEADING hyphen — anchors really ar
 missing because the README writes `*only*` with markdown emphasis. Both times
 the checker was wrong and the artifact was right.
 
+### Groq audit: 4 of 6 chain models retired, including the default (v9.1.0 addendum)
+
+Asked to check whether Groq had better free models. It does — but the more
+urgent finding was that the existing config was **already broken in
+production**, and would have broken completely within two weeks.
+
+Re-verified against `console.groq.com/docs/models` and `/docs/deprecations` on
+2026-08-03. The chain was written against the May 2026 catalogue:
+
+| Model | Status |
+|---|---|
+| `llama-3.3-70b-versatile` | **was `GROQ_DEFAULT_MODEL`** — shuts down 2026-08-16 |
+| `openai/gpt-oss-120b` | live |
+| `meta-llama/llama-4-scout-17b-16e-instruct` | **dead since 2026-07-17** |
+| `qwen/qwen3-32b` | **dead since 2026-07-17** |
+| `openai/gpt-oss-20b` | live |
+| `llama-3.1-8b-instant` | shuts down 2026-08-16 |
+
+Two ids were returning errors already; two more, including the default, had
+13 days left. Same failure shape as the SiliconFlow chain in v7.9.3 — an id
+list is a perishable good — and the miss was that the retirement guard written
+then was **provider-specific**, so nothing was ever watching Groq.
+
+**Also dead and unnoticed:** BOTH entries in `VISION_MODELS["groq"]`
+(llama-4-maverick retired 2026-03-09, llama-4-scout 2026-07-17), so
+`analyze_image` on Groq would simply have 404'd. And `install.sh` carries its
+own hardcoded fallback defaults — a second copy of the same facts — which still
+named the retired 70B.
+
+**New config** (Groq's own migration guidance):
+- `GROQ_DEFAULT_MODEL` → `openai/gpt-oss-120b` (flagship open-weight, ~500 t/s)
+- Chain → `gpt-oss-120b` → `gpt-oss-20b`. Production only, and short: each entry
+  is another round-trip while the operator waits, and every Groq model has its
+  own rate-limit bucket so two already give a real second chance on a 429.
+- **Groq's catalogue was empty** and now has three entries, so its picker shows
+  context window, price and purpose instead of bare ids: gpt-oss-120b
+  (flagship), qwen3.6-27b (highest measured intelligence on Groq, vision — but
+  PREVIEW and 5x the output price, flagged as such), gpt-oss-20b (budget,
+  ~1000 t/s, cheapest).
+- Vision → `qwen/qwen3.6-27b`, the only vision-capable model Groq now serves.
+
+**Deliberately NOT added: `groq/compound` / `groq/compound-mini`.** They are
+agentic systems with built-in web search and code execution — the model fetches
+attacker-chosen URLs itself, outside Basilisk's tool layer and outside the
+`web_read` tier gate. Basilisk's entire injection posture is that those fetchers
+were removed and what remains is tiered in code; a pickable model that quietly
+re-adds one would undo that without the operator seeing a prompt. Their 8,192
+max completion is also below what a tool-calling turn needs. A security call,
+not a capability one — recorded in the source so it is not "fixed" later.
+
+**Preview models stay off the fallback chain.** `qwen3.6-27b` is pickable but
+not walked: a fallback path exists for when things are already going wrong, and
+"may be discontinued at short notice" is the one property it must not have.
+
+**tests/test_models.py 62 → 86 assertions.** A Groq retirement blocklist with
+published shutdown dates, plus the fix for the actual gap: the dead-id sweep now
+covers **every id list** — chains, catalogues, vision lists, and the installer's
+hardcoded fallbacks — rather than chains alone. Also asserts the default heads
+the chain, no preview model is on it, and the compound systems stay unselectable.
+The catalogue-less code path kept its coverage via a synthetic ProviderSpec
+rather than losing it when Groq stopped being the example.
+
+### Unblocking replaces timing out (v9.1.0 addendum)
+
+The operator's diagnosis was right and it applied to work I had done earlier in
+this same session: I had been adding timeouts, and a timeout is a symptom fix.
+
+**The actual bug.** `tool_run_command` ran `subprocess.run(timeout=...)` and
+handled the timeout like this:
+
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "rc": 124, "timed_out": True, "error": ...}
+
+CPython populates `TimeoutExpired.stdout` with every byte the process wrote.
+That handler never read it. **Verified with a reproduction**: a command that
+printed 200 lines and then hung had all 200 lines sitting on the exception, and
+all 200 were discarded. A scan that enumerated two hundred hosts and stalled on
+the last one reported nothing at all, so the agent re-ran the entire scan. "It
+times out and it's back on 0" was a thrown-away-data bug wearing a timeout
+costume, not a tuning problem.
+
+**The second bug** is that a wall clock cannot tell SLOW from STUCK. `nmap -p-
+/24` is twenty-five minutes of real work that is silent in stretches; a curl
+against a dead host is twenty-five minutes of nothing. They got the same number.
+
+**New `basilisk_ext/unblock.py` — supervision by progress.**
+- A process writing output is working. A process burning CPU is working even in
+  total silence (compile, hash crack, crypto) — measured from `/proc/<pid>/stat`
+  summed across the whole process group, because `make` goes idle while its
+  children work. **Any sign of life resets the stall clock**, so there is NO
+  wall-clock limit; a job may run for a week if it keeps progressing.
+- Only silence AND flat CPU is a stall candidate, and even then usually isn't —
+  DNS retry, TCP backoff and rate limiters look identical for tens of seconds.
+
+**When something really has stalled, a ladder that tries to UNSTICK it:**
+1. **Notice** — record it, keep waiting. Most resolve themselves.
+2. **Unblock** — diagnose. The commonest real stall is a process blocked
+   reading stdin: an interactive prompt nobody answered (`Continue? [y/N]`, a
+   host-key prompt, a pager). That is not a timeout, it is an unanswered
+   question, and closing stdin lets the job *finish*. **A timeout can only ever
+   kill it.** Proven in the suite: a command blocked on a prompt is unblocked
+   and completes with rc=0.
+3. **Harvest** — still stuck? Take everything captured, return it marked
+   `partial` with a diagnosis naming what stalled and what to do differently.
+   Stopping the process is bookkeeping at that point, not the answer.
+
+The diagnosis is written for the MODEL: "200 lines were produced before it
+stalled — that work is done, use it, do NOT re-run from the start; it never used
+CPU so it was waiting on something external; narrow the scope or resume from
+where the output ends." "Timed out" told it nothing except to retry identically,
+which is how a twenty-minute scan gets run twice.
+
+**My own bug, caught by my own test.** The first pump used
+`stream.read(65536)`, but `BufferedReader.read(n)` blocks until it has all n
+bytes or hits EOF — so captured bytes stayed flat for the entire run and the
+progress detector never fired, killing a job that was emitting a line a second.
+`read1()` returns what is available now. The test that caught it asserts a job
+outlives a harvest threshold shorter than its runtime.
+
+`salvage_timeout()` also rescues output on any remaining `subprocess.run` path,
+so nothing is binned anywhere.
+
+**Wired:** `tool_run_command` routes through the supervisor with
+`max_wall_s=None` — the `timeout` argument now only scales stall *patience* for
+commands the runtime estimator already expects to be long. `run_bg` surfaces a
+stall as a partial result with its diagnosis rather than an error. Registered in
+install.sh EXT_FILES.
+
+**tests/test_unblock.py, 66 assertions:** output never disappears; slow-but-
+producing survives a threshold shorter than its runtime; silent CPU-bound work
+survives (the case a wall clock always kills); a prompt is unblocked and
+completes; a real stall yields partial output plus diagnosis; `/proc` helpers
+degrade to "unknown" rather than raising; and `max_wall_s` defaults to None,
+because a default wall clock would reintroduce the exact bug being fixed.
+
+### Prompt caching + nudge-don't-kill (v9.1.0 addendum)
+
+**Prompt caching — the prefix was being destroyed on every turn.**
+Groq caches automatically on both chain models: 50% off cached input, lower
+latency, and cached tokens do NOT count against rate limits. It is prefix
+matching — the longest byte-identical run at the START is reused, and the first
+differing byte ends the cache.
+
+`build_system_prompt` put `_now_block()` — a MINUTE-resolution clock — at
+position five, ahead of the ~4,000-token tool contract. Every minute the prefix
+changed and the whole prompt was recomputed. For an agent firing a tool call
+every few seconds that is a miss on virtually every turn: the least cacheable
+possible ordering, arrived at by accident. The per-turn addendum (action ledger,
+mission directive) was also being folded into the system message, changing it
+again on every single turn.
+
+Both now ride at the TAIL as their own trailing message, via the new
+`volatile_block()` / `assemble_messages(volatile=)`. Measured: two turns a
+minute apart now share **24,371 of 24,374 characters**. Appending as a separate
+message rather than merging into the last one is deliberate — merging rewrites a
+message already inside the cached prefix and ends the cache one message early,
+the same mistake further down.
+
+None of this is visible at runtime. The app worked perfectly and cost double.
+`tests/test_persona.py` (201 → 218) pins prefix stability across every mode and
+includes a **reproduction of the old shape** so the fix is pinned, not merely
+described: a clock in the system prompt shares under 100 characters.
+
+Also fixed: the persona hot-reload path rebound three symbols but not the new
+`volatile_block`, so a persona self-edit would have kept calling the stale one.
+
+**The turn watchdog now NUDGES instead of killing.** The version added earlier
+this session ended the turn on a stall — the same mistake as a timeout, throwing
+away the conversation, the action ledger and everything the run had achieved
+because one step failed to report back. It now escalates: cancel only the
+hanging stream, leave the chat, store and ledger untouched, feed back a note
+saying explicitly *nothing was lost, the ALREADY DONE list is current, do not
+start over and do not repeat the step that hung*, and re-kick. Two nudges before
+it will consider handing the UI back. Any real progress resets the ladder, so a
+long run that hits one slow patch still gets its full allowance.
+
+Carrying the full context through the nudge is what stops the nudge becoming a
+loop: the model comes back knowing exactly what it already did.
+
 ### Housekeeping
 
 - `recall.py` registered in install.sh EXT_FILES.
 - New tests/test_persona.py (201 assertions) and tests/test_readme.py (86).
 - Version 9.1.0.
-- 25/25 suites, 1314 assertions, zero red.
+- 26/26 suites, 1422 assertions, zero red.
 - GUARDRAIL byte-identical (sha 0ccebd17786bfaaf).
 - safety/ledger/voice/scope sha256-identical to v9.0.0.
 - compileall + install.sh bash -n clean.

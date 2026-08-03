@@ -122,6 +122,96 @@ def _is_retired(mid: str) -> bool:
 
 _dead = [i for i in _ids + list(SF.chain) if _is_retired(i)]
 ck("no discontinued ids anywhere", not _dead, str(_dead))
+
+
+# ── GROQ retirement guard ────────────────────────────────────────────
+# This block exists because the SiliconFlow guard above was provider-specific,
+# so nothing watched Groq — and by 2026-08 FOUR of its six chain entries had
+# been retired, including GROQ_DEFAULT_MODEL. Two were already erroring. The
+# lesson from v7.9.3 was "an id list is perishable"; the miss was applying it to
+# one provider only.
+#
+# Dates are Groq's published SHUTDOWN dates, not announcement dates
+# (console.groq.com/docs/deprecations).
+_GROQ_RETIRED = {
+    "llama-3.1-8b-instant":                       "2026-08-16",
+    "llama-3.3-70b-versatile":                    "2026-08-16",
+    "qwen/qwen3-32b":                             "2026-07-17",
+    "meta-llama/llama-4-scout-17b-16e-instruct":  "2026-07-17",
+    "moonshotai/kimi-k2-instruct-0905":           "2026-04-15",
+    "meta-llama/llama-4-maverick-17b-128e-instruct": "2026-03-09",
+    "meta-llama/llama-guard-4-12b":               "2026-03-05",
+    "moonshotai/kimi-k2-instruct":                "2025-10-10",
+    "gemma2-9b-it":                               "2025-10-08",
+    "deepseek-r1-distill-llama-70b":              "2025-10-02",
+    "mistral-saba-24b":                           "2025-07-30",
+    "qwen-qwq-32b":                               "2025-07-14",
+}
+GQ = C.PROVIDERS_BY_KEY["groq"]
+_gq_ids = [m.id for m in GQ.catalogue]
+_gq_dead = [i for i in _gq_ids + list(GQ.chain) if i in _GROQ_RETIRED]
+ck("groq: no retired ids in chain or catalogue", not _gq_dead, str(_gq_dead))
+ck("groq: default model is not retired",
+   C.GROQ_DEFAULT_MODEL not in _GROQ_RETIRED, C.GROQ_DEFAULT_MODEL)
+ck("groq: default model is one the provider knows",
+   GQ.knows(C.GROQ_DEFAULT_MODEL))
+ck("groq: default model heads the chain",
+   list(GQ.chain)[0] == C.GROQ_DEFAULT_MODEL,
+   f"{list(GQ.chain)[0]} vs {C.GROQ_DEFAULT_MODEL}")
+
+# The chain is the OUTAGE path: production models only. A preview model can be
+# withdrawn at short notice, which is the one thing a fallback must not do.
+_GROQ_PREVIEW = {"qwen/qwen3.6-27b", "openai/gpt-oss-safeguard-20b",
+                 "minimaxai/minimax-m2.7"}
+_prev_in_chain = [i for i in GQ.chain if i in _GROQ_PREVIEW]
+ck("groq: no PREVIEW model on the fallback chain", not _prev_in_chain,
+   str(_prev_in_chain))
+ck("groq: chain stays short (each entry is another round-trip)",
+   len(GQ.chain) <= 3, str(len(GQ.chain)))
+ck("groq: catalogue is populated (picker showed nothing before)",
+   len(GQ.catalogue) >= 3, str(len(GQ.catalogue)))
+ck("groq: a preview model IS pickable, just not walked",
+   GQ.knows("qwen/qwen3.6-27b"))
+ck("groq: preview note warns it can be withdrawn",
+   any("PREVIEW" in m.note for m in GQ.catalogue if m.id == "qwen/qwen3.6-27b"))
+
+# The agentic systems fetch attacker-chosen URLs by themselves, outside the
+# web_read tier gate. Keeping them out is a security decision, so pin it.
+for _sys in ("groq/compound", "groq/compound-mini"):
+    ck(f"groq: {_sys} is not selectable (bypasses the web_read gate)",
+       not GQ.knows(_sys))
+
+ck("groq: every catalogue id carries real metadata",
+   all(m.ctx_k > 0 and m.out_usd > 0 and m.note for m in GQ.catalogue))
+ck("groq: catalogue ids are unique",
+   len(_gq_ids) == len(set(_gq_ids)))
+
+# A dead id is dead EVERYWHERE, not just in the chain. Both Groq vision models
+# were retired (maverick 2026-03-09, scout 2026-07-17) and nothing noticed,
+# because the retirement guard only ever looked at chains and catalogues —
+# analyze_image on Groq would simply have 404'd. Sweep every id list.
+_VISION_ALL = [(prov, mid) for prov, ids in C.VISION_MODELS.items()
+               for mid in ids]
+_dead_vision = [f"{p}:{m}" for p, m in _VISION_ALL
+                if (m in _GROQ_RETIRED) or _is_retired(m)]
+ck("no retired ids in ANY vision list", not _dead_vision, str(_dead_vision))
+ck("every provider with vision has at least one model",
+   all(ids for ids in C.VISION_MODELS.values()))
+ck("groq vision points at a model groq actually serves",
+   all(GQ.knows(m) or m in {x.id for x in GQ.catalogue}
+       for m in C.VISION_MODELS.get("groq", [])),
+   str(C.VISION_MODELS.get("groq")))
+
+# The installer carries its own hardcoded fallback defaults for when
+# basilisk_core cannot be imported. It is a second copy of the same facts and
+# drifted: it still named the retired llama-3.3-70b-versatile for Groq.
+_inst = open(os.path.join(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__))), "install.sh"), encoding="utf-8").read()
+_inst_dead = [m for m in _GROQ_RETIRED if f'"{m}"' in _inst]
+ck("installer fallback names no retired groq model", not _inst_dead,
+   str(_inst_dead))
+ck("installer fallback names the current groq default",
+   f'"{C.GROQ_DEFAULT_MODEL}"' in _inst)
 ck("the retirement check tolerates live successors",
    not _is_retired("zai-org/GLM-4.5-Air")
    and not _is_retired("MiniMaxAI/MiniMax-M2.5")
@@ -177,14 +267,19 @@ ck("a catalogue-only model is a valid heavy pick",
 # before the split, or this change broke the operator's fallback provider
 # to make his primary prettier.
 print("\n== groq is untouched ==")
-ck("groq has no catalogue", not GROQ.catalogue)
-ck("groq pick_ids falls back to its chain",
-   GROQ.pick_ids == list(GROQ.chain), str(GROQ.pick_ids))
+# Groq HAS a catalogue as of 2026-08 — it used to be empty, so its picker
+# showed bare ids with no context window, price or purpose. These assertions
+# used to pin the empty state; they now pin the populated one.
+ck("groq has a catalogue", bool(GROQ.catalogue))
 ck("groq chain still matches GROQ_FALLBACK_CHAIN",
    list(GROQ.chain) == list(C.GROQ_FALLBACK_CHAIN))
-ck("groq info() returns None (no metadata)",
-   GROQ.info(GROQ.chain[0]) is None)
+ck("groq info() returns metadata for a catalogue model",
+   GROQ.info("openai/gpt-oss-120b") is not None)
+ck("groq info() carries a real context window",
+   (GROQ.info("openai/gpt-oss-120b") or C.ModelInfo("", "", 0, 0, 0)).ctx_k > 0)
 ck("groq knows() still works off the chain", GROQ.knows(GROQ.chain[0]))
+ck("groq pick_ids covers the catalogue", 
+   set(GROQ.pick_ids) >= {m.id for m in GROQ.catalogue})
 
 for key, prov in C.PROVIDERS_BY_KEY.items():
     ck(f"{key} has a non-empty chain", bool(prov.chain))
@@ -310,17 +405,36 @@ ck("the OLD sort would have buried the pinned default",
 
 # A provider with no catalogue must still get the old regex path.
 _groq_order = _pick._models_priced_high_to_low(GROQ)
+ck("groq ordering keeps every pickable id",
+   sorted(_groq_order) == sorted(GROQ.pick_ids))
+
+# The catalogue-less path is still live code — any provider added without a
+# catalogue takes it. Groq used to be the example; now that it has one, use a
+# synthetic spec so the fallback keeps its coverage instead of quietly losing it.
+_BARE = C.ProviderSpec(
+    key="_bare", label="Bare", blurb="synthetic, catalogue-less",
+    base_url="https://example.invalid/v1",
+    chain=["vendor/big-70b", "vendor/small-7b"], key_url="")
+ck("synthetic provider really has no catalogue", not _BARE.catalogue)
+ck("no-catalogue provider falls back to its chain for picks",
+   _BARE.pick_ids == list(_BARE.chain), str(_BARE.pick_ids))
+ck("no-catalogue provider returns no metadata",
+   _BARE.info("vendor/big-70b") is None)
+_bare_order = _pick._models_priced_high_to_low(_BARE)
 ck("no-catalogue providers still get the size heuristic",
-   sorted(_groq_order) == sorted(GROQ.chain) and len(_groq_order) == len(GROQ.chain))
+   sorted(_bare_order) == sorted(_BARE.chain)
+   and len(_bare_order) == len(_BARE.chain))
 
 _tiers = _pick._models_by_tier(SF)
 ck("tier grouping produces labelled groups", len(_tiers) >= 3)
 ck("tier grouping loses nothing",
    sorted(m for _lbl, ids in _tiers for m in ids) == sorted(SF.pick_ids))
 ck("flagship group comes first", "FLAGSHIP" in (_tiers[0][0] or ""))
-_groq_tiers = _pick._models_by_tier(GROQ)
+_groq_tiers = _pick._models_by_tier(_BARE)
 ck("no-catalogue provider gets one unlabelled group",
    len(_groq_tiers) == 1 and _groq_tiers[0][0] is None)
+ck("groq NOW gets labelled tier groups like any catalogued provider",
+   len(_pick._models_by_tier(GROQ)) >= 2)
 
 _d = _pick._model_detail(SF, PINNED)
 ck("detail line carries context and price", "ctx" in _d and "$" in _d, _d)

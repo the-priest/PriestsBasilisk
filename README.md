@@ -32,7 +32,7 @@ Point it at a target and walk away. It finds the way in, <b>proves</b> every hit
 <img src="https://img.shields.io/badge/Linux-X11%20%7C%20Wayland-6d7680?style=for-the-badge&logo=linux&logoColor=white&labelColor=08090b" alt="Linux X11/Wayland">
 <img src="https://img.shields.io/badge/python-3.10+-6d7680?style=for-the-badge&logo=python&logoColor=white&labelColor=08090b" alt="Python 3.10+">
 <img src="https://img.shields.io/badge/runs%20on-NetHunter-6d7680?style=for-the-badge&labelColor=08090b" alt="Runs on NetHunter">
-<img src="https://img.shields.io/badge/tests-1314%20assertions-6d7680?style=for-the-badge&labelColor=08090b" alt="1314 assertions">
+<img src="https://img.shields.io/badge/tests-1422%20assertions-6d7680?style=for-the-badge&labelColor=08090b" alt="1422 assertions">
 
 <br/><br/>
 
@@ -209,6 +209,8 @@ When an approach stalls, it **researches** — pulls the exact technique from a 
 
 - **It forgets what it already did, and redoes it.** A long run's transcript gets trimmed to fit the context window, so the model's evidence of having already tried something decays into a stub while the objective stays loud — and it re-runs the scan it ran four steps ago. Basilisk keeps a compact **action ledger outside the transcript**: one line per action and outcome, never trimmed, re-sent whole every turn. A deterministic guard refuses a third identical action outright, and a cycle detector catches the A→B→A→B loops that a "same command twice" check never sees.
 - **One dead thread strands the whole run.** Every tool runs on a worker; if one dies without reporting back, the loop has nothing to advance on and the agent sits at "working…" forever. Every tool path now goes through a **guaranteed one-shot result** — the worker can return, throw, or fail halfway and exactly one result still reaches the model — with a watchdog behind it as the last resort.
+- **A slow job gets killed and the work is thrown away.** Every long-running tool used to wear a wall-clock timeout, and a wall clock cannot tell `nmap -p- /24` (twenty-five minutes of real work, silent in stretches) from a curl against a dead host (twenty-five minutes of nothing) — so it killed both at the same number. Worse, the timeout handler discarded the output: a scan that enumerated two hundred hosts and then hung on the last one reported *nothing*, so the agent re-ran the whole scan. Basilisk now supervises by **progress**, not elapsed time: output arriving or CPU advancing across the process group resets the clock, so there is no limit on how long real work may take. When something genuinely stalls it tries to **unstick** it first — the commonest real stall is a process blocked on an interactive prompt, which a timeout can only kill but closing stdin actually releases — and if that fails it harvests every byte captured and hands it back marked partial, with a diagnosis of what stalled and where. It never restarts from zero.
+- **It pays full price for the same prompt every turn.** Providers cache by prefix: the longest byte-identical run at the *start* of a request is reused at half the input price, with lower latency, and on Groq those tokens don't count against rate limits. Basilisk's system prompt used to carry a minute-resolution clock ahead of ~4,000 tokens of tool contract, so every minute the prefix changed and the entire prompt was recomputed — a guaranteed miss for an agent firing a tool call every few seconds. The clock and the per-turn material now ride at the *tail*, leaving the whole prompt a stable cacheable prefix. Nothing about that failure is visible at runtime; the app works perfectly and simply costs double, which is why it's pinned by a test.
 - **It over-thinks a simple problem.** Diagnosis is ordered by **likelihood × cost to check**: name the two or three most likely causes, test the cheapest decisive one first, stop the moment it is confirmed. Boring causes before exotic ones. Effort escalates on *evidence of difficulty* — recent failures — not on how many steps have gone by, so it stops deliberating on the turn it should be concluding.
 
 None of this makes it smarter. It makes it *finish*, which is the only property that matters when nobody is watching.
@@ -253,7 +255,7 @@ An agent that reads the outside world *and* runs shell commands is a prompt-inje
 - **Untrusted input is quarantined.** Anything from outside — a target's response, an MCP result, an analyzed image — passes a deterministic content firewall and is wrapped as *data, never instructions*.
 - **Your sudo password never touches the model.** Self-written code runs only in a bubblewrap jail after passing its own test, and Basilisk's own safety source can't be overwritten by a shell command.
 
-All of it is pinned in the test suite — **1,314 assertions across 25 suites**, stdlib-only, runnable before you trust it with anything. Basilisk writes and runs real exploits against authorized targets, because that's the job. It will not produce standalone weaponized malware (reverse shells, implants, ransomware, backdoors), and the destructive class can never run through it at all.
+All of it is pinned in the test suite — **1,422 assertions across 26 suites**, stdlib-only, runnable before you trust it with anything. Basilisk writes and runs real exploits against authorized targets, because that's the job. It will not produce standalone weaponized malware (reverse shells, implants, ransomware, backdoors), and the destructive class can never run through it at all.
 
 <img src="https://capsule-render.vercel.app/api?type=rect&color=0:08090b,100:7d121b&height=3&section=header" width="100%" alt="">
 
@@ -295,7 +297,7 @@ Multi-provider — you only need a key for the one you want. Set it in **Setting
 | Provider | Get a key | Notes |
 | --- | --- | --- |
 | **SiliconFlow** | <https://cloud.siliconflow.com/account/ak> | **Default.** Large open models (DeepSeek, GLM, Kimi, Qwen, MiniMax) + SenseVoice STT |
-| **Groq** | <https://console.groq.com/keys> | Very fast, generous free tier, Whisper STT. Keys look like `gsk_...` |
+| **Groq** | <https://console.groq.com/keys> | Genuinely free tier, no card. Fastest inference anywhere — GPT-OSS 120B at ~500 t/s, GPT-OSS 20B at ~1000 t/s. Whisper STT. Keys look like `gsk_...` |
 
 The model picker shows context window, price per million tokens and what each model is *for*, grouped flagship / workhorse / budget. A refresh button pulls the provider's live catalogue, so a retired model id can't sit in the list silently 404ing. Keys live only in `~/.config/basilisk/settings.json`, locked to your user — they go nowhere but the provider's own API.
 

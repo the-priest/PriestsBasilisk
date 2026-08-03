@@ -125,7 +125,7 @@ for _a in "${OPTIONAL_ART[@]}"; do OPTIONAL_FILES+=("${ASSET_DIR}/${_a}"); done
 # memory/skills/foresight extensions), not just the core four files.
 EXT_FILES=(__init__.py bench.py codescan.py engage.py exploits.py extman.py foresight.py headroom.py mcp.py memory.py \
            oracle.py juiceshop.py pentest.py reach.py sandbox.py skills.py verify.py webshield.py worker.py xbow.py \
-           zdayfind.py workspace.py recall.py)
+           zdayfind.py workspace.py recall.py unblock.py)
 GITHUB_REPO="${BASILISK_REPO:-the-priest/PriestsBasilisk}"
 GITHUB_BRANCH="${BASILISK_BRANCH:-main}"
 
@@ -1036,7 +1036,7 @@ if defaults is None:
     # Minimal fallback only.  load_settings() merges the full DEFAULT_SETTINGS
     # over whatever is on disk at launch, so the rest is filled in then.
     providers = {
-        "groq":        "llama-3.3-70b-versatile",
+        "groq":        "openai/gpt-oss-120b",
         "siliconflow": "deepseek-ai/DeepSeek-V4-Flash",
         "novita":      "qwen/qwen3-coder-480b-a35b-instruct",
         "github":      "openai/gpt-4.1",

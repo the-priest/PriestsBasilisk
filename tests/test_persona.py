@@ -483,5 +483,91 @@ ck("authorization rule reaches the assembled prompt",
    is not None)
 
 
+# ── 11. PROMPT-CACHE PREFIX STABILITY ────────────────────────────────
+# Providers cache by PREFIX MATCHING: the longest byte-identical run at the
+# START of the request is reused at half price, with lower latency, and on Groq
+# without counting against rate limits. The first differing byte ends the cache.
+#
+# This block exists because the system prompt used to carry _now_block() — a
+# MINUTE-resolution clock — at position five, ahead of ~4,000 tokens of tool
+# contract. Every minute the prefix changed and the whole prompt was recomputed.
+# For an agent firing a tool call every few seconds that is a miss on virtually
+# every turn. Nothing about that failure is visible at runtime: the app works
+# perfectly and simply costs double, which is exactly why it needs a test.
+print("\n== prompt-cache prefix stability ==")
+
+_sys_a = kp.build_system_prompt(agent_mode=True, grouped=True)
+_sys_b = kp.build_system_prompt(agent_mode=True, grouped=True)
+ck("system prompt is byte-identical across calls", _sys_a == _sys_b,
+   "any per-turn content in here forfeits the cache on the WHOLE prompt")
+ck("system prompt carries NO clock", "Right now:" not in _sys_a)
+ck("system prompt carries no time-of-day", not re.search(r"\d{2}:\d{2}", _sys_a))
+ck("lean prompt is stable too",
+   kp.build_system_prompt(agent_mode=False)
+   == kp.build_system_prompt(agent_mode=False))
+ck("disarmed prompt is stable too",
+   kp.build_system_prompt(agent_mode=True, grouped=True, unleashed=False)
+   == kp.build_system_prompt(agent_mode=True, grouped=True, unleashed=False))
+
+# The volatile material still has to REACH the model — moving it must not
+# silently drop it.
+_vol = kp.volatile_block("ADDENDUM_MARKER")
+ck("volatile block carries the clock", "Right now:" in _vol)
+ck("volatile block carries the addendum", "ADDENDUM_MARKER" in _vol)
+ck("volatile block with no addendum is just the clock",
+   "Right now:" in kp.volatile_block())
+
+_hist = [{"role": "user", "content": "first"},
+         {"role": "assistant", "content": "reply"}]
+_msgs = kp.assemble_messages(_sys_a, _hist, volatile=_vol)
+ck("system message is first", _msgs[0]["role"] == "system")
+ck("system message is the stable prompt", _msgs[0]["content"] == _sys_a)
+ck("history is preserved in order",
+   [m["content"] for m in _msgs[1:3]] == ["first", "reply"])
+ck("volatile rides LAST", _msgs[-1]["content"] == _vol)
+ck("volatile is its own message, not merged into history",
+   len(_msgs) == len(_hist) + 2,
+   "merging would rewrite an already-cached message and end the cache early")
+ck("assemble without volatile adds nothing",
+   len(kp.assemble_messages(_sys_a, _hist)) == len(_hist) + 1)
+
+# THE PROPERTY THAT MATTERS: two turns a minute apart must share a prefix.
+_t1 = kp.assemble_messages(_sys_a, _hist, volatile="Right now: 10:00\nA")
+_t2 = kp.assemble_messages(_sys_a, _hist, volatile="Right now: 10:01\nB")
+
+
+def _prefix_chars(m1, m2):
+    """Length of the identical leading run, the way a provider matches."""
+    a = "".join(m["role"] + m["content"] for m in m1)
+    b = "".join(m["role"] + m["content"] for m in m2)
+    n = 0
+    for x, y in zip(a, b):
+        if x != y:
+            break
+        n += 1
+    return n, min(len(a), len(b))
+
+
+_shared, _total = _prefix_chars(_t1, _t2)
+ck(f"turns a minute apart share their whole static prefix "
+   f"({_shared}/{_total} chars)",
+   _shared >= len(_sys_a),
+   "the clock must not truncate the cache")
+ck("only the trailing volatile message differs",
+   _t1[:-1] == _t2[:-1])
+
+# And the regression this replaced: a clock INSIDE the system prompt would
+# leave almost nothing shared. Demonstrate the old shape so the test pins the
+# fix rather than merely describing it.
+_old_a = "Right now: 10:00\n" + _sys_a
+_old_b = "Right now: 10:01\n" + _sys_a
+_old_shared, _ = _prefix_chars(
+    [{"role": "system", "content": _old_a}],
+    [{"role": "system", "content": _old_b}])
+ck("reproduction: a clock in the system prompt destroys the prefix",
+   _old_shared < 100 and _old_shared < _shared / 10,
+   f"old shape shared only {_old_shared} chars vs {_shared} now")
+
+
 print(f"\npersona: {_p} passed, {_f} failed")
 sys.exit(1 if _f else 0)

@@ -1529,10 +1529,30 @@ def build_system_prompt(agent_mode: bool = True,
     prompt is smaller and contains nothing about attacking anything, which is
     both cheaper and better behaved on ordinary work.
     """
+    # ── PROMPT-CACHE DISCIPLINE: STABLE CONTENT FIRST, VOLATILE LAST ──
+    #
+    # Providers cache by PREFIX MATCHING: the longest byte-identical run at the
+    # START of the request is reused, at half the input price, with lower
+    # latency, and (on Groq) without counting against rate limits. The first
+    # byte that differs ends the cache and everything after it is charged and
+    # recomputed in full.
+    #
+    # This block used to put _now_block() — a timestamp at MINUTE resolution —
+    # at position five, ahead of the ~4,000 tokens of tool contract. So every
+    # time the clock ticked over a minute the whole prefix changed and the
+    # ENTIRE prompt was recomputed from scratch. For an agent firing a tool
+    # call every few seconds that is a guaranteed miss on essentially every
+    # turn: the most expensive, least cacheable ordering possible, achieved by
+    # accident.
+    #
+    # Everything below the marker is fixed for the life of the process, so it
+    # forms one long stable prefix. The clock and the per-turn addendum move to
+    # the END (see volatile_block / assemble_messages), where changing them
+    # costs only their own tokens instead of invalidating the whole prompt.
     parts = [PERSONA_CORE, "",
              (ENGAGEMENT_ROLE if unleashed else GENERAL_ROLE), "",
              TRUST_AND_PRECISION, "", OPERATOR_PROFILE, "",
-             _now_block(), "", host_facts_block()]
+             host_facts_block()]
     if agent_mode:
         parts.extend(["", PROJECT_SELF])
         if grouped:
@@ -1586,9 +1606,25 @@ def build_system_prompt(agent_mode: bool = True,
     return "\n".join(parts)
 
 
+def volatile_block(extra: str = "") -> str:
+    """Everything that changes from one turn to the next, in one place.
+
+    Kept OUT of the system prompt on purpose. Anything that varies per turn
+    must sit at the END of the request or it truncates the provider's cached
+    prefix at the point it appears — and a clock in the system prompt truncates
+    it at the very beginning, which is how this codebase was throwing away the
+    cache on every single turn.
+    """
+    out = _now_block()
+    if extra:
+        out = out + "\n\n" + extra
+    return out
+
+
 def assemble_messages(system_prompt: str,
                       history: List[Dict[str, str]],
-                      max_history_msgs: int = 80
+                      max_history_msgs: int = 80,
+                      volatile: str = "",
                       ) -> List[Dict[str, str]]:
     if len(history) <= max_history_msgs:
         trimmed = list(history)
@@ -1603,7 +1639,14 @@ def assemble_messages(system_prompt: str,
             trimmed = [history[first_user_idx]] + tail
         else:
             trimmed = tail
-    return [{"role": "system", "content": system_prompt}, *trimmed]
+    msgs = [{"role": "system", "content": system_prompt}, *trimmed]
+    if volatile:
+        # Appended as its OWN trailing message rather than merged into the last
+        # one. Merging would rewrite a message that is already in the cached
+        # prefix, ending the cache one message earlier every turn — the same
+        # mistake as the clock, just further down.
+        msgs.append({"role": "user", "content": volatile})
+    return msgs
 
 
 def title_from_first_message(text: str, max_len: int = 48) -> str:

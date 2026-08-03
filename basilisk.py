@@ -118,7 +118,8 @@ from basilisk_core import (
     get_ledger,
 )
 from basilisk_persona import (
-    build_system_prompt, assemble_messages, title_from_first_message,
+    build_system_prompt, assemble_messages, volatile_block,
+    title_from_first_message,
     conversational_turn, direct_answer_turn,
 )
 
@@ -4727,6 +4728,9 @@ class MainWindow(Adw.ApplicationWindow):
         # Liveness marker for the turn watchdog — bumped whenever the turn
         # actually advances (a token, a tool result, a new step).
         self._turn_progress_ts: float = time.monotonic()
+        # How many times the watchdog has tried to nudge the CURRENT stall.
+        # Reset by any real progress. See _turn_watchdog.
+        self._unblock_attempts: int = 0
         self._mission_verify_pending: bool = False   # first completion signal seen
         self._mission_no_action_streak: int = 0      # turns in a row with no tool call
         self._mission_directive: str = ""       # transient nudge for the next kick
@@ -4804,6 +4808,11 @@ class MainWindow(Adw.ApplicationWindow):
     def _mark_turn_progress(self):
         """Something advanced the current turn.  Cheap enough to call anywhere."""
         self._turn_progress_ts = time.monotonic()
+        # Real progress clears the unblock ladder, so a run that hits one slow
+        # patch hours in still gets its full two nudges rather than inheriting
+        # a count from something that resolved itself long ago.
+        if getattr(self, "_unblock_attempts", 0):
+            self._unblock_attempts = 0
 
     def _turn_watchdog(self):
         """Recover a turn whose loop has died.
@@ -4833,13 +4842,64 @@ class MainWindow(Adw.ApplicationWindow):
             idle = time.monotonic() - last
             if idle < TURN_WATCHDOG_S:
                 return True
+            # ── UNBLOCK LADDER, not a kill ──
+            # The first version of this ended the turn, which is the same
+            # mistake as a timeout: the conversation, the action ledger and
+            # whatever the run had achieved all went in the bin because one
+            # step failed to report back. Try to get it MOVING first, and only
+            # hand the UI back if nudging has already failed twice.
+            self._unblock_attempts = getattr(self, "_unblock_attempts", 0) + 1
+
+            if self._unblock_attempts <= 2:
+                self.terminal_log(
+                    f"⏸ nothing has advanced for {int(idle)}s — nudging the "
+                    f"run rather than ending it "
+                    f"(attempt {self._unblock_attempts}/2)", "error")
+                # Cancel only the stream that is hanging. The chat, the store
+                # and the action ledger are untouched, so the model comes back
+                # with its full context and knows exactly what it already did —
+                # which is what stops a nudge turning into a loop.
+                try:
+                    if self.streaming_cancel:
+                        self.streaming_cancel.set()
+                except Exception:
+                    pass
+                self.streaming_msg_widget = None
+                self.streaming_msg_db_id = None
+                try:
+                    cid = self.streaming_chat_id or self.current_chat_id
+                    if cid:
+                        self.store.add_message(
+                            cid, "user",
+                            "<tool_result>\n[host] The previous step never "
+                            "reported back and was cancelled. Nothing was lost "
+                            "— everything you had already done still stands, "
+                            "and the ALREADY DONE list above is current. Do NOT "
+                            "start over and do NOT repeat the step that hung. "
+                            "Pick the next action from where you actually got "
+                            "to; if the same step hangs again, do it a "
+                            "different way or with a narrower "
+                            "scope.\n</tool_result>",
+                            meta={"kind": "tool_result"})
+                except Exception:
+                    pass
+                self._turn_progress_ts = time.monotonic()
+                try:
+                    self._kick_assistant_turn()
+                except Exception:
+                    log(f"watchdog nudge failed: {traceback.format_exc()}")
+                    self._unblock_attempts = 99      # fall through next tick
+                return True
+
+            # Nudging twice did not move it: hand the UI back rather than
+            # leaving him staring at a spinner.
             self.terminal_log(
-                f"■ turn watchdog: nothing has advanced this turn for "
-                f"{int(idle)}s — the step that should have reported back never "
-                f"did. Ending the turn so the app is usable again.", "error")
+                f"■ turn watchdog: still stuck after {self._unblock_attempts - 1} "
+                f"nudges — ending the turn so the app is usable again. The "
+                f"conversation and everything done so far are kept.", "error")
             self._show_toast(
-                "That step never reported back — turn ended. Send again to "
-                "retry.", timeout=8)
+                "That step wouldn't restart — turn ended, nothing lost. "
+                "Send again to continue.", timeout=8)
             self._stop_requested = True
             self._mission_active = False
             try:
@@ -4849,6 +4909,7 @@ class MainWindow(Adw.ApplicationWindow):
                 pass
             self._finish_turn_cleanup()
             self._stop_requested = False
+            self._unblock_attempts = 0
             self._turn_progress_ts = time.monotonic()
         except Exception:
             log(f"turn watchdog: {traceback.format_exc()}")
@@ -7216,15 +7277,25 @@ class MainWindow(Adw.ApplicationWindow):
             addendum = (addendum + "\n\n" + self._mission_directive).strip()
             self._mission_directive = ""
 
+        # PROMPT CACHING: the addendum is NOT passed into the system prompt.
+        # It carries the per-turn material — the already-done action list, the
+        # mission directive, effort nudges — so putting it in the system message
+        # would change the cached prefix on every single turn and forfeit the
+        # discount on the whole ~6k-token prompt. It rides at the TAIL instead,
+        # where changing it costs only its own tokens.
         sysprompt = build_system_prompt(
             agent_mode=(False if _lean else self.current_agent_mode),
-            custom_addendum=addendum,
             grouped=(not self.settings.get("max_mode", False)),
             # UNLEASH decides the role framing AND which tool groups exist.
             # Off = ordinary work on his machine, offensive suite not loaded:
             # cheaper, and it stops a general task being framed as an attack.
             unleashed=self._unleashed)
-        full = assemble_messages(sysprompt, history)
+        # The clock and the addendum go last, as their own trailing message, so
+        # everything above them stays byte-identical between turns and gets
+        # served from the provider's prefix cache: half price on input, lower
+        # latency, and on Groq those tokens do not count against rate limits.
+        full = assemble_messages(sysprompt, history,
+                                 volatile=volatile_block(addendum))
         # Splice in relevance-scoped recall (top-k memories for THIS turn).
         # No-op unless memory is enabled; never grows with history length.
         if getattr(self, "_ext", None):
@@ -9809,9 +9880,13 @@ class MainWindow(Adw.ApplicationWindow):
             import importlib
             import basilisk_persona as _kp
             importlib.reload(_kp)
-            global build_system_prompt, assemble_messages, title_from_first_message
+            # Every persona symbol this module imported must be rebound, or a
+            # self-edit silently keeps calling the stale one.
+            global build_system_prompt, assemble_messages, volatile_block
+            global title_from_first_message
             build_system_prompt = _kp.build_system_prompt
             assemble_messages = _kp.assemble_messages
+            volatile_block = _kp.volatile_block
             title_from_first_message = _kp.title_from_first_message
             log("persona hot-reloaded")
             return True
@@ -10177,6 +10252,24 @@ class MainWindow(Adw.ApplicationWindow):
                     else:
                         self.terminal_log(f"✓ rc={rc}",
                                           "ok" if rc == 0 else "error")
+                    out = "\n".join(parts)
+                elif r.get("partial"):
+                    # A STALL, not a clean failure. The output collected before
+                    # it stalled is real work and goes back to the model in
+                    # full, with the diagnosis — otherwise it re-runs the whole
+                    # command and stalls in exactly the same place.
+                    parts = [f"$ {command}", "(STALLED — partial result)"]
+                    if r.get("stdout"):
+                        for line in r["stdout"].splitlines()[:80]:
+                            GLib.idle_add(lambda l=line: self.terminal_log(l, "stdout") or False)
+                        parts.append(r["stdout"])
+                    if r.get("stderr"):
+                        parts.append(f"stderr:\n{r['stderr']}")
+                    if r.get("diagnosis"):
+                        parts.append(f"\n[stall diagnosis]\n{r['diagnosis']}")
+                    self.terminal_log(
+                        f"⏸ stalled after {r.get('elapsed_s', '?')}s — kept "
+                        f"{len(r.get('stdout') or '')} chars of output", "error")
                     out = "\n".join(parts)
                 else:
                     out = f"$ {command}\nerror: {r.get('error')}"

@@ -150,20 +150,35 @@ STREAM_IDLE_TIMEOUT_S = 60
 STREAM_MAX_WALL_S = 150
 HEALTH_TIMEOUT_S  = 1.5
 
-GROQ_DEFAULT_MODEL = "llama-3.3-70b-versatile"
-# Ordered roughly by capability (biggest first).  Each model on Groq has
-# its OWN rate-limit bucket — when one hits a 429, the chain moves to
-# the next so testing/iteration doesn't grind to a halt.  Verified
-# against the current GroqCloud catalogue (May 2026).
-GROQ_FALLBACK_CHAIN = [
-    "llama-3.3-70b-versatile",                       # default; 70B Llama, best quality
-    "openai/gpt-oss-120b",                           # 120B OpenAI open-weight
-    "meta-llama/llama-4-scout-17b-16e-instruct",     # newest Llama 4, fast
-    "qwen/qwen3-32b",                                # different family, strong reasoning
-    "openai/gpt-oss-20b",                            # 20B, very fast
-    "llama-3.1-8b-instant",                          # last resort, 560 t/s
-]
+# ── Groq, re-verified against console.groq.com/docs/models and
+#    console.groq.com/docs/deprecations on 2026-08-03 ──────────────────
+#
+# The previous chain was written against the May 2026 catalogue and FOUR of its
+# six entries have since been retired.  Two were already returning errors:
+#
+#     qwen/qwen3-32b                            shut down 2026-07-17
+#     meta-llama/llama-4-scout-17b-16e-instruct shut down 2026-07-17
+#     llama-3.3-70b-versatile                   shuts down 2026-08-16  <- was the DEFAULT
+#     llama-3.1-8b-instant                      shuts down 2026-08-16
+#
+# Same failure shape as the SiliconFlow chain in v7.9.3: an id list is a
+# perishable good, and a dead one costs a wasted round-trip in the middle of an
+# outage fallback — exactly when the retry budget matters most.  A dead DEFAULT
+# is worse: Groq simply stops working.
+#
+# Groq's own migration guidance is gpt-oss-20b for the 8B and gpt-oss-120b (or
+# qwen3.6-27b) for the 70B, which is what this is.
+GROQ_DEFAULT_MODEL = "openai/gpt-oss-120b"
 
+# What the backend WALKS on a 429 or an outage — deliberately SHORT and
+# PRODUCTION-ONLY.  Each entry is another round-trip while the operator waits,
+# and a preview model ("may be discontinued at short notice") has no business on
+# the reliability path.  Every model on Groq has its own rate-limit bucket, so
+# two entries already give a real second chance on a 429.
+GROQ_FALLBACK_CHAIN = [
+    "openai/gpt-oss-120b",   # flagship open-weight, 500 t/s, reasoning
+    "openai/gpt-oss-20b",    # 1000 t/s, cheapest — last resort
+]
 # ─────────────────────────────────────────────────────────────────────
 # CLOUD PROVIDER REGISTRY
 #
@@ -231,6 +246,35 @@ class ModelInfo:
 # IDs marked (inferred) below follow the vendor's exact published naming
 # convention but were not seen verbatim in a SiliconFlow price/release
 # table.  If one 404s, hit ⟳ in Settings and pick the live id.
+# What the operator PICKS.  Groq's catalogue used to be empty, so its picker
+# fell through to the chain and showed no context window, price or purpose.
+# Populated now, same catalogue/chain split as SiliconFlow: pickable != walked.
+#
+# DELIBERATELY NOT LISTED — groq/compound and groq/compound-mini.  They are
+# agentic SYSTEMS with built-in web search and code execution, i.e. the model
+# fetches attacker-chosen URLs by itself, outside Basilisk's tool layer and
+# outside the web_read tier gate.  Basilisk's whole injection posture is that
+# the fetchers were REMOVED and what remains is tiered in code; picking a model
+# that quietly re-adds one would undo that without the operator ever seeing a
+# prompt.  Their 8,192 max completion is also below what a tool-calling turn
+# needs.  Not a capability judgement — a security one.
+GROQ_CATALOGUE: List[ModelInfo] = [
+    ModelInfo("openai/gpt-oss-120b", "GPT-OSS 120B", 131, 0.15, 0.60,
+              "Groq's flagship open-weight model. 120B, reasoning, ~500 t/s. "
+              "The default and the best all-round pick here.",
+              tier="flagship"),
+    ModelInfo("qwen/qwen3.6-27b", "Qwen3.6 27B", 131, 0.60, 3.00,
+              "Highest measured intelligence on Groq, and vision-capable — but "
+              "PREVIEW, so it can be withdrawn at short notice, and output "
+              "costs 5x the 120B. Pick it for a hard one-off, not a long run.",
+              vision=True, tier="flagship"),
+    ModelInfo("openai/gpt-oss-20b", "GPT-OSS 20B", 131, 0.075, 0.30,
+              "Fastest on the platform at ~1000 t/s and the cheapest. Ideal "
+              "for light turns and high-volume tool chains.",
+              tier="budget"),
+]
+
+
 SILICONFLOW_CATALOGUE: List[ModelInfo] = [
     # ── Flagship: reach for these when the target is genuinely hard ──
     ModelInfo("moonshotai/Kimi-K3", "Kimi-K3", 1049, 3.0, 15.0,
@@ -386,6 +430,7 @@ PROVIDERS: List[ProviderSpec] = [
         blurb="Fast cloud inference. Free key at console.groq.com.",
         base_url="https://api.groq.com/openai/v1",
         chain=list(GROQ_FALLBACK_CHAIN),
+        catalogue=tuple(GROQ_CATALOGUE),
         key_url="https://console.groq.com/keys"),
     ProviderSpec(
         key="siliconflow", label="SiliconFlow",
@@ -416,9 +461,13 @@ VISION_MODELS: Dict[str, List[str]] = {
         "Qwen/Qwen3-VL-8B-Instruct",
         "zai-org/GLM-4.5V",
     ],
+    # Groq's vision line-up turned over completely: llama-4-maverick shut down
+    # 2026-03-09 and llama-4-scout 2026-07-17, so BOTH entries here were dead
+    # and analyze_image on Groq would have 404'd. qwen3.6-27b is the only
+    # vision-capable model Groq serves now — it is a PREVIEW model, but a
+    # preview model that works beats a production id that no longer exists.
     "groq": [
-        "meta-llama/llama-4-scout-17b-16e-instruct",
-        "meta-llama/llama-4-maverick-17b-128e-instruct",
+        "qwen/qwen3.6-27b",
     ],
 }
 CLOUD_PROVIDER_KEYS = [p.key for p in PROVIDERS]
@@ -2556,6 +2605,79 @@ def tool_run_command(command: str, timeout: int = 30,
         # command's own sudo surfaces the auth failure, which the GUI turns
         # into a one-time password request.
 
+    # ── PROGRESS SUPERVISION, NOT A WALL CLOCK ──
+    #
+    # This used to be subprocess.run(timeout=timeout), and it was wrong twice.
+    #
+    # First, a wall clock cannot tell `nmap -p- /24` (25 minutes of real work,
+    # silent in stretches) from `curl https://dead.host` (25 minutes of
+    # nothing), so it killed both at the same number.
+    #
+    # Second and worse, the TimeoutExpired handler discarded the output.
+    # CPython populates TimeoutExpired.stdout with every byte the process
+    # wrote; the old handler never read it. A scan that enumerated 200 hosts
+    # and then hung on the last one reported NOTHING — so the agent re-ran the
+    # whole scan. That is the "it times out and it's back to 0" failure, and it
+    # was a thrown-away-data bug wearing a timeout costume.
+    #
+    # unblock.run_supervised watches PROGRESS instead: output arriving, or CPU
+    # advancing across the process group. Any sign of life resets the stall
+    # clock, so there is no limit on how long real work may take. When
+    # something genuinely stalls it tries to UNSTICK it first — the commonest
+    # real stall is a process blocked on an interactive prompt, which a
+    # timeout can only kill but closing stdin actually releases — and if that
+    # fails it harvests every byte captured so far and hands it back marked
+    # partial, with a diagnosis the model can act on.
+    #
+    # `timeout` is retained in the signature for callers and tests, but is NOT
+    # a wall clock any more: it only raises the stall thresholds for commands
+    # the runtime estimator already expects to be long-running, so a slow job
+    # is given more patience before we even start calling it stuck.
+    try:
+        from basilisk_ext import unblock as _unblock
+    except Exception:
+        _unblock = None
+
+    if _unblock is not None:
+        try:
+            _patience = max(1.0, float(timeout or 30) / 30.0)
+            r = _unblock.run_supervised(
+                command,
+                cwd=cwd or os.path.expanduser("~"),
+                stall_notice_s=_unblock.STALL_NOTICE_S * _patience,
+                stall_unblock_s=_unblock.STALL_UNBLOCK_S * _patience,
+                stall_harvest_s=_unblock.STALL_HARVEST_S * _patience,
+                max_wall_s=None)          # deliberate: no wall-clock limit
+            out = {
+                "ok": bool(r.get("ok")),
+                "command": command,
+                "rc": r.get("rc"),
+                "stdout": (r.get("stdout") or "")[:80_000],
+                "stderr": (r.get("stderr") or "")[:20_000],
+                "truncated_stdout": len(r.get("stdout") or "") > 80_000,
+                "needs_sudo": needs_sudo,
+            }
+            if r.get("partial"):
+                # NOT ok, but the output is still here — that is the whole
+                # point. Never report a stall as an empty failure.
+                out["partial"] = True
+                out["stalled"] = bool(r.get("stalled"))
+                out["timed_out"] = True        # legacy key some callers read
+                out["unblocked"] = r.get("unblocked")
+                out["diagnosis"] = r.get("diagnosis")
+                out["elapsed_s"] = r.get("elapsed_s")
+            low = (out["stderr"] or "").lower()
+            if needs_sudo and out["rc"] not in (0, None) and (
+                    "a terminal is required" in low
+                    or "no password was provided" in low
+                    or "a password is required" in low
+                    or "askpass" in low):
+                out["sudo_auth_failed"] = True
+            return out
+        except Exception as e:
+            log(f"supervised run failed, falling back: {type(e).__name__}: {e}")
+
+    # Fallback only if the sidecar is missing from a partial install.
     try:
         p = subprocess.run(
             command, shell=True,
@@ -2564,9 +2686,18 @@ def tool_run_command(command: str, timeout: int = 30,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             timeout=timeout, text=True, errors="replace")
         return _format_run_result(command, p, needs_sudo)
-    except subprocess.TimeoutExpired:
-        return {"ok": False, "command": command, "rc": 124, "timed_out": True,
-                "error": _timeout_note(command, timeout), "needs_sudo": needs_sudo}
+    except subprocess.TimeoutExpired as e:
+        # Salvage the output rather than binning it, even on this path.
+        salv = {"ok": False, "command": command, "rc": 124, "timed_out": True,
+                "partial": True, "needs_sudo": needs_sudo,
+                "error": _timeout_note(command, timeout)}
+        try:
+            from basilisk_ext.unblock import salvage_timeout
+            salv.update(salvage_timeout(e, command, timeout))
+            salv["needs_sudo"] = needs_sudo
+        except Exception:
+            pass
+        return salv
     except Exception as e:
         return {"ok": False, "command": command,
                 "error": f"{type(e).__name__}: {e}", "needs_sudo": needs_sudo}
