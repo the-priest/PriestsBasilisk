@@ -510,12 +510,60 @@ long run that hits one slow patch still gets its full allowance.
 Carrying the full context through the nudge is what stops the nudge becoming a
 loop: the model comes back knowing exactly what it already did.
 
+### Caching, part two: SiliconFlow + the history prefix (v9.1.0 addendum)
+
+**SiliconFlow caches too, and harder than Groq.** DeepSeek-V4-Flash — the
+pinned default — is priced $0.028 cached / $0.14 input / $0.28 output per 1M on
+SiliconFlow. Cached input is **80% off**, against Groq's 50%. Both are automatic
+with no code change. DeepSeek's rule is stricter though: *identical prefix from
+the 0th token; partial matches in the middle never hit.*
+
+**The second cache-buster: the history itself.** Fixing the system prompt was
+only half of it. `_build_history_for_model` kept the last N tool results at full
+length with a SLIDING window — so the result sent in full last turn was sent
+trimmed this turn, rewriting a message in the MIDDLE of the request. Exactly the
+case DeepSeek says never hits. Measured before: **~40% of the request reusable
+and a cache break on every single turn**; the part being thrown away was the
+largest and most expensive tail of the history.
+
+**Two wrong turns on the way, both caught by measurement rather than reasoning:**
+1. First fix made trimming one-way ("once trimmed, always trimmed"). Measured:
+   **no change at all.** The trimming IS the mutation, so making it sticky fixes
+   nothing. The direction that helps is the opposite — keep what was already
+   sent in full.
+2. Second version advanced the watermark by one place per turn once over budget,
+   and measured the RAW store size — which only grows, so the condition latched
+   true forever and it became a sliding window again.
+
+The working design: measure the size of what would actually be SENT, and when it
+exceeds `HISTORY_STABLE_BUDGET_CHARS` advance the watermark ALL THE WAY in one
+jump, then hold. Amortised — one occasional cache miss instead of one per turn.
+Measured after: **100% reusable, zero breaks over 20 turns** with normal-sized
+results; with pathological 25KB results, 6 breaks in 18 turns instead of 18, and
+the rendered history stays bounded.
+
+**Cached pricing surfaced in the picker** via a new `ModelInfo.cached_in_usd`,
+so the real economics are visible where models are chosen.
+
+**A dataclass trap, caught by its own test.** Catalogue entries are built with
+POSITIONAL arguments. The first attempt declared `cached_in_usd` right after
+`out_usd` — which silently re-mapped every entry so each model's `note` string
+became its cached price. The field is now declared LAST with that reason written
+next to it, and `test_models.py` asserts every note is still a string and every
+price still a number.
+
+**tests:** test_models.py 86 → 108 (cached pricing, the positional-arg
+regression, append-only history under both normal and pathological sizes, and
+that rendered history stays bounded). test_persona.py 201 → 218 (prefix
+stability across every mode, plus a reproduction of the old clock-in-prompt
+shape). 26/26 suites, 1,444 assertions.
+
 ### Housekeeping
 
 - `recall.py` registered in install.sh EXT_FILES.
 - New tests/test_persona.py (201 assertions) and tests/test_readme.py (86).
 - Version 9.1.0.
-- 26/26 suites, 1422 assertions, zero red.
+- 26/26 suites, 1444 assertions, zero red.
 - GUARDRAIL byte-identical (sha 0ccebd17786bfaaf).
 - safety/ledger/voice/scope sha256-identical to v9.0.0.
 - compileall + install.sh bash -n clean.

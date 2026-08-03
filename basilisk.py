@@ -234,6 +234,11 @@ _MISSION_VERIFY_DIRECTIVE = (
 # already been consumed) so a long research chat doesn't re-bill huge
 # outputs every turn.
 HISTORY_KEEP_FULL_TOOL_RESULTS = 2
+# How large the raw history may get before we re-trim. Below this, the rendered
+# history is held BYTE-STABLE so the provider's prefix cache keeps hitting;
+# above it, the trim watermark advances once and then holds again. Trading one
+# occasional cache miss for one on every single turn.
+HISTORY_STABLE_BUDGET_CHARS = 120_000
 HISTORY_TRIM_HEAD_CHARS = 600
 # Memory: the live terminal-log TextView and the rendered chat rows are DISPLAY
 # only (the real transcript lives in the SQLite ChatStore, and the model's
@@ -4731,6 +4736,12 @@ class MainWindow(Adw.ApplicationWindow):
         # How many times the watchdog has tried to nudge the CURRENT stall.
         # Reset by any real progress. See _turn_watchdog.
         self._unblock_attempts: int = 0
+        # Per-chat trim watermark: how many tool results have been demoted to
+        # their trimmed form. Only ever advances, and only when the history
+        # exceeds HISTORY_STABLE_BUDGET_CHARS — so the request stays
+        # append-only (and cacheable) between advances. See
+        # _build_history_for_model.
+        self._trim_watermark: dict = {}
         self._mission_verify_pending: bool = False   # first completion signal seen
         self._mission_no_action_streak: int = 0      # turns in a row with no tool call
         self._mission_directive: str = ""       # transient nudge for the next kick
@@ -10574,6 +10585,64 @@ class MainWindow(Adw.ApplicationWindow):
                   and (m.meta or {}).get("kind") == "tool_result"]
         keep_full = set(tr_idx[-HISTORY_KEEP_FULL_TOOL_RESULTS:]) \
             if HISTORY_KEEP_FULL_TOOL_RESULTS > 0 else set()
+
+        # ── TRIM ON A WATERMARK, NOT A SLIDING WINDOW ──
+        # `keep_full` above is a sliding window, and a sliding window rewrites a
+        # message in the MIDDLE of the request on EVERY turn: the tool result
+        # that was sent in full last turn is sent trimmed this turn. Prefix
+        # caching cannot survive that. DeepSeek is explicit that "partial
+        # matches in the middle of the input will not trigger a cache hit", and
+        # Groq's matcher stops at the first differing byte just the same. The
+        # message it rewrites sits a few places from the end, so what got thrown
+        # away every turn was the largest and most expensive part of the
+        # history — the full-length recent tool results.
+        #
+        # Note the direction that actually helps: it is NOT "once trimmed,
+        # always trimmed" (the trimming IS the mutation, so that changes
+        # nothing). It is "once sent in full, KEEP sending it in full" — that
+        # makes the request strictly append-only and the whole head cacheable.
+        #
+        # Kept in full forever would grow without bound, which is why the
+        # trimming exists at all. So the two pressures are resolved by
+        # AMORTISING the mutation: hold the render stable until the history
+        # actually exceeds a size budget, then advance a watermark once and stay
+        # stable again for many turns. One cache miss occasionally instead of
+        # one every single turn.
+        _wm = getattr(self, "_trim_watermark", None)
+        if _wm is None:
+            _wm = self._trim_watermark = {}
+        _key = chat_id or self.current_chat_id
+        _mark = _wm.get(_key, 0)
+
+        # Size measured on what would actually be SENT, not on the raw store.
+        # Measuring the store instead is a trap: it only ever grows, so the
+        # "over budget" condition would latch true forever and the watermark
+        # would creep forward one place every turn — a sliding window again,
+        # exactly what this replaces.
+        _max_mark = max(0, len(tr_idx) - HISTORY_KEEP_FULL_TOOL_RESULTS)
+
+        def _rendered_size(mark: int) -> int:
+            trimmed = set(tr_idx[:mark])
+            total = 0
+            for _j, _m in enumerate(msgs):
+                _c = _m.content or ""
+                total += (HISTORY_TRIM_HEAD_CHARS if _j in trimmed
+                          else len(_c))
+            return total
+
+        if _rendered_size(_mark) > HISTORY_STABLE_BUDGET_CHARS:
+            # Over budget: jump the watermark ALL THE WAY, not by one. A
+            # one-step advance puts us straight back into per-turn mutation;
+            # jumping to the maximum drops the rendered size a long way and
+            # buys many stable turns before the next advance. One occasional
+            # cache miss instead of one every turn.
+            _mark = _max_mark
+            _wm[_key] = _mark
+
+        # Trim the first `_mark` tool results (stable set, only ever grows);
+        # everything newer stays full, which keeps the tail append-only.
+        _trim_idx = set(tr_idx[:_mark])
+        keep_full = set(tr_idx) - _trim_idx
         for i, m in enumerate(msgs):
             kind = (m.meta or {}).get("kind")
             if m.role == "user":

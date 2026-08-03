@@ -226,6 +226,18 @@ class ModelInfo:
     # wrong guess here costs one extra round-trip on one turn, not a
     # broken model.
     think_off: Optional[Dict[str, Any]] = None
+    # Price per MILLION tokens for input served from the provider's PREFIX
+    # CACHE. Both wired providers cache automatically with no code change, and
+    # it is the single largest cost lever an agent has: an agent re-sends the
+    # same system prompt and the same history on every step, so with a stable
+    # prefix most of its input is a cache hit. 0.0 means "no separate published
+    # cached rate", not "free".
+    #
+    # DECLARED LAST ON PURPOSE. Every catalogue entry below is constructed with
+    # POSITIONAL arguments, so adding a field anywhere but the end silently
+    # re-maps them — put this after out_usd and each model's `note` string
+    # becomes its cached price.
+    cached_in_usd: float = 0.0
 
 
 # ── SiliconFlow catalogue, verified against siliconflow.com/models and the
@@ -262,7 +274,7 @@ GROQ_CATALOGUE: List[ModelInfo] = [
     ModelInfo("openai/gpt-oss-120b", "GPT-OSS 120B", 131, 0.15, 0.60,
               "Groq's flagship open-weight model. 120B, reasoning, ~500 t/s. "
               "The default and the best all-round pick here.",
-              tier="flagship"),
+              tier="flagship", cached_in_usd=0.075),
     ModelInfo("qwen/qwen3.6-27b", "Qwen3.6 27B", 131, 0.60, 3.00,
               "Highest measured intelligence on Groq, and vision-capable — but "
               "PREVIEW, so it can be withdrawn at short notice, and output "
@@ -271,7 +283,7 @@ GROQ_CATALOGUE: List[ModelInfo] = [
     ModelInfo("openai/gpt-oss-20b", "GPT-OSS 20B", 131, 0.075, 0.30,
               "Fastest on the platform at ~1000 t/s and the cheapest. Ideal "
               "for light turns and high-volume tool chains.",
-              tier="budget"),
+              tier="budget", cached_in_usd=0.037),
 ]
 
 
@@ -311,12 +323,14 @@ SILICONFLOW_CATALOGUE: List[ModelInfo] = [
               vision=True, tier="flagship"),
 
     # ── Workhorse: the everyday tier. The pinned default lives here ──
-    ModelInfo("deepseek-ai/DeepSeek-V4-Flash", "DeepSeek-V4-Flash", 1049,
+    ModelInfo("deepseek-ai/DeepSeek-V4-Flash", "DeepSeek-V4-Flash",
+              1049,
               0.13, 0.28,
               "PINNED DEFAULT. 284B/13B, 1M ctx. Every benchmark in the "
               "README was produced on this — the scaffolding scores, not "
               "the price tag.",
               tier="workhorse",
+              cached_in_usd=0.028,
               think_off={"enable_thinking": False}),
     ModelInfo("tencent/Hy3", "Hy3", 262, 0.13, 0.53,
               "295B/21B MoE with three reasoning modes. Cheapest credible "

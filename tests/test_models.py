@@ -186,6 +186,42 @@ ck("groq: every catalogue id carries real metadata",
 ck("groq: catalogue ids are unique",
    len(_gq_ids) == len(set(_gq_ids)))
 
+
+# ── prompt-cache economics ───────────────────────────────────────────
+# Both wired providers cache automatically. The discount is the biggest cost
+# lever an agent has, because an agent re-sends the same prompt every step.
+print("\n== cached pricing ==")
+_CACHED = {
+    "openai/gpt-oss-120b": 0.075,          # Groq: 50% off
+    "openai/gpt-oss-20b": 0.037,           # Groq: 50% off
+    "deepseek-ai/DeepSeek-V4-Flash": 0.028,  # SiliconFlow: 80% off
+}
+for _mid, _want in _CACHED.items():
+    _info = (GQ.info(_mid) or SF.info(_mid))
+    ck(f"{_mid} has a cached rate", _info is not None and _info.cached_in_usd > 0)
+    if _info:
+        ck(f"{_mid} cached rate is right", abs(_info.cached_in_usd - _want) < 1e-6,
+           str(_info.cached_in_usd))
+        ck(f"{_mid} cached is cheaper than uncached",
+           _info.cached_in_usd < _info.in_usd)
+
+# THE REGRESSION THIS FIELD ALMOST CAUSED. Catalogue entries are built with
+# POSITIONAL arguments, so a new dataclass field inserted anywhere but the END
+# silently re-maps every one of them — first attempt put cached_in_usd right
+# after out_usd and each model's `note` string became its cached price. Cheap
+# to assert, invisible otherwise.
+_all_models = list(SF.catalogue) + list(GQ.catalogue)
+ck("every note is a string, not a shifted number",
+   all(isinstance(m.note, str) for m in _all_models))
+ck("every cached rate is a number, not a shifted string",
+   all(isinstance(m.cached_in_usd, (int, float)) for m in _all_models))
+ck("every ctx_k is a positive int", all(isinstance(m.ctx_k, int) and m.ctx_k > 0
+                                        for m in _all_models))
+ck("every tier is one of the three labels",
+   all(m.tier in ("flagship", "workhorse", "budget") for m in _all_models))
+ck("no cached rate exceeds its uncached rate",
+   all(m.cached_in_usd <= m.in_usd for m in _all_models if m.cached_in_usd))
+
 # A dead id is dead EVERYWHERE, not just in the chain. Both Groq vision models
 # were retired (maverick 2026-03-09, scout 2026-07-17) and nothing noticed,
 # because the retirement guard only ever looked at chains and catalogues —
@@ -443,6 +479,124 @@ _free = _pick._model_detail(SF, "nex-agi/Nex-N2-Pro")
 ck("a $0 model reads 'free' not '$0/$0'", "free" in _free, _free)
 ck("detail is empty for an unknown id",
    _pick._model_detail(SF, "acme/Nope") == "")
+
+
+
+# ── 12. HISTORY IS APPEND-ONLY BETWEEN WATERMARK ADVANCES ────────────
+# The system prompt being stable is only half the job. `_build_history_for_model`
+# used a SLIDING keep-full window, so the tool result sent in full last turn was
+# sent trimmed this turn — rewriting a message in the MIDDLE of the request.
+# DeepSeek: "partial matches in the middle of the input will not trigger a cache
+# hit". Measured before the fix: ~40% of the request reusable and a break on
+# EVERY turn. After: 100% and zero breaks on a normal run.
+#
+# Note which direction actually fixes it. "Once trimmed, always trimmed" does
+# nothing — the trimming IS the mutation. It has to be "hold the render stable
+# until a size budget forces one big advance", which is what the watermark does.
+print("\n== history append-only (prompt cache) ==")
+_B = Bk   # basilisk, imported above with the GTK stub
+
+ck("a stability budget exists", hasattr(_B, "HISTORY_STABLE_BUDGET_CHARS"))
+ck("the budget is well above one tool result",
+   _B.HISTORY_STABLE_BUDGET_CHARS > 10 * _B.HISTORY_TRIM_HEAD_CHARS,
+   "too small and the watermark advances constantly — a sliding window again")
+
+
+class _M:
+    def __init__(self, i, role, content, kind=None):
+        self.id, self.role, self.content = i, role, content
+        self.meta = {"kind": kind} if kind else {}
+
+
+class _Store:
+    def __init__(self):
+        self.msgs = []
+
+    def list_messages(self, cid):
+        return list(self.msgs)
+
+
+def _mk(n, size):
+    out, mid = [_M(0, "user", "go")], 1
+    for i in range(n):
+        out.append(_M(mid, "assistant", f'<tool name="run">{{"c":{i}}}</tool>'))
+        mid += 1
+        out.append(_M(mid, "user", "<tool_result>\n" + "X" * size +
+                      "\n</tool_result>", "tool_result"))
+        mid += 1
+    return out
+
+
+def _shared(a, b):
+    sa = "".join(m["role"] + m["content"] for m in a)
+    sb = "".join(m["role"] + m["content"] for m in b)
+    n = 0
+    for x, y in zip(sa, sb):
+        if x != y:
+            break
+        n += 1
+    return n, len(sa)
+
+
+_w = object.__new__(_B.MainWindow)
+_w.store = _Store()
+_w.settings = {}
+_w.current_chat_id = 1
+_w._trim_watermark = {}
+
+_breaks, _turns = 0, 0
+_prev = None
+for _n in range(3, 22):
+    _w.store.msgs = _mk(_n, 2000)
+    _cur = _w._build_history_for_model(1)
+    if _prev is not None:
+        _sh, _ln = _shared(_prev, _cur)
+        _turns += 1
+        if _sh < _ln * 0.9:
+            _breaks += 1
+    _prev = _cur
+ck(f"normal-sized results: ZERO cache breaks over {_turns} turns",
+   _breaks == 0, f"{_breaks} breaks")
+
+# Oversized results must still be bounded — the watermark has to advance
+# sometimes, or context grows without limit. What it must NOT do is advance
+# every turn.
+_w2 = object.__new__(_B.MainWindow)
+_w2.store = _Store()
+_w2.settings = {}
+_w2.current_chat_id = 1
+_w2._trim_watermark = {}
+_breaks2, _turns2, _prev = 0, 0, None
+for _n in range(3, 22):
+    _w2.store.msgs = _mk(_n, 25000)
+    _cur = _w2._build_history_for_model(1)
+    if _prev is not None:
+        _sh, _ln = _shared(_prev, _cur)
+        _turns2 += 1
+        if _sh < _ln * 0.9:
+            _breaks2 += 1
+    _prev = _cur
+ck(f"oversized results: breaks are occasional, not every turn "
+   f"({_breaks2}/{_turns2})",
+   0 < _breaks2 < _turns2 / 2,
+   "must advance sometimes (bounded context) but not constantly (sliding)")
+ck("the watermark advanced at all", _w2._trim_watermark.get(1, 0) > 0)
+ck("the watermark only ever grows",
+   _w2._trim_watermark.get(1, 0) <= len(_w2.store.msgs))
+
+# And the rendered history must still be BOUNDED, or stability would just mean
+# an ever-growing prompt.
+_final = _w2._build_history_for_model(1)
+_size = sum(len(m["content"]) for m in _final)
+ck(f"oversized history stays bounded ({_size} chars)",
+   _size < _B.HISTORY_STABLE_BUDGET_CHARS * 3, str(_size))
+
+# Trimming must never destroy the model's record of WHAT IT DID — the tool
+# CALLS live in assistant messages and are never trimmed.
+ck("assistant tool calls survive trimming",
+   sum(1 for m in _final if "<tool name=" in m["content"]) >= 15,
+   "the action record must outlive the output trimming")
+
 
 
 print(f"\nmodels: {_p} passed, {_f} failed")
