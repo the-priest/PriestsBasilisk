@@ -1,3 +1,73 @@
+## v9.2.0
+
+**Theme: the cache is now genuinely maxed out, and the README says what this
+thing actually is.**
+
+### Prompt caching, third pass — measured end-to-end, not per-component
+
+Re-measured the WHOLE request (system + history + volatile) over 60-turn runs
+rather than one component at a time, which is how the remaining leak was found.
+
+**A third cache-buster: the history CAP also slid.** `assemble_messages` keeps
+the last N-1 messages once a conversation passes `max_history_msgs`. That window
+slides by one every turn, so the oldest kept message — and the request prefix
+with it — changed every turn from the cap onwards. Measured: reuse held at 100%
+up to turn 40 and then broke on **all twenty remaining turns**. Fixed by
+quantising the drop into blocks (`HISTORY_DROP_BLOCK`), so the window re-anchors
+occasionally instead of continuously. Same history dropped, prefix stable
+between anchors. Stateless and deterministic — no bookkeeping needed.
+
+**Verified headroom compression is prefix-safe** (94.8% with it on, same as
+off) rather than assuming it.
+
+**Final measured reuse, full requests:**
+
+| Scenario | Reusable prefix | Breaks | % of theoretical ceiling |
+|---|---|---|---|
+| short chat, 10 turns | 100% | 0 | maxed |
+| normal run, 30 turns | 100% | 0 | maxed |
+| general (disarmed), 30 turns | 100% | 0 | maxed |
+| max mode, 20 turns | 100% | 0 | maxed |
+| long run, 60 turns | 94.8% | 3 / 58 | 97.8% |
+| heavy run, 60 turns @ 8KB | 89.2% | 7 / 58 | 96.3% |
+
+Against DeepSeek-V4-Flash's 80%-off cached input that is roughly a
+**three-quarters cut in input cost** on a long autonomous run, for zero
+behavioural change. On Groq the discount is 50% and cached tokens do not count
+against rate limits at all.
+
+Pinned in `test_persona.py` (218 → 225): the drop block must exceed one message
+(a block of 1 IS a sliding window), 60 turns past the cap must produce ≤6
+anchors, the cap must still cap, the opening message must survive, and
+consecutive turns past the cap must share their prefix.
+
+### README rewritten again — harder framing, more substance
+
+- New **"Dangerous on purpose. Safe by construction."** section: a
+  will/cannot table making the point that neither list is a prompt — both are
+  enforced in code, below the model, where nothing it says and nothing a target
+  injects can reach. That is what makes it safe to hand something this capable a
+  real shell.
+- New **"The loop"** section with an ASCII flow of
+  observe → hypothesise → arm → fire → verify → record, and the point that the
+  proof marker is armed *before* firing.
+- New **"Why it costs almost nothing to run"** section with the three
+  cache-busters as a before/after table and the measured reuse chart.
+- New **"Everything in the box"** capability matrix showing which tool groups
+  load always and which only exist when Unleash is armed, plus a collapsible
+  reliability table (four named failure modes and what handles each).
+- ASCII difficulty-curve and progression charts beside the benchmark.
+- Hero rewritten with a four-figure stat table; stronger closing call to action.
+- 299 → 464 lines. Every claim still verified against the running code by
+  `test_readme.py`, which caught a stray Unicode variation selector in one of
+  the new anchor links.
+
+### Housekeeping
+- Version 9.2.0.
+- 26/26 suites, 1,456 assertions, zero red.
+- GUARDRAIL byte-identical. safety/ledger/voice/scope sha256-identical.
+- compileall + install.sh bash -n clean.
+
 ## v9.1.0
 
 **Theme: the turn loop cannot die, and the model cannot forget what it already did.**

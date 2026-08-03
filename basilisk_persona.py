@@ -1606,6 +1606,13 @@ def build_system_prompt(agent_mode: bool = True,
     return "\n".join(parts)
 
 
+# How many messages to drop at once when the history cap is crossed. Dropping
+# the minimum each turn slides the window and breaks the prompt cache every
+# turn; dropping in blocks re-anchors it occasionally instead. See
+# assemble_messages.
+HISTORY_DROP_BLOCK = 20
+
+
 def volatile_block(extra: str = "") -> str:
     """Everything that changes from one turn to the next, in one place.
 
@@ -1630,11 +1637,29 @@ def assemble_messages(system_prompt: str,
         trimmed = list(history)
     else:
         # Keep the very first user message (often carries the task framing
-        # the rest of the conversation refers back to) and the last N-1.
+        # the rest of the conversation refers back to) and a tail.
+        #
+        # THE TAIL START IS QUANTISED, and that matters more than it looks.
+        # Taking the last N-1 messages means the window slides by one every
+        # turn, so the oldest kept message changes every turn and the request's
+        # PREFIX changes with it — which destroys the provider's prompt cache
+        # from the moment the conversation crosses this cap, on every single
+        # turn thereafter. Measured: reuse held at 100% until the cap and then
+        # broke on all twenty remaining turns of a sixty-turn run.
+        #
+        # Rounding the drop count up to a block means the window re-anchors
+        # once every HISTORY_DROP_BLOCK messages instead of continuously: the
+        # same total amount of history is dropped, but the prefix stays
+        # byte-identical between re-anchors. One cache miss every ten turns
+        # rather than ten misses in ten turns.
+        over = len(history) - (max_history_msgs - 1)
+        drop = ((over + HISTORY_DROP_BLOCK - 1) // HISTORY_DROP_BLOCK) \
+            * HISTORY_DROP_BLOCK
+        drop = min(drop, len(history) - 1)
         first_user_idx = next(
             (i for i, m in enumerate(history) if m.get("role") == "user"),
             None)
-        tail = history[-(max_history_msgs - 1):]
+        tail = history[drop:]
         if first_user_idx is not None and history[first_user_idx] not in tail:
             trimmed = [history[first_user_idx]] + tail
         else:

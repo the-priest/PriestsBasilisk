@@ -569,5 +569,58 @@ ck("reproduction: a clock in the system prompt destroys the prefix",
    f"old shape shared only {_old_shared} chars vs {_shared} now")
 
 
+# ── 12. THE HISTORY CAP MUST NOT SLIDE EITHER ───────────────────────
+# assemble_messages drops old messages once the conversation passes
+# max_history_msgs. Dropping the MINIMUM each turn slides the window by one, so
+# the oldest kept message — and therefore the request PREFIX — changes every
+# turn from the cap onwards. Measured on a 60-turn run: reuse held at 100% up to
+# the cap and then broke on all twenty remaining turns. Quantising the drop
+# re-anchors it occasionally instead: same history dropped, prefix stable
+# between anchors.
+print("\n== history cap is quantised, not sliding ==")
+ck("a drop block is defined", hasattr(kp, "HISTORY_DROP_BLOCK"))
+ck("the drop block is more than one message", kp.HISTORY_DROP_BLOCK > 1,
+   "a block of 1 IS a sliding window")
+
+
+def _conv(n):
+    return [{"role": "user" if i % 2 == 0 else "assistant",
+             "content": f"msg{i}"} for i in range(n)]
+
+
+_cap = 40
+_anchors = set()
+for _n in range(_cap + 1, _cap + 61):
+    _m = kp.assemble_messages("SYS", _conv(_n), max_history_msgs=_cap)
+    # the first message after the preserved opener identifies the anchor
+    _anchors.add(_m[2]["content"] if len(_m) > 2 else "")
+ck(f"60 turns past the cap produce few anchors ({len(_anchors)})",
+   len(_anchors) <= 6,
+   "one anchor per turn means the window slid every turn")
+ck("under the cap nothing is dropped",
+   len(kp.assemble_messages("SYS", _conv(10), max_history_msgs=_cap)) == 11)
+ck("over the cap the result is bounded",
+   len(kp.assemble_messages("SYS", _conv(500), max_history_msgs=_cap))
+   <= _cap + 2, "the cap must still cap")
+ck("the opening user message is preserved past the cap",
+   any(m["content"] == "msg0" for m in
+       kp.assemble_messages("SYS", _conv(200), max_history_msgs=_cap)),
+   "it carries the task framing the rest refers back to")
+
+# Consecutive turns between anchors must be byte-identical in their prefix.
+_a = kp.assemble_messages("SYS", _conv(_cap + 5), max_history_msgs=_cap)
+_b = kp.assemble_messages("SYS", _conv(_cap + 6), max_history_msgs=_cap)
+_ca = "".join(m["role"] + m["content"] for m in _a)
+_cb = "".join(m["role"] + m["content"] for m in _b)
+_n = 0
+for _x, _y in zip(_ca, _cb):
+    if _x != _y:
+        break
+    _n += 1
+ck(f"consecutive turns past the cap share their prefix ({_n}/{len(_ca)})",
+   _n >= len(_ca) * 0.9,
+   "this is the property the whole cache depends on")
+
+
 print(f"\npersona: {_p} passed, {_f} failed")
 sys.exit(1 if _f else 0)

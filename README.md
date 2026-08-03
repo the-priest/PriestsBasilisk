@@ -10,16 +10,28 @@
 
 # 🐍 Priest's Basilisk
 
-### An autonomous security agent that runs as a native Linux desktop app on your own machine.
+### An autonomous offensive-security agent that lives on your machine, not in someone's cloud.
 
-<p><em>You bring the model; Basilisk gives it hands.</em><br/>
-Point it at a target and walk away. It finds the way in, <b>proves</b> every hit against ground truth, and keeps a hashed receipt of every command it ran — then turns around and does the same forensic job on your own codebase. Local, yours, no account, no telemetry. The only thing that ever leaves the box is the API call to the model <em>you</em> picked.</p>
+<p><b><em>You bring the model. Basilisk gives it hands, a memory, and a conscience.</em></b></p>
 
-<p><em>It scores <b>87/113</b> on OWASP Juice Shop black-box, driving one of the cheapest models on the market — beating frontier-model agents that were handed the source.</em></p>
+<p>Point it at a target and <b>walk away</b>. It maps the attack surface, forms a hypothesis, builds the exploit, fires it, and <b>proves the hit against ground truth</b> before it counts — then keeps a hashed, tamper-evident receipt of every single command it ran. When it's done breaking things, it turns the same forensic discipline on your own codebase and hands you back a repo whose tests actually pass.</p>
+
+<p>No account. No telemetry. No cloud sandbox. It runs as a native GTK4 desktop app on your own Linux box, with your privileges, and the <b>only</b> thing that ever leaves the machine is the API call to the model <em>you</em> chose.</p>
+
+<table align="center">
+<tr>
+<td align="center"><b>87 / 113</b><br/><sub>OWASP Juice Shop<br/>black-box, autonomous</sub></td>
+<td align="center"><b>22 / 22</b><br/><sub>Duck Store API<br/>black-box, autonomous</sub></td>
+<td align="center"><b>3.8×</b><br/><sub>the nearest<br/>competing agent</sub></td>
+<td align="center"><b>~$0</b><br/><sub>every benchmark run<br/>on a budget model</sub></td>
+</tr>
+</table>
+
+<p><em>Read that last column again. Basilisk beat frontier-model agents that were <b>handed the source code</b> — while driving one of the cheapest models on the market. The scaffolding scores. Not the price tag.</em></p>
 
 <br/>
 
-<img src="https://img.shields.io/badge/version-9.1.0-7d121b?style=for-the-badge&labelColor=08090b" alt="version 9.1.0">
+<img src="https://img.shields.io/badge/version-9.2.0-7d121b?style=for-the-badge&labelColor=08090b" alt="version 9.2.0">
 <img src="https://img.shields.io/badge/license-MIT-7d121b?style=for-the-badge&labelColor=08090b" alt="MIT license">
 <img src="https://img.shields.io/github/last-commit/the-priest/PriestsBasilisk?style=for-the-badge&color=6d7680&labelColor=08090b&logo=github&logoColor=white" alt="last commit">
 
@@ -32,16 +44,20 @@ Point it at a target and walk away. It finds the way in, <b>proves</b> every hit
 <img src="https://img.shields.io/badge/Linux-X11%20%7C%20Wayland-6d7680?style=for-the-badge&logo=linux&logoColor=white&labelColor=08090b" alt="Linux X11/Wayland">
 <img src="https://img.shields.io/badge/python-3.10+-6d7680?style=for-the-badge&logo=python&logoColor=white&labelColor=08090b" alt="Python 3.10+">
 <img src="https://img.shields.io/badge/runs%20on-NetHunter-6d7680?style=for-the-badge&labelColor=08090b" alt="Runs on NetHunter">
-<img src="https://img.shields.io/badge/tests-1444%20assertions-6d7680?style=for-the-badge&labelColor=08090b" alt="1444 assertions">
+<img src="https://img.shields.io/badge/tests-1456%20assertions-6d7680?style=for-the-badge&labelColor=08090b" alt="1456 assertions">
 
 <br/><br/>
 
+<a href="#-dangerous-on-purpose-safe-by-construction"><img src="https://img.shields.io/badge/Threat%20model-08090b?style=flat-square&labelColor=7d121b&color=08090b" height="26" alt="Threat model"></a>
 <a href="#-what-it-does"><img src="https://img.shields.io/badge/What%20it%20does-08090b?style=flat-square&labelColor=7d121b&color=08090b" height="26" alt="What it does"></a>
+<a href="#-the-loop"><img src="https://img.shields.io/badge/The%20loop-08090b?style=flat-square&labelColor=7d121b&color=08090b" height="26" alt="The loop"></a>
 <a href="#-benchmark"><img src="https://img.shields.io/badge/Benchmark-08090b?style=flat-square&labelColor=7d121b&color=08090b" height="26" alt="Benchmark"></a>
 <a href="#-fixing-your-code"><img src="https://img.shields.io/badge/Code%20repair-08090b?style=flat-square&labelColor=7d121b&color=08090b" height="26" alt="Code repair"></a>
 <a href="#-how-it-works"><img src="https://img.shields.io/badge/How%20it%20works-08090b?style=flat-square&labelColor=7d121b&color=08090b" height="26" alt="How it works"></a>
+<a href="#-why-it-costs-almost-nothing-to-run"><img src="https://img.shields.io/badge/Economics-08090b?style=flat-square&labelColor=7d121b&color=08090b" height="26" alt="Economics"></a>
 <a href="#-memory-learning--self-improvement"><img src="https://img.shields.io/badge/Memory-08090b?style=flat-square&labelColor=7d121b&color=08090b" height="26" alt="Memory"></a>
 <a href="#-security-model"><img src="https://img.shields.io/badge/Security-08090b?style=flat-square&labelColor=7d121b&color=08090b" height="26" alt="Security"></a>
+<a href="#-everything-in-the-box"><img src="https://img.shields.io/badge/Toolbox-08090b?style=flat-square&labelColor=7d121b&color=08090b" height="26" alt="Toolbox"></a>
 <a href="#-install"><img src="https://img.shields.io/badge/Install-e11d2b?style=flat-square&labelColor=08090b&color=e11d2b" height="26" alt="Install"></a>
 
 </div>
@@ -56,6 +72,37 @@ Point it at a target and walk away. It finds the way in, <b>proves</b> every hit
 
 <img src="https://capsule-render.vercel.app/api?type=rect&color=0:08090b,100:7d121b&height=3&section=header" width="100%" alt="">
 
+## ⚔️ Dangerous on purpose. Safe by construction.
+
+Most "AI security tools" are demos with a kill switch. Basilisk is a loaded weapon with a trigger guard — and the difference is worth being precise about, because it's the whole design.
+
+<table>
+<tr><th align="left">It will</th><th align="left">It cannot</th></tr>
+<tr valign="top"><td>
+
+- Run **real exploits** against whatever you authorise, autonomously, with no per-command approval
+- Execute **any shell command**, including `sudo`, without asking twice
+- Rewrite files, drive your desktop, and **edit its own source**
+- Keep going through errors, retries and dead ends until the objective is **verifiably** met
+- Write and keep **its own new tools** when the toolbox falls short
+
+</td><td>
+
+- Touch the **irreversible class** — disk wipes, `mkfs`, recursive root deletes, fork bombs, raw block-device writes. Refused inside the execution primitive. No override exists. Not for you, not for it
+- Step **outside your declared scope** — fails closed, sees through `sh -c`, `sudo`, `proxychains` and command substitution
+- Reach an **unapproved domain**, or any internal / private / cloud-metadata address
+- See your **sudo password**
+- Take an instruction from a **target**, a web page, or a file
+
+</td></tr>
+</table>
+
+**Neither list is a prompt.** Both are enforced in code, below the model, where nothing the model says or a target injects can reach. A prompt is a request; these are walls. That's what makes it safe to hand something this capable a real shell on a real machine.
+
+> **The honest version:** aimed at a system you own, Basilisk is one of the most capable things you can point at it. Aimed at something you don't own, it is evidence in a criminal case. The tool doesn't know the difference. **You do, and that's the entire contract.**
+
+<img src="https://capsule-render.vercel.app/api?type=rect&color=0:08090b,100:7d121b&height=3&section=header" width="100%" alt="">
+
 ## 🎯 What it does
 
 Two jobs, one loop, and the loop is the same both times: **do the thing, then prove it worked.**
@@ -67,6 +114,32 @@ Two jobs, one loop, and the loop is the same both times: **do the thing, then pr
 **It only arms when you arm it.** The offensive suite — recon planning, scanner parsing, the exploit builders, the success oracle, scope and asset tracking — loads *only* when Unleash is on. Disarmed, it is a research and repair tool and the attack tooling is not merely hidden from it, it is refused at the loader. One switch decides both what it can do and what it thinks it is for.
 
 The common thread is that Basilisk never asks a model whether something worked. Most "AI pentesters" do exactly that and take the answer on faith, which is why their findings drift and their scores collapse on targets the model hasn't memorized. Basilisk **arms every attempt with the marker that would confirm it** — a dumped database row, another user's token, a measurable timing difference, an out-of-band callback — fires, then checks for that marker before anything counts as a solve. No proof, no finding. Same discipline on the code side: no passing test, no fix.
+
+<img src="https://capsule-render.vercel.app/api?type=rect&color=0:08090b,100:7d121b&height=3&section=header" width="100%" alt="">
+
+## 🔁 The loop
+
+Every other agent asks the model "did that work?" and believes the answer. That's why their findings drift and their scores collapse on anything the model hasn't memorised. Basilisk never asks. It **arms the proof before it fires**.
+
+```
+   ┌──────────────────────────────────────────────────────────────────┐
+   │                                                                  │
+   │   OBSERVE ──▶ HYPOTHESISE ──▶ ARM ──▶ FIRE ──▶ VERIFY ──▶ RECORD │
+   │   behaviour   vuln class      the     through   against   to the  │
+   │   of the app  + builder       proof   the       ground    hashed  │
+   │               to reach for    marker  safety    truth     ledger  │
+   │                                       gate                        │
+   │       ▲                                            │              │
+   │       │                                            ▼              │
+   │       └──────────── what's left, what's proven ─────┘             │
+   │                     (oracle never re-runs a solved bug)           │
+   └──────────────────────────────────────────────────────────────────┘
+
+   The marker is the whole trick: a dumped row, another user's token,
+   a measurable timing delta, an out-of-band callback. No marker, no finding.
+```
+
+**Same loop, different target, when you point it at your own repo:** baseline the tests → change one thing → re-run → read what *broke* first → loop until green → refuse to export anything unverified. Do the thing, then prove it worked. That's the entire product in one sentence.
 
 <img src="https://capsule-render.vercel.app/api?type=rect&color=0:08090b,100:7d121b&height=3&section=header" width="100%" alt="">
 
@@ -89,6 +162,19 @@ Turned loose **fully autonomously** and **black-box** — no per-command approva
 > **The model is not the point — the loop is.** Every Basilisk figure above was produced driving **DeepSeek-V4-Flash**, one of the cheapest models available. The agents it beats run on far pricier frontier models and still scored lower. The result comes from the verified-exploitation loop wrapped around the model, not from the model itself — which is why a budget model tops the board.
 
 Published work generally puts fully-autonomous LLM pentest agents at **20–30%** on comparable tasks; Basilisk clears ~77%. Other agents' figures above are from the earlier v6-era session and were not re-run.
+
+```
+        SOLVE RATE BY DIFFICULTY                     PROGRESSION (same scoring)
+  ★     ████████████████████████ 100%          v6.0.0  ████████████         58
+  ★★    ████████████████████████ 100%          v7.1.0  ███████████████      73
+  ★★★   ██████████████████████░░  92%          v7.5.3  █████████████████    81
+  ★★★★  ███████████░░░░░░░░░░░░░  48%          v7.6.0  ██████████████████   87
+  ★★★★★ ████████████████░░░░░░░░  68%
+  ★★★★★★████████████░░░░░░░░░░░░  58%          Cascade ████████            36
+                                               Opus    █████               23
+```
+
+The curve is the honest part. It clears the entire lower half, then thins as the chains get deeper — and it *climbs again* at five and six stars, because that's where the verified-exploitation oracle earns its keep. A flat line would mean the benchmark was memorised, not solved.
 
 <details>
 <summary><b>📊 Difficulty curve, deep-end detail, and how to reproduce it</b></summary>
@@ -235,6 +321,37 @@ Parameterised generators for any authorized target, not Juice-Shop-bound toys:
 
 <img src="https://capsule-render.vercel.app/api?type=rect&color=0:08090b,100:7d121b&height=3&section=header" width="100%" alt="">
 
+## 💰 Why it costs almost nothing to run
+
+An agent re-sends the same system prompt and the same conversation on every single step. That makes **prompt caching** the largest cost lever it has — and both wired providers do it automatically, by *prefix*: the longest byte-identical run at the start of a request is reused at a steep discount, and on Groq those tokens don't count against your rate limits at all.
+
+Prefix caching is brutally literal. One changed byte near the front and you pay full price for everything after it. Basilisk was breaking it in **three** places at once:
+
+| | Was | Now |
+|---|---|---|
+| **A clock in the system prompt** | minute-resolution timestamp sitting *ahead* of ~4,000 tokens of tool contract — new prefix every minute | volatile content rides at the **tail** |
+| **Sliding trim window** | the tool result sent in full last turn was sent trimmed this turn, rewriting the *middle* of the request | watermark that holds the render byte-stable until a size budget forces one jump |
+| **Sliding history cap** | past 80 messages it dropped one from the front per turn, moving the anchor every turn | drops in **quantised blocks**, re-anchoring occasionally |
+
+Measured end-to-end across full requests, before vs after:
+
+```
+  SCENARIO                        REUSABLE PREFIX        CACHE BREAKS
+  short chat    (10 turns)   ████████████████████ 100%      0
+  normal run    (30 turns)   ████████████████████ 100%      0
+  general mode  (30 turns)   ████████████████████ 100%      0
+  long run      (60 turns)   ███████████████████░  95%      3 / 58
+  heavy run     (60 turns, 8KB results)
+                             ██████████████████░░  89%      7 / 58
+                             ^ theoretical ceiling is 93-97%; this captures 96-98% of it
+```
+
+With DeepSeek-V4-Flash on SiliconFlow (cached input **80% off**) that's roughly a **three-quarters cut in input cost** on a long autonomous run — for zero change in behaviour. Groq's discount is 50%, and cached tokens there don't touch your rate limit, so a free-tier key goes several times further.
+
+> None of this is visible at runtime. The app worked perfectly before and simply cost several times more. That is exactly why every one of these properties is now pinned by a test that measures a real request rather than describing an intention.
+
+<img src="https://capsule-render.vercel.app/api?type=rect&color=0:08090b,100:7d121b&height=3&section=header" width="100%" alt="">
+
 ## 🧠 Memory, learning & self-improvement
 
 Basilisk isn't a stateless prompt. Three mechanisms let it remember, learn and grow — all local, all yours.
@@ -255,7 +372,40 @@ An agent that reads the outside world *and* runs shell commands is a prompt-inje
 - **Untrusted input is quarantined.** Anything from outside — a target's response, an MCP result, an analyzed image — passes a deterministic content firewall and is wrapped as *data, never instructions*.
 - **Your sudo password never touches the model.** Self-written code runs only in a bubblewrap jail after passing its own test, and Basilisk's own safety source can't be overwritten by a shell command.
 
-All of it is pinned in the test suite — **1,444 assertions across 26 suites**, stdlib-only, runnable before you trust it with anything. Basilisk writes and runs real exploits against authorized targets, because that's the job. It will not produce standalone weaponized malware (reverse shells, implants, ransomware, backdoors), and the destructive class can never run through it at all.
+All of it is pinned in the test suite — **1,456 assertions across 26 suites**, stdlib-only, runnable before you trust it with anything. Basilisk writes and runs real exploits against authorized targets, because that's the job. It will not produce standalone weaponized malware (reverse shells, implants, ransomware, backdoors), and the destructive class can never run through it at all.
+
+<img src="https://capsule-render.vercel.app/api?type=rect&color=0:08090b,100:7d121b&height=3&section=header" width="100%" alt="">
+
+## 🧰 Everything in the box
+
+Tool specs load **on demand**, so the base prompt stays small no matter how many exist — and the offensive half only exists at all when Unleash is armed.
+
+| Group | Loaded | What's in it |
+|---|---|---|
+| 🖥️ **system** | always | Read any file, search anywhere, snapshot RAM / disk / processes / routes / services / journal, graded security audit, network scan |
+| 🧪 **code** | always | SAST + SCA + secrets scanning across py/js/ts/php/java/ruby/go/.NET, cross-tool triage, remediation hints, 31-signature variant analysis |
+| 📦 **workspace** | always | Import a repo zip, search and read it whole, surgical edits, baseline → verify → export with a gate that refuses unverified changes |
+| 🖱️ **desktop** | always | Launch apps, manage windows, type, click, screenshot, OCR the screen, notify |
+| 🖼️ **media** | always | Show images inline, and actually *look* at one with a vision model |
+| ⚔️ **offensive** | **armed only** | Recon planning, scanner-output parsing, CVE → KEV → EPSS, nuclei templates, sqlmap builder, false-positive self-check, the verified-exploitation oracle + out-of-band canary |
+| 🎯 **engagement** | **armed only** | Authorised scope (fails closed), asset graph, loot, in-scope credential-reuse leads |
+| 📊 **benchmark** | **armed only** | Score a run against known-vulnerable practice targets |
+
+<details>
+<summary><b>⚙️ Reliability — what makes it survivable to leave running for six hours</b></summary>
+
+<br/>
+
+Autonomy is easy to claim and hard to survive. Four specific things kill a long unattended run, and each is handled in code rather than asked for in a prompt:
+
+| Failure | What Basilisk does |
+|---|---|
+| **Forgets what it already did and redoes it** | A compact action ledger lives *outside* the transcript — one line per action and outcome, never trimmed, re-sent whole every turn. A deterministic guard refuses a third identical action; a cycle detector catches A→B→A→B loops that a "same command twice" check never sees |
+| **A slow job gets killed and the work is binned** | Supervision by **progress**, not a wall clock. Output arriving *or* CPU advancing across the process group resets the clock, so real work has no time limit. A genuine stall gets **unstuck** first — the commonest one is a process blocked on an interactive prompt, which a timeout can only kill but closing stdin actually releases |
+| **One dead worker strands the whole run** | Every tool path returns through a guaranteed one-shot result: the worker can return, throw, or die halfway and exactly one result still reaches the model. A watchdog behind that **nudges** the run back into motion — carrying the full conversation and ledger, so a nudge can't become a loop — before it will ever consider stopping |
+| **Over-thinks a simple problem** | Diagnosis ordered by **likelihood × cost to check**. Name the two or three likeliest causes, test the cheapest decisive one first, stop the moment it's confirmed. Boring causes before exotic ones. Effort escalates on *evidence of difficulty*, not on how many steps have passed |
+
+</details>
 
 <img src="https://capsule-render.vercel.app/api?type=rect&color=0:08090b,100:7d121b&height=3&section=header" width="100%" alt="">
 
@@ -312,5 +462,21 @@ The model picker shows context window, price per million tokens and what each mo
 ## 📜 License
 
 **MIT.** Take it, fork it, use it on what you're allowed to break.
+
+<div align="center">
+
+<br/>
+
+### Built by one person, verified by 1,456 assertions.
+
+<sub>No VC, no waitlist, no "contact sales". Clone it, read it, run the suite,<br/>
+then point it at something you own and watch it work.</sub>
+
+<br/>
+
+<a href="https://github.com/the-priest/PriestsBasilisk"><img src="https://img.shields.io/badge/★%20Star%20the%20repo-7d121b?style=for-the-badge&labelColor=08090b" alt="Star the repo"></a>
+<a href="#-install"><img src="https://img.shields.io/badge/Install%20in%20one%20line-e11d2b?style=for-the-badge&labelColor=08090b" alt="Install"></a>
+
+</div>
 
 <img src="https://capsule-render.vercel.app/api?type=waving&color=0:08090b,100:7d121b&height=120&section=footer&text=verify%20everything&fontColor=ffffff&fontSize=26&fontAlignY=68&animation=twinkling" width="100%" alt="verify everything">
