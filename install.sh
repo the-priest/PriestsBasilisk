@@ -1035,12 +1035,12 @@ if install_dir and os.path.isdir(install_dir):
 if defaults is None:
     # Minimal fallback only.  load_settings() merges the full DEFAULT_SETTINGS
     # over whatever is on disk at launch, so the rest is filled in then.
+    # SiliconFlow is the only chat provider. This dict previously listed five,
+    # including "google" TWICE (the second silently won) and two providers that
+    # were never in the registry at all — dead weight that could only ever
+    # produce a default pointing at nothing.
     providers = {
-        "google":      "gemini-2.5-flash",
         "siliconflow": "deepseek-ai/DeepSeek-V4-Flash",
-        "novita":      "qwen/qwen3-coder-480b-a35b-instruct",
-        "github":      "openai/gpt-4.1",
-        "google":      "gemini-2.5-pro",
     }
     defaults = {
         "active_provider": "siliconflow",

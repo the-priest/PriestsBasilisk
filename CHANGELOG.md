@@ -1,3 +1,182 @@
+### The OTHER half of the screenshot: extra tool calls were silently dropped (v9.5.1)
+
+The dialect fix explained the pipes on screen. It did not explain why the model
+kept saying its own calls were "malformed" and re-sending them. That is a
+second, independent bug on the same failure path.
+
+**`web_read` is deliberately NOT batchable.** The web readers were pulled from
+the parallel batch set to shrink the prompt-injection surface — a real decision,
+recorded in a comment, and left in place here. But the routing then does this:
+
+    batch = []                       # leading run of PURE tools
+    for c in executable:
+        if self._pure_tool_fn(c) is not None: batch.append(c)
+        else: break
+    ...
+    else:
+        self._execute_tool_calls(executable[:1])   # <- the rest vanish
+
+A reply containing two or three `web_read` calls produced an EMPTY batch (the
+first tool is not pure), fell to `executable[:1]`, ran one, and **discarded the
+others without a word**. The screenshot shows exactly that: two web_reads in one
+message, three in another. The model got one result for three lookups, could
+only conclude it had emitted bad calls, apologised — "my last two lookups
+glitched on my end (malformed call)" — and re-sent them, to be dropped again.
+
+**And the persona was telling it to do the thing that breaks.** "BATCH READS —
+emit ALL their tags in the SAME reply." Instruction and implementation in direct
+contradiction, which is the worst kind: following the documented rule was what
+triggered the bug.
+
+Fixed both ends without touching the security decision:
+- The skipped calls are now REPORTED. The next tool result carries a note naming
+  them, stating plainly that nothing was malformed and nothing was lost, and to
+  re-issue them one per reply. A mystery becomes an instruction.
+- The persona now says which tools do NOT batch (`web_read`, `web_sources`,
+  `cve_lookup`, `image_search` — everything that reaches outside the machine)
+  and that emitting two means only the first runs.
+
+`test_persona.py` pins the agreement so the instruction can never drift away
+from the implementation again.
+
+## v9.5.0
+
+### Google AI Studio removed — SiliconFlow is the only chat provider
+
+Gemini could not reliably drive the app, and its free tier trains on submitted
+prompts, which is the wrong place for engagement data. Removed. Anyone whose
+config still selects `google` (or `groq`) is migrated to the primary, with a
+generic guard so no future removal can strand a config on a dead selection.
+
+Cleaning `install.sh` turned up a real mess in its fallback defaults: it listed
+FIVE providers, including **`"google"` twice** (duplicate dict key — the second
+silently won) and two, `novita` and `github`, that were never in the registry at
+all. A default pointing at an unregistered provider can only ever fail. One
+entry now, and a test asserts the installer names no provider outside the
+registry.
+
+### The oracle was unreachable on a single call
+
+`basilisk.py` resolves a tool name in two places: `_pure_tool_fn` (parallel
+batch) and `dispatch` (single call). `oracle_arm`, `oracle_check`,
+`oracle_status` and `oracle_listen` were in the batch path ONLY — so
+`oracle_check` called on its own, which is exactly how it is used right after
+firing an exploit, fell through to:
+
+    self._feed_tool_result(f"Unknown tool '{call.name}'.")
+
+The oracle is the verified-exploitation core. "No proof, no finding" depends on
+it entirely and every benchmark number was produced with it; a silent unknown-
+tool turns every confirmed hit back into an assumption. Wired into `dispatch`.
+
+**`tests/test_dispatch.py` (30 assertions)** now pins that the set of tools the
+persona SELLS and the set the app can RUN are the same set, and that nothing
+lives in the batch path alone — the drift signature that caused this.
+
+### Playbooks — the model no longer has to improvise method
+
+The reported screenshot showed it hand-rolling `html.duckduckgo.com/html/?q=…`,
+because **there is no search tool** and nothing said so. It was rediscovering
+that every run and getting it subtly wrong.
+
+New always-loaded PLAYBOOKS section with exact sequences for: searching the web
+(including that the non-`html.` domain is JS-only and returns nothing, that the
+results page is never the answer, and a two-search ceiling before reading
+something), verifying a current fact against a primary source, CVE research,
+target enumeration, claiming a finding through the oracle (proof armed BEFORE
+firing; a 200 is not evidence), repo repair (baseline first, read `broke` first,
+never edit his tests), and batching reads.
+
+Specialist steps are deliberately written WITHOUT a `<tool …>` wrapper — an
+earlier draft wrapped them, which registered them as CORE tools, broke the
+minimal-core invariant and would have implied they were already loaded when they
+still need `load_tools`.
+
+### Settings audit — one missing control, one unusable option
+
+- **Research depth had no control at all.** `answer_tool_budget` was a hardcoded
+  `.get(..., 18)` fallback that was not even in `DEFAULT_SETTINGS`, so it could
+  neither be seen nor raised — while every `load_tools`, `web_search`,
+  `web_read` and file read counted against it. Now a real setting (default 40)
+  with a Settings row.
+- **The transcription picker offered an option with nowhere to enter its key.**
+  Groq stopped being a chat provider, so it stopped getting an API-key row from
+  `_build_provider_group` — but it is still the Whisper backend and the picker
+  still lists it. Added a dedicated "Groq API key (Whisper only)" row beside the
+  setting that uses it, with a get-a-key link.
+- `unleashed` — the master mode switch — was written by the toggle and read with
+  a `.get` default but was never in the schema. Added.
+- No dead controls found: every Settings row writes a key the app reads.
+
+**METHOD NOTE:** the dead-setting check flagged `stt_model_siliconflow` and was
+WRONG — it is read indirectly via `{"model_setting": "stt_model_siliconflow"}`
+in basilisk_voice.py, which no `.get("literal")` regex can see. Acting on that
+verdict would have deleted a live setting. The check now counts indirect use.
+Third time in this project a checker has been wrong rather than the artifact;
+validate the checker first.
+
+### Housekeeping
+- Version 9.5.0.
+- 28/28 suites, 1,604 assertions, zero red.
+- GUARDRAIL byte-identical. safety/ledger/voice/scope sha256-identical.
+
+## v9.4.0
+
+### Finishing the tool-dialect fix — the first pass was not enough
+
+v9.3.0 taught the parser five dialects. Verifying it end-to-end rather than
+unit-testing the parser found the fix was **one third complete**. Three separate
+leaks remained, and the most visible one was completely untouched.
+
+**1. Parse normalised, strip did not.** A native-token call therefore EXECUTED
+(parse saw it) and SURVIVED stripping (strip did not). The raw special tokens
+went to the screen AND into the stored message — so every later turn re-sent the
+garbage to the model as history, wasting context and teaching it the broken
+format was fine. Parse and strip must see the same text or one of them is always
+wrong. `strip_tool_calls` now normalises first, and `_on_stream_done` normalises
+ONCE at the boundary so parsing, stripping, the database, the history and the
+widget all operate on canonical text.
+
+**2. It still leaked the whole time it was streaming.** The end state being
+correct is worth nothing when the reply is rendered on every token. Replaying
+the reported reply character by character: **61 of 176 frames printed protocol
+text**, starting with `<｜tool▁calls▁begin｜` — precisely the pipes and boxes in
+the screenshot. Fixing only the final message would have left the visible
+symptom entirely intact. Partial-fragment rules now hide a call that is still
+arriving, mirroring what `TOOL_PARTIAL_RE` already did for the canonical form.
+
+**3. The other four dialects leaked too.** Caught by the same replay after the
+DeepSeek case was fixed: `<tool_call>`, `<invoke>` and `<function=>` each stayed
+visible until their closing tag landed — 39 to 48 frames each. All five dialects
+now measure **zero leaked frames**.
+
+Verified end-to-end on the exact payload from the report: 2 calls parsed and
+executed, operator sees `Good — that search landed…` and nothing else, stored
+history contains the prose and nothing else.
+
+**Two more bugs found while proving it:**
+- A tool tag inside a ```` ```python ```` fence was EXECUTED — a reply that
+  documented the tool syntax would fire the tool. Fences are masked before
+  scanning; positions come from the mask while content is re-matched against the
+  original, so a tag whose own body is fenced still yields its JSON.
+- A canonical tag with a fenced JSON body fell back to `_raw` instead of
+  parsing. Models format JSON that way constantly.
+
+**Known and accepted:** a tool tag the model writes inside a code fence *as
+documentation* is stripped from the display as well. Cosmetic, rare, and it errs
+in the safe direction — the alternative reopens the leak.
+
+**tests/test_toolsyntax.py: 68 → 106 assertions.** Adds the character-by-
+character streaming replay for all five dialects, the parse/strip agreement
+invariant, mixed dialects in one reply, and six prose cases (`a < b`, `<div>`,
+`function=f(x)`, markdown autolinks, a grep pattern) proving nothing legitimate
+is mangled.
+
+### Housekeeping
+- Version 9.4.0.
+- 27/27 suites, 1,557 assertions, zero red.
+- GUARDRAIL byte-identical. safety/ledger/voice/scope sha256-identical.
+
 ## v9.3.0
 
 ### The leashed-mode bug: found it, and it was a silent drop
@@ -69,8 +248,65 @@ professional-only weapon, a "who this is for / not for" section, and the point
 that privacy protects the operator and not the target — being untraceable is
 not the same as being permitted. Version 9.3.0.
 
+### The "DSML" garbage: the host only spoke one tool dialect (v9.3.0 addendum)
+
+Reported with a screenshot: pipes and boxes and `name="web_read"` printed as
+text, the model apologising for "malformed calls", and the turn ending without
+doing the work. It looked like the model was broken. It was not — the host was.
+
+`TOOL_TAG_RE` matched exactly ONE dialect, `<tool name=...>`. Measured against
+the parser, every other form scored zero:
+
+| Form | Parsed before |
+|---|---|
+| `<tool name="x">` | 1 ✅ |
+| DeepSeek native special tokens | **0** |
+| `<tool_call name="x">` | **0** |
+| `<invoke name="x">` | **0** |
+| `<function=x>` | **0** |
+
+A call that parses to zero is neither executed NOR stripped, so it leaks to the
+screen as raw protocol text and the turn ends with nothing to run — which is
+both halves of the report at once.
+
+**The pipes identify the culprit.** DeepSeek emits function calls as special
+tokens built from FULLWIDTH VERTICAL LINE (U+FF5C) and LOWER ONE EIGHTH BLOCK
+(U+2581). In a font without those glyphs they render as pipes and boxes. The
+model was using its own trained tool syntax; the host understood one dialect and
+had no way to say so.
+
+**Fix 1 — speak the dialects.** `_normalise_tool_syntax()` rewrites DeepSeek
+native tokens, `<tool_call>`, `<toolcall>`, `<function_call>`, `<invoke>` and
+`<function=name>` into the canonical form before parsing. All now parse.
+
+**Fix 2 — never fail silently.** Whack-a-mole on regexes does not fix the class,
+so `looks_like_failed_tool_call()` detects tool-call-shaped debris in a reply
+that produced no executable calls, and the host feeds back the exact working
+format and asks the model to re-send. A malformed call explicitly does NOT lock
+tools — it still needs to run, just in the right syntax.
+
+**Fix 3 — the operator never sees protocol wreckage.** `scrub_tool_debris()` is
+applied on the display path. Raw transport internals on screen tell him nothing
+and make a working app look broken.
+
+**Two more bugs found while testing this:**
+- A tool tag inside a ```` ```python ```` fence was EXECUTED — a reply that
+  documented the tool syntax would fire the tool. Fences are now masked before
+  scanning. Positions come from the masked copy while content is re-matched
+  against the original, so a tag whose own body is fenced still yields its JSON.
+- A canonical tag with a ```` ```json ```` body fell back to `_raw` instead of
+  parsing. Models format JSON that way constantly; it is unwrapped now.
+
+**tests/test_toolsyntax.py, 68 assertions:** every dialect parses with the right
+name and args; two native calls in one reply both parse; normalisation is
+conservative (prose, HTML talk, `a < b`, and fenced examples invent nothing);
+debris detection has no false alarms on clean prose; display scrubbing removes
+every control token; an unterminated native call does not swallow the rest of
+the reply; and 400 calls parse in under two seconds with no backtracking blowup
+on a 400KB input.
+
 ### Housekeeping
-- 26/26 suites, 1,452 assertions, zero red.
+- 27/27 suites, 1,519 assertions, zero red.
 - GUARDRAIL byte-identical. safety/ledger/voice/scope sha256-identical.
 - compileall + install.sh bash -n clean.
 

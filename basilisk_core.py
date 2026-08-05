@@ -150,46 +150,6 @@ STREAM_IDLE_TIMEOUT_S = 60
 STREAM_MAX_WALL_S = 150
 HEALTH_TIMEOUT_S  = 1.5
 
-# ── Google AI Studio ─────────────────────────────────────────────────
-# Verified 2026-08-03. Groq was removed: its catalogue is four chat models and
-# it had already retired four of six chain entries in three months. Google AI
-# Studio ships an OPENAI-COMPATIBLE endpoint
-# (generativelanguage.googleapis.com/v1beta/openai), so it drops straight into
-# OpenAICompatBackend with no new engine — and its free tier is far larger:
-# 1M-token context, ~1500 requests/day on Flash, no credit card.
-#
-# ⚠ READ THIS BEFORE PICKING IT FOR REAL WORK.  Google's FREE tier permits
-# using submitted prompts to improve their models; the paid tier and Vertex do
-# not. Basilisk sends target responses, findings and sometimes credentials
-# through the model. On a real engagement that is a disclosure you almost
-# certainly cannot make. The note on each model below says so, and the operator
-# picks with that in front of him rather than buried in a doc.
-GOOGLE_DEFAULT_MODEL = "gemini-2.5-flash"
-
-# Short and production-only: each entry is another round-trip during an outage.
-GOOGLE_FALLBACK_CHAIN = [
-    "gemini-2.5-flash",        # 1M ctx, the free-tier workhorse
-    "gemini-2.5-flash-lite",   # cheapest + highest RPM, last resort
-]
-# ─────────────────────────────────────────────────────────────────────
-# CLOUD PROVIDER REGISTRY
-#
-# Every cloud provider below SiliconFlow speaks the OpenAI-compatible
-# /chat/completions schema, so one generic backend (OpenAICompatBackend)
-# drives all of them — no extra Python dependencies, just urllib + SSE.
-# Groq keeps its own library-backed backend (it's what the operator
-# already relies on) but is registered here too so the UI treats every
-# provider uniformly.
-#
-# Each chain is ordered BIGGEST/BEST FIRST.  The chain is both the
-# default model (chain[0]) and the in-provider fallback order: if the
-# selected model is rate-limited or unavailable, the backend walks down
-# the chain before giving up.  Model IDs drift over time — every
-# provider also supports live discovery (GET /models) and the model
-# field in Settings is editable, so a stale ID here is never fatal.
-# Verified against each provider's docs, May 2026.
-# ─────────────────────────────────────────────────────────────────────
-
 @dataclass(frozen=True)
 class ModelInfo:
     """One pickable model, with the metadata the picker needs to be useful.
@@ -219,61 +179,17 @@ class ModelInfo:
     # broken model.
     think_off: Optional[Dict[str, Any]] = None
     # Price per MILLION tokens for input served from the provider's PREFIX
-    # CACHE. Both wired providers cache automatically with no code change, and
-    # it is the single largest cost lever an agent has: an agent re-sends the
-    # same system prompt and the same history on every step, so with a stable
-    # prefix most of its input is a cache hit. 0.0 means "no separate published
-    # cached rate", not "free".
+    # CACHE. SiliconFlow/DeepSeek publishes a cached rate ~80% below the
+    # uncached one, and it is the single largest cost lever an agent has: an
+    # agent re-sends the same system prompt and the same history on every step,
+    # so with a stable prefix most of its input is a cache hit. 0.0 means "no
+    # separate published cached rate", not "free".
     #
     # DECLARED LAST ON PURPOSE. Every catalogue entry below is constructed with
     # POSITIONAL arguments, so adding a field anywhere but the end silently
     # re-maps them — put this after out_usd and each model's `note` string
     # becomes its cached price.
     cached_in_usd: float = 0.0
-
-
-# ── SiliconFlow catalogue, verified against siliconflow.com/models and the
-#    published pricing table, Jul 2026 ────────────────────────────────────
-#
-# WHY THIS IS A LIST OF ModelInfo AND NOT JUST IDS: the old flat chain was
-# doing three incompatible jobs at once — the Settings picker list, the
-# quick-switch popover list, AND the runtime rate-limit fallback walk.  That
-# coupling meant you could not add a model to pick from without also adding
-# it to the retry storm that fires when the provider is down.  They are now
-# separate: CATALOGUE is what you can PICK, CHAIN is what the backend WALKS.
-#
-# Three entries in the previous chain were dead and would have 404'd:
-#   Qwen/Qwen3-235B-A22B-*  discontinued 2025-12-31
-#   zai-org/GLM-4.6         discontinued (superseded by GLM-5.x)
-#   moonshotai/Kimi-K2.5    being discontinued; requests redirect to K2.6
-#
-# IDs marked (inferred) below follow the vendor's exact published naming
-# convention but were not seen verbatim in a SiliconFlow price/release
-# table.  If one 404s, hit ⟳ in Settings and pick the live id.
-# What the operator PICKS.  Same catalogue/chain split as SiliconFlow.
-#
-# Google publishes CONTEXT CACHING with an implicit ~75% discount on cached
-# input for the 2.5 family, which is why cached_in_usd is set: an agent re-sends
-# the same prompt every step, so with the stable prefix this build produces,
-# most input is a cache hit.
-GOOGLE_CATALOGUE: List[ModelInfo] = [
-    ModelInfo("gemini-2.5-flash", "Gemini 2.5 Flash", 1048, 0.30, 2.50,
-              "The free-tier workhorse: 1M context, natively multimodal, "
-              "~1500 requests/day free with no card. FREE TIER TRAINS ON YOUR "
-              "PROMPTS — do not point it at a real engagement.",
-              vision=True, tier="workhorse", cached_in_usd=0.075),
-    ModelInfo("gemini-2.5-pro", "Gemini 2.5 Pro", 1048, 1.25, 10.00,
-              "Strongest reasoning of the three, but the free tier is capped "
-              "near 50 requests/day — enough to answer a hard question, not to "
-              "run an engagement. Same free-tier training caveat.",
-              vision=True, tier="flagship", cached_in_usd=0.31),
-    ModelInfo("gemini-2.5-flash-lite", "Gemini 2.5 Flash-Lite", 1048,
-              0.10, 0.40,
-              "Cheapest and highest request-rate of the three. Good for light "
-              "turns and high-volume tool chains. Same free-tier training "
-              "caveat.",
-              vision=True, tier="budget", cached_in_usd=0.025),
-]
 
 
 SILICONFLOW_CATALOGUE: List[ModelInfo] = [
@@ -429,14 +345,6 @@ class ProviderSpec:
 # fallback chain, not the default.
 PROVIDERS: List[ProviderSpec] = [
     ProviderSpec(
-        key="google", label="Google AI Studio",
-        blurb="OpenAI-compatible. Gemini, 1M context, big free tier "
-              "(no card). Free tier trains on your prompts.",
-        base_url="https://generativelanguage.googleapis.com/v1beta/openai",
-        chain=list(GOOGLE_FALLBACK_CHAIN),
-        catalogue=tuple(GOOGLE_CATALOGUE),
-        key_url="https://aistudio.google.com/apikey"),
-    ProviderSpec(
         key="siliconflow", label="SiliconFlow",
         blurb="OpenAI-compatible. Big open models (DeepSeek, GLM, Kimi, "
               "Qwen, MiniMax).",
@@ -464,11 +372,6 @@ VISION_MODELS: Dict[str, List[str]] = {
         "Qwen/Qwen3-VL-30B-A3B-Instruct",
         "Qwen/Qwen3-VL-8B-Instruct",
         "zai-org/GLM-4.5V",
-    ],
-    "google": [
-        "gemini-2.5-flash",
-        "gemini-2.5-pro",
-        "gemini-2.5-flash-lite",
     ],
 }
 CLOUD_PROVIDER_KEYS = [p.key for p in PROVIDERS]
@@ -596,6 +499,11 @@ DEFAULT_SETTINGS = {
     # table, so it could not be tuned. Hitting it is now visible and
     # recoverable rather than a silent dead end (see _on_stream_done).
     "answer_tool_budget":      40,
+    # UNLEASH: the master two-mode switch. It was written by the toggle and read
+    # with a .get default, but was never IN this table — so it was invisible to
+    # anything that iterates the schema, and _migrate_settings could not reason
+    # about it. Off = answer once and stop; on = autonomous engagement.
+    "unleashed":               False,
     "mcp_enabled":             False,   # connect external MCP tool servers (OFF
                                         # by default — MCP is an RCE surface;
                                         # tool args are safety-screened + logged)
@@ -738,10 +646,15 @@ def _migrate_settings(merged: Dict[str, Any], raw: Dict[str, Any]) -> None:
     # a provider that no longer exists — prefer Google if they have that key,
     # otherwise the locked primary. The Groq WHISPER key is untouched: speech-
     # to-text is a separate feature and still uses it.
-    if merged.get("active_provider") == "groq":
-        merged["active_provider"] = (
-            "google" if (raw.get("google_api_key") or "").strip()
-            else "siliconflow")
+    # Providers removed over time: Groq (v9.3.0 — four chat models and four of
+    # six chain ids retired in three months) and Google AI Studio (v9.5.0 — the
+    # operator found Gemini could not drive the app reliably, and its free tier
+    # trains on submitted prompts, which is wrong for engagement data). Anyone
+    # still selecting one is moved to the locked primary rather than left
+    # pointing at a provider that no longer exists. The generic guard below
+    # catches any future removal too; this is here so the intent is explicit.
+    if merged.get("active_provider") in ("groq", "google"):
+        merged["active_provider"] = "siliconflow"
     # Guard against an active_provider that no longer exists in the
     # registry (e.g. a renamed/removed provider) — fall back to the locked
     # primary, SiliconFlow.
@@ -7343,11 +7256,204 @@ _CONTENT_FIELD_ALIASES = ("text", "body", "contents", "data",
                           "file_text", "file_content", "filecontent")
 
 
+# ── TOOL-SYNTAX NORMALISATION ────────────────────────────────────────
+# TOOL_TAG_RE only matches `<tool ...>`. Everything else a model might emit —
+# and they emit plenty — parsed to ZERO calls, which meant the text was neither
+# executed NOR stripped, so it leaked into the chat as raw garbage and the turn
+# ended with nothing to run. That is the "why is it printing DSML nonsense
+# instead of searching, and why does it stop" failure.
+#
+# The worst offender is the model's OWN native format. DeepSeek emits function
+# calls as special tokens built from FULLWIDTH VERTICAL LINE (U+FF5C) and LOWER
+# ONE EIGHTH BLOCK (U+2581):
+#
+#     <｜tool▁calls▁begin｜><｜tool▁call▁begin｜>function<｜tool▁sep｜>web_read
+#     ```json
+#     {"url": "..."}
+#     ```<｜tool▁call▁end｜>
+#
+# In a font without those glyphs that renders as pipes and boxes — which is
+# exactly what appears on screen. The model is not malfunctioning; it is using
+# its trained tool syntax, and the host only understood one dialect.
+_DS_PIPE = "\uff5c"          # ｜ FULLWIDTH VERTICAL LINE
+_DS_SEP = "\u2581"           # ▁ LOWER ONE EIGHTH BLOCK
+
+_DEEPSEEK_CALL_RE = re.compile(
+    r"<" + _DS_PIPE + r"tool" + _DS_SEP + r"call" + _DS_SEP + r"begin" + _DS_PIPE + r">"
+    r"\s*(?:function)?\s*"
+    r"<" + _DS_PIPE + r"tool" + _DS_SEP + r"sep" + _DS_PIPE + r">"
+    r"\s*([A-Za-z_][\w.-]*)\s*"
+    r"(.*?)"
+    r"(?:<" + _DS_PIPE + r"tool" + _DS_SEP + r"call" + _DS_SEP + r"end" + _DS_PIPE + r">|$)",
+    re.S)
+
+# Any leftover <｜...｜> control token, once the calls above are extracted.
+_DS_TOKEN_RE = re.compile("<" + _DS_PIPE + r"[^>]*?" + _DS_PIPE + ">")
+
+# A call that is STILL ARRIVING. Mid-stream the reply is a prefix, so
+# _DEEPSEEK_CALL_RE cannot recognise it until the separator token lands — and
+# until then the raw special tokens were rendered straight to the operator.
+# Measured on a character-by-character replay of the reported reply: 61 of 176
+# frames showed protocol text, starting with `<｜tool▁calls▁begin｜` — exactly
+# the pipes and boxes in the bug report. Normalisation has already rewritten
+# every COMPLETE call by the time this runs, so anything still opening with a
+# DeepSeek tool token is by definition unfinished: hide from there to the end,
+# the same way TOOL_PARTIAL_RE hides a half-written <tool …> tag.
+_DS_PARTIAL_RE = re.compile("<" + _DS_PIPE + r"tool" + _DS_SEP + r".*$", re.S)
+# A bare token opener that has only just begun to arrive ("<｜", "<｜to").
+_DS_OPENER_RE = re.compile("<" + _DS_PIPE + r"[^>]{0,40}$", re.S)
+
+# The same problem for every OTHER dialect: _ALT_TAG_RES needs the closing tag,
+# so from the moment `<tool_call name="…">` starts arriving until `</tool_call>`
+# lands, the whole thing was rendered as text. Any alternative opener that is
+# still unclosed at end-of-string is by definition mid-flight — hide it.
+_ALT_PARTIAL_RE = re.compile(
+    r"<\s*(?:tool_call|toolcall|function_call|invoke|antml:invoke)\b[^>]*>?"
+    r"(?:(?!</\s*(?:tool_call|toolcall|function_call|invoke|antml:invoke)\s*>).)*$",
+    re.S | re.I)
+_ALT_FUNC_PARTIAL_RE = re.compile(
+    r"<\s*function\s*=(?:(?!<\s*/\s*function\s*>).)*$", re.S | re.I)
+
+# Other dialects seen in the wild. All rewritten to the canonical form rather
+# than teaching the main parser five grammars.
+_ALT_TAG_RES = [
+    # <tool_call name="x">…</tool_call>, <toolcall …>, <function_call …>
+    (re.compile(r"<\s*(?:tool_call|toolcall|function_call|invoke|antml:invoke)"
+                r"\s+([^>]*?)>(.*?)<\s*/\s*"
+                r"(?:tool_call|toolcall|function_call|invoke|antml:invoke)\s*>",
+                re.S | re.I), "attrs"),
+    # <function=web_read>{…}</function>
+    (re.compile(r"<\s*function\s*=\s*([A-Za-z_][\w.-]*)\s*>(.*?)"
+                r"<\s*/\s*function\s*>", re.S | re.I), "eqname"),
+]
+
+_FENCE_JSON_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.S)
+
+
+def _normalise_tool_syntax(text: str) -> str:
+    """Rewrite known alternative tool-call dialects into `<tool name=...>`.
+
+    Deliberately conservative: it only rewrites shapes that unambiguously ARE
+    tool calls. A false rewrite would execute something the model meant as
+    prose, which is far worse than missing one — the fail-open backstop in
+    _on_stream_done catches anything this misses by ASKING the model to re-emit.
+    """
+    if not text or "<" not in text:
+        return text
+    out = text
+
+    # 1. DeepSeek native tokens.
+    if _DS_PIPE in out:
+        def _ds(m):
+            name = m.group(1)
+            payload = m.group(2) or ""
+            fm = _FENCE_JSON_RE.search(payload)
+            if fm:
+                body = fm.group(1)
+            else:
+                b = payload.find("{")
+                e = payload.rfind("}")
+                body = payload[b:e + 1] if (b != -1 and e > b) else "{}"
+            return f'<tool name="{name}">{body}</tool>'
+        out = _DEEPSEEK_CALL_RE.sub(_ds, out)
+        out = _DS_TOKEN_RE.sub("", out)
+
+    # 2. Other tag dialects.
+    for rx, kind in _ALT_TAG_RES:
+        def _alt(m, kind=kind):
+            if kind == "eqname":
+                name, body = m.group(1), (m.group(2) or "").strip()
+            else:
+                attrs, body = m.group(1) or "", (m.group(2) or "").strip()
+                nm = _NAME_ATTR_RE.search(attrs)
+                if not nm:
+                    return m.group(0)          # can't name it — leave alone
+                name = nm.group(1)
+            fm = _FENCE_JSON_RE.search(body)
+            if fm:
+                body = fm.group(1)
+            return f'<tool name="{name}">{body or "{}"}</tool>'
+        out = rx.sub(_alt, out)
+    return out
+
+
+# Debris that means "the model TRIED to call a tool and the host did not
+# understand it". Used only after a turn produced no executable calls.
+_TOOL_DEBRIS_RES = [
+    re.compile(r"<\s*/?\s*tool\b", re.I),
+    re.compile(r"</?\s*(?:tool_call|toolcall|function_call|invoke)\b", re.I),
+    re.compile(r'\bname\s*=\s*"[a-z_][\w.]*"\s*>'),
+    re.compile("<" + _DS_PIPE),
+    re.compile(r"<\s*function\s*=", re.I),
+]
+
+
+def looks_like_failed_tool_call(text: str) -> bool:
+    """True when a reply contains tool-call-shaped debris that did not parse.
+
+    This is the fail-open backstop for dialects normalisation does not know
+    yet. Rather than guessing at the syntax, the host tells the model its call
+    was not understood and shows it the one format that works — which fixes the
+    class of bug instead of one member of it.
+    """
+    if not text:
+        return False
+    return any(rx.search(text) for rx in _TOOL_DEBRIS_RES)
+
+
+def scrub_tool_debris(text: str) -> str:
+    """Remove unparsed tool-call wreckage from what the OPERATOR sees.
+
+    He should never be shown raw protocol garbage; it looks like the app is
+    broken (it was) and tells him nothing actionable.
+    """
+    if not text:
+        return text
+    out = _DS_TOKEN_RE.sub("", text)
+    out = re.sub(r"<\s*/?\s*(?:tool|tool_call|toolcall|function_call|invoke)"
+                 r"\b[^>]*>", "", out, flags=re.I)
+    out = re.sub(r"<\s*function\s*=[^>]*>|<\s*/\s*function\s*>", "",
+                 out, flags=re.I)
+    return out.strip()
+
+
+_FENCE_BLOCK_RE = re.compile(r"```.*?```", re.S)
+
+
+def _mask_fences(text: str) -> str:
+    """Blank fenced code blocks, preserving offsets.
+
+    A tool tag written INSIDE a ``` fence is an EXAMPLE — the model showing the
+    operator what a call looks like — and executing it is a real bug: a reply
+    that documents the tool syntax would fire the tool. Masking is done AFTER
+    _normalise_tool_syntax, which has already lifted any fenced JSON out of a
+    dialect tag and into a canonical tag body, so nothing legitimate is hidden.
+    Offsets are preserved (same length, spaces) so match positions stay valid.
+    """
+    return _FENCE_BLOCK_RE.sub(lambda m: " " * len(m.group(0)), text)
+
+
 def parse_tool_calls(text: str) -> List[ToolCall]:
     calls: List[ToolCall] = []
-    for m in TOOL_TAG_RE.finditer(text):
+    text = _normalise_tool_syntax(text or "")
+    # Positions come from the MASKED copy (so a tag inside a ``` example is not
+    # found at all), but the content is re-matched against the ORIGINAL, so a
+    # tag whose own body happens to be fenced still yields its real JSON.
+    scan = _mask_fences(text)
+    _matches = []
+    for _m in TOOL_TAG_RE.finditer(scan):
+        _real = TOOL_TAG_RE.match(text, _m.start())
+        _matches.append(_real if _real else _m)
+    for m in _matches:
         attrs = m.group(1) or ""
         body = (m.group(2) or "").strip()
+        # A model often wraps the JSON body in a ```json fence. That is not an
+        # error on its part — it is how most chat models format JSON — so unwrap
+        # it rather than handing json.loads a fence and falling back to _raw.
+        if body.startswith("```"):
+            _fm = _FENCE_JSON_RE.search(body)
+            if _fm:
+                body = _fm.group(1).strip()
 
         # name comes from the name="..." attribute
         name_attr = None
@@ -7458,9 +7564,30 @@ def shell_block_command(text: str) -> str:
 
 
 def strip_tool_calls(text: str) -> str:
+    """Remove tool calls from text meant for a human or for the history.
+
+    NORMALISES FIRST — and that is load-bearing, not tidiness. parse_tool_calls
+    normalises dialects before matching; if this did not, the two disagreed:
+    a DeepSeek-native call would EXECUTE (parse saw it) and simultaneously
+    SURVIVE stripping (this did not), so the raw special tokens were shown to
+    the operator AND written into the stored message. Every later turn then
+    re-sent that garbage to the model as history, which both wasted context and
+    taught it the broken format was acceptable. Parse and strip must see exactly
+    the same text or one of them is always wrong.
+    """
+    text = _normalise_tool_syntax(text or "")
     out = TOOL_TAG_RE.sub("", text)
     # Also remove dangling unclosed <tool ...> ... fragments mid-stream
     out = TOOL_PARTIAL_RE.sub("", out)
+    # …and the same for a native-token call that is still arriving. Without
+    # this the operator watches the raw special tokens type themselves out.
+    if _DS_PIPE in out:
+        out = _DS_PARTIAL_RE.sub("", out)
+        out = _DS_TOKEN_RE.sub("", out)
+        out = _DS_OPENER_RE.sub("", out)
+    if "<" in out:
+        out = _ALT_PARTIAL_RE.sub("", out)
+        out = _ALT_FUNC_PARTIAL_RE.sub("", out)
     # LAST-RESORT belt-and-suspenders.  The parser above is liberal, but a
     # model can always invent a tag shape we didn't anticipate.  The execution
     # side can't run a tag it couldn't parse — but the one thing that must

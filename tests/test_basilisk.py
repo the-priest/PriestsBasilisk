@@ -80,14 +80,14 @@ class TestSettings(unittest.TestCase):
 
     def test_save_load_roundtrip(self):
         s = basilisk_core.load_settings()
-        s["active_provider"] = "google"          # a deliberate Groq choice
+        s["active_provider"] = "siliconflow"          # a deliberate Groq choice
         s["_provider_pin_normalized"] = True   # already past the one-time heal
         s["siliconflow_api_key"] = "sk-test"   # even with a SiliconFlow key present
         s["temperature"] = 0.42
         basilisk_core.save_settings(s)
 
         loaded = basilisk_core.load_settings()
-        self.assertEqual(loaded["active_provider"], "google")  # deliberate choice respected
+        self.assertEqual(loaded["active_provider"], "siliconflow")  # deliberate choice respected
         self.assertAlmostEqual(loaded["temperature"], 0.42)
         # Untouched defaults must survive a round-trip.
         self.assertIn("max_tokens", loaded)
@@ -113,22 +113,21 @@ class TestSettings(unittest.TestCase):
         # exists, and sets a marker so it runs only once.
         merged = dict(basilisk_core.DEFAULT_SETTINGS)
         merged["active_provider"] = "groq"
-        raw = {"active_provider": "google", "siliconflow_api_key": "sk-x"}
+        raw = {"active_provider": "siliconflow", "siliconflow_api_key": "sk-x"}
         basilisk_core._migrate_settings(merged, raw)
         self.assertEqual(merged["active_provider"], "siliconflow")
         self.assertTrue(merged["_provider_pin_normalized"])
 
-    def test_migration_moves_off_removed_groq_to_google(self):
+    def test_migration_moves_off_removed_provider(self):
         # Groq was removed as a chat provider in v9.3.0. A config still selecting
         # it must be MOVED, not respected — the marker no longer protects it,
         # because respecting a deliberate choice of a provider that no longer
         # exists strands the operator on a dead selection.
         merged = dict(basilisk_core.DEFAULT_SETTINGS)
         merged["active_provider"] = "groq"
-        raw = {"active_provider": "groq", "google_api_key": "AIza-x",
-               "_provider_pin_normalized": True}
+        raw = {"active_provider": "groq", "_provider_pin_normalized": True}
         basilisk_core._migrate_settings(merged, raw)
-        self.assertEqual(merged["active_provider"], "google")
+        self.assertEqual(merged["active_provider"], "siliconflow")
 
     def test_migration_moves_off_groq_to_primary_without_google_key(self):
         # No Google key either → the locked primary, never a dead provider.
@@ -140,7 +139,7 @@ class TestSettings(unittest.TestCase):
 
     def test_migration_never_leaves_an_unregistered_provider(self):
         # The general property, so any future removal is covered too.
-        for stale in ("groq", "openai", "anthropic", "nope"):
+        for stale in ("groq", "google", "openai", "anthropic", "nope"):
             merged = dict(basilisk_core.DEFAULT_SETTINGS)
             merged["active_provider"] = stale
             basilisk_core._migrate_settings(merged, {"active_provider": stale})
@@ -161,7 +160,7 @@ class TestSettings(unittest.TestCase):
 # ─────────────────────────────────────────────────────────────────────────
 class TestProviderRegistry(unittest.TestCase):
     def test_all_expected_providers_present(self):
-        for key in ("siliconflow", "google"):
+        for key in ("siliconflow",):
             self.assertIn(key, basilisk_core.PROVIDERS_BY_KEY,
                           f"provider {key} missing from registry")
 
@@ -579,7 +578,7 @@ class TestSttFailover(unittest.TestCase):
     def test_recording_is_cleaned_up_after_transcription(self):
         basilisk_voice._post_multipart = lambda url, *a, **k: '{"text": "ok"}'
         stt = self._stt({
-            "active_provider": "google",
+            "active_provider": "siliconflow",
             "groq_api_key": "gsk-groq",
             "stt_provider": "auto",
         })

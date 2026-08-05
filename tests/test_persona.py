@@ -203,7 +203,7 @@ for name, pat in SURVIVORS.items():
 print("\n== size ==")
 t_full, t_grp, t_lean = len(FULL) // 4, len(GROUPED) // 4, len(LEAN) // 4
 print(f"     full={t_full}  grouped={t_grp}  lean={t_lean}")
-ck(f"grouped prompt under 6.3k tok ({t_grp})", t_grp < 6300)
+ck(f"grouped prompt under 7.1k tok ({t_grp})", t_grp < 7100)
 ck(f"lean prompt under 2k tok ({t_lean})", t_lean < 2000)
 ck("grouped is much smaller than full", t_grp < t_full - 4000)
 ck("lean is much smaller than full", t_lean < t_full - 6000)
@@ -365,10 +365,10 @@ print(f"     max      armed={_t_armx} disarmed={_t_disx}")
 ck(f"disarmed grouped is smaller ({_t_dis} < {_t_arm})", _t_dis < _t_arm)
 ck(f"disarmed max is much smaller ({_t_disx} < {_t_armx})",
    _t_disx < _t_armx - 5000)
-ck(f"disarmed grouped under 5.8k tok ({_t_dis})", _t_dis < 5800,
+ck(f"disarmed grouped under 6.7k tok ({_t_dis})", _t_dis < 6700,
    "general work should not pay for the engagement prompt")
-ck(f"core tool text under 3k tok ({len(kp.CORE_TOOLS_TEXT)//4})",
-   len(kp.CORE_TOOLS_TEXT) // 4 < 3000,
+ck(f"core tool text under 3.9k tok ({len(kp.CORE_TOOLS_TEXT)//4})",
+   len(kp.CORE_TOOLS_TEXT) // 4 < 3900,
    "core ships on EVERY turn in both modes — it is the dominant cost")
 
 # -- default stays permissive so nothing else changes behaviour --
@@ -429,7 +429,7 @@ ck("code refuses loopback regardless",
 # mechanic that must survive any future trim.
 print("\n== nothing lost in the trim ==")
 CORE_MECHANICS = {
-    "batch reads": r"BATCH READS",
+    "batch reads": r"BATCH LOCAL READS",
     "serialize writes": r"SERIALIZE WRITES|ONE per reply",
     "close the tag exactly": r"</tool>` — plain ASCII",
     "nothing after the tool tags": r"output NOTHING ELSE",
@@ -620,6 +620,63 @@ for _x, _y in zip(_ca, _cb):
 ck(f"consecutive turns past the cap share their prefix ({_n}/{len(_ca)})",
    _n >= len(_ca) * 0.9,
    "this is the property the whole cache depends on")
+
+
+# ── 13. PLAYBOOKS ────────────────────────────────────────────────────
+# The model was reinventing basic method every run — including hand-rolling a
+# DuckDuckGo HTML URL for search, because there IS no search tool and nothing
+# told it so. Each recipe below removes a decision it was getting wrong or
+# paying turns to rediscover. They live in the always-loaded core on purpose:
+# they are worthless if the model has to know to go and find them.
+print("\n== playbooks are present and specific ==")
+_pb = kp.CORE_TOOLS_TEXT
+ck("playbooks section exists", "PLAYBOOKS" in _pb)
+ck("says plainly there is no search tool", "There is no search tool" in _pb,
+   "otherwise it invents one, or worse, answers from memory")
+ck("gives the working search URL", "html.duckduckgo.com/html/?q=" in _pb)
+ck("warns the JS domain returns nothing", "JS-only" in _pb)
+ck("forbids answering from the results page",
+   "NEVER the answer" in _pb)
+ck("bounds searching before reading", "Two searches max" in _pb)
+ck("current-fact recipe reaches for the primary source",
+   "PRIMARY source first" in _pb)
+ck("current-fact recipe requires a citation", "cite the URL" in _pb)
+ck("current-fact recipe permits an honest non-answer",
+   "labelled\nunverified" in _pb or "unverified" in _pb)
+# Specialist tools are shown WITHOUT a <tool …> wrapper on purpose: wrapping
+# them would register them as CORE tools, breaking the minimal-core invariant
+# and implying they are already loaded when they still need load_tools.
+ck("cve recipe names cve_lookup", "cve_lookup {" in _pb)
+ck("playbooks say specialist steps need load_tools first",
+   "load_tools" in _pb and "Steps shown WITHOUT" in _pb)
+ck("cve recipe chases the FIXED version", "fixed VERSION" in _pb)
+ck("enumeration recipe is ordered", "pentest_plan" in _pb
+   and "parse_output" in _pb and "graph_ingest" in _pb)
+ck("finding recipe arms the proof BEFORE firing",
+   _pb.index("oracle_arm") < _pb.index("fire the attempt"))
+ck("finding recipe rejects a 200 as evidence",
+   "A 200, a plausible-looking body" in _pb)
+ck("finding recipe covers blind bugs", '"blind": true' in _pb)
+ck("repo recipe demands a baseline first", "BEFORE editing" in _pb)
+ck("repo recipe says read `broke` first", "read `broke` FIRST" in _pb)
+ck("repo recipe forbids editing his tests",
+   "Never edit his tests" in _pb)
+ck("read recipe says to batch", "batch them" in _pb)
+# THE ONE THAT CAUSED THE REPORTED BUG: the persona told the model to batch
+# reads, but web_read is deliberately NOT batchable — so two web_reads in a
+# reply ran one and silently dropped the other, and the model blamed itself for
+# "malformed calls". Instruction and implementation must agree.
+ck("persona says web_read does NOT batch",
+   "ONE AT A TIME by design" in _pb or "ONE per reply, always" in _pb)
+ck("persona names every non-batching outward tool",
+   all(t in _pb for t in ("web_read", "web_sources", "cve_lookup",
+                          "image_search")))
+ck("persona warns only the FIRST runs",
+   "only the FIRST runs" in _pb)
+ck("playbooks ship in the DISARMED prompt too",
+   "PLAYBOOKS" in kp.build_system_prompt(agent_mode=True, grouped=True,
+                                         unleashed=False),
+   "research and repo work are general-mode jobs")
 
 
 print(f"\npersona: {_p} passed, {_f} failed")

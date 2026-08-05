@@ -50,8 +50,6 @@ def ck(name: str, cond: bool, detail: str = "") -> None:
 import basilisk_core as C  # noqa: E402
 
 SF = C.PROVIDERS_BY_KEY["siliconflow"]
-GOOG = C.PROVIDERS_BY_KEY["google"]
-GROQ = GOOG   # legacy alias in this file; Groq was removed as a chat provider
 
 
 # ── 1. the pinned default ────────────────────────────────────────────
@@ -125,70 +123,26 @@ _dead = [i for i in _ids + list(SF.chain) if _is_retired(i)]
 ck("no discontinued ids anywhere", not _dead, str(_dead))
 
 
-# ── GROQ retirement guard ────────────────────────────────────────────
-# This block exists because the SiliconFlow guard above was provider-specific,
-# so nothing watched Groq — and by 2026-08 FOUR of its six chain entries had
-# been retired, including GROQ_DEFAULT_MODEL. Two were already erroring. The
-# lesson from v7.9.3 was "an id list is perishable"; the miss was applying it to
-# one provider only.
-#
-# Dates are Groq's published SHUTDOWN dates, not announcement dates
-# (console.groq.com/docs/deprecations).
-_GROQ_RETIRED = {
-    "llama-3.1-8b-instant":                       "2026-08-16",
-    "llama-3.3-70b-versatile":                    "2026-08-16",
-    "qwen/qwen3-32b":                             "2026-07-17",
-    "meta-llama/llama-4-scout-17b-16e-instruct":  "2026-07-17",
-    "moonshotai/kimi-k2-instruct-0905":           "2026-04-15",
-    "meta-llama/llama-4-maverick-17b-128e-instruct": "2026-03-09",
-    "meta-llama/llama-guard-4-12b":               "2026-03-05",
-    "moonshotai/kimi-k2-instruct":                "2025-10-10",
-    "gemma2-9b-it":                               "2025-10-08",
-    "deepseek-r1-distill-llama-70b":              "2025-10-02",
-    "mistral-saba-24b":                           "2025-07-30",
-    "qwen-qwq-32b":                               "2025-07-14",
-}
-GQ = C.PROVIDERS_BY_KEY["google"]
-_gq_ids = [m.id for m in GQ.catalogue]
-_gq_dead = [i for i in _gq_ids + list(GQ.chain) if i in _GROQ_RETIRED]
-ck("groq: no retired ids in chain or catalogue", not _gq_dead, str(_gq_dead))
-ck("groq: default model is not retired",
-   C.GOOGLE_DEFAULT_MODEL not in _GROQ_RETIRED, C.GOOGLE_DEFAULT_MODEL)
-ck("groq: default model is one the provider knows",
-   GQ.knows(C.GOOGLE_DEFAULT_MODEL))
-ck("groq: default model heads the chain",
-   list(GQ.chain)[0] == C.GOOGLE_DEFAULT_MODEL,
-   f"{list(GQ.chain)[0]} vs {C.GOOGLE_DEFAULT_MODEL}")
-
-# The chain is the OUTAGE path: production models only. A preview model can be
-# withdrawn at short notice, which is the one thing a fallback must not do.
-_GROQ_PREVIEW = set()
-_prev_in_chain = [i for i in GQ.chain if i in _GROQ_PREVIEW]
-ck("groq: no PREVIEW model on the fallback chain", not _prev_in_chain,
-   str(_prev_in_chain))
-ck("groq: chain stays short (each entry is another round-trip)",
-   len(GQ.chain) <= 3, str(len(GQ.chain)))
-ck("groq: catalogue is populated (picker showed nothing before)",
-   len(GQ.catalogue) >= 3, str(len(GQ.catalogue)))
-ck("google: the restricted-quota model is pickable but NOT on the chain",
-   GQ.knows("gemini-2.5-pro") and "gemini-2.5-pro" not in GQ.chain,
-   "50 requests/day answers a hard question; it cannot carry an outage path")
-ck("google: every note carries the free-tier training warning",
-   all("training" in m.note.lower() or "TRAINS" in m.note
-       for m in GQ.catalogue),
-   "a pentest tool sending engagement data to a training-enabled tier is a "
-   "disclosure the operator must see at the point of choosing")
-
-# The agentic systems fetch attacker-chosen URLs by themselves, outside the
-# web_read tier gate. Keeping them out is a security decision, so pin it.
-ck("groq is no longer a chat provider",
-   "groq" not in C.PROVIDERS_BY_KEY,
-   "removed in v9.3.0; its Whisper STT endpoint is a separate feature")
-
-ck("groq: every catalogue id carries real metadata",
-   all(m.ctx_k > 0 and m.out_usd > 0 and m.note for m in GQ.catalogue))
-ck("groq: catalogue ids are unique",
-   len(_gq_ids) == len(set(_gq_ids)))
+# ── provider registry is SiliconFlow-only ───────────────────────────
+# Groq was removed in v9.3.0 (four chat models; four of six chain ids retired in
+# three months) and Google AI Studio in v9.5.0 (could not reliably drive the
+# app, and its free tier trains on submitted prompts — wrong for engagement
+# data). What matters now is that nothing can be left pointing at a provider
+# that no longer exists.
+print("\n== provider registry ==")
+ck("siliconflow is registered", "siliconflow" in C.PROVIDERS_BY_KEY)
+ck("groq is gone", "groq" not in C.PROVIDERS_BY_KEY)
+ck("google is gone", "google" not in C.PROVIDERS_BY_KEY)
+ck("exactly one chat provider", len(C.PROVIDERS_BY_KEY) == 1,
+   str(sorted(C.PROVIDERS_BY_KEY)))
+for _stale in ("groq", "google", "openai", "nope"):
+    _m = dict(C.DEFAULT_SETTINGS)
+    _m["active_provider"] = _stale
+    C._migrate_settings(_m, {"active_provider": _stale})
+    ck(f"a config on '{_stale}' migrates to a real provider",
+       _m["active_provider"] in C.PROVIDERS_BY_KEY, _m["active_provider"])
+ck("no vision list points at a removed provider",
+   set(C.VISION_MODELS) <= set(C.PROVIDERS_BY_KEY), str(set(C.VISION_MODELS)))
 
 
 # ── prompt-cache economics ───────────────────────────────────────────
@@ -196,11 +150,10 @@ ck("groq: catalogue ids are unique",
 # lever an agent has, because an agent re-sends the same prompt every step.
 print("\n== cached pricing ==")
 _CACHED = {
-    "gemini-2.5-flash": 0.075,             # Google: ~75% off cached
-    "deepseek-ai/DeepSeek-V4-Flash": 0.028,  # SiliconFlow: 80% off
+    "deepseek-ai/DeepSeek-V4-Flash": 0.028,  # SiliconFlow: 80% off cached
 }
 for _mid, _want in _CACHED.items():
-    _info = (GQ.info(_mid) or SF.info(_mid))
+    _info = SF.info(_mid)
     ck(f"{_mid} has a cached rate", _info is not None and _info.cached_in_usd > 0)
     if _info:
         ck(f"{_mid} cached rate is right", abs(_info.cached_in_usd - _want) < 1e-6,
@@ -213,7 +166,7 @@ for _mid, _want in _CACHED.items():
 # silently re-maps every one of them — first attempt put cached_in_usd right
 # after out_usd and each model's `note` string became its cached price. Cheap
 # to assert, invisible otherwise.
-_all_models = list(SF.catalogue) + list(GQ.catalogue)
+_all_models = list(SF.catalogue)
 ck("every note is a string, not a shifted number",
    all(isinstance(m.note, str) for m in _all_models))
 ck("every cached rate is a number, not a shifted string",
@@ -225,33 +178,55 @@ ck("every tier is one of the three labels",
 ck("no cached rate exceeds its uncached rate",
    all(m.cached_in_usd <= m.in_usd for m in _all_models if m.cached_in_usd))
 
-# A dead id is dead EVERYWHERE, not just in the chain. Both Groq vision models
-# were retired (maverick 2026-03-09, scout 2026-07-17) and nothing noticed,
-# because the retirement guard only ever looked at chains and catalogues —
-# analyze_image on Groq would simply have 404'd. Sweep every id list.
-_VISION_ALL = [(prov, mid) for prov, ids in C.VISION_MODELS.items()
-               for mid in ids]
-_dead_vision = [f"{p}:{m}" for p, m in _VISION_ALL
-                if (m in _GROQ_RETIRED) or _is_retired(m)]
-ck("no retired ids in ANY vision list", not _dead_vision, str(_dead_vision))
-ck("every provider with vision has at least one model",
-   all(ids for ids in C.VISION_MODELS.values()))
-ck("groq vision points at a model groq actually serves",
-   all(GQ.knows(m) or m in {x.id for x in GQ.catalogue}
-       for m in C.VISION_MODELS.get("groq", [])),
-   str(C.VISION_MODELS.get("groq")))
-
-# The installer carries its own hardcoded fallback defaults for when
-# basilisk_core cannot be imported. It is a second copy of the same facts and
-# drifted: it still named the retired llama-3.3-70b-versatile for Groq.
+# install.sh carries its own hardcoded fallback defaults for when
+# basilisk_core cannot be imported — a SECOND copy of the same facts, which has
+# drifted before. It once listed five providers, including "google" twice (the
+# duplicate key silently won) and two that were never in the registry at all.
 _inst = open(os.path.join(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))), "install.sh"), encoding="utf-8").read()
-_inst_dead = [m for m in _GROQ_RETIRED if f'"{m}"' in _inst]
-ck("installer fallback names no retired groq model", not _inst_dead,
-   str(_inst_dead))
-ck("installer fallback names the current google default",
-   f'"{C.GOOGLE_DEFAULT_MODEL}"' in _inst,
-   "install.sh carries a second copy of these defaults and has drifted before")
+ck("installer names no removed provider",
+   '"groq":' not in _inst and '"google":' not in _inst)
+ck("installer names the current default model",
+   "deepseek-ai/DeepSeek-V4-Flash" in _inst)
+ck("installer lists no provider outside the registry",
+   all(f'"{k}":' not in _inst
+       for k in ("novita", "github", "openai", "anthropic")),
+   "a default pointing at an unregistered provider can only ever fail")
+
+
+# ── prompt-cache economics ───────────────────────────────────────────
+# Both wired providers cache automatically. The discount is the biggest cost
+# lever an agent has, because an agent re-sends the same prompt every step.
+print("\n== cached pricing ==")
+_CACHED = {
+    "deepseek-ai/DeepSeek-V4-Flash": 0.028,  # SiliconFlow: 80% off cached
+}
+for _mid, _want in _CACHED.items():
+    _info = SF.info(_mid)
+    ck(f"{_mid} has a cached rate", _info is not None and _info.cached_in_usd > 0)
+    if _info:
+        ck(f"{_mid} cached rate is right", abs(_info.cached_in_usd - _want) < 1e-6,
+           str(_info.cached_in_usd))
+        ck(f"{_mid} cached is cheaper than uncached",
+           _info.cached_in_usd < _info.in_usd)
+
+# THE REGRESSION THIS FIELD ALMOST CAUSED. Catalogue entries are built with
+# POSITIONAL arguments, so a new dataclass field inserted anywhere but the END
+# silently re-maps every one of them — first attempt put cached_in_usd right
+# after out_usd and each model's `note` string became its cached price. Cheap
+# to assert, invisible otherwise.
+_all_models = list(SF.catalogue)
+ck("every note is a string, not a shifted number",
+   all(isinstance(m.note, str) for m in _all_models))
+ck("every cached rate is a number, not a shifted string",
+   all(isinstance(m.cached_in_usd, (int, float)) for m in _all_models))
+ck("every ctx_k is a positive int", all(isinstance(m.ctx_k, int) and m.ctx_k > 0
+                                        for m in _all_models))
+ck("every tier is one of the three labels",
+   all(m.tier in ("flagship", "workhorse", "budget") for m in _all_models))
+ck("no cached rate exceeds its uncached rate",
+   all(m.cached_in_usd <= m.in_usd for m in _all_models if m.cached_in_usd))
+
 ck("the retirement check tolerates live successors",
    not _is_retired("zai-org/GLM-4.5-Air")
    and not _is_retired("MiniMaxAI/MiniMax-M2.5")
@@ -306,20 +281,20 @@ ck("a catalogue-only model is a valid heavy pick",
 # Groq deliberately has no catalogue.  It must behave exactly as it did
 # before the split, or this change broke the operator's fallback provider
 # to make his primary prettier.
-print("\n== groq is untouched ==")
-# Groq HAS a catalogue as of 2026-08 — it used to be empty, so its picker
-# showed bare ids with no context window, price or purpose. These assertions
-# used to pin the empty state; they now pin the populated one.
-ck("groq has a catalogue", bool(GROQ.catalogue))
-ck("groq chain still matches GROQ_FALLBACK_CHAIN",
-   list(GROQ.chain) == list(C.GOOGLE_FALLBACK_CHAIN))
-ck("google info() returns metadata for a catalogue model",
-   GOOG.info("gemini-2.5-flash") is not None)
-ck("google info() carries a real context window",
-   (GOOG.info("gemini-2.5-flash") or C.ModelInfo("", "", 0, 0, 0)).ctx_k > 0)
-ck("groq knows() still works off the chain", GROQ.knows(GROQ.chain[0]))
-ck("groq pick_ids covers the catalogue", 
-   set(GROQ.pick_ids) >= {m.id for m in GROQ.catalogue})
+print("\n== the whisper STT key is untouched ==")
+# SiliconFlow is the only chat provider. These assertions used to cover a
+# second provider's catalogue/chain split; they now pin the survivor's.
+ck("siliconflow has a catalogue", bool(SF.catalogue))
+ck("chain matches SILICONFLOW_CHAIN",
+   list(SF.chain) == list(C.SILICONFLOW_CHAIN))
+ck("info() returns metadata for a catalogue model",
+   SF.info("deepseek-ai/DeepSeek-V4-Flash") is not None)
+ck("info() carries a real context window",
+   (SF.info("deepseek-ai/DeepSeek-V4-Flash")
+    or C.ModelInfo("", "", 0, 0, 0)).ctx_k > 0)
+ck("knows() works off the chain", SF.knows(SF.chain[0]))
+ck("pick_ids covers the catalogue",
+   set(SF.pick_ids) >= {m.id for m in SF.catalogue})
 
 for key, prov in C.PROVIDERS_BY_KEY.items():
     ck(f"{key} has a non-empty chain", bool(prov.chain))
@@ -444,9 +419,9 @@ ck("the OLD sort would have buried the pinned default",
    f"old={_old_ids.index(PINNED)} new={_order.index(PINNED)}")
 
 # A provider with no catalogue must still get the old regex path.
-_groq_order = _pick._models_priced_high_to_low(GROQ)
+_sf_order = _pick._models_priced_high_to_low(SF)
 ck("groq ordering keeps every pickable id",
-   sorted(_groq_order) == sorted(GROQ.pick_ids))
+   sorted(_sf_order) == sorted(SF.pick_ids))
 
 # The catalogue-less path is still live code — any provider added without a
 # catalogue takes it. Groq used to be the example; now that it has one, use a
@@ -470,11 +445,11 @@ ck("tier grouping produces labelled groups", len(_tiers) >= 3)
 ck("tier grouping loses nothing",
    sorted(m for _lbl, ids in _tiers for m in ids) == sorted(SF.pick_ids))
 ck("flagship group comes first", "FLAGSHIP" in (_tiers[0][0] or ""))
-_groq_tiers = _pick._models_by_tier(_BARE)
+_sf_tiers = _pick._models_by_tier(_BARE)
 ck("no-catalogue provider gets one unlabelled group",
-   len(_groq_tiers) == 1 and _groq_tiers[0][0] is None)
+   len(_sf_tiers) == 1 and _sf_tiers[0][0] is None)
 ck("groq NOW gets labelled tier groups like any catalogued provider",
-   len(_pick._models_by_tier(GROQ)) >= 2)
+   len(_pick._models_by_tier(SF)) >= 2)
 
 _d = _pick._model_detail(SF, PINNED)
 ck("detail line carries context and price", "ctx" in _d and "$" in _d, _d)

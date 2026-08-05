@@ -110,6 +110,8 @@ from basilisk_core import (
     reply_is_strong_conclusion,
     note_command, recent_duplicate,
     parse_tool_calls, strip_tool_calls, shell_block_command,
+    looks_like_failed_tool_call, scrub_tool_debris,
+    _normalise_tool_syntax,
     extract_think_blocks, strip_think_blocks,
     is_online, is_sensitive_path, command_needs_sudo, is_catastrophic_command,
     command_tampers_self, Watcher,
@@ -148,7 +150,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.basilisk"
 APP_NAME = "Basilisk"
-VERSION = "9.3.0"
+VERSION = "9.5.1"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -2943,7 +2945,12 @@ class MessageWidget(Gtk.Box):
                                   if self._thoughts else think)
             if self._thoughts:
                 self._render_thoughts()
-            display_text = strip_tool_calls(visible)
+            # strip_tool_calls only removes the canonical <tool …> form. A call
+            # in any other dialect survives it and is rendered to the operator
+            # as raw protocol garbage — which is what he actually sees when this
+            # goes wrong, and it looks like the app is broken. Scrub the wreckage
+            # too: he should never be shown transport internals.
+            display_text = scrub_tool_debris(strip_tool_calls(visible))
         else:
             display_text = text
         # If the assistant message carries only tool calls, don't show a
@@ -3384,6 +3391,27 @@ class SettingsDialog(Adw.PreferencesDialog):
         self.active_provider_row.connect("notify::selected",
                                          self._on_active_provider)
         rg.add(self.active_provider_row)
+
+        # Research depth for LEASHED (question) turns. This had NO control at
+        # all: it was a hardcoded fallback of 18 that was not even in
+        # DEFAULT_SETTINGS, so the operator could neither see it nor raise it.
+        # Every load_tools, web_search, web_read and file read counts against
+        # it, so a genuinely deep question hit the cap while still mid-research
+        # and the answer arrived truncated. Exposed here because it is the one
+        # limit he is realistically going to want to move.
+        self.answer_budget_row = Adw.SpinRow.new_with_range(5, 200, 5)
+        self.answer_budget_row.set_title("Research depth (answer mode)")
+        self.answer_budget_row.set_subtitle(
+            "How many tool round-trips one QUESTION may take before Basilisk "
+            "stops looking and answers with what it has. A runaway backstop, "
+            "not a work budget — raise it for deep research.")
+        self.answer_budget_row.set_value(
+            float(parent.settings.get("answer_tool_budget", 40)))
+        self.answer_budget_row.connect(
+            "notify::value",
+            lambda r, *_a: self._set("answer_tool_budget",
+                                     int(r.get_value())))
+        rg.add(self.answer_budget_row)
 
         self.adaptive_effort_row = Adw.SwitchRow()
         self.adaptive_effort_row.set_title("Adaptive effort")
@@ -4111,6 +4139,32 @@ class SettingsDialog(Adw.PreferencesDialog):
                 self._stt_provider_keys[r.get_selected()]))
         ig.add(self.stt_provider_row)
 
+        # Groq is no longer a CHAT provider, so it no longer gets an API-key row
+        # from _build_provider_group. But it is still the Whisper transcription
+        # backend, and the picker above still offers it — which left the option
+        # selectable with nowhere to put the key. Give it its own field here,
+        # beside the setting that actually uses it.
+        self.stt_key_row = Adw.PasswordEntryRow()
+        self.stt_key_row.set_title("Groq API key (Whisper only)")
+        self.stt_key_row.set_text(parent.settings.get("groq_api_key", ""))
+        self.stt_key_row.connect(
+            "changed",
+            lambda r: self._set("groq_api_key", r.get_text().strip()))
+        ig.add(self.stt_key_row)
+
+        self.stt_key_hint = Adw.ActionRow()
+        self.stt_key_hint.set_title("Get a Groq key")
+        self.stt_key_hint.set_subtitle(
+            "console.groq.com/keys — free. Used ONLY for speech-to-text; "
+            "Basilisk does not chat through Groq.")
+        _stt_link = Gtk.Button(label="Open")
+        _stt_link.set_valign(Gtk.Align.CENTER)
+        _stt_link.connect(
+            "clicked",
+            lambda *_a: tool_open_url("https://console.groq.com/keys"))
+        self.stt_key_hint.add_suffix(_stt_link)
+        ig.add(self.stt_key_hint)
+
         self.stt_model_row = Adw.EntryRow()
         self.stt_model_row.set_title("Groq Whisper model")
         self.stt_model_row.set_text(
@@ -4707,6 +4761,9 @@ class MainWindow(Adw.ApplicationWindow):
         # after a dropped tool call or an all-tool-call reply. Bounded so a
         # model that will not write prose cannot loop. See _on_stream_done.
         self._force_answer_tries: int = 0
+        # Text appended to the next tool result when extra calls in a reply
+        # were not run this turn. See _on_stream_done_body / _feed_tool_result.
+        self._deferred_note: str = ""
         # Set when the operator hits the stop button.  Halts the current
         # stream AND prevents the tool chain from kicking another turn.
         self._stop_requested: bool = False
@@ -7470,6 +7527,18 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_stream_done_body(self, meta):
         final = self.streaming_msg_widget.finish_streaming()
+        # ── CANONICALISE ONCE, AT THE BOUNDARY ──
+        # Everything downstream — parsing, stripping, the stored message, the
+        # history re-sent on every later turn, the widget the operator reads —
+        # must see the SAME text. Normalising here rather than in each consumer
+        # is what guarantees that: a call in the model's native token syntax is
+        # rewritten to the canonical form the instant it arrives, so it cannot
+        # execute-but-not-strip, and the raw special tokens never reach the
+        # database or the screen.
+        try:
+            final = _normalise_tool_syntax(final or "")
+        except Exception:
+            pass
         # Mission completion signal: strip the token from what's shown/stored/
         # spoken, but remember that it fired this turn.
         _mission_done_signal = MISSION_COMPLETE_TOKEN in final
@@ -7640,9 +7709,40 @@ class MainWindow(Adw.ApplicationWindow):
                 self._set_working(True, self._status_for_call(batch[0]) + "…")
                 self._execute_tool_calls(batch)
             else:
-                # First executable tool has side effects → one at a time.
+                # First executable tool has side effects (or is otherwise not
+                # batchable) → one at a time.
+                #
+                # THE REST ARE NOT SILENTLY DROPPED. They used to be, and it is
+                # the second half of the "malformed call" failure: `web_read` is
+                # deliberately NOT in the batchable set (the web readers were
+                # pulled from it to shrink the prompt-injection surface), so a
+                # reply containing two or three web_read calls — which the
+                # persona explicitly tells the model to emit, "batch reads" —
+                # ran only the FIRST and discarded the others without a word.
+                # The model then got one result for three lookups, concluded it
+                # had emitted malformed calls, apologised, and re-sent them.
+                # Same failure again, forever.
+                #
+                # Telling it costs nothing and turns a mystery into an
+                # instruction it can follow.
                 self._set_working(
                     True, self._status_for_call(executable[0]) + "…")
+                if len(executable) > 1:
+                    _rest = executable[1:]
+                    _names = ", ".join(
+                        self._action_label(c) for c in _rest)[:400]
+                    self.terminal_log(
+                        f"↷ {len(_rest)} further call(s) not run this turn "
+                        f"— they follow one at a time", "dim")
+                    self._deferred_note = (
+                        f"\n\n[host] NOTE — you emitted {len(executable)} tool "
+                        f"calls in that reply and only the FIRST was run. The "
+                        f"others were NOT executed and NOT lost; they simply do "
+                        f"not run in parallel:\n    {_names}\n"
+                        f"Nothing was malformed. Re-issue them ONE PER REPLY, "
+                        f"reading each result before the next. Read-only tools "
+                        f"like read_file and list_dir DO batch; web_read does "
+                        f"not.")
                 self._execute_tool_calls(executable[:1])
         else:
             # No executable tool ran this turn. Track how many turns in a row
@@ -7771,15 +7871,44 @@ class MainWindow(Adw.ApplicationWindow):
             _empty_answer = (not cancelled and not executable
                              and not _visible
                              and not self._mission_active)
-            if (not cancelled and (_locked_drop or _empty_answer)
+            # ── A TOOL CALL THE HOST DIDN'T UNDERSTAND ──
+            # Models emit tool calls in several dialects, including their own
+            # native special-token format. Anything parse_tool_calls doesn't
+            # recognise is neither executed NOR stripped: it leaks onto the
+            # screen as raw protocol garbage and the turn ends with nothing to
+            # run. _normalise_tool_syntax now converts the known dialects, but
+            # this is the fail-open backstop for the ones it doesn't know yet —
+            # tell the model its call wasn't understood and show it the format
+            # that works. That fixes the CLASS instead of one member of it.
+            _bad_call = (not cancelled and not executable
+                         and looks_like_failed_tool_call(final or ""))
+            if _bad_call:
+                self.terminal_log(
+                    "⚠ the model emitted a tool call in a syntax this build "
+                    "doesn't parse — asking it to re-send", "error")
+            if (not cancelled and (_locked_drop or _empty_answer or _bad_call)
                     and getattr(self, "_force_answer_tries", 0) < 2
                     and not self._stop_requested):
                 self._force_answer_tries = \
                     getattr(self, "_force_answer_tries", 0) + 1
-                _why = ("your tool call was NOT run — the tool budget for this "
-                        "question is spent"
-                        if _locked_drop else
-                        "your reply contained no answer, only a tool call")
+                if _locked_drop:
+                    _why = ("your tool call was NOT run — the tool budget for "
+                            "this question is spent")
+                elif _bad_call:
+                    _why = (
+                        "your last message contained a tool call this host "
+                        "could NOT parse, so NOTHING ran and the raw text was "
+                        "shown to the operator. Do not use your native "
+                        "function-calling tokens, JSON tool blocks, "
+                        "<tool_call>, <invoke> or <function=...>. The ONLY "
+                        "format that works is exactly:\n"
+                        '  <tool name="web_read">{"url": "https://example.com"}'
+                        "</tool>\n"
+                        "one tag, the tool name in a name=\"...\" attribute, "
+                        "plain JSON in the body, closed with </tool>. RE-SEND "
+                        "the call you were trying to make, in that exact form")
+                else:
+                    _why = "your reply contained no answer, only a tool call"
                 self.terminal_log(
                     "── forcing the final answer (" +
                     ("dropped tool call" if _locked_drop else "empty reply")
@@ -7789,17 +7918,23 @@ class MainWindow(Adw.ApplicationWindow):
                     self.store.add_message(
                         _fc, "user",
                         "<tool_result>\n[system] " + _why + ". Nothing you "
-                        "gathered is lost — it is all in this conversation. "
-                        "Do NOT call another tool. Write the FULL answer to "
-                        "the operator's original question NOW, in prose, using "
-                        "everything you have already read. If some part is "
-                        "still unverified, say so plainly and answer the "
-                        "rest — a partial answer is useful, silence is "
-                        "not.\n</tool_result>",
+                        "gathered is lost — it is all in this conversation."
+                        + ("" if _bad_call else
+                           " Do NOT call another tool. Write the FULL answer "
+                           "to the operator's original question NOW, in prose, "
+                           "using everything you have already read. If some "
+                           "part is still unverified, say so plainly and "
+                           "answer the rest — a partial answer is useful, "
+                           "silence is not.")
+                        + "\n</tool_result>",
                         meta={"kind": "tool_result"})
                 except Exception:
                     pass
-                self._tools_locked = True
+                if not _bad_call:
+                    # A dropped/empty answer means "stop calling tools". A
+                    # MALFORMED call means the opposite — it still needs to run,
+                    # just in the right syntax.
+                    self._tools_locked = True
                 self.streaming_msg_widget = None
                 self.streaming_msg_db_id = None
                 try:
@@ -9224,6 +9359,43 @@ class MainWindow(Adw.ApplicationWindow):
                     dispatch["skill_write"] = self._tool_skill_write
             except Exception:
                 pass
+        # ── ORACLE: single-call path ──
+        # These four were wired ONLY into _pure_tool_fn (the parallel read-only
+        # batch path) and were missing from this map, which is the one a SINGLE
+        # tool call goes through. So `oracle_check` on its own — the normal way
+        # it is used, right after firing an exploit — fell through to
+        # "Unknown tool 'oracle_check'". The oracle is the verified-exploitation
+        # core: no proof, no finding. Losing it silently turns every confirmed
+        # hit back into a guess. Exactly the two-dispatch-path drift v7.10.0
+        # documented and routed the workspace tools through one mapper to avoid.
+        dispatch.setdefault("oracle_arm", lambda a: self._tool_simple(
+            lambda: tool_oracle_arm(
+                a.get("objective", a.get("goal", a.get("what", ""))),
+                a.get("target", a.get("url", a.get("host", ""))),
+                a.get("technique", a.get("vuln", a.get("class",
+                                                       a.get("attack", "")))),
+                a.get("criterion_type", a.get("type", a.get(
+                    "criterion", a.get("check", "contains")))),
+                a.get("criterion_value", a.get("value", a.get(
+                    "marker", a.get("expect", a.get(
+                        "expected", a.get("pattern", "")))))),
+                a.get("blind", a.get("oob", False)),
+                a.get("oob_host", a.get("host", a.get("callback_host", ""))))))
+        dispatch.setdefault("oracle_check", lambda a: self._tool_simple(
+            lambda: tool_oracle_check(
+                a.get("attempt_id", a.get("id", a.get("attempt", ""))),
+                a.get("evidence", a.get("response", a.get("body", a.get(
+                    "output", a.get("text", a.get("resp", "")))))),
+                a.get("status", a.get("code", a.get("status_code", None))),
+                a.get("baseline", a.get("base", a.get("normal",
+                                                      a.get("control", "")))))))
+        dispatch.setdefault("oracle_status",
+                            lambda a: self._tool_simple(tool_oracle_status))
+        dispatch.setdefault("oracle_listen", lambda a: self._tool_simple(
+            lambda: tool_oracle_listen(
+                a.get("port", 0),
+                a.get("host", a.get("callback_host", a.get("ip", ""))))))
+
         fn = dispatch.get(call.name)
         if fn:
             self.terminal_log(f"→ tool: {call.name}({json.dumps(call.args, separators=(',',':'))[:80]})", "info")
@@ -9233,6 +9405,14 @@ class MainWindow(Adw.ApplicationWindow):
             self._feed_tool_result(f"Unknown tool '{call.name}'.")
 
     def _feed_tool_result(self, result_text):
+        # Carry any "these calls did not run" note into the SAME result, so the
+        # model reads it at exactly the moment it is wondering where the other
+        # answers went. See the deferred branch in _on_stream_done_body.
+        _note = getattr(self, "_deferred_note", "")
+        if _note:
+            self._deferred_note = ""
+            result_text = (result_text or "") + _note
+
         # ACTION RECALL: attach this result to whatever action produced it. One
         # hook here covers every tool, instead of instrumenting each of the
         # thirty-odd dispatch sites (which is how they drift apart).
