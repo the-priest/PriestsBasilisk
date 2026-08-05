@@ -1036,7 +1036,7 @@ if defaults is None:
     # Minimal fallback only.  load_settings() merges the full DEFAULT_SETTINGS
     # over whatever is on disk at launch, so the rest is filled in then.
     providers = {
-        "groq":        "openai/gpt-oss-120b",
+        "google":      "gemini-2.5-flash",
         "siliconflow": "deepseek-ai/DeepSeek-V4-Flash",
         "novita":      "qwen/qwen3-coder-480b-a35b-instruct",
         "github":      "openai/gpt-4.1",

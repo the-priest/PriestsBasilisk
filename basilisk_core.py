@@ -150,34 +150,26 @@ STREAM_IDLE_TIMEOUT_S = 60
 STREAM_MAX_WALL_S = 150
 HEALTH_TIMEOUT_S  = 1.5
 
-# ── Groq, re-verified against console.groq.com/docs/models and
-#    console.groq.com/docs/deprecations on 2026-08-03 ──────────────────
+# ── Google AI Studio ─────────────────────────────────────────────────
+# Verified 2026-08-03. Groq was removed: its catalogue is four chat models and
+# it had already retired four of six chain entries in three months. Google AI
+# Studio ships an OPENAI-COMPATIBLE endpoint
+# (generativelanguage.googleapis.com/v1beta/openai), so it drops straight into
+# OpenAICompatBackend with no new engine — and its free tier is far larger:
+# 1M-token context, ~1500 requests/day on Flash, no credit card.
 #
-# The previous chain was written against the May 2026 catalogue and FOUR of its
-# six entries have since been retired.  Two were already returning errors:
-#
-#     qwen/qwen3-32b                            shut down 2026-07-17
-#     meta-llama/llama-4-scout-17b-16e-instruct shut down 2026-07-17
-#     llama-3.3-70b-versatile                   shuts down 2026-08-16  <- was the DEFAULT
-#     llama-3.1-8b-instant                      shuts down 2026-08-16
-#
-# Same failure shape as the SiliconFlow chain in v7.9.3: an id list is a
-# perishable good, and a dead one costs a wasted round-trip in the middle of an
-# outage fallback — exactly when the retry budget matters most.  A dead DEFAULT
-# is worse: Groq simply stops working.
-#
-# Groq's own migration guidance is gpt-oss-20b for the 8B and gpt-oss-120b (or
-# qwen3.6-27b) for the 70B, which is what this is.
-GROQ_DEFAULT_MODEL = "openai/gpt-oss-120b"
+# ⚠ READ THIS BEFORE PICKING IT FOR REAL WORK.  Google's FREE tier permits
+# using submitted prompts to improve their models; the paid tier and Vertex do
+# not. Basilisk sends target responses, findings and sometimes credentials
+# through the model. On a real engagement that is a disclosure you almost
+# certainly cannot make. The note on each model below says so, and the operator
+# picks with that in front of him rather than buried in a doc.
+GOOGLE_DEFAULT_MODEL = "gemini-2.5-flash"
 
-# What the backend WALKS on a 429 or an outage — deliberately SHORT and
-# PRODUCTION-ONLY.  Each entry is another round-trip while the operator waits,
-# and a preview model ("may be discontinued at short notice") has no business on
-# the reliability path.  Every model on Groq has its own rate-limit bucket, so
-# two entries already give a real second chance on a 429.
-GROQ_FALLBACK_CHAIN = [
-    "openai/gpt-oss-120b",   # flagship open-weight, 500 t/s, reasoning
-    "openai/gpt-oss-20b",    # 1000 t/s, cheapest — last resort
+# Short and production-only: each entry is another round-trip during an outage.
+GOOGLE_FALLBACK_CHAIN = [
+    "gemini-2.5-flash",        # 1M ctx, the free-tier workhorse
+    "gemini-2.5-flash-lite",   # cheapest + highest RPM, last resort
 ]
 # ─────────────────────────────────────────────────────────────────────
 # CLOUD PROVIDER REGISTRY
@@ -258,32 +250,29 @@ class ModelInfo:
 # IDs marked (inferred) below follow the vendor's exact published naming
 # convention but were not seen verbatim in a SiliconFlow price/release
 # table.  If one 404s, hit ⟳ in Settings and pick the live id.
-# What the operator PICKS.  Groq's catalogue used to be empty, so its picker
-# fell through to the chain and showed no context window, price or purpose.
-# Populated now, same catalogue/chain split as SiliconFlow: pickable != walked.
+# What the operator PICKS.  Same catalogue/chain split as SiliconFlow.
 #
-# DELIBERATELY NOT LISTED — groq/compound and groq/compound-mini.  They are
-# agentic SYSTEMS with built-in web search and code execution, i.e. the model
-# fetches attacker-chosen URLs by itself, outside Basilisk's tool layer and
-# outside the web_read tier gate.  Basilisk's whole injection posture is that
-# the fetchers were REMOVED and what remains is tiered in code; picking a model
-# that quietly re-adds one would undo that without the operator ever seeing a
-# prompt.  Their 8,192 max completion is also below what a tool-calling turn
-# needs.  Not a capability judgement — a security one.
-GROQ_CATALOGUE: List[ModelInfo] = [
-    ModelInfo("openai/gpt-oss-120b", "GPT-OSS 120B", 131, 0.15, 0.60,
-              "Groq's flagship open-weight model. 120B, reasoning, ~500 t/s. "
-              "The default and the best all-round pick here.",
-              tier="flagship", cached_in_usd=0.075),
-    ModelInfo("qwen/qwen3.6-27b", "Qwen3.6 27B", 131, 0.60, 3.00,
-              "Highest measured intelligence on Groq, and vision-capable — but "
-              "PREVIEW, so it can be withdrawn at short notice, and output "
-              "costs 5x the 120B. Pick it for a hard one-off, not a long run.",
-              vision=True, tier="flagship"),
-    ModelInfo("openai/gpt-oss-20b", "GPT-OSS 20B", 131, 0.075, 0.30,
-              "Fastest on the platform at ~1000 t/s and the cheapest. Ideal "
-              "for light turns and high-volume tool chains.",
-              tier="budget", cached_in_usd=0.037),
+# Google publishes CONTEXT CACHING with an implicit ~75% discount on cached
+# input for the 2.5 family, which is why cached_in_usd is set: an agent re-sends
+# the same prompt every step, so with the stable prefix this build produces,
+# most input is a cache hit.
+GOOGLE_CATALOGUE: List[ModelInfo] = [
+    ModelInfo("gemini-2.5-flash", "Gemini 2.5 Flash", 1048, 0.30, 2.50,
+              "The free-tier workhorse: 1M context, natively multimodal, "
+              "~1500 requests/day free with no card. FREE TIER TRAINS ON YOUR "
+              "PROMPTS — do not point it at a real engagement.",
+              vision=True, tier="workhorse", cached_in_usd=0.075),
+    ModelInfo("gemini-2.5-pro", "Gemini 2.5 Pro", 1048, 1.25, 10.00,
+              "Strongest reasoning of the three, but the free tier is capped "
+              "near 50 requests/day — enough to answer a hard question, not to "
+              "run an engagement. Same free-tier training caveat.",
+              vision=True, tier="flagship", cached_in_usd=0.31),
+    ModelInfo("gemini-2.5-flash-lite", "Gemini 2.5 Flash-Lite", 1048,
+              0.10, 0.40,
+              "Cheapest and highest request-rate of the three. Good for light "
+              "turns and high-volume tool chains. Same free-tier training "
+              "caveat.",
+              vision=True, tier="budget", cached_in_usd=0.025),
 ]
 
 
@@ -440,12 +429,13 @@ class ProviderSpec:
 # fallback chain, not the default.
 PROVIDERS: List[ProviderSpec] = [
     ProviderSpec(
-        key="groq", label="Groq", engine="groq",
-        blurb="Fast cloud inference. Free key at console.groq.com.",
-        base_url="https://api.groq.com/openai/v1",
-        chain=list(GROQ_FALLBACK_CHAIN),
-        catalogue=tuple(GROQ_CATALOGUE),
-        key_url="https://console.groq.com/keys"),
+        key="google", label="Google AI Studio",
+        blurb="OpenAI-compatible. Gemini, 1M context, big free tier "
+              "(no card). Free tier trains on your prompts.",
+        base_url="https://generativelanguage.googleapis.com/v1beta/openai",
+        chain=list(GOOGLE_FALLBACK_CHAIN),
+        catalogue=tuple(GOOGLE_CATALOGUE),
+        key_url="https://aistudio.google.com/apikey"),
     ProviderSpec(
         key="siliconflow", label="SiliconFlow",
         blurb="OpenAI-compatible. Big open models (DeepSeek, GLM, Kimi, "
@@ -475,13 +465,10 @@ VISION_MODELS: Dict[str, List[str]] = {
         "Qwen/Qwen3-VL-8B-Instruct",
         "zai-org/GLM-4.5V",
     ],
-    # Groq's vision line-up turned over completely: llama-4-maverick shut down
-    # 2026-03-09 and llama-4-scout 2026-07-17, so BOTH entries here were dead
-    # and analyze_image on Groq would have 404'd. qwen3.6-27b is the only
-    # vision-capable model Groq serves now — it is a PREVIEW model, but a
-    # preview model that works beats a production id that no longer exists.
-    "groq": [
-        "qwen/qwen3.6-27b",
+    "google": [
+        "gemini-2.5-flash",
+        "gemini-2.5-pro",
+        "gemini-2.5-flash-lite",
     ],
 }
 CLOUD_PROVIDER_KEYS = [p.key for p in PROVIDERS]
@@ -601,6 +588,14 @@ DEFAULT_SETTINGS = {
     # re-checking after a change is verification, not a loop — so the third
     # identical execution is the one that gets refused.
     "repeat_block_after":      2,
+    # Round-trips a LEASHED research answer may take before tools are locked
+    # and the answer is forced. A runaway backstop, NOT a work budget: every
+    # load_tools, web_search, web_read and file read counts against it, so a
+    # genuinely deep question burned through the old hardcoded 18 while still
+    # mid-research and the operator got nothing back. It was also never in this
+    # table, so it could not be tuned. Hitting it is now visible and
+    # recoverable rather than a silent dead end (see _on_stream_done).
+    "answer_tool_budget":      40,
     "mcp_enabled":             False,   # connect external MCP tool servers (OFF
                                         # by default — MCP is an RCE surface;
                                         # tool args are safety-screened + logged)
@@ -737,6 +732,16 @@ def _migrate_settings(merged: Dict[str, Any], raw: Dict[str, Any]) -> None:
                 and (raw.get("siliconflow_api_key") or "").strip()):
             merged["active_provider"] = "siliconflow"
         merged["_provider_pin_normalized"] = True
+    # Groq was removed as a CHAT provider in v9.3.0 (its catalogue was four
+    # models and it retired four of six chain entries in three months). Anyone
+    # whose config still selects it is moved off it rather than left pointing at
+    # a provider that no longer exists — prefer Google if they have that key,
+    # otherwise the locked primary. The Groq WHISPER key is untouched: speech-
+    # to-text is a separate feature and still uses it.
+    if merged.get("active_provider") == "groq":
+        merged["active_provider"] = (
+            "google" if (raw.get("google_api_key") or "").strip()
+            else "siliconflow")
     # Guard against an active_provider that no longer exists in the
     # registry (e.g. a renamed/removed provider) — fall back to the locked
     # primary, SiliconFlow.
@@ -1306,7 +1311,8 @@ class BackendRouter:
     def __init__(self, cloud: Dict[str, Backend], settings: Dict[str, Any]):
         self.cloud = cloud            # {provider_key: backend}
         self.settings = settings
-        # Back-compat alias.
+        # Back-compat alias. Groq is no longer a chat provider; this stays
+        # only so any older reference resolves to None instead of raising.
         self.groq = cloud.get("groq")
 
     def active_cloud(self) -> Tuple[Optional[Backend], str]:
@@ -1319,8 +1325,12 @@ class BackendRouter:
             key = "siliconflow"
             backend = self.cloud.get(key)
             if backend is None:        # SiliconFlow somehow absent — last resort
-                backend = self.cloud.get("groq")
-                key = "groq"
+                # Take whatever IS configured rather than naming a provider that
+                # may no longer be registered.
+                for _k, _b in self.cloud.items():
+                    if _b is not None:
+                        backend, key = _b, _k
+                        break
         return backend, key
 
     def pick(self) -> Tuple[Optional[Backend], str]:

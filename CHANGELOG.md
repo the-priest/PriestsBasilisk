@@ -1,3 +1,79 @@
+## v9.3.0
+
+### The leashed-mode bug: found it, and it was a silent drop
+
+Reported as "in leashed mode it hits the tool cap, or stops mid-read, and never
+gives me the report". It is one bug with two faces, and it is in
+`_on_stream_done`:
+
+```python
+# When the tool budget is spent we lock tools for the final answer
+# turn — ignore anything the model still tried to call.
+if self._tools_locked:
+    executable = []
+```
+
+When the answer budget is spent, tools are locked and the model is told to
+answer. If it instead emits **another tool call** — overwhelmingly likely,
+because it was mid-research when the cap hit — that call is dropped **in
+silence**. Nothing is fed back, nothing is logged to the model. The turn then
+settles, `strip_tool_calls()` leaves an empty or near-empty bubble, and the
+operator gets a blank reply to a question the model had half-answered.
+
+Three fixes, all root-cause:
+
+1. **A dropped call is now TOLD.** The refusal is fed back as a tool result
+   saying the call was not run, nothing gathered is lost, and the full answer
+   must be written now in prose. Costs one round-trip, converts a dead end into
+   a finished answer.
+2. **A turn can no longer settle with an empty answer.** If the visible reply
+   after stripping tool calls is empty, that is a dead end regardless of cause —
+   one more turn is forced demanding prose. Bounded at two attempts so a model
+   that will not write prose cannot loop.
+3. **The budget was too low and unreachable.** `answer_tool_budget` was a
+   hardcoded `.get(..., 18)` fallback that **was never in DEFAULT_SETTINGS**, so
+   it could not be configured. Every `load_tools`, `web_search`, `web_read` and
+   file read counts against it, so deep research burned it while still working.
+   Now a real setting, default 40.
+
+### Groq removed, Google AI Studio added
+
+Groq's chat catalogue was four models and it retired four of six chain entries
+in three months. Google AI Studio ships an **OpenAI-compatible endpoint**, so it
+drops into the existing backend with no new engine — and the free tier is far
+larger: 1M-token context, ~1,500 requests/day, no card.
+
+Catalogue: `gemini-2.5-flash` (workhorse, chain head), `gemini-2.5-pro`
+(flagship, pickable but deliberately **not** on the chain — a 50-request/day
+quota cannot carry an outage path), `gemini-2.5-flash-lite` (budget). Cached
+pricing recorded (~75% off) since the prefix is now stable.
+
+**Every model note carries the free-tier training warning**, and a test asserts
+it. A pentest tool sending target responses and findings to a tier that trains
+on them is a disclosure the operator must see *at the point of choosing*, not
+buried in a doc.
+
+**Groq's Whisper STT is deliberately kept.** It is a separate feature with its
+own key; deleting it to satisfy "remove Groq" would have silently broken voice
+input. Said rather than done quietly.
+
+Migration hardened: any config still selecting Groq is moved to Google (if
+keyed) or the locked primary — the old "respect a deliberate choice" marker no
+longer protects a provider that does not exist. A new test asserts the general
+property, so any future removal is covered too.
+
+### README
+
+Reframed from describing a tool to stating what it is and who may hold it: a
+professional-only weapon, a "who this is for / not for" section, and the point
+that privacy protects the operator and not the target — being untraceable is
+not the same as being permitted. Version 9.3.0.
+
+### Housekeeping
+- 26/26 suites, 1,452 assertions, zero red.
+- GUARDRAIL byte-identical. safety/ledger/voice/scope sha256-identical.
+- compileall + install.sh bash -n clean.
+
 ## v9.2.0
 
 **Theme: the cache is now genuinely maxed out, and the README says what this

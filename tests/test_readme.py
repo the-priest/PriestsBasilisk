@@ -186,7 +186,7 @@ FACTS = [
     "14 OWASP", "F1 0.95", "CVE-2007-4559", "commonpath", "Zip slip",
     "Zip bombs", "Symlink entries", "bubblewrap", "workspace_baseline",
     "workspace_verify", "workspace_export", "zday_scan", "code_scan_plan",
-    "SiliconFlow", "Groq", "gsk_", "~/.config/basilisk/settings.json",
+    "SiliconFlow", "Google AI Studio", "AIza", "~/.config/basilisk/settings.json",
     "Python 3.10+", "GTK4", "NetHunter", "pacman", "doas", "MIT",
     "install.sh", "alg:none", "RS256", "prototype pollution", "interactsh",
     "out-of-band", "memory_forget", "SQLite",

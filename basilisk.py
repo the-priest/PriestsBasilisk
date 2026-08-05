@@ -148,7 +148,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.basilisk"
 APP_NAME = "Basilisk"
-VERSION = "9.2.0"
+VERSION = "9.3.0"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -4703,6 +4703,10 @@ class MainWindow(Adw.ApplicationWindow):
         # Set once per turn when the tool-step budget is exhausted: the next
         # turn ignores any tool calls and just answers, so we never dead-end.
         self._tools_locked: bool = False
+        # How many times THIS turn has been pushed to produce a written answer
+        # after a dropped tool call or an all-tool-call reply. Bounded so a
+        # model that will not write prose cannot loop. See _on_stream_done.
+        self._force_answer_tries: int = 0
         # Set when the operator hits the stop button.  Halts the current
         # stream AND prevents the tool chain from kicking another turn.
         self._stop_requested: bool = False
@@ -6894,6 +6898,7 @@ class MainWindow(Adw.ApplicationWindow):
             self.streaming_chat_id = self.current_chat_id
             self._tool_chain_depth = 0
             self._tools_locked = False
+            self._force_answer_tries = 0
 
         # Limit how many model round-trips a turn may chain.  Rather than
         # dead-ending with "chain too long" and no answer (annoying), once
@@ -7003,7 +7008,7 @@ class MainWindow(Adw.ApplicationWindow):
         # give ONE reply and stop. Only a runaway (a model that keeps calling
         # tools without converging) needs breaking, so the cap is generous — lock
         # tools and force the answer only after answer_tool_budget round-trips.
-        _ans_cap = self.settings.get("answer_tool_budget", 18)
+        _ans_cap = self.settings.get("answer_tool_budget", 40)
         if _answer_only and self._tool_chain_depth > _ans_cap and not self._tools_locked:
             self._tools_locked = True
             addendum = (addendum + "\n\n[You've used a lot of tools on this "
@@ -7518,9 +7523,24 @@ class MainWindow(Adw.ApplicationWindow):
             executable = [c for c in calls
                           if c.name not in ("propose", "propose_edit",
                                             "write_file")]
-        # When the tool budget is spent we lock tools for the final answer
-        # turn — ignore anything the model still tried to call.
+        # ── TOOL LOCK: dropped calls must be TOLD, not silently binned ──
+        # When the budget is spent we lock tools for one final answer turn. The
+        # old code just emptied `executable` and said nothing. That is the bug
+        # behind "it hits the tool cap and never gives me the report":
+        #
+        #   · the model was mid-research, so its reply was mostly a tool call
+        #     with little or no prose,
+        #   · the call was dropped in silence — nothing fed back, nothing logged
+        #     to the model,
+        #   · the turn then settled, and strip_tool_calls() left an empty or
+        #     near-empty bubble.
+        #
+        # The operator gets a blank answer to a question the model had actually
+        # half-researched. Feeding the refusal back costs one round-trip and
+        # turns a dead end into a finished answer.
+        _locked_drop = []
         if self._tools_locked:
+            _locked_drop = list(executable)
             executable = []
         # ── RECOVERY: the model printed a command instead of calling `run` ──
         # A known model-drift failure: instead of a `run` tool call, the model
@@ -7742,6 +7762,52 @@ class MainWindow(Adw.ApplicationWindow):
                     self._show_toast(
                         "That reply looked degraded after retries. Tap send to "
                         "try again.", timeout=6)
+            # ── the two dead ends that lose an answer ──
+            # (a) tools were locked and the model still called one, or
+            # (b) the reply is ALL tool call and no prose,
+            # either way settling here hands the operator an empty bubble.
+            # Push exactly one more turn that demands the answer in words.
+            _visible = strip_tool_calls(final or "").strip()
+            _empty_answer = (not cancelled and not executable
+                             and not _visible
+                             and not self._mission_active)
+            if (not cancelled and (_locked_drop or _empty_answer)
+                    and getattr(self, "_force_answer_tries", 0) < 2
+                    and not self._stop_requested):
+                self._force_answer_tries = \
+                    getattr(self, "_force_answer_tries", 0) + 1
+                _why = ("your tool call was NOT run — the tool budget for this "
+                        "question is spent"
+                        if _locked_drop else
+                        "your reply contained no answer, only a tool call")
+                self.terminal_log(
+                    "── forcing the final answer (" +
+                    ("dropped tool call" if _locked_drop else "empty reply")
+                    + ")", "dim")
+                try:
+                    _fc = self.streaming_chat_id or self.current_chat_id
+                    self.store.add_message(
+                        _fc, "user",
+                        "<tool_result>\n[system] " + _why + ". Nothing you "
+                        "gathered is lost — it is all in this conversation. "
+                        "Do NOT call another tool. Write the FULL answer to "
+                        "the operator's original question NOW, in prose, using "
+                        "everything you have already read. If some part is "
+                        "still unverified, say so plainly and answer the "
+                        "rest — a partial answer is useful, silence is "
+                        "not.\n</tool_result>",
+                        meta={"kind": "tool_result"})
+                except Exception:
+                    pass
+                self._tools_locked = True
+                self.streaming_msg_widget = None
+                self.streaming_msg_db_id = None
+                try:
+                    self._kick_assistant_turn()
+                    return False
+                except Exception:
+                    log(f"force-answer kick failed: {traceback.format_exc()}")
+
             elif not cancelled and not executable:
                 # A clean, non-degraded settle → reset the degraded retry counter
                 # (but NOT the no-action streak: a plain reply is still a turn

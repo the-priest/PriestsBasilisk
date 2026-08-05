@@ -80,12 +80,12 @@ class TestSettings(unittest.TestCase):
 
     def test_save_load_roundtrip(self):
         s = basilisk_core.load_settings()
-        s["active_provider"] = "groq"
+        s["active_provider"] = "google"
         s["temperature"] = 0.42
         basilisk_core.save_settings(s)
 
         loaded = basilisk_core.load_settings()
-        self.assertEqual(loaded["active_provider"], "groq")
+        self.assertEqual(loaded["active_provider"], "google")
         self.assertAlmostEqual(loaded["temperature"], 0.42)
         # Untouched defaults must survive a round-trip.
         self.assertIn("max_tokens", loaded)
@@ -122,7 +122,7 @@ class TestSettings(unittest.TestCase):
 # ─────────────────────────────────────────────────────────────────────────
 class TestProviderRegistry(unittest.TestCase):
     def test_all_expected_providers_present(self):
-        for key in ("siliconflow", "groq"):
+        for key in ("siliconflow", "google"):
             self.assertIn(key, basilisk_core.PROVIDERS_BY_KEY,
                           f"provider {key} missing from registry")
 
@@ -475,10 +475,16 @@ class TestSttFailover(unittest.TestCase):
     def _stt(self, settings):
         return basilisk_voice.SpeechToText(lambda: settings)
 
-    def test_falls_back_to_groq_when_siliconflow_403s(self):
+    def test_falls_back_to_groq_whisper_when_siliconflow_403s(self):
         # The reported failure: SiliconFlow key works for chat but the
         # transcription endpoint returns 403. With a Groq key present, voice
         # must transparently fall back to Groq Whisper instead of failing.
+        #
+        # NOTE: Groq was removed as a CHAT provider in v9.3.0, but it is still
+        # the Whisper speech-to-text fallback — a separate feature with its own
+        # key. Deleting this path to satisfy "remove Groq" would have silently
+        # broken voice input for anyone relying on it, which is a worse outcome
+        # than keeping one transcription endpoint around.
         def fake_post(url, *a, **k):
             if "siliconflow" in url:
                 raise _http_error(403)
@@ -524,7 +530,7 @@ class TestSttFailover(unittest.TestCase):
         stt = self._stt({
             "active_provider": "siliconflow",
             "siliconflow_api_key": "sk-sf",
-            "groq_api_key": "gsk-groq",
+            "google_api_key": "AIza-test",
             "stt_provider": "auto",
         })
         text, err = stt.transcribe(str(self.wav))
@@ -540,8 +546,8 @@ class TestSttFailover(unittest.TestCase):
     def test_recording_is_cleaned_up_after_transcription(self):
         basilisk_voice._post_multipart = lambda url, *a, **k: '{"text": "ok"}'
         stt = self._stt({
-            "active_provider": "groq",
-            "groq_api_key": "gsk",
+            "active_provider": "google",
+            "google_api_key": "AIza-test",
             "stt_provider": "auto",
         })
         stt.transcribe(str(self.wav))

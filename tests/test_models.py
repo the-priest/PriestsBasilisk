@@ -50,7 +50,8 @@ def ck(name: str, cond: bool, detail: str = "") -> None:
 import basilisk_core as C  # noqa: E402
 
 SF = C.PROVIDERS_BY_KEY["siliconflow"]
-GROQ = C.PROVIDERS_BY_KEY["groq"]
+GOOG = C.PROVIDERS_BY_KEY["google"]
+GROQ = GOOG   # legacy alias in this file; Groq was removed as a chat provider
 
 
 # ── 1. the pinned default ────────────────────────────────────────────
@@ -147,22 +148,21 @@ _GROQ_RETIRED = {
     "mistral-saba-24b":                           "2025-07-30",
     "qwen-qwq-32b":                               "2025-07-14",
 }
-GQ = C.PROVIDERS_BY_KEY["groq"]
+GQ = C.PROVIDERS_BY_KEY["google"]
 _gq_ids = [m.id for m in GQ.catalogue]
 _gq_dead = [i for i in _gq_ids + list(GQ.chain) if i in _GROQ_RETIRED]
 ck("groq: no retired ids in chain or catalogue", not _gq_dead, str(_gq_dead))
 ck("groq: default model is not retired",
-   C.GROQ_DEFAULT_MODEL not in _GROQ_RETIRED, C.GROQ_DEFAULT_MODEL)
+   C.GOOGLE_DEFAULT_MODEL not in _GROQ_RETIRED, C.GOOGLE_DEFAULT_MODEL)
 ck("groq: default model is one the provider knows",
-   GQ.knows(C.GROQ_DEFAULT_MODEL))
+   GQ.knows(C.GOOGLE_DEFAULT_MODEL))
 ck("groq: default model heads the chain",
-   list(GQ.chain)[0] == C.GROQ_DEFAULT_MODEL,
-   f"{list(GQ.chain)[0]} vs {C.GROQ_DEFAULT_MODEL}")
+   list(GQ.chain)[0] == C.GOOGLE_DEFAULT_MODEL,
+   f"{list(GQ.chain)[0]} vs {C.GOOGLE_DEFAULT_MODEL}")
 
 # The chain is the OUTAGE path: production models only. A preview model can be
 # withdrawn at short notice, which is the one thing a fallback must not do.
-_GROQ_PREVIEW = {"qwen/qwen3.6-27b", "openai/gpt-oss-safeguard-20b",
-                 "minimaxai/minimax-m2.7"}
+_GROQ_PREVIEW = set()
 _prev_in_chain = [i for i in GQ.chain if i in _GROQ_PREVIEW]
 ck("groq: no PREVIEW model on the fallback chain", not _prev_in_chain,
    str(_prev_in_chain))
@@ -170,16 +170,20 @@ ck("groq: chain stays short (each entry is another round-trip)",
    len(GQ.chain) <= 3, str(len(GQ.chain)))
 ck("groq: catalogue is populated (picker showed nothing before)",
    len(GQ.catalogue) >= 3, str(len(GQ.catalogue)))
-ck("groq: a preview model IS pickable, just not walked",
-   GQ.knows("qwen/qwen3.6-27b"))
-ck("groq: preview note warns it can be withdrawn",
-   any("PREVIEW" in m.note for m in GQ.catalogue if m.id == "qwen/qwen3.6-27b"))
+ck("google: the restricted-quota model is pickable but NOT on the chain",
+   GQ.knows("gemini-2.5-pro") and "gemini-2.5-pro" not in GQ.chain,
+   "50 requests/day answers a hard question; it cannot carry an outage path")
+ck("google: every note carries the free-tier training warning",
+   all("training" in m.note.lower() or "TRAINS" in m.note
+       for m in GQ.catalogue),
+   "a pentest tool sending engagement data to a training-enabled tier is a "
+   "disclosure the operator must see at the point of choosing")
 
 # The agentic systems fetch attacker-chosen URLs by themselves, outside the
 # web_read tier gate. Keeping them out is a security decision, so pin it.
-for _sys in ("groq/compound", "groq/compound-mini"):
-    ck(f"groq: {_sys} is not selectable (bypasses the web_read gate)",
-       not GQ.knows(_sys))
+ck("groq is no longer a chat provider",
+   "groq" not in C.PROVIDERS_BY_KEY,
+   "removed in v9.3.0; its Whisper STT endpoint is a separate feature")
 
 ck("groq: every catalogue id carries real metadata",
    all(m.ctx_k > 0 and m.out_usd > 0 and m.note for m in GQ.catalogue))
@@ -192,8 +196,7 @@ ck("groq: catalogue ids are unique",
 # lever an agent has, because an agent re-sends the same prompt every step.
 print("\n== cached pricing ==")
 _CACHED = {
-    "openai/gpt-oss-120b": 0.075,          # Groq: 50% off
-    "openai/gpt-oss-20b": 0.037,           # Groq: 50% off
+    "gemini-2.5-flash": 0.075,             # Google: ~75% off cached
     "deepseek-ai/DeepSeek-V4-Flash": 0.028,  # SiliconFlow: 80% off
 }
 for _mid, _want in _CACHED.items():
@@ -246,8 +249,9 @@ _inst = open(os.path.join(os.path.dirname(os.path.dirname(
 _inst_dead = [m for m in _GROQ_RETIRED if f'"{m}"' in _inst]
 ck("installer fallback names no retired groq model", not _inst_dead,
    str(_inst_dead))
-ck("installer fallback names the current groq default",
-   f'"{C.GROQ_DEFAULT_MODEL}"' in _inst)
+ck("installer fallback names the current google default",
+   f'"{C.GOOGLE_DEFAULT_MODEL}"' in _inst,
+   "install.sh carries a second copy of these defaults and has drifted before")
 ck("the retirement check tolerates live successors",
    not _is_retired("zai-org/GLM-4.5-Air")
    and not _is_retired("MiniMaxAI/MiniMax-M2.5")
@@ -308,11 +312,11 @@ print("\n== groq is untouched ==")
 # used to pin the empty state; they now pin the populated one.
 ck("groq has a catalogue", bool(GROQ.catalogue))
 ck("groq chain still matches GROQ_FALLBACK_CHAIN",
-   list(GROQ.chain) == list(C.GROQ_FALLBACK_CHAIN))
-ck("groq info() returns metadata for a catalogue model",
-   GROQ.info("openai/gpt-oss-120b") is not None)
-ck("groq info() carries a real context window",
-   (GROQ.info("openai/gpt-oss-120b") or C.ModelInfo("", "", 0, 0, 0)).ctx_k > 0)
+   list(GROQ.chain) == list(C.GOOGLE_FALLBACK_CHAIN))
+ck("google info() returns metadata for a catalogue model",
+   GOOG.info("gemini-2.5-flash") is not None)
+ck("google info() carries a real context window",
+   (GOOG.info("gemini-2.5-flash") or C.ModelInfo("", "", 0, 0, 0)).ctx_k > 0)
 ck("groq knows() still works off the chain", GROQ.knows(GROQ.chain[0]))
 ck("groq pick_ids covers the catalogue", 
    set(GROQ.pick_ids) >= {m.id for m in GROQ.catalogue})
