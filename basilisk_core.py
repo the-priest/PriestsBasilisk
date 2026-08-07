@@ -7302,17 +7302,55 @@ _DS_TOKEN_RE = re.compile("<" + _DS_PIPE + r"[^>]*?" + _DS_PIPE + ">")
 _DS_PARTIAL_RE = re.compile("<" + _DS_PIPE + r"tool" + _DS_SEP + r".*$", re.S)
 # A bare token opener that has only just begun to arrive ("<｜", "<｜to").
 _DS_OPENER_RE = re.compile("<" + _DS_PIPE + r"[^>]{0,40}$", re.S)
+# Any special-token tag still open at end-of-string, whatever its keyword.
+# Normalisation has already rewritten every COMPLETE one, so a survivor is by
+# definition mid-flight.
+_DS_ANY_PARTIAL_RE = re.compile("<" + _DS_PIPE + r".*$", re.S)
 
 # The same problem for every OTHER dialect: _ALT_TAG_RES needs the closing tag,
 # so from the moment `<tool_call name="…">` starts arriving until `</tool_call>`
 # lands, the whole thing was rendered as text. Any alternative opener that is
 # still unclosed at end-of-string is by definition mid-flight — hide it.
-_ALT_PARTIAL_RE = re.compile(
-    r"<\s*(?:tool_call|toolcall|function_call|invoke|antml:invoke)\b[^>]*>?"
-    r"(?:(?!</\s*(?:tool_call|toolcall|function_call|invoke|antml:invoke)\s*>).)*$",
-    re.S | re.I)
-_ALT_FUNC_PARTIAL_RE = re.compile(
-    r"<\s*function\s*=(?:(?!<\s*/\s*function\s*>).)*$", re.S | re.I)
+#
+# THIS USED TO BE A REGEX AND IT WAS A HARD UI FREEZE.  The tempered form
+# `<opener>(?:(?!</closer>).)*$` costs a lookahead per character per starting
+# position, and re.sub tries every position.  Measured on 3000 repeated
+# `<tool_call name="x">` openers followed by ONE `</tool_call>`:
+#
+#     25.0 SECONDS.
+#
+# strip_tool_calls runs on EVERY streamed frame, so that is 25s multiplied by
+# the frame count, on the GTK main thread, with no way to cancel it. And the
+# input that triggers it is not exotic: a model stuck repeating itself is a
+# known Basilisk failure mode (it is what v9.1.0's repeat guard exists for), and
+# a repetitive model repeats whatever it was last emitting — which, when a tool
+# call has just failed to parse, is a tool-call opener.
+#
+# The scan below is the same decision made linearly: closers only get scarcer
+# left-to-right, so the first opener with no closer after it is the first
+# opener that appears after the LAST closer. Two forward passes, no backtracking.
+_ALT_OPEN_RE = re.compile(
+    r"<\s*(?:tool_call|toolcall|function_call|invoke|antml:invoke)\b", re.I)
+_ALT_CLOSE_RE = re.compile(
+    r"<\s*/\s*(?:tool_call|toolcall|function_call|invoke|antml:invoke)\s*>",
+    re.I)
+_FUNC_OPEN_RE = re.compile(r"<\s*function\s*=", re.I)
+_FUNC_CLOSE_RE = re.compile(r"<\s*/\s*function\s*>", re.I)
+
+
+def _cut_unclosed(text: str, open_re, close_re) -> str:
+    """Drop from the first UNCLOSED opener to the end of the string.
+
+    Linear replacement for a tempered-dot `(?:(?!close).)*$` regex — see the
+    25-second measurement above.  Same result, two forward passes.
+    """
+    if not text:
+        return text
+    last_close = 0
+    for cm in close_re.finditer(text):
+        last_close = cm.end()
+    om = open_re.search(text, last_close)
+    return text[:om.start()] if om else text
 
 # Other dialects seen in the wild. All rewritten to the canonical form rather
 # than teaching the main parser five grammars.
@@ -7330,6 +7368,194 @@ _ALT_TAG_RES = [
 _FENCE_JSON_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.S)
 
 
+# ── DSML: DeepSeek-V4's tag dialect ──────────────────────────────────
+# The v9.1.0 normaliser knew DeepSeek's OLD token format (<｜tool▁call▁begin｜>
+# … <｜tool▁sep｜>name … ```json …```).  V4 emits a DIFFERENT, XML-shaped
+# dialect in which every tag carries a "DSML" sentinel built from the same
+# FULLWIDTH VERTICAL LINE, and the arguments are CHILD TAGS instead of a JSON
+# body:
+#
+#     <｜DSML｜｜tool name="run">
+#     <｜DSML｜｜parameter name="command" string="true">curl -s …</｜DSML｜｜parameter>
+#     <｜DSML｜｜parameter name="reason" string="true">why</｜DSML｜｜parameter>
+#     </｜DSML｜｜invoke>
+#     </｜DSML｜｜tool>
+#
+# Two things broke, and they produced two DIFFERENT symptoms in the same run:
+#
+#   1. When the sentinel was on the OPENER, TOOL_TAG_RE (`<tool`) never matched
+#      — nothing executed and nothing was stripped, so the raw markup was
+#      printed to the operator as chat text.  That is the pipes-and-boxes on
+#      screen.
+#   2. When the model happened to open with a plain `<tool name="…">` and only
+#      the CHILDREN carried the sentinel, TOOL_TAG_RE matched, the body was not
+#      JSON, and the whole thing landed in args as {"_raw": "<｜DSML｜｜parameter
+#      name=\"url\" …"}.  The tool then ran with no url at all.  That is the
+#      `web_read({"_raw":"<｜DSML｜｜parameter …` line in the log.
+#
+# Symptom 2 is the more dangerous of the pair: it looks like a working tool
+# call, right down to the "✓ done", so the loop never notices it learned
+# nothing and just tries again.
+#
+# The sentinel's pipe COUNT varies with how the tokenizer renders the special
+# token, and on a closing tag the slash may sit either side of it — so match
+# one-or-more pipes and accept a slash in either position rather than pinning
+# the exact byte string seen once in one screenshot.
+_DSML_SENTINEL_RE = re.compile(
+    r"<\s*(/?)\s*" + _DS_PIPE + r"+\s*DSML\s*" + _DS_PIPE + r"+\s*(/?)\s*",
+    re.I)
+
+# Argument child tags, with or without the sentinel (it is stripped first).
+# `name` here is deliberately LOOSER than _NAME_ATTR_RE: that one names a TOOL
+# and stays tight, but a parameter is called things like `max_results` or
+# `arg2`, and rejecting a digit would silently drop the argument.
+#
+# NOTE ON SHAPE — this is deliberately TWO regexes walked in lockstep, not one
+# `<parameter …>(.*?)</parameter>` pair.  The paired form is quadratic when
+# openers outnumber closers: every unmatched opener re-scans to end-of-string.
+# Measured on a body with 5000 unclosed openers it took 2.06 SECONDS, and this
+# runs on the UI thread on every streamed frame.  The lockstep walk below never
+# looks backwards, so it is linear in the body length.
+_PARAM_OPEN_RE = re.compile(r"<\s*(?:antml:)?parameter\b([^>]*)>", re.I)
+_PARAM_CLOSE_RE = re.compile(r"<\s*/\s*(?:antml:)?parameter\s*>", re.I)
+_PARAM_NAME_RE = re.compile(
+    r'\bname\s*=\s*["\'\u201c\u201d]?([A-Za-z_][\w.\-]*)')
+# `string="true"` means "do not interpret this value" — the model telling us
+# the argument is text.  Honour it: a version number or an id that happens to
+# look numeric must not silently become an int.
+_PARAM_STRING_RE = re.compile(r'\bstring\s*=\s*["\'\u201c\u201d]?(true|false)',
+                              re.I)
+
+# Orphaned structural tags left behind when a dialect body is decoded — these
+# must never reach the operator's screen or the JSON parser.
+_ORPHAN_TAG_RE = re.compile(
+    r"<\s*/?\s*(?:antml:)?(?:parameter|invoke|tool_call|toolcall|"
+    r"function_call)\b[^>]*>", re.I)
+
+_NUMERIC_RE = re.compile(r"^-?\d+$")
+_FLOAT_RE = re.compile(r"^-?\d*\.\d+$")
+
+# Only the five XML entities, semicolon required.  html.unescape() would also
+# expand legacy semicolon-less forms, which is a real hazard when the value is
+# a shell command — `curl 'a&copy=1'` must survive byte-for-byte.
+_ENTITIES = (("&lt;", "<"), ("&gt;", ">"), ("&quot;", '"'),
+             ("&apos;", "'"), ("&amp;", "&"))
+
+
+def _unentity(s: str) -> str:
+    for a, b in _ENTITIES:
+        s = s.replace(a, b)
+    return s
+
+
+def _coerce_param(val: str) -> Any:
+    """Turn a parameter tag's text into a Python value.
+
+    Conservative on purpose: only shapes that are UNAMBIGUOUSLY JSON are
+    interpreted.  A bare word stays a string, because guessing wrong on a
+    `command` argument is how a shell call gets mangled.
+    """
+    v = val.strip()
+    if not v:
+        return ""
+    low = v.lower()
+    if low in ("true", "false"):
+        return low == "true"
+    if low == "null":
+        return None
+    if _NUMERIC_RE.match(v):
+        try:
+            return int(v)
+        except ValueError:
+            return v
+    if _FLOAT_RE.match(v):
+        try:
+            return float(v)
+        except ValueError:
+            return v
+    if (v[0], v[-1]) in (("{", "}"), ("[", "]")):
+        try:
+            return json.loads(v)
+        except (json.JSONDecodeError, ValueError):
+            return v
+    return v
+
+
+def _params_to_args(body: str) -> Optional[Dict[str, Any]]:
+    """Decode a `<parameter name="x">value</parameter>` body into an args dict.
+
+    Returns None when the body carries no parameter tags at all, so the caller
+    can fall through to the normal JSON path — this must never take over a body
+    that was only ever meant to be JSON.
+    """
+    if not body or "parameter" not in body.lower():
+        return None
+    args: Dict[str, Any] = {}
+    found = False
+    pos = 0
+    while True:
+        om = _PARAM_OPEN_RE.search(body, pos)
+        if not om:
+            break
+        cm = _PARAM_CLOSE_RE.search(body, om.end())
+        if not cm:
+            # Unclosed — the value is still arriving or the reply was cut off.
+            # Skip it rather than taking everything to the end: a HALF a
+            # `command` argument is worse than none, because it would be
+            # dispatched and run.
+            break
+        pos = cm.end()
+        attrs = om.group(1) or ""
+        nm = _PARAM_NAME_RE.search(attrs)
+        if not nm:
+            continue
+        found = True
+        raw = _unentity(body[om.end():cm.start()])
+        sm = _PARAM_STRING_RE.search(attrs)
+        if sm and sm.group(1).lower() == "true":
+            args[nm.group(1)] = raw.strip()
+        else:
+            args[nm.group(1)] = _coerce_param(raw)
+    return args if found else None
+
+
+def _first_json_object(s: str) -> str:
+    """First brace-balanced {...} in s, ignoring braces inside strings.
+
+    Backstop for a body that IS valid JSON with something glued to the end of
+    it — the shape that produced `{"_raw": "{\\"url\\": \\"https://…\\"}\\n
+    </｜DSML｜｜invoke>"}` in the log, where a perfectly good object was thrown
+    away because a stray closing tag trailed it.
+    """
+    if not s:
+        return ""
+    start = s.find("{")
+    if start == -1:
+        return ""
+    depth = 0
+    in_str = False
+    esc = False
+    for i in range(start, len(s)):
+        ch = s[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return s[start:i + 1]
+    return ""
+
+
 def _normalise_tool_syntax(text: str) -> str:
     """Rewrite known alternative tool-call dialects into `<tool name=...>`.
 
@@ -7341,6 +7567,16 @@ def _normalise_tool_syntax(text: str) -> str:
     if not text or "<" not in text:
         return text
     out = text
+
+    # 0. DSML sentinel FIRST.  Strip `<｜DSML｜｜` down to `<` and the rest of
+    #    this function — plus TOOL_TAG_RE, plus strip_tool_calls — sees
+    #    ordinary markup it already understands.  Doing it here rather than
+    #    teaching each regex about the sentinel is what keeps parse and strip
+    #    in agreement; the moment they disagree, a call executes but survives
+    #    stripping and the raw markup reaches the screen and the database.
+    if _DS_PIPE in out and "DSML" in out:
+        out = _DSML_SENTINEL_RE.sub(lambda m: "<" + (m.group(1) or m.group(2)),
+                                    out)
 
     # 1. DeepSeek native tokens.
     if _DS_PIPE in out:
@@ -7359,7 +7595,18 @@ def _normalise_tool_syntax(text: str) -> str:
         out = _DS_TOKEN_RE.sub("", out)
 
     # 2. Other tag dialects.
+    # GUARD: a paired `<open …>(.*?)</close>` sub is quadratic when openers
+    # outnumber closers — every unmatched opener re-scans to end-of-string.
+    # 3000 bare `<tool_call …>` openers cost 1.48s here. If the closing tag is
+    # not present AT ALL the sub cannot match anything, so the cheap linear
+    # search below buys the whole thing for nothing.
+    _has_alt_close = bool(_ALT_CLOSE_RE.search(out))
+    _has_func_close = bool(_FUNC_CLOSE_RE.search(out))
     for rx, kind in _ALT_TAG_RES:
+        if kind == "eqname" and not _has_func_close:
+            continue
+        if kind == "attrs" and not _has_alt_close:
+            continue
         def _alt(m, kind=kind):
             if kind == "eqname":
                 name, body = m.group(1), (m.group(2) or "").strip()
@@ -7385,6 +7632,10 @@ _TOOL_DEBRIS_RES = [
     re.compile(r'\bname\s*=\s*"[a-z_][\w.]*"\s*>'),
     re.compile("<" + _DS_PIPE),
     re.compile(r"<\s*function\s*=", re.I),
+    # A `<parameter name=…>` that survived to here belongs to a call whose
+    # opener we never recognised.  The name= requirement keeps prose that
+    # merely mentions the word from tripping it.
+    re.compile(r"<\s*(?:antml:)?parameter\b[^>]*\bname\s*=", re.I),
 ]
 
 
@@ -7409,7 +7660,12 @@ def scrub_tool_debris(text: str) -> str:
     """
     if not text:
         return text
-    out = _DS_TOKEN_RE.sub("", text)
+    out = text
+    if _DS_PIPE in out and "DSML" in out:
+        out = _DSML_SENTINEL_RE.sub(lambda m: "<" + (m.group(1) or m.group(2)),
+                                    out)
+    out = _DS_TOKEN_RE.sub("", out)
+    out = _ORPHAN_TAG_RE.sub("", out)
     out = re.sub(r"<\s*/?\s*(?:tool|tool_call|toolcall|function_call|invoke)"
                  r"\b[^>]*>", "", out, flags=re.I)
     out = re.sub(r"<\s*function\s*=[^>]*>|<\s*/\s*function\s*>", "",
@@ -7472,15 +7728,38 @@ def parse_tool_calls(text: str) -> List[ToolCall]:
                 # the attribute value may carry escaped quotes — unescape
                 json_src = json_src.replace('\\"', '"').replace("\\'", "'")
 
-        try:
-            parsed = json.loads(json_src) if json_src else {}
-        except json.JSONDecodeError:
-            # Literal newlines / unescaped control chars in a string value are
-            # the usual cause (a multi-line `content` for propose_edit).  Try
-            # a repaired parse before giving up so the call still carries real
-            # path/content and its diff card actually renders.
-            recovered = _loads_lenient(json_src)
-            parsed = recovered if recovered is not None else {"_raw": json_src}
+        # ── ARGUMENTS AS CHILD TAGS (DSML / antml `<parameter>` dialect) ──
+        # Checked BEFORE the JSON path and only when parameter tags are
+        # actually present, so a body that was always meant to be JSON is
+        # untouched.  Without this the body is not valid JSON, lands in
+        # {"_raw": …}, and the tool runs with none of its real arguments —
+        # which reads as a successful call and teaches the loop nothing.
+        parsed = _params_to_args(json_src)
+        if parsed is None:
+            try:
+                parsed = json.loads(json_src) if json_src else {}
+            except json.JSONDecodeError:
+                # Literal newlines / unescaped control chars in a string value
+                # are the usual cause (a multi-line `content` for
+                # propose_edit).  Try a repaired parse before giving up so the
+                # call still carries real path/content and its diff card
+                # actually renders.
+                recovered = _loads_lenient(json_src)
+                if recovered is None:
+                    # Still no.  Two salvage passes, cheapest first: drop
+                    # orphaned structural tags a dialect left glued to the
+                    # body, then pull out the first balanced object.  Good
+                    # JSON with a stray `</invoke>` after it is a real,
+                    # observed shape and throwing it away costs a round trip.
+                    _cleaned = _ORPHAN_TAG_RE.sub("", json_src).strip()
+                    if _cleaned and _cleaned != json_src:
+                        recovered = _loads_lenient(_cleaned)
+                    if recovered is None:
+                        _obj = _first_json_object(json_src)
+                        if _obj:
+                            recovered = _loads_lenient(_obj)
+                parsed = recovered if recovered is not None else {
+                    "_raw": json_src}
 
         # Resolve tool name
         name = name_attr
@@ -7531,6 +7810,21 @@ def parse_tool_calls(text: str) -> List[ToolCall]:
             # text still gets stripped from display by strip_tool_calls.
             continue
         args = parsed if isinstance(parsed, dict) else {"_raw": parsed}
+        # ── DON'T RUN A CALL WE COULDN'T READ ──
+        # If the only thing in args is _raw and that raw is still TAG MARKUP,
+        # we did not decode the arguments — we just relabelled them.  Running
+        # it produces a tool call with no url / no command that reports "done"
+        # and returns nothing useful, so the model retries the same broken
+        # shape forever (exactly the loop in the report).  Dropping it here
+        # leaves the debris visible to looks_like_failed_tool_call, which asks
+        # the model to re-send in the format that works.  Note the narrow
+        # condition: merely MALFORMED JSON still goes through as before, so a
+        # half-written propose_edit is not newly discarded.
+        if (list(args.keys()) == ["_raw"]
+                and isinstance(args["_raw"], str)
+                and (_ORPHAN_TAG_RE.search(args["_raw"])
+                     or _DS_PIPE in args["_raw"])):
+            continue
         calls.append(ToolCall(name=name, args=args, raw=m.group(0)))
     return calls
 
@@ -7585,9 +7879,19 @@ def strip_tool_calls(text: str) -> str:
         out = _DS_PARTIAL_RE.sub("", out)
         out = _DS_TOKEN_RE.sub("", out)
         out = _DS_OPENER_RE.sub("", out)
+        # Any fullwidth-pipe token still standing after normalisation is a
+        # tag that has not finished arriving (a complete one was rewritten).
+        # Same argument as _DS_PARTIAL_RE above, generalised past the old
+        # `tool▁` prefix so the DSML sentinel is covered too — otherwise the
+        # operator watches `<｜DSML｜｜parameter name="url"…` type itself out
+        # one character at a time before it resolves.
+        out = _DS_ANY_PARTIAL_RE.sub("", out)
     if "<" in out:
-        out = _ALT_PARTIAL_RE.sub("", out)
-        out = _ALT_FUNC_PARTIAL_RE.sub("", out)
+        out = _cut_unclosed(out, _ALT_OPEN_RE, _ALT_CLOSE_RE)
+        out = _cut_unclosed(out, _FUNC_OPEN_RE, _FUNC_CLOSE_RE)
+        # Structural child tags orphaned by a body we decoded or a call that
+        # never closed.  Display only — nothing here changes what executed.
+        out = _ORPHAN_TAG_RE.sub("", out)
     # LAST-RESORT belt-and-suspenders.  The parser above is liberal, but a
     # model can always invent a tag shape we didn't anticipate.  The execution
     # side can't run a tag it couldn't parse — but the one thing that must
@@ -7615,6 +7919,8 @@ THINK_RE = re.compile(
 # A think block opened but not yet closed (still streaming).
 THINK_PARTIAL_RE = re.compile(
     r'<think\b[^>]*>(.*)$', re.DOTALL | re.IGNORECASE)
+# Cheap linear probe used to skip the quadratic paired sub above.
+_THINK_CLOSE_RE = re.compile(r'</think\s*>', re.IGNORECASE)
 
 
 def extract_think_blocks(text: str) -> Tuple[str, str]:
@@ -7628,7 +7934,13 @@ def extract_think_blocks(text: str) -> Tuple[str, str]:
         thoughts.append((m.group(1) or "").strip())
         return ""
 
-    visible = THINK_RE.sub(_grab, text)
+    # GUARD, same reason as the dialect subs: THINK_RE is a paired non-greedy
+    # `<think …>(.*?)</think>` and goes quadratic when openers outnumber
+    # closers — 3000 bare `<think>` openers cost 434ms, and this runs on every
+    # streamed frame. If no closing tag exists the sub cannot match, so skip
+    # straight to the unclosed-trailing case it would have fallen through to.
+    visible = THINK_RE.sub(_grab, text) if _THINK_CLOSE_RE.search(text or "") \
+        else (text or "")
     pm = THINK_PARTIAL_RE.search(visible)
     if pm:
         thoughts.append((pm.group(1) or "").strip())

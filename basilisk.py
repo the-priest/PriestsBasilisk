@@ -150,7 +150,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.basilisk"
 APP_NAME = "Basilisk"
-VERSION = "9.5.1"
+VERSION = "9.6.0"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -4764,6 +4764,9 @@ class MainWindow(Adw.ApplicationWindow):
         # Text appended to the next tool result when extra calls in a reply
         # were not run this turn. See _on_stream_done_body / _feed_tool_result.
         self._deferred_note: str = ""
+        # Name of the tool currently being dispatched, so a lambda-wrapped
+        # handler can log what it actually is. See _run_tool_call / _tool_simple.
+        self._dispatching_tool: str = ""
         # Set when the operator hits the stop button.  Halts the current
         # stream AND prevents the tool chain from kicking another turn.
         self._stop_requested: bool = False
@@ -6641,13 +6644,21 @@ class MainWindow(Adw.ApplicationWindow):
         'idle' when not, and never reflows the other buttons."""
         global _CURRENT_ACTION
         if working:
+            # Only LOG on a change. _set_working is called from more than one
+            # place per tool (the chain step and the tool's own start), so an
+            # unchanged label printed the same line twice in a row — which in a
+            # long run makes the terminal look like it is stuttering and buries
+            # the lines that matter. The pill still updates every call; only
+            # the duplicate log line is suppressed.
+            _changed = (_CURRENT_ACTION != label)
             _CURRENT_ACTION = label
             if hasattr(self, "status_pill_label"):
                 self.status_pill_label.set_text(label)
                 self.status_pill_spinner.set_visible(True)
                 self.status_pill_spinner.start()
                 self.status_pill_box.add_css_class("busy")
-            self.terminal_log(f"── {label}", "dim")
+            if _changed:
+                self.terminal_log(f"── {label}", "dim")
         else:
             _CURRENT_ACTION = ""
             if hasattr(self, "status_pill_label"):
@@ -7899,9 +7910,11 @@ class MainWindow(Adw.ApplicationWindow):
                         "your last message contained a tool call this host "
                         "could NOT parse, so NOTHING ran and the raw text was "
                         "shown to the operator. Do not use your native "
-                        "function-calling tokens, JSON tool blocks, "
-                        "<tool_call>, <invoke> or <function=...>. The ONLY "
-                        "format that works is exactly:\n"
+                        "function-calling tokens, DSML tags, argument child "
+                        "tags such as <parameter name=\"...\">, JSON tool "
+                        "blocks, <tool_call>, <invoke> or <function=...>. "
+                        "Put the arguments in the tag BODY as one JSON "
+                        "object. The ONLY format that works is exactly:\n"
                         '  <tool name="web_read">{"url": "https://example.com"}'
                         "</tool>\n"
                         "one tag, the tool name in a name=\"...\" attribute, "
@@ -7909,10 +7922,16 @@ class MainWindow(Adw.ApplicationWindow):
                         "the call you were trying to make, in that exact form")
                 else:
                     _why = "your reply contained no answer, only a tool call"
+                # The label had two branches for three cases, so an unparsed
+                # tool call was announced as "empty reply" — the log named the
+                # wrong problem at the exact moment you needed the right one.
+                _label = ("dropped tool call" if _locked_drop
+                          else "unreadable tool call — asking for a re-send"
+                          if _bad_call else "empty reply")
                 self.terminal_log(
-                    "── forcing the final answer (" +
-                    ("dropped tool call" if _locked_drop else "empty reply")
-                    + ")", "dim")
+                    ("── asking the model to re-send its tool call"
+                     if _bad_call else "── forcing the final answer")
+                    + f" ({_label})", "dim")
                 try:
                     _fc = self.streaming_chat_id or self.current_chat_id
                     self.store.add_message(
@@ -7943,6 +7962,20 @@ class MainWindow(Adw.ApplicationWindow):
                 except Exception:
                     log(f"force-answer kick failed: {traceback.format_exc()}")
 
+            elif not cancelled and (_locked_drop or _empty_answer or _bad_call):
+                # Re-send budget spent and the turn still produced nothing
+                # runnable.  Previously this settled in silence and handed the
+                # operator an empty bubble with no idea why — say it plainly
+                # instead.  The counter resets on the next fresh turn, so
+                # tapping send genuinely does retry.
+                self._degraded_retries = 0
+                self.terminal_log(
+                    "⚠ the model kept emitting an unreadable tool call — "
+                    "giving up on this turn", "error")
+                self._show_toast(
+                    "The model's tool calls couldn't be read after 2 "
+                    "attempts. Tap send to retry, or switch model in "
+                    "Settings.", timeout=8)
             elif not cancelled and not executable:
                 # A clean, non-degraded settle → reset the degraded retry counter
                 # (but NOT the no-action streak: a plain reply is still a turn
@@ -9399,7 +9432,16 @@ class MainWindow(Adw.ApplicationWindow):
         fn = dispatch.get(call.name)
         if fn:
             self.terminal_log(f"→ tool: {call.name}({json.dumps(call.args, separators=(',',':'))[:80]})", "info")
-            fn(call.args)
+            # The name the log line below should use. Set here because this is
+            # the ONE place that knows it; _tool_simple reads it synchronously
+            # inside fn(). Cleared in finally so a later stray call cannot
+            # inherit a stale name and mislabel itself — an unnamed tool is
+            # honest, a wrongly-named one is not.
+            self._dispatching_tool = call.name
+            try:
+                fn(call.args)
+            finally:
+                self._dispatching_tool = ""
         else:
             self.terminal_log(f"✗ unknown tool: {call.name}", "error")
             self._feed_tool_result(f"Unknown tool '{call.name}'.")
@@ -9979,14 +10021,39 @@ class MainWindow(Adw.ApplicationWindow):
         spec = PROVIDERS_BY_KEY.get(prov)
         return spec.base_url if spec else ""
 
-    def _tool_simple(self, fn):
-        name = fn.__name__ if hasattr(fn, "__name__") else "tool"
+    def _tool_simple(self, fn, name=None):
+        # LABEL, NOT LOGIC — but a log that lies is a debugging tax you pay on
+        # every future bug. `fn.__name__` works only when a bare function is
+        # passed; 150 of the 151 dispatch entries wrap the call in a lambda to
+        # bind its arguments, so every one of them logged `→ running <lambda>…`
+        # and the terminal could not tell you WHICH tool ran. The dispatcher
+        # already knows the name — take it from there rather than reflecting on
+        # a closure. Read synchronously here, in the dispatcher's own call
+        # stack, before any thread starts, so there is no race with the next
+        # tool in the chain.
+        name = (name
+                or getattr(self, "_dispatching_tool", "")
+                or getattr(fn, "__name__", "") or "tool")
+        if name == "<lambda>":
+            name = getattr(self, "_dispatching_tool", "") or "tool"
         def _bg(feed):
             GLib.idle_add(lambda: self.terminal_log(
                 f"→ running {name}…", "info") or False)
             result = fn()
             text = json.dumps(result, indent=2, default=str)
-            GLib.idle_add(lambda: self.terminal_log("✓ done", "ok") or False)
+            # A tool that reported ok:false / error is NOT "✓ done". Printing
+            # a tick over a failure is the same lie the DSML bug told — the
+            # run looks healthy while nothing is actually being learned, so
+            # the first place you look for the cause is the last place that
+            # will show it. Say what happened.
+            _bad = ""
+            if isinstance(result, dict):
+                if result.get("ok") is False or result.get("error"):
+                    _bad = str(result.get("error")
+                               or result.get("reason") or "failed")
+            GLib.idle_add(lambda: self.terminal_log(
+                (f"✗ {name}: {_bad[:120]}" if _bad else "✓ done"),
+                ("error" if _bad else "ok")) or False)
             feed(text)
         self._tool_thread(_bg, name)
 

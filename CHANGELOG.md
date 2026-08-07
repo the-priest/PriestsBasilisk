@@ -1,3 +1,137 @@
+## v9.6.0
+
+### DSML: the model's tool calls were unreadable, and the log said the wrong thing about it
+
+Reported: asked for a Steam recommendation, got `<｜DSML｜｜tool name="run">` and
+`<｜DSML｜｜parameter name="url" …>` printed into the chat, a log alternating
+between "syntax this build doesn't parse" and calls that ran with
+`{"_raw": "<｜DSML｜｜parameter …"}` as their arguments, and no answer.
+
+DeepSeek-V4 emits tool calls in **DSML** — an XML-shaped dialect where every tag
+carries a `<｜DSML｜｜…>` sentinel built from FULLWIDTH VERTICAL LINE (U+FF5C),
+and arguments arrive as **child tags** rather than a JSON body:
+
+    <｜DSML｜｜tool name="run">
+    <｜DSML｜｜parameter name="command" string="true">curl -s …</｜DSML｜｜parameter>
+    </｜DSML｜｜invoke>
+
+v9.1.0 taught the normaliser DeepSeek's *old* token format
+(`<｜tool▁call▁begin｜>` … ```json). This is a different dialect from the same
+vendor, and it broke in **two different ways in the same run** — which is why
+the log reads like two separate bugs:
+
+* **A — sentinel on the opener.** `TOOL_TAG_RE` matches `<tool`; the text starts
+  `<｜DSML…`. Zero calls parsed, so nothing ran *and* nothing was stripped. The
+  markup went to the screen as chat text. That is the pipes and boxes.
+* **B — sentinel only on the children.** The tag matched, the body was not JSON,
+  and the arguments became `{"_raw": …}`. `web_read` then ran **with no url at
+  all** and logged `✓ done`. **This is the dangerous one**: it looks like a
+  working call, so the loop never learns it got nothing and retries the same
+  shape until the budget dies.
+* **C** — good JSON discarded because a stray `</｜DSML｜｜invoke>` trailed it.
+
+Fixed:
+
+* **Sentinel stripped first**, in `_normalise_tool_syntax`, so parse *and* strip
+  see identical text. That agreement is load-bearing: the moment they disagree,
+  a call executes but survives stripping, and the raw markup reaches both the
+  screen and the stored history — which then re-teaches the model that the
+  broken format is acceptable. Tolerant of pipe count and of the slash sitting
+  either side, rather than pinned to the one byte string in the screenshot.
+* **`_params_to_args()`** decodes `<parameter name="x">value</parameter>`
+  children into real arguments. Runs only when parameter tags are present, so a
+  JSON-only body is untouched. `string="true"` is honoured — an appid like
+  `221910` stays text instead of silently becoming an int. The five XML entities
+  are unescaped; semicolon-less legacy forms are not, because
+  `curl 'a&copy=1'` must survive byte-for-byte.
+* **Two JSON salvage passes** — drop orphaned structural tags, then extract the
+  first brace-balanced object. Fixes C.
+* **An undecodable call is dropped, not dispatched.** A call whose only argument
+  is `_raw` containing markup no longer runs blind; it falls through to the
+  re-send path instead. Narrow condition: merely *malformed* JSON still passes
+  through as before, so a half-written `propose_edit` is not newly discarded.
+* Mid-stream DSML and orphaned child tags scrubbed from the display.
+  Character-by-character replay of the reported reply: **258 leaking frames → 0**.
+* The re-send correction now names DSML and `<parameter>` explicitly. Telling a
+  model "that was wrong" without naming the format it used leaves it guessing.
+
+### A 25-second UI freeze, found while hunting the same shape
+
+Fixing the above, the first draft of the parameter decoder used the obvious
+paired regex `<parameter …>(.*?)</parameter>`. That is quadratic when openers
+outnumber closers — 5000 unclosed openers took **2.06 s**, on the UI thread, on
+every streamed frame. Rewritten as a lockstep opener/closer walk: **8.5 ms**.
+
+Then the same shape turned up in code that predates all of this:
+
+    _ALT_PARTIAL_RE = <open …>(?:(?!</close>).)*$
+
+A lookahead per character per starting position, and `re.sub` tries every
+position. On 3000 repeated `<tool_call name="x">` openers followed by ONE
+`</tool_call>`:
+
+    24,972 ms.
+
+`strip_tool_calls` runs on **every streamed frame**, on the GTK main thread, with
+no cancellation. That is a hard freeze multiplied by the frame count — and the
+input is not exotic. **It composes with the DSML bug**: unparsed dialect → model
+retries → model repeats itself (a known failure mode, which is what v9.1.0's
+repeat guard exists for) → what it repeats is a tool-call opener → freeze.
+Milder instances of the same shape: the paired dialect sub (1,475 ms on bare
+openers) and `THINK_RE` (434 ms).
+
+* `_ALT_PARTIAL_RE` / `_ALT_FUNC_PARTIAL_RE` replaced by `_cut_unclosed()`, a
+  two-forward-pass scan. Closers only get scarcer left to right, so the first
+  opener with no closer after it is the first opener past the *last* closer.
+* Cheap closing-tag presence guards on the two paired `.*?` subs and on
+  `THINK_RE` — if the closing tag is absent the sub cannot match anything, so
+  the linear probe buys the whole scan for nothing.
+* **Worst case 24,972 ms → 13 ms.** Differential-tested against the exact regex
+  it replaces: 200,000 random inputs, **0 disagreements**. A faster function
+  that answers differently is not a fix.
+
+### The log was lying in four ways at once
+
+None of these is a crash. All four are why a fifteen-minute bug took an
+afternoon — a log that is wrong is worse than no log, because you believe it.
+
+* **`→ running <lambda>…` on every line.** `_tool_simple` took its label from
+  `fn.__name__`, and **150 of the 151 dispatch entries** wrap the call in a
+  lambda to bind its arguments. The log could not tell you *which tool ran*,
+  which is the first question you ask. The dispatcher already knows the name, so
+  it now publishes it — set immediately before the call and cleared in a
+  `finally`, because a stale name mislabels the *next* tool, which is worse than
+  no name.
+* **`✓ done` after a tool that failed.** The tick was unconditional, so a
+  `web_read` that came back with `ok: false` and no url read exactly like a
+  successful fetch. The same lie the parser bug told, one layer up. Now
+  `✗ <tool>: <reason>` at error level. The result still reaches the model
+  unchanged.
+* **`forcing the final answer (empty reply)` when the real problem was an
+  unreadable tool call.** Two label branches for three cases, so at the exact
+  moment the log had the answer it named the wrong thing.
+* **The status line printed twice in a row.** `_set_working` logs on every call
+  and is called more than once per tool with the same label. Logs on change
+  only; the pill still updates every call.
+
+Also: when the re-send budget is spent, the operator is now told, instead of
+being handed an empty bubble with no explanation.
+
+### Verification
+
+* **29 suites, 1,690 assertions, zero red.** `tests/test_toolsyntax.py` 106 →
+  161; new `tests/test_toollog.py` (28). Both new suites **fail against v9.5.1**
+  — they pin the bugs rather than describing them.
+* The 25-second freeze is pinned as a **number**, not a comment. The tempered
+  form is the obvious way to write that regex and someone will reach for it again.
+* Fuzz: 120,000 mixed-dialect inputs through all five entry points, 0 crashes.
+* Full-tree AST audit clean — zero mutable defaults, bare excepts, `subprocess`
+  without timeout, `sqlite3.connect` without `check_same_thread`, bare
+  `acquire`/`release`, `is` on a literal.
+* `basilisk_persona.py`, `basilisk_safety.py`, `basilisk_scope.py`,
+  `basilisk_ledger.py`, `basilisk_voice.py` sha256-identical to v9.5.1 —
+  GUARDRAIL untouched. `compileall` clean.
+
 ### The OTHER half of the screenshot: extra tool calls were silently dropped (v9.5.1)
 
 The dialect fix explained the pipes on screen. It did not explain why the model
