@@ -67,6 +67,7 @@ this is not a tool you should be pointing at anything.</sub></p>
 <a href="#-memory-learning--self-improvement"><img src="https://img.shields.io/badge/Memory-08090b?style=flat-square&labelColor=7d121b&color=08090b" height="26" alt="Memory"></a>
 <a href="#-security-model"><img src="https://img.shields.io/badge/Security-08090b?style=flat-square&labelColor=7d121b&color=08090b" height="26" alt="Security"></a>
 <a href="#-everything-in-the-box"><img src="https://img.shields.io/badge/Toolbox-08090b?style=flat-square&labelColor=7d121b&color=08090b" height="26" alt="Toolbox"></a>
+<a href="#-what-it-is-not-and-what-it-cant-do"><img src="https://img.shields.io/badge/Limits-08090b?style=flat-square&labelColor=7d121b&color=08090b" height="26" alt="Limits"></a>
 <a href="#-how-you-know-it-works"><img src="https://img.shields.io/badge/Verification-08090b?style=flat-square&labelColor=7d121b&color=08090b" height="26" alt="Verification"></a>
 <a href="#-install"><img src="https://img.shields.io/badge/Install-e11d2b?style=flat-square&labelColor=08090b&color=e11d2b" height="26" alt="Install"></a>
 
@@ -319,6 +320,8 @@ Basilisk runs a **closed loop**, not a payload spray. It reads a target's *behav
 - **Differential & time-based oracles** — proves blind bugs by *measuring*: diffs TRUE vs FALSE responses (length, status, DOM, similarity) for a boolean channel, and analyses latency statistically (mean, stddev, z-score) to confirm time-based blind SQLi/RCE past network jitter.
 - **Verified-exploitation oracle** — before firing, Basilisk *arms* an attempt with the marker that would prove it (a dumped row, another user's token, a status, a measurable difference); after, it *checks* the response and records **confirmed / failed / pending** in a ledger it consults every planning turn. For blind bugs that echo nothing back — blind SSRF/RCE/XXE, OOB SQLi — it stands up a local **out-of-band canary listener**: the payload carries a unique callback URL, and a hit proves the bug with certainty (interactsh technique, running locally and offline).
 
+> **In plain English:** a scanner throws payloads at a page and reports what looked odd. Basilisk decides *what would have to be true* if the bug were real — a specific row appearing, a specific token leaking, a callback arriving at a server only it knows about — then goes and checks whether that happened. It's the difference between "this smells like SQL injection" and "here is a row out of your database."
+
 When an approach stalls, it **researches** — pulls the exact technique from a vetted source and applies it on the next move. It clears easy wins first, then goes deep on hard chains, hashing every command into the evidence ledger as it goes.
 
 **Unleash** is the one-tap form of this: arm it, Basilisk confirms the target, and then it **runs off the leash** — no per-command approval, surviving errors and retrying past them, and it does not stop until the objective is *verifiably* done or you stand it down.
@@ -402,9 +405,21 @@ An agent that reads the outside world *and* runs shell commands is a prompt-inje
 
 - **The injection surface was removed, then gated.** The tools that fetched *attacker-chosen* URLs are gone. What is left, `web_read`, is split into two tiers **in code**: *trusted* sources an attacker cannot plant content in (NVD, MITRE, CISA, vendor and distro advisories, standards bodies, official tool docs, OWASP, PortSwigger, Kali docs) fetch automatically. **Everything else on the public internet — including exploit-db, GitHub, Stack Overflow and PyPI — is user-authored and stays outside the autonomous loop**: Basilisk raises a one-tap approval in the notification bell, and a compromised model cannot reach any of it without your click. Redirects into an approved domain from an unapproved one are refused, and link-local, private and cloud-metadata addresses are refused outright with no approval able to override it.
 - **The irreversible class can never run — enforced twice.** A structural detector hard-blocks disk wipes, recursive root/`$HOME` deletes, fork bombs and raw block-device writes. It normalises `$IFS` and quoting first, then judges the command that will actually *run*, not the word that happens to come first: it peels wrapper commands **and their own options** (`timeout 5 …`, `nice -n 5 …`, `sudo -u root …`), reads through grouping (`( … )`, `{ …; }`, `if/then`, function bodies), recurses into `sh -c`, `eval`, `trap` payloads, here-strings and `xargs`, and enters command substitutions — `$( … )` and backticks — including from inside double quotes. Refused at the UI gate *and* again inside the command-execution primitive, so no caller can route around it. There is no "Run anyway." Zero false positives on legitimate work like `rm -rf ~/loot`, `timeout 60 rm -rf ./dist` or `( rm -rf ./build )` — a floor that fires on ordinary work gets switched off, and then it protects nothing.
+
+  > *Why that's hard:* `rm -rf /` is easy to spot. `timeout 5 rm -rf /` is the same command wearing a hat, and so are `( rm -rf / )`, `$(rm -rf /)`, and `echo x | xargs -I{} rm -rf /`. A blocklist of dangerous words loses this game immediately. Basilisk instead *unwraps* the command until it finds what will really execute, then judges that.
 - **Scope is a boundary, not a suggestion.** Before any active command runs, its targets are extracted and checked against the authorized list. It fails closed: no scope set, an unparseable command, or no match all mean *out of scope, refused*. It sees through `sh -c`, wrapper prefixes like `sudo`/`timeout`/`proxychains`, and command substitution.
 - **Untrusted input is quarantined.** Anything from outside — a target's response, an MCP result, an analyzed image — passes a deterministic content firewall and is wrapped as *data, never instructions*.
-- **Your sudo password never touches the model.** Self-written code runs only in a bubblewrap jail after passing its own test, and Basilisk's own safety source can't be overwritten by a shell command.
+- **Your sudo password never touches the model.** When a command needs root, Basilisk asks *you*, and the password goes to `sudo` through an askpass helper via an environment variable — never into the prompt, never onto disk, never into a log, never into the process argument list where any user on the box could read it with `ps`.
+- **It cannot edit its own safety code.** A shell command that would write to, truncate, redirect into, `sed -i`, or copy over `basilisk_safety.py`, `basilisk_scope.py` or the other core modules is refused — including when the write is hidden inside `sh -c`, an interpreter one-liner, or a `cp`/`mv` destination. The guardrail block in the persona is verified byte-for-byte against a known hash on every release.
+- **It writes and keeps its own tools — under a jail and a test.** New Python tools are AST-parsed, statically screened, and executed against their own test inside a **bubblewrap** sandbox. Kept only if the test passes; a tool that can't prove it works is discarded, not saved with a warning. Every later call runs jailed too.
+- **The provider stays where you put it.** Basilisk never silently hops to a different cloud behind your back. Your selected provider is pinned; a retry after a degraded reply goes back to the *same* provider, so your data never lands somewhere you didn't choose.
+- **It will not build weapons to leave behind.** It writes and runs real exploits against targets you authorize — that's the job — but it will not produce standalone weaponized malware: no reverse shells, implants, ransomware, or backdoors. That line is in the immutable guardrail, not in a swappable prompt.
+- **The web/OSINT readers are deliberately left unwired.** A set of harvesting tools exists in the tree and is *not* connected to the agent loop, on purpose, because wiring them would reopen the indirect-prompt-injection surface the design just closed. That's a capability we chose not to ship.
+
+<br/>
+
+> **In plain English:** the model is treated like a talented contractor with a key to one room. It can do anything inside that room, including things that would wreck the room. It cannot get out of it, cannot change the locks, cannot read your wallet on the way past, and cannot take the tools home.
+
 
 ### We audit our own floor, and we publish what we find
 
@@ -457,6 +472,20 @@ Autonomy is easy to claim and hard to survive. Four specific things kill a long 
 | **Over-thinks a simple problem** | Diagnosis ordered by **likelihood × cost to check**. Name the two or three likeliest causes, test the cheapest decisive one first, stop the moment it's confirmed. Boring causes before exotic ones. Effort escalates on *evidence of difficulty*, not on how many steps have passed |
 
 </details>
+
+<img src="https://capsule-render.vercel.app/api?type=rect&color=0:08090b,100:7d121b&height=3&section=header" width="100%" alt="">
+
+## 🙅 What it is not, and what it can't do
+
+Every tool page lists strengths. Here are the limits, because you'll find them anyway and it's better you hear them from us.
+
+- **It is not a replacement for a penetration tester.** It is an extremely fast, tireless, methodical pair of hands that never skips the boring half of the methodology. Scoping the engagement, judging business impact, deciding what a finding is *worth*, and writing the part of the report a client acts on — all still yours.
+- **It gets weaker as the chain gets longer.** Look at the difficulty curve: it clears one- through three-star challenges nearly outright and thins in the deep end. Bugs that need four unrelated insights stacked in the right order are still where autonomous agents lose. We publish the misses by name rather than rounding them away.
+- **It is only as good as the model you give it.** The scaffolding is what scores — that's the whole thesis — but a weak model still reasons weakly inside it. The benchmarks were run on a cheap model on purpose; they were not run on *every* model.
+- **The benchmark numbers are ours.** They're reproducible — the exact target, flags, model and scoreboard commands are published above so you can re-run them — but they are self-reported, and you should treat them the way you'd treat any vendor's self-reported number until you've regenerated one.
+- **It is Linux and GTK4.** No Windows, no macOS. It runs on a phone (NetHunter Pro), which is a strange flex, but it does not run on your work laptop's default OS.
+- **Network egress is real.** It runs locally, but the model call leaves your machine. If your engagement data can't go to a third-party API, Basilisk is the wrong tool until you point it at something self-hosted.
+- **Autonomy is a loaded gun with a good trigger guard.** The floors are real and tested. They stop it destroying *your* machine. Nothing in the software stops you aiming it at a host you have no right to touch — and it will keep working that host until you pull it off.
 
 <img src="https://capsule-render.vercel.app/api?type=rect&color=0:08090b,100:7d121b&height=3&section=header" width="100%" alt="">
 

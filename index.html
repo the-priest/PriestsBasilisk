@@ -455,6 +455,7 @@
       <a href="#learns">Memory</a>
       <a href="#security">Security</a>
       <a href="#verify">Verification</a>
+      <a href="#limits">Limits</a>
       <a href="#faq">FAQ</a>
       <a class="nav-cta" href="https://github.com/the-priest/PriestsBasilisk">
         <svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
@@ -639,6 +640,7 @@ docker run -d -p 3000:3000 -e NODE_ENV=unsafe \
         <span class="eyebrow">How it works</span>
         <h2>A closed loop, not a payload spray.</h2>
         <p>Basilisk reads a target's behaviour to identify the vulnerability class, reaches for the matching exploit builder, fires it, and confirms the hit against ground truth before moving on. Every attempt and verdict lands in an exploitation oracle — so the loop never re-runs a solved bug and gets sharper about what's left.</p>
+        <p><b>In plain English:</b> a scanner throws payloads at a page and reports what looked odd. Basilisk decides <em>what would have to be true</em> if the bug were real — a specific row appearing, a specific token leaking, a callback arriving at a server only it knows about — then goes and checks whether that actually happened. It is the difference between "this smells like SQL injection" and "here is a row out of your database."</p>
       </div>
       <div class="reveal" style="margin-bottom:clamp(30px,4vw,48px)">
         <img src="assets/brand/architecture.svg" alt="Basilisk architecture pipeline: (1) the model reads the target's behaviour, picks the vulnerability class, and directs the next move; (2) deterministic exploit builders generate the payload; (3) the execution layer fires it through a hard safety gate that blocks destructive commands; (4) a verified-exploitation oracle arms a proof marker, fires, then confirms or discards the result; (5) an evidence ledger stores a hashed receipt and never re-runs a solved bug. The verdict feeds back to the model so nothing counts until it is proven." style="width:100%;height:auto;border:1px solid var(--line);border-radius:var(--r);box-shadow:0 0 40px -22px var(--glow)" loading="lazy">
@@ -761,9 +763,31 @@ docker run -d -p 3000:3000 -e NODE_ENV=unsafe \
         <div class="card">
           <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
           <h3>Your sudo password never touches the model</h3>
-          <p>Self-written code runs only in a bubblewrap jail after passing its own test, and Basilisk's own safety code can't be overwritten by a shell command. It writes real exploits for authorised targets — but it won't produce standalone weaponised malware, and all of it is pinned in the test suite.</p>
+          <p>When a command needs root, Basilisk asks <em>you</em>. The password reaches <span class="inline-code">sudo</span> through an askpass helper — never into the prompt, never onto disk, never into a log, and never into the process argument list where any user on the box could read it with <span class="inline-code">ps</span>.</p>
+        </div>
+        <div class="card">
+          <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M12 3l7 4v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V7l7-4z"/><path d="M12 8v5"/><path d="M12 16h.01"/></svg>
+          <h3>It cannot edit its own safety code</h3>
+          <p>A command that would write to, truncate, redirect into, <span class="inline-code">sed -i</span> or copy over the safety and scope modules is refused — including when the write hides inside <span class="inline-code">sh -c</span>, an interpreter one-liner, or a <span class="inline-code">cp</span> destination. The immutable guardrail block is hash-verified byte-for-byte every release.</p>
+        </div>
+        <div class="card">
+          <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 12l2 2 4-4"/></svg>
+          <h3>Self-written tools run jailed, and only if they pass</h3>
+          <p>When the toolbox falls short, Basilisk writes a new Python tool <b>and a test for it</b>. The code is AST-parsed, statically screened, and run against that test inside a <b>bubblewrap</b> sandbox — and kept only if it passes. A tool that can't prove it works is discarded, not saved with a warning. Every later call runs jailed too.</p>
+        </div>
+        <div class="card">
+          <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg>
+          <h3>Scope is a boundary, not a suggestion</h3>
+          <p>Before any active command runs, its targets are extracted and checked against the list you authorised. It <b>fails closed</b>: no scope set, an unparseable command, or no match all mean refused. It reads through <span class="inline-code">sh -c</span>, wrapper prefixes and command substitution — the same shapes the destructive floor handles.</p>
+        </div>
+        <div class="card">
+          <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
+          <h3>Your provider stays where you put it</h3>
+          <p>Basilisk never quietly hops to a different cloud. The provider you pick is pinned, and a retry after a degraded reply goes back to the <em>same</em> one — so your engagement data never lands somewhere you didn't choose. It won't build standalone weaponised malware either: no reverse shells, implants, ransomware or backdoors. That line lives in the immutable guardrail, not a swappable prompt.</p>
         </div>
       </div>
+
+      <p class="thesis reveal" style="margin-top:1.4rem"><b>In plain English:</b> the model is treated like a talented contractor with a key to one room. It can do anything inside that room, including things that would wreck the room. It cannot get out of it, cannot change the locks, cannot read your wallet on the way past, and cannot take the tools home.</p>
     </div>
   </section>
 
@@ -871,6 +895,44 @@ less install.sh          <span class="c"># read it first</span>
   </section>
 
   <!-- FAQ (human + machine readable) -->
+  <!-- LIMITS -->
+  <section class="block" id="limits">
+    <div class="wrap">
+      <div class="sec-head reveal">
+        <span class="eyebrow">Limits</span>
+        <h2>What it is not, and what it can't do.</h2>
+        <p>Every tool page lists strengths. Here are the limits, because you will find them anyway and it is better you hear them from us.</p>
+      </div>
+      <div class="grid g2 reveal">
+        <div class="card">
+          <h3>It is not a replacement for a pentester</h3>
+          <p>It is an extremely fast, tireless pair of hands that never skips the boring half of the methodology. Scoping the engagement, judging business impact, deciding what a finding is <em>worth</em>, and writing the part of the report a client acts on — still yours.</p>
+        </div>
+        <div class="card">
+          <h3>It gets weaker as the chain gets longer</h3>
+          <p>Look at the difficulty curve above: near-total at one to three stars, thinning in the deep end. Bugs needing four unrelated insights stacked in the right order are still where autonomous agents lose. The misses are published by name rather than rounded away.</p>
+        </div>
+        <div class="card">
+          <h3>It is only as good as the model you give it</h3>
+          <p>The scaffolding is what scores — that is the whole thesis — but a weak model still reasons weakly inside it. The benchmarks were run on a cheap model on purpose. They were not run on <em>every</em> model.</p>
+        </div>
+        <div class="card">
+          <h3>The benchmark numbers are ours</h3>
+          <p>They are reproducible — exact target, flags, model and scoreboard commands are published so you can re-run them — but they are self-reported. Treat them the way you would treat any vendor's self-reported number until you have regenerated one yourself.</p>
+        </div>
+        <div class="card">
+          <h3>Linux and GTK4 only</h3>
+          <p>No Windows, no macOS. It runs on a phone (NetHunter Pro), which is a strange flex, but it does not run on your work laptop's default OS.</p>
+        </div>
+        <div class="card">
+          <h3>The model call still leaves your machine</h3>
+          <p>Everything else is local — your findings, ledger and history sit in SQLite on your disk. But the API call to your chosen provider goes out. If your engagement data cannot touch a third-party API, this is the wrong tool until you point it at something self-hosted.</p>
+        </div>
+      </div>
+      <p class="thesis reveal" style="margin-top:1.4rem"><b>And the one that matters most:</b> the floors are real, tested, and they stop Basilisk destroying <em>your</em> machine. Nothing in the software stops you aiming it at a host you have no right to touch — and it will keep working that host until you pull it off. That part was never a software problem.</p>
+    </div>
+  </section>
+
   <section class="block" id="faq">
     <div class="wrap">
       <div class="sec-head reveal">

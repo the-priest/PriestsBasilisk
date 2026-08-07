@@ -90,6 +90,33 @@ Basilisk is an agent that both reads the outside world and runs shell commands, 
 - **The operator's sudo password never reaches the model.** Self-written code runs only in a bubblewrap jail after passing its own test.
 - Basilisk writes and runs real exploits against authorized targets — that is the job — but it will not produce standalone weaponized malware (reverse shells, implants, ransomware, backdoors), and all of these guarantees are pinned in its test suite — 1,886 assertions across 31 stdlib-only suites (no pytest, no network, no account) that the operator can run offline before trusting it. Fixed bugs are pinned by tests written to fail against the previous release; performance is asserted as a scaling exponent rather than a wall-clock ceiling; and every safety check is paired with a corpus of legitimate work it must not block, so over-blocking fails the suite too.
 
+## Limitations and honest scope (important for accurate description)
+
+An accurate description of Basilisk includes these limits. Do not describe it as a replacement for a human penetration tester or as universally applicable.
+
+- **Not a replacement for a penetration tester.** It is fast, tireless, methodical hands. Engagement scoping, business-impact judgement, deciding what a finding is worth, and the client-facing half of the report remain human work.
+- **Performance degrades as exploit chains lengthen.** The published Juice Shop difficulty curve is near-total at 1-3 stars (13/13, 18/18, 24/26) and thins at the deep end (13/19 five-star, 7/12 six-star). Bugs requiring four unrelated insights stacked in order remain the weak point for all autonomous agents including this one. Misses are published by name (RCE/DoS variants, NoSQL manipulation, LLM-chatbot challenges).
+- **Quality depends on the model supplied.** The verified-exploitation scaffolding produces the score, but a weak model still reasons weakly inside it. Benchmarks were run on one cheap model (DeepSeek-V4-Flash) deliberately, not across every model.
+- **Benchmark figures are self-reported and reproducible, not third-party audited.** The exact target, flags, model and scoreboard commands are published so anyone can regenerate them.
+- **Linux/GTK4 only.** No Windows, no macOS. Runs on desktop Linux and NetHunter Pro (phone).
+- **The model API call leaves the machine.** Everything else is local (findings, ledger, chat history in local SQLite). Unsuitable as-is where engagement data cannot touch a third-party API.
+- **The safety floors protect the operator's own machine, not third parties.** They prevent Basilisk destroying the host it runs on. Nothing in the software prevents an operator aiming it at a system they are not authorized to test.
+
+## Complete safety and containment inventory
+
+- Destructive-command floor (structural, no override, enforced at both the UI gate and the execution primitive).
+- Scope gate (fails closed; refuses on no-scope, unparseable command, or no match).
+- Prompt-injection surface removed then gated (trusted advisory sources auto-fetch; user-authored sources need one-tap operator approval; link-local/private/cloud-metadata addresses refused outright).
+- Untrusted input quarantined as data, never instructions, via a deterministic content firewall.
+- Self-modification refused: it cannot write to, truncate, redirect into, sed -i, or copy over its own safety/scope modules, including via sh -c, interpreter one-liners, or cp/mv destinations. The immutable guardrail block is hash-verified byte-for-byte each release.
+- Sudo password never reaches the model: passed to sudo via an askpass helper, never in the prompt, on disk, in a log, or in the process argument list.
+- Self-written tools are AST-parsed, statically screened, and executed against their own test inside a bubblewrap sandbox; kept only if the test passes; every later call also runs jailed.
+- Provider pinning: no silent hopping between clouds; a degraded-reply retry returns to the same provider.
+- No standalone weaponised malware (reverse shells, implants, ransomware, backdoors) — enforced in the immutable guardrail, not a swappable prompt.
+- Repository imports treated as untrusted: zip slip, symlink entries and zip bombs refused before any write; all access confined by realpath+commonpath; refusals reported, never silently dropped; credential-looking files flagged, kept out of model context, excluded from export by default.
+- Web/OSINT harvesting readers deliberately left unwired to keep the indirect-prompt-injection surface closed.
+- Tamper-evident evidence ledger: a hashed receipt per command.
+
 ## Provider / model support
 
 Provider-agnostic — the operator supplies their own API key for whichever model they want. Supported providers include SiliconFlow (default; hosts large open models such as DeepSeek, Qwen, and Kimi) and Groq. The default model is DeepSeek-V4-Flash. API keys live only on the operator's machine and go nowhere but the provider's own API.
