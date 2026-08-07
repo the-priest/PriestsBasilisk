@@ -472,7 +472,10 @@
       <div>
         <span class="eyebrow">Basilisk · autonomous offensive security · open source · v9.7.0</span>
         <h1>The autonomous AI pentester that <span class="neon-text">proves</span> every exploit.</h1>
-        <p class="sub"><strong>Basilisk is an open-source, autonomous AI penetration-testing agent</strong> — a native Linux desktop app that turns any large language model into a working penetration tester. On the OWASP Juice Shop benchmark it scores <strong>87 of 113, fully autonomous and black-box</strong> — <strong>running on DeepSeek-V4-Flash, one of the cheapest models available</strong> — beating Cascade (36) and a bare Claude Opus 4.8 (23) on the same board, including their white-box runs — and <strong>22 of 22</strong> on Escape's contamination-free Duck Store API benchmark. It runs entirely on your own machine, brings your own model key, and is MIT-licensed. <em>It doesn't guess — it confirms.</em></p>
+        <p class="sub">Basilisk is an <strong>open-source autonomous penetration-testing agent</strong> — a native Linux desktop app that hands a language model a real shell and a real methodology, then gets out of the way.</p>
+        <p class="sub"><strong>87 of 113 on OWASP Juice Shop.</strong> Black-box, fully autonomous, no source on the machine. Cascade scored 36 on that board. A bare Claude Opus 4.8 scored 23 — and Basilisk beat both of their <em>white-box</em> runs from the outside. Then <strong>22 of 22</strong> on Escape's Duck Store API, a target no model has memorised.</p>
+        <p class="sub">It did all of that driving <strong>DeepSeek-V4-Flash</strong>, one of the cheapest models on the market. Read that twice: the scaffolding scores, not the price tag.</p>
+        <p class="sub">Your machine. Your key. Your data. MIT-licensed, no account, nothing phoning home. <em>It doesn't guess. It confirms.</em></p>
         <div class="cta-row">
           <a class="btn btn-primary" href="https://github.com/the-priest/PriestsBasilisk">
             <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
@@ -480,7 +483,7 @@
           </a>
           <a class="btn btn-ghost" href="#benchmarks">See the numbers</a>
         </div>
-        <p class="thesis"><b>Why it beats bare models:</b> most autonomous "AI pentesters" ask the model whether a bug worked and record its answer, so findings drift and scores collapse on unseen targets. Basilisk <b>arms every exploit with the marker that would prove it</b> — a dumped row, another user's token, an out-of-band callback — fires, then checks against ground truth <b>before it counts</b>. No proof, no finding.</p>
+        <p class="thesis"><b>Why it beats bare models.</b> Most autonomous "AI pentesters" ask the model whether the bug worked and write down the answer. That is a confidence score wearing a lab coat, and it is why their findings drift and their numbers fall apart on targets the model has never seen. Basilisk arms every exploit with the thing that would <em>prove</em> it — a dumped row, another user's token, an out-of-band callback — fires, and checks for that marker before anything is recorded. <b>No proof, no finding.</b> That one rule is the whole difference.</p>
       </div>
       <div class="hero-art reveal">
         <span class="halo" aria-hidden="true"></span>
@@ -514,8 +517,7 @@
     <div class="wrap">
       <div style="border:1px solid var(--crimson);border-left:4px solid var(--crimson);border-radius:12px;background:linear-gradient(180deg,rgba(200,16,46,.10),rgba(200,16,46,.03));padding:1.3rem 1.5rem">
         <div style="font-family:'Chakra Petch',sans-serif;font-weight:700;letter-spacing:.03em;color:var(--bone);font-size:1.02rem;margin-bottom:.5rem">⚠ Authorized targets only — this is a live weapon, not a demo</div>
-        <p style="margin:0;color:var(--steel);font-size:.93rem;line-height:1.65">Basilisk executes real exploits and real shell commands against whatever you point it at, on its own, with your user's privileges. In <b style="color:var(--bone)">Unleash</b> mode it confirms the target and then runs with no per-step approval and does not stop until the objective is met — aimed at the wrong host it will keep attacking it until you pull it off. Run it only against systems you own or have <b style="color:var(--bone)">explicit written authorization</b> to test; unauthorized testing is a crime in most jurisdictions. The irreversible-command class — disk wipes, recursive root deletes, fork bombs, raw block-device writes — is hard-blocked in two independent places and has no "run anyway"; everything else it will do if you tell it to. Point it carefully.</p>
-      </div>
+        <p style="margin:0;color:var(--steel);font-size:.93rem;line-height:1.65">Basilisk executes real exploits and real shell commands against whatever you point it at, on its own, with your user's privileges. In <b style="color:var(--bone)">Unleash</b> mode it confirms the target, then runs with no per-step approval and does not stop until the objective is met.<br><br>Aimed at the wrong host, it will keep working that host until you pull it off. Run it only against systems you own or have <b style="color:var(--bone)">explicit written authorization</b> to test — unauthorized testing is a crime in most jurisdictions.<br><br>The irreversible-command class — disk wipes, recursive root deletes, fork bombs, raw block-device writes — is hard-blocked in two independent places, below the model, with no "run anyway". That floor protects your machine. Nothing in the tool protects you from pointing it at someone else's. </div>
     </div>
   </section>
 
@@ -525,13 +527,15 @@
       <div class="sec-head reveal">
         <span class="eyebrow">What it is</span>
         <h2>A GTK4 desktop app that gives a language model hands.</h2>
-        <p>Point it at an authorized target and it runs the engagement end to end — recon, exploitation across every web-vulnerability class, verification, and a reproducible write-up — turn after turn, on its own, until the objective is confirmed or you press Stop. One tap of <b style="color:var(--bone)">Unleash</b> and it confirms the target out loud, then drives the whole engagement off the leash — no per-step approval, no stopping until the mission is verifiably done. It also does the reverse job: hand it a zip of your own repository and it edits the tree, runs <b style="color:var(--bone)">your</b> tests, and hands back a fixed zip. Same loop both times &mdash; do the thing, then prove it worked. It audits code across ten scanners, hardens a host, and drives your shell and desktop.</p>
+        <p>Point it at a target you're authorized to test and it runs the engagement end to end: recon, exploitation across every web-vulnerability class, verification, write-up. Turn after turn, on its own, until the objective is confirmed or you press Stop.</p>
+        <p>One tap of <b style="color:var(--bone)">Unleash</b> and it says the target out loud, then works it off the leash — no per-step approval, no babysitting, no stopping until the mission is verifiably done. Errors don't end the run. It reads them and keeps going.</p>
+        <p>Then it does the job in reverse. Hand it a zip of your own repository and it edits the tree, runs <b style="color:var(--bone)">your</b> tests, and hands back a zip that passes them. Same loop both times: do the thing, then prove it worked. It also audits code across ten scanners, hardens a host, and drives your shell and desktop.</p>
       </div>
       <div class="truths reveal">
-        <div class="truth"><b>Local by default</b><span>Plain Python plus one shell script. No Docker, no daemon, no account, nothing phoning home.</span></div>
-        <div class="truth"><b>Black-box</b><span>No target source required. It reads behaviour, not code — the way an attacker actually would.</span></div>
-        <div class="truth"><b>A receipt for everything</b><span>Every command it runs is hashed into a tamper-evident evidence ledger as it goes.</span></div>
-        <div class="truth"><b>A floor it can't cross</b><span>The irreversible command class is blocked in two places. There is no "Run anyway."</span></div>
+        <div class="truth"><b>Local by default</b><span>Plain Python and one shell script. No Docker, no daemon, no account, nothing phoning home.</span></div>
+        <div class="truth"><b>Black-box</b><span>No target source needed. It reads behaviour, not code — the way an attacker actually has to.</span></div>
+        <div class="truth"><b>A receipt for everything</b><span>Every command it runs is hashed into a tamper-evident ledger as it goes. Findings you can hand to a client.</span></div>
+        <div class="truth"><b>A floor it can't cross</b><span>The irreversible command class is blocked in two places, below the model. There is no "Run anyway."</span></div>
         <div class="truth"><b>Verified, not asserted</b><span>1,886 stdlib-only assertions across 31 suites. Run them yourself before you trust it with a shell.</span></div>
       </div>
     </div>
@@ -543,7 +547,7 @@
       <div class="sec-head reveal">
         <span class="eyebrow">Benchmarks</span>
         <h2>The claim is only worth the number you can regenerate.</h2>
-        <p>Basilisk is scored against <b style="color:var(--bone)">OWASP Juice Shop</b>, which marks a challenge solved only when the exploit genuinely fires — no partial credit, no checklist to recall, graded by difficulty from one to six stars. It's the comparable benchmark the security community already uses.</p>
+        <p>Scored against <b style="color:var(--bone)">OWASP Juice Shop</b>, which marks a challenge solved only when the exploit actually fires. No partial credit. No checklist to recall. Graded one to six stars by difficulty — and it's the board the security community already argues over, which is exactly why it's the one worth posting.</p>
       </div>
 
       <div class="reveal">
@@ -563,7 +567,7 @@
           <div class="diff-row"><span class="stars">★★★★★</span><div class="bar"><i data-pct="68"></i></div><span class="val"><b>13</b>/19 · 68%</span></div>
           <div class="diff-row peak"><span class="stars">★★★★★★</span><div class="bar"><i data-pct="58"></i></div><span class="val"><b>7</b>/12 · 58%</span></div>
         </div>
-        <p class="note">The curve is the honest part: it now clears the entire lower half — <b>every one- and two-star, and 24 of 26 three-star</b> — then thins as the chains get deeper, the shape a real tool should have. It still takes <b>7 of 12 six-star</b> challenges (SSRF, SSTi, Forged Coupon, Forged Signed JWT, Login Support Team, Premium Paywall, Arbitrary File Write) and <b>13 of 19 five-star</b>. Misses cluster where one builder isn't enough and the chain runs long — RCE/DoS variants, NoSQL manipulation, and the LLM-chatbot challenges.</p>
+        <p class="note">The curve is the honest part. It clears the entire lower half outright — <b>every one- and two-star, and 24 of 26 three-star</b> — then thins as the chains get deeper. That is the shape a real tool has; a suspiciously flat one usually means the model recognised the target rather than exploited it.<br><br>At the deep end it still takes <b>13 of 19 five-star</b> and <b>7 of 12 six-star</b>, including SSRF, SSTi, Forged Signed JWT and Arbitrary File Write. The misses cluster in one honest place: where a single builder isn't enough and the chain runs long — RCE/DoS variants, NoSQL manipulation, and the LLM-chatbot challenges. Those are the next target, and they're listed here rather than rounded away.</p>
 
         <div class="cmp">
           <table>
@@ -679,7 +683,7 @@ docker run -d -p 3000:3000 -e NODE_ENV=unsafe \
       <div class="sec-head reveal">
         <span class="eyebrow">Repo repair</span>
         <h2>The same discipline, pointed at your own code.</h2>
-        <p>Hand Basilisk a <span class="inline-code">.zip</span> of your repository and it works the whole tree — searches it, reads it, edits it, runs <b style="color:var(--bone)">your</b> tests, and hands back a fixed zip. It is the same loop as the engagement: do the thing, then prove it worked. No passing test, no fix.</p>
+        <p>Hand Basilisk a <span class="inline-code">.zip</span> of your repository and it works the whole tree: searches it, reads it, edits it, runs <b style="color:var(--bone)">your</b> tests, hands back a zip that passes them. Same loop as the engagement, pointed the other way. No passing test, no fix — and it will not touch your tests to get one.</p>
       </div>
       <div class="grid g2 reveal">
         <div class="card">
@@ -736,7 +740,7 @@ docker run -d -p 3000:3000 -e NODE_ENV=unsafe \
       <div class="sec-head reveal">
         <span class="eyebrow">Security model</span>
         <h2>Remove the doors rather than bolt on a filter.</h2>
-        <p>An agent that reads the outside world <em>and</em> runs shell commands is a prompt-injection target. Basilisk is built so a compromised model still can't do the things that matter.</p>
+        <p>An agent that reads the outside world <em>and</em> runs shell commands is a prompt-injection target by construction. So the design assumption is that the model is already compromised — and the things that matter are put where a compromised model cannot reach them. Not filtered. Removed.</p>
       </div>
       <div class="grid g2 reveal">
         <div class="card">
@@ -769,7 +773,7 @@ docker run -d -p 3000:3000 -e NODE_ENV=unsafe \
       <div class="sec-head reveal">
         <span class="eyebrow">Verification</span>
         <h2>Claims are cheap. Run the suite.</h2>
-        <p>Everything on this page is either a number you can regenerate or a test you can run. The suite is stdlib-only — no pytest, no network, no fixtures, no account — and it finishes in under a minute on a laptop.</p>
+        <p>Every claim on this page is either a number you can regenerate or a test you can run. The suite is stdlib-only — no pytest, no network, no fixtures, no account, nothing to install — and it finishes in under a minute on a laptop. You do not have to believe any of this. You can check it.</p>
       </div>
 
       <div class="code reveal">
@@ -803,7 +807,7 @@ docker run -d -p 3000:3000 -e NODE_ENV=unsafe \
       <div class="sec-head reveal" style="margin-top:clamp(52px,7vw,84px)">
         <span class="eyebrow">Self-audit</span>
         <h2>We fuzz our own safety floor, and publish what it finds.</h2>
-        <p>The hard block on irreversible commands is the one piece of Basilisk that has to be right, because under Unleash nobody is on the trigger. So it gets attacked on purpose, every release.</p>
+        <p>The hard block on irreversible commands is the one piece of Basilisk that has to be right, because under Unleash nobody is on the trigger. So we attack it on purpose, every release, and publish whatever it gives up.</p>
       </div>
 
       <div class="grid g2 reveal">
@@ -827,7 +831,7 @@ docker run -d -p 3000:3000 -e NODE_ENV=unsafe \
       <div class="sec-head reveal">
         <span class="eyebrow">Bring your own model</span>
         <h2>You supply the brain. Keys stay on your disk.</h2>
-        <p>Multi-provider — you only need a key for the one you want, set in <span class="inline-code">Settings → Backends</span>. Keys live only in <span class="inline-code">~/.config/basilisk/settings.json</span>, locked to your user; they go nowhere but the provider's own API.</p>
+        <p>Bring one key for whichever provider you want, set in <span class="inline-code">Settings → Backends</span>. It lives in <span class="inline-code">~/.config/basilisk/settings.json</span>, locked to your user, and goes nowhere except that provider's own API. There is no Basilisk account to make, because there is no Basilisk server to make it on.</p>
       </div>
       <div class="prov reveal">
         <div class="card">
@@ -845,7 +849,7 @@ docker run -d -p 3000:3000 -e NODE_ENV=unsafe \
       <div class="sec-head reveal" style="margin-top:clamp(52px,7vw,84px)">
         <span class="eyebrow">Install</span>
         <h2>Read the installer. Then run it.</h2>
-        <p>Basilisk runs shell commands as you — so it ships as plain Python plus one shell script you can read start to finish. The installer auto-detects your distro, parse-checks every file before it touches disk, and backs up your chat history. The same command updates in place.</p>
+        <p>Basilisk runs shell commands as you. So it ships as plain Python and one shell script you can read start to finish before you run it — which you should, and which is the point of it being one file. The installer detects your distro, parse-checks every file before it touches disk, and backs up your chat history. The same command updates in place.</p>
       </div>
       <div class="code reveal">
         <div class="code-bar"><span>one line</span><button class="copy" data-copy="curl -fsSL https://raw.githubusercontent.com/the-priest/PriestsBasilisk/main/install.sh | bash">Copy</button></div>

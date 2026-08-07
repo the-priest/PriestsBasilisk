@@ -12,14 +12,18 @@
 
 ### An autonomous offensive-security agent. It lives on your machine, it answers to you, and it does not ask twice.
 
-<p><b><em>You bring the model. Basilisk gives it hands, a memory, and a leash you hold.</em></b></p>
+<p><b><em>You bring the model. Basilisk gives it hands, a memory, a methodology — and a leash you hold.</em></b></p>
 
 <p align="center"><b>⚠ This is professional offensive-security tooling. ⚠</b><br/>
 <sub>It is built for people who already run engagements, already have authorisation in writing,<br/>
 and already know what they are legally and ethically responsible for. If that is not you,<br/>
 this is not a tool you should be pointing at anything.</sub></p>
 
-<p>Point it at a target and <b>walk away</b>. It maps the attack surface, forms a hypothesis, builds the exploit, fires it, and <b>proves the hit against ground truth</b> before it counts — then keeps a hashed, tamper-evident receipt of every single command it ran. When it's done breaking things, it turns the same forensic discipline on your own codebase and hands you back a repo whose tests actually pass.</p>
+<p>Point it at a target and <b>walk away</b>.</p>
+
+<p>It maps the attack surface, forms a hypothesis, builds the exploit, fires it, and <b>proves the hit against ground truth</b> before it counts — keeping a hashed, tamper-evident receipt of every command it ran along the way. Errors don't end the run; it reads them and keeps working.</p>
+
+<p>Then it turns the same forensic discipline on your own codebase and hands you back a repo whose tests actually pass.</p>
 
 <p>No account. No telemetry. No cloud sandbox. It runs as a native GTK4 desktop app on your own Linux box, with your privileges, and the <b>only</b> thing that ever leaves the machine is the API call to the model <em>you</em> chose.</p>
 
@@ -32,7 +36,7 @@ this is not a tool you should be pointing at anything.</sub></p>
 </tr>
 </table>
 
-<p><em>Read that last column again. Basilisk beat frontier-model agents that were <b>handed the source code</b> — while driving one of the cheapest models on the market. The scaffolding scores. Not the price tag.</em></p>
+<p><em>Read that last column again. Basilisk beat frontier-model agents that were <b>handed the source code</b> — from the outside, on one of the cheapest models money can buy.<br/><b>The scaffolding scores. Not the price tag.</b></em></p>
 
 <br/>
 
@@ -69,7 +73,11 @@ this is not a tool you should be pointing at anything.</sub></p>
 </div>
 
 > [!CAUTION]
-> **Authorized targets only. This is a live weapon, not a demo.** Basilisk runs real exploits and real shell commands against whatever you point it at, autonomously, with your privileges. Arm **Unleash** and it confirms the target, then runs with no per-command approval, surviving errors and retrying past them, until the objective is *verifiably* met or you stand it down. Aimed at the wrong host, it will keep working that host until you pull it off. Use it only on systems you own or have **explicit written authorization** to test. Unauthorized testing is a crime in most jurisdictions.
+> **Authorized targets only. This is a live weapon, not a demo.**
+>
+> Basilisk runs real exploits and real shell commands against whatever you point it at, autonomously, with your privileges. Arm **Unleash** and it confirms the target, then runs with no per-command approval — surviving errors, retrying past them — until the objective is *verifiably* met or you stand it down.
+>
+> Aimed at the wrong host, it will keep working that host until you pull it off. Use it only on systems you own or have **explicit written authorization** to test. Unauthorized testing is a crime in most jurisdictions.
 >
 > Two things it will never do, and neither is a prompt you can talk around. The **irreversible class** — disk wipes, `mkfs`, recursive root deletes, fork bombs, raw block-device writes — is refused inside the execution primitive itself, so no caller can route around it and there is no "run anyway". And **anything outside your declared scope** is refused before it leaves the box. Everything else, it will do if you tell it to.
 
@@ -80,7 +88,7 @@ this is not a tool you should be pointing at anything.</sub></p>
 
 ## ⚔️ Dangerous on purpose. Safe by construction.
 
-Most "AI security tools" are demos with a kill switch. Basilisk is a loaded weapon with a trigger guard — and the difference is worth being precise about, because it's the whole design.
+Most "AI security tools" are demos with a kill switch. Basilisk is a loaded weapon with a trigger guard. The difference is worth being precise about, because it is the entire design — so here is the honest ledger, both columns.
 
 <table>
 <tr><th align="left">It will</th><th align="left">It cannot</th></tr>
@@ -103,9 +111,13 @@ Most "AI security tools" are demos with a kill switch. Basilisk is a loaded weap
 </td></tr>
 </table>
 
-**Neither list is a prompt.** Both are enforced in code, below the model, where nothing the model says or a target injects can reach. A prompt is a request; these are walls. That's what makes it safe to hand something this capable a real shell on a real machine.
+**Neither list is a prompt.** Both are enforced in code, below the model, where nothing the model says and nothing a target injects can reach them. A prompt is a request. These are walls. That is the only reason it is sane to hand something this capable a real shell on a real machine.
 
-> **The honest version:** aimed at a system you own, Basilisk is one of the most capable things you can point at it. Aimed at something you don't own, it is evidence in a criminal case with your name and a full hashed timeline of every command attached. The ledger that makes it a professional tool is the same ledger that makes it a confession. **The tool cannot tell the difference. You can, and that is the entire contract.**
+> **The honest version:** aimed at a system you own, Basilisk is one of the most capable things you can point at it.
+>
+> Aimed at something you don't own, it is evidence — your name, and a full hashed timeline of every command you ran. The ledger that makes it a professional tool is the same ledger that makes it a confession.
+>
+> **The tool cannot tell the difference. You can, and that is the entire contract.**
 
 ### Who this is for, plainly
 
@@ -113,7 +125,9 @@ Most "AI security tools" are demos with a kill switch. Basilisk is a loaded weap
 
 **It is not for:** anyone looking for a way into something that isn't theirs. Not because of a filter — there isn't one that would stop you — but because the thing you'd be reaching for is a tool that logs everything you do, runs with your privileges, and is designed by someone who expects you to be able to produce a signed authorisation on request.
 
-**On privacy:** we take it seriously and it is not a courtesy. No account, no telemetry, no analytics, no phone-home, no cloud sandbox holding your engagement data. Your findings, your ledger and your chat history live in a SQLite file on your disk and go nowhere. The single exception is the API call to the model provider you chose — which is exactly why the model picker tells you, at the point of choosing, which free tiers train on what you send them.
+**On privacy:** not a courtesy, a design constraint. No account, no telemetry, no analytics, no phone-home, no cloud sandbox holding your engagement data. Your findings, your ledger and your chat history live in a SQLite file on your disk and go nowhere.
+
+There is exactly one exception: the API call to the model provider you chose. Which is why the model picker tells you, at the moment you pick, which free tiers train on what you send them.
 
 **And the part people skip:** privacy protects the operator, not the target. Being untraceable is not the same as being permitted. Get the authorisation, keep it, and stay inside it.
 
@@ -123,13 +137,17 @@ Most "AI security tools" are demos with a kill switch. Basilisk is a loaded weap
 
 Two jobs, one loop, and the loop is the same both times: **do the thing, then prove it worked.**
 
-**It breaks in.** Pointed at an authorized target, Basilisk reads the app's *behaviour* to identify the vuln class, reaches for a matching exploit builder, fires, and confirms the hit against ground truth before anything counts. 87 of 113 on OWASP Juice Shop, black-box and fully autonomous — beating every other agent on that board, including their white-box runs, on a budget model. It does not spray payloads and hope; it forms a hypothesis, arms the proof, and collects.
+**It breaks in.** Pointed at an authorized target, it reads the app's *behaviour* to name the vuln class, reaches for a matching exploit builder, fires, and confirms the hit against ground truth before anything counts. 87 of 113 on OWASP Juice Shop — black-box, fully autonomous, on a budget model, beating every other agent on that board including their white-box runs. It does not spray payloads and hope. It forms a hypothesis, arms the proof, and collects.
 
 **It fixes code.** Hand it a `.zip` of your repo and it works the whole thing: searches, reads, edits, runs *your* tests, hands back a fixed zip. It records what was already failing before it touched anything, and it will not export a change set it hasn't verified.
 
-**It only arms when you arm it.** The offensive suite — recon planning, scanner parsing, the exploit builders, the success oracle, scope and asset tracking — loads *only* when Unleash is on. Disarmed, it is a research and repair tool and the attack tooling is not merely hidden from it, it is refused at the loader. One switch decides both what it can do and what it thinks it is for.
+**It only arms when you arm it.** The offensive suite — recon planning, scanner parsing, the exploit builders, the success oracle, scope and asset tracking — loads *only* under Unleash. Disarmed, Basilisk is a research and repair tool, and the attack tooling isn't hidden from it, it is **refused at the loader**. One switch decides both what it can do and what it thinks it is for.
 
-The common thread is that Basilisk never asks a model whether something worked. Most "AI pentesters" do exactly that and take the answer on faith, which is why their findings drift and their scores collapse on targets the model hasn't memorized. Basilisk **arms every attempt with the marker that would confirm it** — a dumped database row, another user's token, a measurable timing difference, an out-of-band callback — fires, then checks for that marker before anything counts as a solve. No proof, no finding. Same discipline on the code side: no passing test, no fix.
+One rule runs underneath both jobs: **Basilisk never asks a model whether something worked.**
+
+Most "AI pentesters" do exactly that. They fire, ask the model how it went, and write down the answer — a confidence score wearing a lab coat. It is why their findings drift, and why their numbers fall apart the moment the target isn't one the model has read a walkthrough of.
+
+Basilisk arms every attempt with the thing that would *prove* it: a dumped database row, another user's token, a measurable timing difference, an out-of-band callback. Then it fires. Then it looks for that marker. **No proof, no finding** — and on the code side, no passing test, no fix.
 
 <img src="https://capsule-render.vercel.app/api?type=rect&color=0:08090b,100:7d121b&height=3&section=header" width="100%" alt="">
 
@@ -380,7 +398,7 @@ Basilisk isn't a stateless prompt. Three mechanisms let it remember, learn and g
 
 ## 🛡️ Security model
 
-An agent that reads the outside world *and* runs shell commands is a prompt-injection target. Basilisk removes the doors rather than bolting on a filter.
+An agent that reads the outside world *and* runs shell commands is a prompt-injection target by construction. So the design assumes the model is **already compromised**, and puts the things that matter where a compromised model cannot reach them. Not filtered. Removed.
 
 - **The injection surface was removed, then gated.** The tools that fetched *attacker-chosen* URLs are gone. What is left, `web_read`, is split into two tiers **in code**: *trusted* sources an attacker cannot plant content in (NVD, MITRE, CISA, vendor and distro advisories, standards bodies, official tool docs, OWASP, PortSwigger, Kali docs) fetch automatically. **Everything else on the public internet — including exploit-db, GitHub, Stack Overflow and PyPI — is user-authored and stays outside the autonomous loop**: Basilisk raises a one-tap approval in the notification bell, and a compromised model cannot reach any of it without your click. Redirects into an approved domain from an unapproved one are refused, and link-local, private and cloud-metadata addresses are refused outright with no approval able to override it.
 - **The irreversible class can never run — enforced twice.** A structural detector hard-blocks disk wipes, recursive root/`$HOME` deletes, fork bombs and raw block-device writes. It normalises `$IFS` and quoting first, then judges the command that will actually *run*, not the word that happens to come first: it peels wrapper commands **and their own options** (`timeout 5 …`, `nice -n 5 …`, `sudo -u root …`), reads through grouping (`( … )`, `{ …; }`, `if/then`, function bodies), recurses into `sh -c`, `eval`, `trap` payloads, here-strings and `xargs`, and enters command substitutions — `$( … )` and backticks — including from inside double quotes. Refused at the UI gate *and* again inside the command-execution primitive, so no caller can route around it. There is no "Run anyway." Zero false positives on legitimate work like `rm -rf ~/loot`, `timeout 60 rm -rf ./dist` or `( rm -rf ./build )` — a floor that fires on ordinary work gets switched off, and then it protects nothing.
@@ -390,7 +408,7 @@ An agent that reads the outside world *and* runs shell commands is a prompt-inje
 
 ### We audit our own floor, and we publish what we find
 
-The paragraph above is only worth the work behind it, so here is the work.
+A security claim is worth exactly the work behind it, so here is the work.
 
 In v9.7.0 the destructive gate was **fuzzed against a real shell** — every candidate bypass re-run in live `bash` with the destructive verb swapped for a harmless marker, counting only the shapes where the shell actually did the thing. **Twenty-one shapes that had been getting through were found and closed**, including `timeout 5 rm -rf /`, `( rm -rf ~ )`, `$(rm -rf /)` and `echo x | xargs -I{} mkfs.ext4 /dev/sda1`.
 
@@ -444,13 +462,13 @@ Autonomy is easy to claim and hard to survive. Four specific things kill a long 
 
 ## 🔬 How you know it works
 
-Claims are cheap. Everything on this page is either a number you can regenerate or a test you can run, and the test suite is deliberately boring to execute:
+Claims are cheap. Every claim on this page is either a number you can regenerate or a test you can run — and the suite is deliberately boring to execute:
 
 ```bash
 for f in tests/test_*.py; do python3 "$f" || echo "RED $f"; done
 ```
 
-Stdlib only. No pytest, no network, no fixtures to install, no account. **31 suites, 1,886 assertions**, and it runs in under a minute on a laptop.
+Stdlib only. No pytest, no network, no fixtures, no account, nothing to install. **31 suites, 1,886 assertions**, done in under a minute on a laptop. You don't have to believe any of this — you can check it.
 
 What that suite is actually for — because "we have tests" means nothing on its own:
 
