@@ -63,6 +63,7 @@ this is not a tool you should be pointing at anything.</sub></p>
 <a href="#-memory-learning--self-improvement"><img src="https://img.shields.io/badge/Memory-08090b?style=flat-square&labelColor=7d121b&color=08090b" height="26" alt="Memory"></a>
 <a href="#-security-model"><img src="https://img.shields.io/badge/Security-08090b?style=flat-square&labelColor=7d121b&color=08090b" height="26" alt="Security"></a>
 <a href="#-everything-in-the-box"><img src="https://img.shields.io/badge/Toolbox-08090b?style=flat-square&labelColor=7d121b&color=08090b" height="26" alt="Toolbox"></a>
+<a href="#-how-you-know-it-works"><img src="https://img.shields.io/badge/Verification-08090b?style=flat-square&labelColor=7d121b&color=08090b" height="26" alt="Verification"></a>
 <a href="#-install"><img src="https://img.shields.io/badge/Install-e11d2b?style=flat-square&labelColor=08090b&color=e11d2b" height="26" alt="Install"></a>
 
 </div>
@@ -93,7 +94,7 @@ Most "AI security tools" are demos with a kill switch. Basilisk is a loaded weap
 
 </td><td>
 
-- Touch the **irreversible class** — disk wipes, `mkfs`, recursive root deletes, fork bombs, raw block-device writes. Refused inside the execution primitive. No override exists. Not for you, not for it
+- Touch the **irreversible class** — disk wipes, `mkfs`, recursive root deletes, fork bombs, raw block-device writes. Wrappers don't help it: `timeout`, `nice`, `xargs`, subshells, `trap`, `$( )` and backticks are all read through. Refused inside the execution primitive. No override exists. Not for you, not for it
 - Step **outside your declared scope** — fails closed, sees through `sh -c`, `sudo`, `proxychains` and command substitution
 - Reach an **unapproved domain**, or any internal / private / cloud-metadata address
 - See your **sudo password**
@@ -382,10 +383,27 @@ Basilisk isn't a stateless prompt. Three mechanisms let it remember, learn and g
 An agent that reads the outside world *and* runs shell commands is a prompt-injection target. Basilisk removes the doors rather than bolting on a filter.
 
 - **The injection surface was removed, then gated.** The tools that fetched *attacker-chosen* URLs are gone. What is left, `web_read`, is split into two tiers **in code**: *trusted* sources an attacker cannot plant content in (NVD, MITRE, CISA, vendor and distro advisories, standards bodies, official tool docs, OWASP, PortSwigger, Kali docs) fetch automatically. **Everything else on the public internet — including exploit-db, GitHub, Stack Overflow and PyPI — is user-authored and stays outside the autonomous loop**: Basilisk raises a one-tap approval in the notification bell, and a compromised model cannot reach any of it without your click. Redirects into an approved domain from an unapproved one are refused, and link-local, private and cloud-metadata addresses are refused outright with no approval able to override it.
-- **The irreversible class can never run — enforced twice.** A structural detector hard-blocks disk wipes, recursive root/`$HOME` deletes, fork bombs and raw block-device writes, seeing through quoting, `$IFS` and `bash -c` tricks that a regex misses. It's refused at the UI gate *and* again inside the command-execution primitive, so no caller can route around it. There is no "Run anyway." Verified against real bypass forms, with zero false positives on legitimate work like `rm -rf ~/loot`.
+- **The irreversible class can never run — enforced twice.** A structural detector hard-blocks disk wipes, recursive root/`$HOME` deletes, fork bombs and raw block-device writes. It normalises `$IFS` and quoting first, then judges the command that will actually *run*, not the word that happens to come first: it peels wrapper commands **and their own options** (`timeout 5 …`, `nice -n 5 …`, `sudo -u root …`), reads through grouping (`( … )`, `{ …; }`, `if/then`, function bodies), recurses into `sh -c`, `eval`, `trap` payloads, here-strings and `xargs`, and enters command substitutions — `$( … )` and backticks — including from inside double quotes. Refused at the UI gate *and* again inside the command-execution primitive, so no caller can route around it. There is no "Run anyway." Zero false positives on legitimate work like `rm -rf ~/loot`, `timeout 60 rm -rf ./dist` or `( rm -rf ./build )` — a floor that fires on ordinary work gets switched off, and then it protects nothing.
 - **Scope is a boundary, not a suggestion.** Before any active command runs, its targets are extracted and checked against the authorized list. It fails closed: no scope set, an unparseable command, or no match all mean *out of scope, refused*. It sees through `sh -c`, wrapper prefixes like `sudo`/`timeout`/`proxychains`, and command substitution.
 - **Untrusted input is quarantined.** Anything from outside — a target's response, an MCP result, an analyzed image — passes a deterministic content firewall and is wrapped as *data, never instructions*.
 - **Your sudo password never touches the model.** Self-written code runs only in a bubblewrap jail after passing its own test, and Basilisk's own safety source can't be overwritten by a shell command.
+
+### We audit our own floor, and we publish what we find
+
+The paragraph above is only worth the work behind it, so here is the work.
+
+In v9.7.0 the destructive gate was **fuzzed against a real shell** — every candidate bypass re-run in live `bash` with the destructive verb swapped for a harmless marker, counting only the shapes where the shell actually did the thing. **Twenty-one shapes that had been getting through were found and closed**, including `timeout 5 rm -rf /`, `( rm -rf ~ )`, `$(rm -rf /)` and `echo x | xargs -I{} mkfs.ext4 /dev/sda1`.
+
+That method mattered more than the fixes. A blind fuzz reported 18,856 "bypasses" — almost all of them shell **syntax errors** that never execute and never mattered. Filtering to what a real shell actually runs is what made the twenty-one findable at all.
+
+Two things are worth stating plainly:
+
+- **They were real.** Not theoretical, not "hard to reach". `timeout 5 rm -rf /` isn't an attack — it's something a model writes by accident, and under Unleash nobody is on the trigger.
+- **They are now pinned, not just patched.** `tests/test_safety_gate.py` asserts all twenty-one, *and* asserts the counter-property against a corpus of ordinary pentest and dev commands, so a future "improvement" that over-blocks fails just as loudly as one that under-blocks.
+
+The scope gate was audited the same way and did **not** share the hole — it fails closed on every one of those shapes with a stated reason, because it reasons about the whole command string rather than trusting the first word.
+
+If you find a twenty-second shape, open an issue. That is the arrangement.
 
 All of it is pinned in the test suite — **1,886 assertions across 31 suites**, stdlib-only, runnable before you trust it with anything. Basilisk writes and runs real exploits against authorized targets, because that's the job. It will not produce standalone weaponized malware (reverse shells, implants, ransomware, backdoors), and the destructive class can never run through it at all.
 
@@ -421,6 +439,27 @@ Autonomy is easy to claim and hard to survive. Four specific things kill a long 
 | **Over-thinks a simple problem** | Diagnosis ordered by **likelihood × cost to check**. Name the two or three likeliest causes, test the cheapest decisive one first, stop the moment it's confirmed. Boring causes before exotic ones. Effort escalates on *evidence of difficulty*, not on how many steps have passed |
 
 </details>
+
+<img src="https://capsule-render.vercel.app/api?type=rect&color=0:08090b,100:7d121b&height=3&section=header" width="100%" alt="">
+
+## 🔬 How you know it works
+
+Claims are cheap. Everything on this page is either a number you can regenerate or a test you can run, and the test suite is deliberately boring to execute:
+
+```bash
+for f in tests/test_*.py; do python3 "$f" || echo "RED $f"; done
+```
+
+Stdlib only. No pytest, no network, no fixtures to install, no account. **31 suites, 1,886 assertions**, and it runs in under a minute on a laptop.
+
+What that suite is actually for — because "we have tests" means nothing on its own:
+
+- **Bugs are pinned, not described.** When a real bug is fixed, the test that catches it is written to **fail against the previous release**. `test_safety_gate.py` fails on v9.6.0 for all twenty-one gate bypasses; `test_streamperf.py` fails on it for the UI freeze. A regression can't quietly return.
+- **Performance is asserted as a *shape*, not a stopwatch.** A millisecond ceiling passes by luck on a fast machine. So the suite also asserts the **scaling exponent** — quadruple the input, the time must not quadruple — which fails on a slow box and a fast one alike.
+- **Counter-properties are tested as hard as properties.** Every safety check is paired with a corpus of ordinary work it must stay silent on. Over-blocking is a test failure, because a safety feature people turn off protects nothing.
+- **The shipped artifact is what's verified.** The release zip is extracted fresh and the full suite run from inside it — not from the working tree it was built in.
+
+The parts that carry the most risk are locked down hardest: the immutable guardrail block is hash-checked on every release, and the safety, scope and ledger modules are diffed byte-for-byte so a change to any of them is deliberate and visible.
 
 <img src="https://capsule-render.vercel.app/api?type=rect&color=0:08090b,100:7d121b&height=3&section=header" width="100%" alt="">
 

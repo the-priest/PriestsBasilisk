@@ -103,6 +103,14 @@ doesn't read as a hang, and a no-op after widget disposal. 2000 tokens across
 The no-markup fast path in `strip_tool_calls` is byte-identical to the old
 behaviour over 60,000 corpus inputs.
 
+### Site, README and llms.txt
+
+The front page was six releases stale (`softwareVersion` still read 7.6.0) and — the bigger miss — **repo-repair mode did not appear on the visible site at all**, despite being half the product since v7.10.0. That is the same gap the README had at v9.0.0, in the other document. It now has its own section covering the baseline, failure-set tracking, the export gate, and archive containment.
+
+Also added, to all three documents: a **Verification** section (run the suite yourself; what the suite is actually for), and an honest write-up of the v9.7.0 self-audit — including that the twenty-one bypasses were real rather than theoretical, and an open invitation to report a twenty-second.
+
+Left deliberately unchanged: the `v7.6.0` labels on the benchmark rows. Those record which build produced each score, and the benchmark has not been re-run on 9.7.0.
+
 ### Tests
 
 New `tests/test_safety_gate.py` (155 assertions) and `tests/test_streamperf.py`
