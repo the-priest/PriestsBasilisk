@@ -330,7 +330,12 @@ def compress_messages(
             note = (f"\n[headroom: {len(body)}→{len(comp)} chars via {engine}]")
             return f"<tool_result>\n{comp}{note}\n</tool_result>"
 
-        new_content = _TOOL_RE.sub(_sub, content)
+        # `(.*?)` scans to end-of-string from every opener before failing, so
+        # an unclosed <tool_result> makes this quadratic — 718ms on a
+        # transcript of repeated openers.  The pattern cannot match without a
+        # closing tag, so the probe is exact and skips exactly the bad case.
+        new_content = (_TOOL_RE.sub(_sub, content)
+                       if "</tool_result>" in content else content)
         nm = dict(m)
         nm["content"] = new_content
         out.append(nm)

@@ -2134,6 +2134,13 @@ def command_needs_sudo(command: str) -> bool:
     """True if the command contains a real `sudo` invocation."""
     if not command:
         return False
+    # `(?:\w+=\S*\s+)*` is a nested quantifier, so this is quadratic on input
+    # that never matches: 116ms on a 2000-char command, and it runs on every
+    # command.  The pattern cannot match without the literal "sudo", so the
+    # presence check is exact rather than a heuristic, and it short-circuits
+    # every command that isn't a sudo invocation — which is nearly all of them.
+    if "sudo" not in command:
+        return False
     return bool(_SUDO_RE.search(command))
 
 
@@ -7138,7 +7145,7 @@ TOOL_TAG_RE = re.compile(
     # as raw text.  name="..."/json=... are still pulled out of this blob by
     # the dedicated regexes below, so a stray word changes nothing else.
     r'((?:\s+(?:[a-zA-Z_]+\s*=\s*(?:"[^"]*"|\'[^\']*\'|[\u201c\u201d][^\u201c\u201d]*[\u201c\u201d])'
-    r'|[^\s=>"\']+))*)'  # attrs (key="value" pairs and/or bare words)
+    r'|[^\s=>"\'<]+))*)'  # attrs (key="value" pairs and/or bare words)
     r'\s*(?:/\s*>|>(.*?)(?:<\\?\s*/\s*tool\s*>|$))',
     re.DOTALL | re.IGNORECASE)
 
@@ -7150,9 +7157,19 @@ _JSON_ATTR_RE = re.compile(
     r'\bjson\s*=\s*(?:"((?:[^"\\]|\\.)*)"|\'((?:[^\'\\]|\\.)*)\')',
     re.DOTALL)
 
-# Also strip stray <tool> openings that never closed (mid-stream artefacts)
+# Also strip stray <tool> openings that never closed (mid-stream artefacts).
+#
+# THE ATTRIBUTE RUN IS BOUNDED ON PURPOSE.  With an unbounded `[^>]*` the engine
+# scans to end-of-string from every `<tool` position before failing, which is
+# quadratic — measured 479ms on 4000 repeated `<tool ` openers, on the GTK main
+# thread, in a function that runs on every streamed frame.  That is the same
+# class of bug as the 25s `_ALT_PARTIAL_RE` freeze fixed in v9.6.0, in the
+# neighbouring regex.  An opener's ATTRIBUTES are short (the long part of a tool
+# call is the body, which comes after the `>`), so a 4000-char ceiling cannot
+# refuse anything a model actually emits — pinned by a differential test against
+# the unbounded form in tests/test_streamperf.py.
 TOOL_PARTIAL_RE = re.compile(
-    r'<tool(?:\s[^>]*)?>\s*\{?[^<]*$',
+    r'<tool(?:\s[^>]{0,4000})?>\s*\{?[^<]*$',
     re.DOTALL | re.IGNORECASE)
 
 
@@ -7869,10 +7886,24 @@ def strip_tool_calls(text: str) -> str:
     taught it the broken format was acceptable. Parse and strip must see exactly
     the same text or one of them is always wrong.
     """
-    text = _normalise_tool_syntax(text or "")
+    text = text or ""
+    # Nothing below can change a string with no '<' and no fullwidth pipe:
+    # _normalise_tool_syntax returns early without '<', every tag regex needs a
+    # '<', and the DeepSeek/DSML passes need _DS_PIPE.  So the only remaining
+    # effect is the .strip().  This is an exactness claim, not a heuristic —
+    # tests/test_streamperf.py asserts byte-identical output against the
+    # unguarded path over a corpus.  It matters because this runs once per
+    # streamed FRAME over the whole buffer so far, so a scan that finds nothing
+    # is paid thousands of times per reply.
+    if "<" not in text and _DS_PIPE not in text:
+        return text.strip()
+    text = _normalise_tool_syntax(text)
     out = TOOL_TAG_RE.sub("", text)
     # Also remove dangling unclosed <tool ...> ... fragments mid-stream
-    out = TOOL_PARTIAL_RE.sub("", out)
+    # The pattern cannot match without a '>' anywhere — skipping is exact, and
+    # the no-'>' input is exactly the repeated-opener shape that costs most.
+    if ">" in out:
+        out = TOOL_PARTIAL_RE.sub("", out)
     # …and the same for a native-token call that is still arriving. Without
     # this the operator watches the raw special tokens type themselves out.
     if _DS_PIPE in out:
@@ -7901,7 +7932,7 @@ def strip_tool_calls(text: str) -> str:
     # <tool …>…</tool> block and any leftover bare <tool …> opener from the
     # DISPLAY string.  This only affects what's rendered, never what executed.
     if re.search(r'<\s*\\?\s*/?\s*tool\b', out, re.IGNORECASE):
-        out = re.sub(r'<tool\b[^>]*>.*?<\\?\s*/\s*tool\s*>', '', out,
+        out = re.sub(r'<tool\b[^>]{0,4000}>.*?<\\?\s*/\s*tool\s*>', '', out,
                      flags=re.DOTALL | re.IGNORECASE)
         # any leftover opener or orphaned closer remnant
         out = re.sub(r'<\\?\s*/?\s*tool\b[^>]*>?', '', out, flags=re.IGNORECASE)

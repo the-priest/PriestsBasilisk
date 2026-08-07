@@ -1,3 +1,124 @@
+## v9.7.0
+
+### The destructive floor let 21 command shapes through — verified against a real shell
+
+`is_catastrophic_command` is the no-override backstop at the execution
+primitive. Under UNLEASH nobody is on the trigger, so it is the only thing
+between a model's mistake and a wiped disk. It let these run:
+
+    $(rm -rf /)              ( rm -rf ~ )            timeout 5 rm -rf /
+    `rm -rf /`               { rm -rf $HOME; }       nice -n 5 rm -rf /
+    echo "$(rm -rf /)"       if true; then rm -rf /; fi    ionice -c3 rm -rf ~
+    bash -c '$(rm -rf /)'    f(){ rm -rf /; }; f     stdbuf -o0 rm -rf /
+    trap 'rm -rf /' EXIT     sh <<< 'rm -rf /'       sudo -u root rm -rf /
+    echo x | xargs -I{} rm -rf /                     sudo timeout 10 rm -rf /
+    echo x | xargs -I{} mkfs.ext4 /dev/sda1          timeout 5 nice -n 3 rm -rf /
+
+**Method note, because it decided the result.** A blind fuzz of 40,000
+mutations reported 18,856 "leaks". Almost all were shell syntax errors —
+`r"m -rf /`, `RM -RF /`, `sh -c 'rm\t-rf\t/'` — that never execute and never
+mattered. Every shape was then re-run against a live bash with the destructive
+verb replaced by `touch MARKER`, and kept only if bash created the marker.
+Twenty-one survived that filter. Counting the other 18,835 would have buried
+them.
+
+Three root causes, none of them "the blocklist was too short":
+
+1. **The peel loop was arity-blind.** It skipped a wrapper *word* but not that
+   wrapper's own *options*. `nohup rm -rf /` was caught because nohup takes no
+   flags; `nice -n 5 rm -rf /` peeled `nice`, landed on `-n`, stopped, and
+   judged a command called `-n`. `sudo -u root rm -rf /` had been broken the
+   same way the whole time. This is why the fix is an arity table
+   (`_PREFIX_RUNNERS`, which knows what each wrapper's own options and leading
+   positionals look like) and not a longer word list — adding `timeout` to the
+   old set would still have left `timeout 5 rm -rf /` open. A wrapper's
+   positional is only eaten when it *looks* like one, so `timeout rm -rf /`
+   does not silently swallow the `rm`.
+
+2. **No grouping awareness.** `_split_subcommands` knew `; && || | &` and
+   nothing about `( )`, `{ }`, `if/then`, or function bodies, so argv[0] came
+   back as `(`, `{` or `then`. `(`, `)` and backticks are now separators — a
+   subshell boundary *is* a command boundary — and `_strip_struct` drops
+   leading structure tokens.
+
+3. **Command substitutions were never entered.** `sh -c` and `eval` recursed;
+   `$( )` and backticks did not. `_substitution_payloads` now lifts them,
+   including from inside double quotes where the splitter cannot reach.
+   An unterminated opener is a bash syntax error and never runs, but its tail
+   is still scanned at top level rather than silently dropped — that exact
+   shape was a real fail-open in `basilisk_scope` at v7.9.4.
+
+Also closed: `trap '…' EXIT`, `sh <<< '…'`, and `xargs`, which now recurses on
+whatever it runs instead of special-casing `rm` (that is what kept
+`xargs -I{} mkfs.ext4 /dev/sda1` open). The deferral is preserved:
+`find / | xargs rm -rf` has no literal operand, so the recursion finds nothing
+and the pipe-chain rule still owns it.
+
+**The counter-property was checked as hard as the property.** A floor that
+fires on `rm -rf ./build` gets switched off, and then it protects nothing.
+Differential over a 70-command corpus of ordinary pentest and dev work:
+**0 new false positives, 0 regressions.** Cost on a realistic command:
+75µs → 81µs.
+
+The scope gate did **not** share this hole — it marks every grouping form
+`uncertain` with a stated reason and fails closed, because it scans for targets
+across the whole string instead of trusting argv[0]. `command_tampers_self`
+also held. Same input class, one gate structural, the other positional.
+
+### Four quadratic regexes on the streaming path, one of them a 3.5-second freeze
+
+`strip_tool_calls` runs on every streamed frame, over the whole buffer so far,
+on the GTK main thread. v9.6.0 fixed `_ALT_PARTIAL_RE` (25s) and shipped four
+more of the same shape in the neighbouring code.
+
+| shape | v9.6.0 | v9.7.0 |
+|---|---|---|
+| model repeats `<tool ` opener ×4000, one pass | 3558 ms | **18 ms** |
+| `_SELF_WRITE_RE`, 176KB command | 101 s | **1.3 s** |
+| large `write_file`, total CPU across the stream | 38.7 s | **13.0 s** |
+| `clean_for_speech`, 4000 openers | 728 ms | **0.6 ms** |
+
+- `TOOL_TAG_RE`'s bare-word attribute alternative did not exclude `<`, so one
+  opener's attribute blob swallowed every following opener and then backtracked
+  through the lot looking for a `>`. Quoted attributes may still contain `<`;
+  only the bare-word form excludes it.
+- `TOOL_PARTIAL_RE` and the final display scrub had unbounded `[^>]*` runs.
+  Bounded at 4000 — an opener's *attributes* are short, the long part is the
+  body, which comes after the `>`.
+- `_SELF_WRITE_RE` had unbounded lazy gaps. Bounded at 1024, and the bounded
+  form agrees with the unbounded one on **6,528 constructed commands, 0
+  disagreements**, diverging only past a 1024-char gap.
+- `command_needs_sudo`, `headroom._TOOL_RE` and `clean_for_speech` got exact
+  presence guards (the patterns cannot match without `sudo` / `</tool_result>`
+  / `</tool` respectively, so skipping is exactness, not a heuristic).
+
+**And the one that no regex fix would have solved:** the render recomputed the
+strip over the *entire* buffer once per token, which is O(n²) in reply length
+however fast the regexes are. That is now coalesced to a 50ms floor — ~20
+full passes per second regardless of token rate, with a trailing-edge flush so
+the tail of a reply still lands, an immediate first paint so a slow opening
+doesn't read as a hang, and a no-op after widget disposal. 2000 tokens across
+2s of stream now cost 40 full strips instead of 2000.
+
+The no-markup fast path in `strip_tool_calls` is byte-identical to the old
+behaviour over 60,000 corpus inputs.
+
+### Tests
+
+New `tests/test_safety_gate.py` (155 assertions) and `tests/test_streamperf.py`
+(42). Both **fail against v9.6.0** — the gate suite on all 21 shapes, the perf
+suite on latency *and* on the scaling exponent (`4x input costs 16.0x time`),
+which is the assertion that does not pass by luck on a fast machine.
+
+31 suites, 1,886 assertions, zero red. `basilisk_persona.py` sha256-identical
+to v9.6.0 (`1f755d478a32ee41`), GUARDRAIL slice unchanged; `basilisk_scope.py`
+and `basilisk_ledger.py` also byte-identical. compileall and `bash -n
+install.sh` clean. No new module, so `install.sh` is unchanged.
+
+**Known, pre-existing, not introduced here:** `tests/test_unblock.py` has
+wall-clock assertions that can flake when the whole suite runs under load; 12/12
+clean in isolation on both v9.6.0 and v9.7.0.
+
 ## v9.6.0
 
 ### DSML: the model's tool calls were unreadable, and the log said the wrong thing about it

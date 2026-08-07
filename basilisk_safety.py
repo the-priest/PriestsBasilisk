@@ -95,10 +95,24 @@ def _normalize(command: str) -> str:
 
 def _split_subcommands(command: str) -> List[str]:
     """Split a command line into sub-commands on the shell operators that
-    sequence them: ; && || | & and newlines.  Quotes/escapes are respected so
-    an operator *inside* a quoted string doesn't split.  Best-effort: on a
+    sequence them: ; && || | & newlines — and on the delimiters that OPEN a new
+    command context: ( ) and backticks.  Quotes/escapes are respected so an
+    operator *inside* a quoted string doesn't split.  Best-effort: on a
     tokenising failure we return the whole line as one piece (the caller still
-    runs its regex fallback)."""
+    runs its regex fallback).
+
+    Why ( ) and ` are separators and not ordinary characters.  Before v9.7.0
+    they weren't, and the consequence was a verified fail-open: `( rm -rf / )`
+    shlex-tokenised to ['(', 'rm', '-rf', '/', ')'], so argv[0] was '(' and the
+    rm branch never ran.  Same for `$(rm -rf /)` and ``rm -rf /``.  Every one of
+    those executes for real — checked against bash, not assumed.  A subshell or
+    an unquoted command substitution IS a command boundary, so treating it as
+    one is the structurally correct read, and it makes the three shapes fall
+    out of the existing per-sub classifier with no new pattern matching.
+
+    Substitutions inside DOUBLE quotes still run but must not be split here
+    (the quote is load-bearing for the rest of the line) — those are lifted
+    separately by _substitution_payloads and rescanned."""
     parts: List[str] = []
     buf: List[str] = []
     i, n = 0, len(command)
@@ -119,11 +133,230 @@ def _split_subcommands(command: str) -> List[str]:
         # two-char operators
         if command[i:i + 2] in ("&&", "||"):
             parts.append("".join(buf)); buf = []; i += 2; continue
-        if c in (";", "|", "&", "\n"):
+        if c in (";", "|", "&", "\n", "(", ")", "`"):
             parts.append("".join(buf)); buf = []; i += 1; continue
         buf.append(c); i += 1
     parts.append("".join(buf))
     return [p.strip() for p in parts if p.strip()]
+
+
+def _substitution_payloads(command: str,
+                           include_unterminated: bool = True) -> List[str]:
+    """Lift the bodies of command substitutions — $( … ) and ` … ` — that the
+    subcommand splitter can't reach because they sit inside DOUBLE quotes.
+
+    `echo "$(rm -rf /)"` runs the rm.  The splitter respects double quotes (it
+    has to — the quote governs the rest of the line), so without this the
+    payload is never classified.  Single-quoted text is skipped: there the
+    characters are literal and nothing executes.
+
+    An UNTERMINATED substitution is a bash syntax error and never executes, so
+    it is not an escape — but the same shape was a genuine fail-open in
+    basilisk_scope (v7.9.4, where the scanner swallowed the rest of the line and
+    then dropped it).  So the tail after an unterminated opener is returned as a
+    payload too: scanning text that will never run costs nothing, while
+    dropping text that might is exactly the accident this gate exists to avoid.
+    """
+    out: List[str] = []
+    i, n = 0, len(command)
+    sq = False
+    while i < n:
+        c = command[i]
+        if c == "\\" and not sq and i + 1 < n:
+            i += 2
+            continue
+        if c == "'":
+            sq = not sq
+            i += 1
+            continue
+        if sq:
+            i += 1
+            continue
+        if c == "$" and i + 1 < n and command[i + 1] == "(":
+            j, depth, inner_q = i + 2, 1, None
+            while j < n and depth:
+                ch = command[j]
+                if ch == "\\" and inner_q != "'" and j + 1 < n:
+                    j += 2
+                    continue
+                if inner_q:
+                    if ch == inner_q:
+                        inner_q = None
+                elif ch in ("'", '"'):
+                    inner_q = ch
+                elif ch == "(":
+                    depth += 1
+                elif ch == ")":
+                    depth -= 1
+                j += 1
+            if depth:                      # unterminated — scan the tail anyway
+                if include_unterminated:
+                    out.append(command[i + 2:])
+                break
+            out.append(command[i + 2:j - 1])
+            i = j
+            continue
+        if c == "`":
+            j = command.find("`", i + 1)
+            if j < 0:
+                if include_unterminated:
+                    out.append(command[i + 1:])
+                break
+            out.append(command[i + 1:j])
+            i = j + 1
+            continue
+        i += 1
+    return [p for p in (s.strip() for s in out) if p]
+
+
+# Tokens that are shell STRUCTURE, not a command.  When one of these leads a
+# sub-command the real command is behind it: `{ rm -rf /; }` splits to
+# ['{', 'rm', ...] and `if true; then rm -rf /; fi` to ['then', 'rm', ...].
+# Judging argv[0] without stripping these read the command name as '{' / 'then'
+# and let both shapes through (verified executing in bash).
+_STRUCT_TOKENS = {
+    "{", "}", "!", "if", "then", "else", "elif", "fi",
+    "while", "until", "do", "done", "for", "select",
+    "case", "esac", "in", "function", ";;",
+}
+# `f(){` — a function header that survived tokenising as one word.
+_FUNCDEF_RE = re.compile(r"^[A-Za-z_]\w*\(\)\s*\{?$")
+
+
+def _strip_struct(args: List[str]) -> List[str]:
+    """Drop leading shell-structure tokens so argv[0] is the real command."""
+    i = 0
+    while i < len(args) and (args[i] in _STRUCT_TOKENS
+                             or _FUNCDEF_RE.match(args[i])):
+        i += 1
+    return args[i:]
+
+
+# ── Prefix runners ───────────────────────────────────────────────────────────
+# Commands whose job is to run ANOTHER command given in their arguments.  The
+# real command has to be judged, not the wrapper.
+#
+# The pre-v9.7.0 peeler had the right idea and the wrong shape: it skipped the
+# wrapper WORD but not the wrapper's OWN OPTIONS.  So `nohup rm -rf /` was
+# caught (nohup takes no options) while `nice -n 5 rm -rf /` was not — the loop
+# peeled `nice`, landed on `-n`, saw a token that wasn't another wrapper and
+# stopped, leaving cmd = '-n'.  `sudo -u root rm -rf /` failed the same way.
+# That is why the fix is an arity table rather than a longer word list: adding
+# `timeout` to the old set would still have left `timeout 5 rm -rf /` open.
+#
+# value: (options that consume the FOLLOWING token, regex for leading
+#         positional arguments that belong to the wrapper itself)
+_DURATION_RE = re.compile(r"^\d+(?:\.\d+)?[smhd]?$")
+_CPUMASK_RE = re.compile(r"^(?:0x)?[0-9a-fA-F]+(?:[,-][0-9a-fA-F]+)*$")
+
+_PREFIX_RUNNERS = {
+    "sudo":         ({"-u", "-g", "-p", "-C", "-U", "-r", "-t", "-h",
+                      "--user", "--group", "--prompt", "--close-from",
+                      "--other-user", "--role", "--type", "--host"}, None),
+    "doas":         ({"-u", "-C"}, None),
+    "nice":         ({"-n", "--adjustment"}, None),
+    "ionice":       ({"-c", "-n", "-p", "-P", "-u",
+                      "--class", "--classdata", "--pid"}, None),
+    "stdbuf":       ({"-i", "-o", "-e", "--input", "--output", "--error"}, None),
+    "timeout":      ({"-s", "-k", "--signal", "--kill-after"}, _DURATION_RE),
+    "taskset":      ({"-p", "-c", "--pid", "--cpu-list"}, _CPUMASK_RE),
+    "chrt":         ({"-p", "--pid"}, _DURATION_RE),
+    "nohup":        (set(), None),
+    "setsid":       (set(), None),
+    "time":         ({"-o", "-f", "--output", "--format"}, None),
+    "command":      (set(), None),
+    "builtin":      (set(), None),
+    "exec":         ({"-a"}, None),
+    "env":          ({"-u", "--unset", "-C", "--chdir"}, None),
+    "proxychains":  ({"-f"}, None),
+    "proxychains4": ({"-f"}, None),
+    "torsocks":     (set(), None),
+    "torify":       (set(), None),
+    "unbuffer":     (set(), None),
+    "watch":        ({"-n", "-d", "--interval"}, None),
+    "ssh-agent":    (set(), None),
+    "dbus-run-session": (set(), None),
+}
+
+
+def _peel_prefix(args: List[str]) -> List[str]:
+    """Peel wrapper commands (and their own options) until argv[0] is the
+    command that will actually run.  Also peels `VAR=value` assignments.
+
+    Returns [] when nothing is left — a bare `sudo` with no command is not a
+    catastrophe, and the caller treats an empty argv as harmless."""
+    guard = 0
+    while args and guard < 12:
+        guard += 1
+        # leading environment assignments: FOO=bar rm -rf /
+        j = 0
+        while j < len(args) and "=" in args[j] and not args[j].startswith("-") \
+                and _ASSIGN_RE.match(args[j]):
+            j += 1
+        if j:
+            args = args[j:]
+            continue
+        base = _base(args[0])
+        if base not in _PREFIX_RUNNERS:
+            break
+        valopts, posre = _PREFIX_RUNNERS[base]
+        i = 1
+        while i < len(args) and args[i].startswith("-") and args[i] != "-":
+            tok = args[i]
+            if tok == "--":
+                i += 1
+                break
+            if tok in valopts:
+                i += 2                      # -n 5
+            elif "=" in tok:
+                i += 1                      # --signal=KILL
+            elif len(tok) > 2 and tok[:2] in valopts:
+                i += 1                      # -o0, -c3, -n5 (glued value)
+            else:
+                i += 1                      # ordinary flag
+        # env's VAR=val operands
+        if base == "env":
+            while i < len(args) and _ASSIGN_RE.match(args[i]):
+                i += 1
+        # a positional that belongs to the wrapper (timeout's DURATION,
+        # taskset's MASK).  Only skipped when it LOOKS like one — `timeout rm`
+        # must not silently eat the rm.
+        if posre is not None and i < len(args) and posre.match(args[i]):
+            i += 1
+        if i >= len(args):
+            return []
+        args = args[i:]
+    return args
+
+
+_ASSIGN_RE = re.compile(r"^[A-Za-z_]\w*=")
+
+# xargs options that consume the following token.  Kept out of
+# _PREFIX_RUNNERS on purpose: _pipe_chain_is_catastrophic identifies the xargs
+# stage by argv[0], so peeling xargs globally would hide it from the
+# `find <dangerous> | xargs rm -r` rule.
+_XARGS_VALOPTS = {"-I", "-i", "-n", "-P", "-s", "-L", "-l", "-d", "-E", "-a",
+                  "--replace", "--max-args", "--max-procs", "--max-chars",
+                  "--max-lines", "--delimiter", "--eof", "--arg-file"}
+
+
+def _strip_xargs_opts(rest: List[str]) -> List[str]:
+    """Return the argv xargs would execute, with xargs' own options removed."""
+    i = 0
+    while i < len(rest) and rest[i].startswith("-") and rest[i] != "-":
+        tok = rest[i]
+        if tok == "--":
+            i += 1
+            break
+        if tok in _XARGS_VALOPTS:
+            i += 2
+        elif "=" in tok:
+            i += 1
+        elif len(tok) > 2 and tok[:2] in _XARGS_VALOPTS:
+            i += 1                          # -I{}, -n1
+        else:
+            i += 1
+    return rest[i:]
 
 
 def _argv(sub: str) -> Optional[List[str]]:
@@ -380,26 +613,13 @@ def _interpreter_payload_tampers_self(cmd: str, rest: List[str],
 def _sub_is_catastrophic(args: List[str], depth: int) -> bool:
     if not args:
         return False
+
+    # Shell structure first (`{`, `then`, `f(){` …), then wrapper commands and
+    # their own options, so `cmd` below is what actually runs.
+    args = _peel_prefix(_strip_struct(args))
+    if not args:
+        return False
     cmd = _base(args[0])
-
-    # `sudo`/`doas`/`env VAR=x`/`nice`/`nohup`/`time`/`ionice` … prefixes:
-    # peel them and re-judge the real command underneath.
-    PEELS = {"sudo", "doas", "nice", "nohup", "time", "ionice", "stdbuf",
-             "setsid", "command", "builtin", "exec"}
-    idx = 0
-    while idx < len(args) and (_base(args[idx]) in PEELS or "=" in args[idx]
-                               or (_base(args[idx]) == "env" and idx == 0)):
-        # for `env`, also skip its VAR=val operands
-        idx += 1
-        if idx < len(args) and _base(args[max(idx - 1, 0)]) == "env":
-            while idx < len(args) and "=" in args[idx]:
-                idx += 1
-    if idx:
-        if idx >= len(args):
-            return False
-        args = args[idx:]
-        cmd = _base(args[0])
-
     rest = args[1:]
 
     # recurse into `sh -c "<payload>"` / `bash -c …`
@@ -407,16 +627,34 @@ def _sub_is_catastrophic(args: List[str], depth: int) -> bool:
         payload = _payload_after(args, "-c")
         if payload and depth < 4:
             return _scan(payload, depth + 1)
+        # `sh <<< 'rm -rf /'` — a here-string is a -c payload wearing a
+        # different hat.  shlex hands us '<<<' as its own token.
+        here = _payload_after(args, "<<<")
+        if here and depth < 4:
+            return _scan(here, depth + 1)
 
     # `eval <payload>` / `eval "<payload>"`
     if cmd == "eval" and rest and depth < 4:
         return _scan(" ".join(rest), depth + 1)
 
-    # `xargs rm -r* …`  (the dangerous source is judged at the pipe level)
-    if cmd == "xargs":
-        sub = [a for a in rest if not a.startswith("-")]
-        if sub and _base(sub[0]) == "rm" and _has_recursive_flag(rest):
-            return False  # handled by _pipe_chain_is_catastrophic
+    # `trap 'rm -rf /' EXIT` — the payload runs later, but it runs.
+    if cmd == "trap" and rest and depth < 4:
+        if _scan(rest[0], depth + 1):
+            return True
+
+    # `xargs [opts] <command> …` — xargs is a prefix runner like the others,
+    # so judge what it RUNS.  The old branch only understood `xargs rm -r*` and
+    # then deferred unconditionally to the pipe classifier, which left
+    # `echo x | xargs -I{} rm -rf /` (and the dd/mkfs equivalents) wide open.
+    #
+    # Recursing is also what keeps the deferral honest: `find / | xargs rm -rf`
+    # has NO literal operand, so the recursion finds no dangerous target and
+    # returns False — exactly as before, and the pipe-chain rule still owns it.
+    # Only a target xargs supplies ITSELF gets judged here.
+    if cmd == "xargs" and depth < 4:
+        inner = _strip_xargs_opts(rest)
+        if inner and _sub_is_catastrophic(inner, depth + 1):
+            return True
 
     # recursive rm onto root/home/system/everything-glob
     if cmd == "rm" and _has_recursive_flag(rest):
@@ -495,7 +733,10 @@ def _pipe_chain_is_catastrophic(command: str) -> bool:
       • anything | sh                     (opaque pipe into a shell)
     """
     subs = _split_subcommands(command)
-    argvs = [(_argv(s) or []) for s in subs]
+    # Peel structure and wrapper commands here as well, or `cd / && nice -n 5
+    # rm -rf *` reads as argv[0] == 'nice' and the cd-then-wildcard rule below
+    # never sees the rm.
+    argvs = [_peel_prefix(_strip_struct(_argv(s) or [])) for s in subs]
 
     # cd into a dangerous dir, then a wildcard/dot recursive rm later in chain
     cwd_dangerous = False
@@ -568,6 +809,19 @@ def _scan(command: str, depth: int = 0) -> bool:
             continue
         if _sub_is_catastrophic(args, depth):
             return True
+
+    # Command substitutions that survived inside double quotes — the splitter
+    # can't reach those, and `echo "$(rm -rf /)"` still deletes everything.
+    if depth < 4 and ("$(" in norm or "`" in norm):
+        # The unterminated tail is only pursued at the TOP level.  It is a
+        # bash syntax error and never executes, so one belt-and-braces pass is
+        # enough — recursing on it re-lifted a slightly shorter suffix at every
+        # level and multiplied the cost of a pathological input by the depth
+        # limit for no additional coverage.
+        for payload in _substitution_payloads(norm,
+                                              include_unterminated=(depth == 0)):
+            if _scan(payload, depth + 1):
+                return True
     return False
 
 
@@ -614,15 +868,27 @@ _PROT_NAMES = {"basilisk_persona.py", "basilisk_core.py", "basilisk_voice.py",
 # Verbs where the protected name appearing ANYWHERE means a write/destroy of
 # it: a redirect, an in-place edit, a device write, a truncate/remove.  (cp /
 # mv / ln are handled separately — for those only the *destination* counts.)
+# Every gap below is BOUNDED.  With `*?` the engine expands lazily from every
+# candidate start position, which made this regex quadratic: a command built
+# from `>> basilisk` took 1.6s at 22KB and 101s at 176KB — and it runs on every
+# command the agent issues.  A bounded repeat caps the work per start position,
+# so the whole scan is linear.  The ceilings are far wider than any real
+# invocation (a path between the redirect and the filename, or a sed script
+# before it), so nothing that used to match stops matching until the gap
+# exceeds 1024 characters, a length no real invocation reaches (measured: the
+# old and new patterns agree on every gap up to 1024 and diverge only past it).
+# Pinned by a differential test over the old pattern in tests/test_safety_gate.py.
+_GAP = r"[^\n|;&]{0,1024}?"
+_GAP_NL = r"[^\n]{0,1024}?"
 _SELF_WRITE_RE = re.compile(
     r"(?:"
-    r">>?\s*[^\n|;&]*?" + _PROT_SRC +
-    r"|\btee\b\s+[^\n|;&]*?" + _PROT_SRC +
-    r"|\bsed\b\s+[^\n]*?-[a-zA-Z]*i[^\n]*?" + _PROT_SRC +
-    r"|\bperl\b\s+[^\n]*?-[a-zA-Z]*i[^\n]*?" + _PROT_SRC +
-    r"|\bdd\b\s+[^\n]*?of=\s*[^\n|;&]*?" + _PROT_SRC +
-    r"|\btruncate\b\s+[^\n]*?" + _PROT_SRC +
-    r"|\b(?:rm|chmod|chown|install|patch)\b\s+[^\n]*?" + _PROT_SRC +
+    r">>?\s*" + _GAP + _PROT_SRC +
+    r"|\btee\b\s+" + _GAP + _PROT_SRC +
+    r"|\bsed\b\s+" + _GAP_NL + r"-[a-zA-Z]*i" + _GAP_NL + _PROT_SRC +
+    r"|\bperl\b\s+" + _GAP_NL + r"-[a-zA-Z]*i" + _GAP_NL + _PROT_SRC +
+    r"|\bdd\b\s+" + _GAP_NL + r"of=\s*" + _GAP + _PROT_SRC +
+    r"|\btruncate\b\s+" + _GAP_NL + _PROT_SRC +
+    r"|\b(?:rm|chmod|chown|install|patch)\b\s+" + _GAP_NL + _PROT_SRC +
     r")", re.IGNORECASE)
 
 
@@ -643,12 +909,17 @@ def _tampers_self(command: str, depth: int = 0) -> bool:
     if not command:
         return False
     norm = _normalize(command)
-    if _SELF_WRITE_RE.search(norm):
+    # Cheap presence guard before the expensive alternation.  EVERY branch of
+    # _SELF_WRITE_RE ends in _PROT_SRC, which cannot match without the literal
+    # "basilisk" — so no match is possible without it, and skipping is exact,
+    # not a heuristic.  It matters because the regex is quadratic in the input:
+    # measured 1.8s on a 22KB command, and this runs on every command.
+    if "basilisk" in norm.lower() and _SELF_WRITE_RE.search(norm):
         return True
     # peek inside `sh -c "<payload>"`, `eval "<payload>"`, and interpreter
     # inline-code payloads, and check cp/mv destinations per sub-command
     for sub in _split_subcommands(norm):
-        args = _argv(sub)
+        args = _peel_prefix(_strip_struct(_argv(sub) or []))
         if not args:
             continue
         if _copy_move_targets_self(args):

@@ -36,7 +36,7 @@ this is not a tool you should be pointing at anything.</sub></p>
 
 <br/>
 
-<img src="https://img.shields.io/badge/version-9.6.0-7d121b?style=for-the-badge&labelColor=08090b" alt="version 9.6.0">
+<img src="https://img.shields.io/badge/version-9.7.0-7d121b?style=for-the-badge&labelColor=08090b" alt="version 9.7.0">
 <img src="https://img.shields.io/badge/license-MIT-7d121b?style=for-the-badge&labelColor=08090b" alt="MIT license">
 <img src="https://img.shields.io/github/last-commit/the-priest/PriestsBasilisk?style=for-the-badge&color=6d7680&labelColor=08090b&logo=github&logoColor=white" alt="last commit">
 
@@ -49,7 +49,7 @@ this is not a tool you should be pointing at anything.</sub></p>
 <img src="https://img.shields.io/badge/Linux-X11%20%7C%20Wayland-6d7680?style=for-the-badge&logo=linux&logoColor=white&labelColor=08090b" alt="Linux X11/Wayland">
 <img src="https://img.shields.io/badge/python-3.10+-6d7680?style=for-the-badge&logo=python&logoColor=white&labelColor=08090b" alt="Python 3.10+">
 <img src="https://img.shields.io/badge/runs%20on-NetHunter-6d7680?style=for-the-badge&labelColor=08090b" alt="Runs on NetHunter">
-<img src="https://img.shields.io/badge/tests-1690%20assertions-6d7680?style=for-the-badge&labelColor=08090b" alt="1690 assertions">
+<img src="https://img.shields.io/badge/tests-1886%20assertions-6d7680?style=for-the-badge&labelColor=08090b" alt="1886 assertions">
 
 <br/><br/>
 
@@ -387,7 +387,7 @@ An agent that reads the outside world *and* runs shell commands is a prompt-inje
 - **Untrusted input is quarantined.** Anything from outside — a target's response, an MCP result, an analyzed image — passes a deterministic content firewall and is wrapped as *data, never instructions*.
 - **Your sudo password never touches the model.** Self-written code runs only in a bubblewrap jail after passing its own test, and Basilisk's own safety source can't be overwritten by a shell command.
 
-All of it is pinned in the test suite — **1,690 assertions across 29 suites**, stdlib-only, runnable before you trust it with anything. Basilisk writes and runs real exploits against authorized targets, because that's the job. It will not produce standalone weaponized malware (reverse shells, implants, ransomware, backdoors), and the destructive class can never run through it at all.
+All of it is pinned in the test suite — **1,886 assertions across 31 suites**, stdlib-only, runnable before you trust it with anything. Basilisk writes and runs real exploits against authorized targets, because that's the job. It will not produce standalone weaponized malware (reverse shells, implants, ransomware, backdoors), and the destructive class can never run through it at all.
 
 <img src="https://capsule-render.vercel.app/api?type=rect&color=0:08090b,100:7d121b&height=3&section=header" width="100%" alt="">
 
@@ -483,7 +483,7 @@ The model picker shows context window, price per million tokens and what each mo
 
 <br/>
 
-### Built by one person, verified by 1,690 assertions.
+### Built by one person, verified by 1,886 assertions.
 
 <sub>No VC, no waitlist, no "contact sales". Clone it, read it, run the suite,<br/>
 then point it at something you own and watch it work.</sub>

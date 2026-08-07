@@ -131,7 +131,11 @@ def _stt_url(cfg: Dict, settings: Dict) -> str:
 # ═════════════════════════════════════════════════════════════════════
 
 _TOOL_TAG_RE   = re.compile(r"<tool\b[^>]*>.*?</tool\s*>", re.DOTALL | re.IGNORECASE)
-_TOOL_FRAG_RE  = re.compile(r"<tool\b[^>]*?>.*?$", re.DOTALL | re.IGNORECASE)
+# Attribute run BOUNDED: an unbounded `[^>]*?` rescans to end-of-string from
+# every `<tool` position, which is quadratic (210ms on repeated openers) on
+# text that reaches here once per spoken message.  A tool tag's attributes are
+# short — the long part is the body, after the `>`.
+_TOOL_FRAG_RE  = re.compile(r"<tool\b[^>]{0,4000}?>.*?$", re.DOTALL | re.IGNORECASE)
 _FENCE_RE      = re.compile(r"```.*?```", re.DOTALL)
 _FENCE_OPEN_RE = re.compile(r"```.*$", re.DOTALL)
 _INLINE_CODE   = re.compile(r"`([^`]+)`")
@@ -198,8 +202,21 @@ def clean_for_speech(text: str) -> str:
     otherwise become a long dead pause in the spoken output."""
     if not text:
         return ""
-    s = _TOOL_TAG_RE.sub(" ", text)
-    s = _TOOL_FRAG_RE.sub(" ", s)
+    # Both patterns require a '<tool' AND a '>'; without either they cannot
+    # match, so the probes are exact.  They matter because the fragment
+    # pattern rescans to end-of-string from every '<tool' position, and the
+    # input that has many openers and no '>' is precisely a model repeating a
+    # tool-call opener — the shape that froze the UI in v9.6.0.
+    s = text
+    _low = s.lower()
+    if "<tool" in _low:
+        # The PAIRED pattern needs a closing tag; without one its `.*?` rescans
+        # to end-of-string from every opener (728ms on 4000 openers).  Same
+        # cheap closing-tag probe already used for THINK_RE in the core.
+        if "</tool" in _low:
+            s = _TOOL_TAG_RE.sub(" ", s)
+        if ">" in s:
+            s = _TOOL_FRAG_RE.sub(" ", s)
     s = _FENCE_RE.sub(" ", s)             # code blocks: drop, no pause
     s = _FENCE_OPEN_RE.sub(" ", s)        # dangling open fence
     out: List[str] = []

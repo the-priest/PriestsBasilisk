@@ -150,7 +150,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.basilisk"
 APP_NAME = "Basilisk"
-VERSION = "9.6.0"
+VERSION = "9.7.0"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -2748,6 +2748,9 @@ class MessageWidget(Gtk.Box):
         self._speak_state = "idle"
         self._blocks_container: Optional[Gtk.Box] = None
         self._streaming_label: Optional[Gtk.Label] = None
+        # Live-stream render throttle — see append_streaming.
+        self._last_stream_render: float = 0.0
+        self._stream_render_pending: bool = False
         # Captured model reasoning ("thoughts"): from a reasoning_content
         # stream field and/or inline <think> blocks.  Shown in a collapsed
         # expander the operator can click open.
@@ -3144,6 +3147,10 @@ class MessageWidget(Gtk.Box):
         self._streaming_label.set_text("")
         self._blocks_container.append(self._streaming_label)
         self._content = ""
+        # Force the first token of a new stream to paint immediately — a reply
+        # that opens with a pause reads as a hang.
+        self._last_stream_render = 0.0
+        self._stream_render_pending = False
 
     def append_streaming(self, token: str):
         if getattr(self, "_disposed", False):
@@ -3153,11 +3160,39 @@ class MessageWidget(Gtk.Box):
         if self._streaming_label is None:      # disposed / no container
             return
         self._content += token
+        # RENDER IS COALESCED, AND THAT IS A COMPLEXITY FIX, NOT A COSMETIC ONE.
+        # Stripping is a function of the WHOLE buffer, so re-running it per
+        # token is O(n²) in the reply length no matter how fast the regexes
+        # are.  Measured on the shipped v9.6.0 with a single large write_file —
+        # the ordinary path for the workspace repair tools — that was 1.75s of
+        # GTK main-thread CPU at 66KB and 7.24s at 131KB, scaling ×4 per ×2.
+        # Redrawing on a ~50ms floor instead caps the number of full passes at
+        # ~20/second regardless of token rate, which no reader can tell apart
+        # from per-token and which no longer grows with the reply.
+        now = time.monotonic()
+        if now - self._last_stream_render >= _STREAM_RENDER_MIN_S:
+            self._render_stream()
+        elif not self._stream_render_pending:
+            # Trailing edge: the last token of a burst must still land, or the
+            # tail of a reply that ends mid-interval is never drawn.
+            self._stream_render_pending = True
+            GLib.timeout_add(_STREAM_RENDER_MIN_MS, self._flush_stream_render)
+
+    def _render_stream(self):
+        """Recompute the visible text from the whole buffer and paint it."""
+        if getattr(self, "_disposed", False) or self._streaming_label is None:
+            return
+        self._last_stream_render = time.monotonic()
         # Hide both tool XML and any inline <think> reasoning from the live
         # reply.  The reasoning (if any) gets captured at finish_streaming /
         # set_content and shown in the collapsible thoughts panel.
         display = strip_tool_calls(strip_think_blocks(self._content))
         self._streaming_label.set_text(display)
+
+    def _flush_stream_render(self):
+        self._stream_render_pending = False
+        self._render_stream()
+        return False        # GLib.SOURCE_REMOVE — one shot
 
     def finish_streaming(self) -> str:
         final = self._content
@@ -11707,6 +11742,15 @@ _UI_SCALE: float = 1.0
 # from real Gdk geometry in do_startup, used by _make_wrap_label.
 _VIEWPORT_WIDTH: int = 540   # OP6 portrait logical width
 _MAX_BUBBLE_CHARS: int = 25  # conservative default; recomputed at startup
+
+# Minimum wall-clock gap between two full re-renders of a streaming reply.
+# Stripping tool markup is a function of the entire buffer, so the per-token
+# render that preceded this was quadratic in reply length; this bounds the
+# number of full passes per second instead of per token.  50ms is 20fps —
+# above the rate at which text reads as continuous, and far below the point
+# where the cost tracks the reply size.
+_STREAM_RENDER_MIN_MS: int = 50
+_STREAM_RENDER_MIN_S: float = _STREAM_RENDER_MIN_MS / 1000.0
 
 
 def _ui_scale() -> float:
