@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 # ── tunables (all overridable from settings) ──────────────────────────
@@ -182,7 +183,27 @@ def _real_compress(text: str, target_ratio: float) -> Optional[str]:
     if not _PKG_STATE["checked"]:
         _PKG_STATE["checked"] = True
         try:
-            from headroom import compress as _hc  # type: ignore
+            import headroom as _pkg  # type: ignore
+            # ── NAME COLLISION GUARD ──
+            # This module is ALSO called headroom (basilisk_ext/headroom.py), and
+            # the third-party package it wants is `headroom` too.  Whenever
+            # basilisk_ext/ ends up on sys.path — tests/test_basilisk.py,
+            # test_core.py and test_webshield.py all put it there — this import
+            # resolves to THIS FILE and the module silently probes itself.
+            #
+            # It has never mis-fired at runtime (basilisk_ext is imported as a
+            # package, so the absolute import reaches the real one), but it did
+            # something worse: it means the tests can NEVER exercise the
+            # headroom-ai engine, because in a test process the name always
+            # resolves to us.  That is precisely why the cache-reference bug
+            # shipped — the only engine the suite could see was the fallback.
+            #
+            # Identity check, not a name check.
+            if getattr(_pkg, "__name__", "") == __name__ or _pkg is sys.modules.get(__name__):
+                raise ImportError("resolved to basilisk_ext's own headroom module")
+            _hc = getattr(_pkg, "compress", None)
+            if not callable(_hc):
+                raise ImportError("headroom package has no callable compress()")
             _PKG_STATE["fn"] = _hc
             _PKG_STATE["name"] = "headroom-ai"
         except Exception:

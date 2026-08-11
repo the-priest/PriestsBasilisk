@@ -311,7 +311,11 @@ fi
 # still compresses, just a little less aggressively.
 
 step "Headroom context compression (optional)"
-if python3 -c "import headroom" 2>/dev/null; then
+# Probe the ACTUAL API, not just the name. `import headroom` alone is
+# satisfied by any headroom.py on the path — including Basilisk's own
+# basilisk_ext/headroom.py — so the old check could report "already present"
+# while the app fell back to the built-in compressor.
+if python3 -c "import headroom,sys; sys.exit(0 if callable(getattr(headroom,\"compress\",None)) else 1)" 2>/dev/null; then
   ok "headroom already present"
 elif python3 -m pip install --user --quiet headroom-ai 2>/dev/null; then
   ok "headroom installed (pip --user)"

@@ -34,8 +34,10 @@ from __future__ import annotations
 import ast
 import hashlib
 import json
+import os
 import re
 import shutil
+import tempfile
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -73,6 +75,43 @@ class SkillStore:
         self.dir.mkdir(parents=True, exist_ok=True)
         (self.dir / ".archive").mkdir(exist_ok=True)
 
+    # ── the containment boundary ───────────────────────────────────────
+    def _skill_dir(self, name: str) -> Optional[Path]:
+        """Resolve a skill NAME to its directory, or None if it isn't one.
+
+        Every path in this class must come through here.  `commit` validated
+        its name with _NAME_RE, but `run_skill`, `tool_run` and `curate` took
+        the name straight from the model / a manifest and did `self.dir / name`
+        — so `skill_run{name: "../elsewhere/planted"}` loaded and EXECUTED a
+        skill.py from outside the store.  That skips the entire commit path:
+        no ast check, no static screen, and no sandbox test.  The store even
+        reported zero saved skills while running one.
+
+        Two independent checks, because either alone has a hole:
+          * the name must match _NAME_RE — no separators, no dots, so nothing
+            traversal-shaped is even considered; and
+          * the RESOLVED path must still sit directly under self.dir, compared
+            with commonpath rather than startswith (".../skills-old" starts
+            with ".../skills" and is a different directory), and resolved
+            first so a symlink planted inside the store cannot point out.
+        Fails closed: anything it cannot vouch for returns None.
+        """
+        if not _NAME_RE.match(name or ""):
+            return None
+        try:
+            base = self.dir.resolve()
+            cand = (base / name).resolve()
+        except OSError:
+            return None
+        try:
+            if os.path.commonpath([str(base), str(cand)]) != str(base):
+                return None
+        except ValueError:              # different drives (Windows)
+            return None
+        if cand.parent != base:
+            return None
+        return cand
+
     # ── discovery ──────────────────────────────────────────────────────
     def list_skills(self) -> List[Dict[str, Any]]:
         out = []
@@ -108,9 +147,17 @@ class SkillStore:
             return head + "\n  (no skills saved yet.)"
         lines = [head, "  Saved skills you can skill_run:"]
         for s in skills:
-            caps = ",".join(s.get("capabilities", [])) or "none"
-            lines.append(f"   - {s['name']}: {s.get('description','')} "
+            # `s['name']` raised KeyError on a manifest missing that field —
+            # and this string is part of the SYSTEM PROMPT, so one malformed
+            # file on disk took down every turn, not just skill listing.
+            nm = s.get("name")
+            if not nm:
+                continue
+            caps = ",".join(s.get("capabilities") or []) or "none"
+            lines.append(f"   - {nm}: {s.get('description','')} "
                          f"(caps: {caps})")
+        if len(lines) == 2:
+            return head + "\n  (no skills saved yet.)"
         return "\n".join(lines)
 
     # ── propose (no write) ─────────────────────────────────────────────
@@ -166,8 +213,14 @@ class SkillStore:
 
         # Stage the skill in a temp build dir, test it there, only then
         # promote.  A failing test never touches the live skills dir.
-        build = self.dir / f".build-{name}-{int(time.time())}"
-        build.mkdir(parents=True, exist_ok=True)
+        # UNIQUE staging dir, not a timestamped name.  `.build-{name}-{int(
+        # time.time())}` collides for two commits of the same skill inside one
+        # second, and both then share a directory whose `finally` clause
+        # rmtree()s it — so the first to finish deletes the second's runner
+        # mid-test.  Tool calls run on worker threads, so this is reachable.
+        # Same shape as the workspace _stash_original race: fix the shape, not
+        # the odds.  mkdtemp is atomic and cannot collide.
+        build = Path(tempfile.mkdtemp(prefix=f".build-{name}-", dir=self.dir))
         try:
             runner = self._make_test_runner(code, test)
             (build / "runner.py").write_text(runner)
@@ -218,14 +271,28 @@ class SkillStore:
     # ── run a saved skill (always sandboxed) ───────────────────────────
     def run_skill(self, name: str, args: Dict[str, Any],
                   timeout: int = 20) -> Dict[str, Any]:
-        d = self.dir / name
+        d = self._skill_dir(name)
+        if d is None:
+            return {"ok": False,
+                    "error": f"{name!r} is not a valid skill name"}
         man_path = d / "manifest.json"
         if not man_path.exists():
             return {"ok": False, "error": f"no skill named {name!r}"}
-        manifest = json.loads(man_path.read_text())
+        # A manifest or skill.py that is missing/corrupt is a broken skill, not
+        # a crash: this used to raise straight out through tool_run into the
+        # dispatcher, where the operator saw a traceback instead of "that skill
+        # is broken".
+        try:
+            manifest = json.loads(man_path.read_text())
+            if not isinstance(manifest, dict):
+                raise ValueError("manifest is not an object")
+            code = (d / "skill.py").read_text()
+        except Exception as e:
+            return {"ok": False,
+                    "error": f"skill {name!r} is unreadable: "
+                             f"{type(e).__name__}: {e}"}
         # Tamper check: refuse to run code whose hash drifted from the manifest
         # (caught a manual edit / corruption — re-commit to re-bless it).
-        code = (d / "skill.py").read_text()
         if _hash(code) != manifest.get("hash"):
             return {"ok": False, "error": ("skill code hash mismatch — it was "
                                            "modified after save. Re-create it "
@@ -246,8 +313,11 @@ class SkillStore:
             + "if _result is None:\n"
             + "    _result = {}\n"
             + "print(_json.dumps(_result, default=str))\n")
-        build = self.dir / f".run-{name}-{int(time.time()*1000)}"
-        build.mkdir(parents=True, exist_ok=True)
+        # Unique, atomically-created staging dir — see the note in commit().
+        # A millisecond suffix is narrower than a second but still collides,
+        # and two threads running the SAME skill concurrently is the normal
+        # case, not the exotic one.
+        build = Path(tempfile.mkdtemp(prefix=f".run-{name}-", dir=self.dir))
         try:
             (build / "invoke.py").write_text(invoker)
             res = sandbox.run_python(str(build / "invoke.py"),
@@ -267,15 +337,27 @@ class SkillStore:
         now = time.time()
         archived = []
         for s in self.list_skills():
+            # The name comes out of a manifest.json on disk, and this method
+            # rmtree()s and move()s using it.  A manifest naming itself
+            # "../../something" would have those act outside the store, so it
+            # goes through the same boundary as every other path here.
+            src = self._skill_dir(s.get("name", ""))
+            if src is None or not src.is_dir():
+                continue
             last = s.get("last_used") or s.get("created", now)
-            age_days = (now - last) / 86400.0
+            try:
+                age_days = (now - float(last)) / 86400.0
+            except (TypeError, ValueError):
+                continue
             if age_days > ARCHIVE_AFTER_DAYS and s.get("uses", 0) == 0:
-                src = self.dir / s["name"]
-                dst = self.dir / ".archive" / s["name"]
-                if dst.exists():
-                    shutil.rmtree(dst)
-                shutil.move(str(src), str(dst))
-                archived.append(s["name"])
+                dst = self.dir / ".archive" / src.name
+                try:
+                    if dst.exists():
+                        shutil.rmtree(dst)
+                    shutil.move(str(src), str(dst))
+                except OSError:
+                    continue
+                archived.append(src.name)
         return {"archived": archived}
 
     # ── tool surface ───────────────────────────────────────────────────

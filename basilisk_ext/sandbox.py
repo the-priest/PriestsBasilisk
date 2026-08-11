@@ -35,7 +35,6 @@ from __future__ import annotations
 
 import json
 import os
-import resource
 import shutil
 import signal
 import subprocess
@@ -43,6 +42,22 @@ import sys
 import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+# `resource`, os.setsid, os.killpg and os.getpgid are all POSIX-only.  This was
+# a bare `import resource` at module scope, and the consequence was much larger
+# than this file: skills.py imports sandbox, extman.py imports skills, and
+# basilisk_ext/__init__ imports extman — so on Windows the ImportError took out
+# the ENTIRE sidecar package.  Workspace, recall, memory, oracle, bench and
+# headroom all vanished, silently, because basilisk.py's ext import is
+# (correctly) guarded and just leaves self._ext = None.
+#
+# CI publishes a Windows EXE, so that platform is not hypothetical.
+try:
+    import resource                      # type: ignore
+    _POSIX_LIMITS = True
+except ImportError:                      # pragma: no cover - Windows
+    resource = None                      # type: ignore
+    _POSIX_LIMITS = False
 
 
 DEFAULT_TIMEOUT = 20
@@ -55,13 +70,26 @@ def _have(cmd: str) -> bool:
     return shutil.which(cmd) is not None
 
 
-def _rlimit_preexec(mem_mb: int, fsize_mb: int, nofile: int):
+def _rlimit_preexec(mem_mb: int, fsize_mb: int, nofile: int,
+                    cpu_seconds: int = DEFAULT_TIMEOUT):
+    """Build the pre-exec hook that caps the child's resources.
+
+    `cpu_seconds` is passed in rather than read from DEFAULT_TIMEOUT, which is
+    what it used to do: a caller asking for `run_python(..., timeout=60)` still
+    got a 20-second CPU rlimit, so a legitimately long skill was killed by
+    SIGXCPU at a third of its allowance and reported as a skill failure rather
+    than as a limit being hit.  The wall-clock timeout and the CPU limit are
+    now the same number by construction.
+    """
     def _apply():
         # New session so we can kill the whole group on timeout.
         os.setsid()
+        if not _POSIX_LIMITS:            # pragma: no cover - Windows
+            return
         soft = mem_mb * 1024 * 1024
         resource.setrlimit(resource.RLIMIT_AS, (soft, soft))
-        resource.setrlimit(resource.RLIMIT_CPU, (DEFAULT_TIMEOUT, DEFAULT_TIMEOUT + 2))
+        resource.setrlimit(resource.RLIMIT_CPU,
+                           (cpu_seconds, cpu_seconds + 2))
         fz = fsize_mb * 1024 * 1024
         resource.setrlimit(resource.RLIMIT_FSIZE, (fz, fz))
         resource.setrlimit(resource.RLIMIT_NOFILE, (nofile, nofile))
@@ -157,20 +185,39 @@ def run_python(code_path: str,
                     "stderr": f"could not stage skill: {e}",
                     "timed_out": False, "duration": 0.0}
         py = sys.executable or "/usr/bin/python3"
+        if not _POSIX_LIMITS:            # pragma: no cover - Windows
+            # No rlimits, no setsid, no killpg, and neither bwrap nor unshare
+            # exists here.  There is no isolation available AT ALL, and the one
+            # thing this module must never do is run model-written code with
+            # nothing around it — the module docstring is explicit that
+            # in-process/unconfined execution is not containable.  Refuse
+            # loudly instead of silently downgrading to "just run it".
+            return {"ok": False, "tier": "none", "rc": -1, "stdout": "",
+                    "stderr": ("sandbox: this platform provides no isolation "
+                               "primitives (no resource limits, no namespaces) "
+                               "— refusing to execute agent-written code "
+                               "unconfined"),
+                    "timed_out": False, "duration": 0.0}
+        # RLIMITS ON EVERY TIER, including bwrap.
+        # bwrap used to run with preexec=None, so the STRONGEST isolation tier
+        # was the only one with no resource caps: it confines the filesystem
+        # and the network but does nothing about memory, CPU or file size, so a
+        # runaway skill could exhaust the box precisely when the operator had
+        # the best sandbox installed.  The module docstring promised "every
+        # tier adds ... rlimits"; now it is true.
+        preexec = _rlimit_preexec(mem_mb, fsize_mb, DEFAULT_NOFILE,
+                                  cpu_seconds=max(1, int(timeout)))
         if _have("bwrap"):
             tier = "bwrap"
             argv = _bwrap_argv(scratch, allow_net) + [run_target, args_json]
-            preexec = None
         elif _have("unshare"):
             tier = "unshare"
             net = [] if allow_net else ["-n"]
             argv = (["unshare", "-m", *net, py,
                      "-I", "-S", run_target, args_json])
-            preexec = _rlimit_preexec(mem_mb, fsize_mb, DEFAULT_NOFILE)
         else:
             tier = "rlimit"
             argv = [py, "-I", "-S", run_target, args_json]
-            preexec = _rlimit_preexec(mem_mb, fsize_mb, DEFAULT_NOFILE)
 
         import time as _t
         t0 = _t.time()
@@ -182,7 +229,13 @@ def run_python(code_path: str,
             env=_scrubbed_env(scratch, allow_net),
             cwd=scratch,
             preexec_fn=preexec,
-            start_new_session=(preexec is None),
+            # setsid() happens inside the preexec hook (which every tier now
+            # has), and it must happen exactly ONCE.  Do not "simplify" this to
+            # True: CPython runs start_new_session's setsid BEFORE preexec_fn,
+            # so the hook's own setsid would then fail with EPERM — already a
+            # session leader — and the child would die before exec.  The old
+            # `preexec is None` here was load-bearing for the same reason.
+            start_new_session=False,
             text=True,
         )
         timed_out = False

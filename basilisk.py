@@ -164,6 +164,14 @@ VERSION = "9.7.0"
 # it's overridable per-user via the "max_tool_steps" setting, and it resets
 # every turn so "keep going" always grants a fresh budget.
 MAX_TOOL_CHAIN = 150
+# ANSWER MODE stall recovery: how many times a turn may be pushed after the
+# model DESCRIBED its next action but emitted no tool call ("Let me grab the HN
+# thread…" and then nothing).  Two is deliberate — one push covers the ordinary
+# slip, a second covers a model that needed telling twice, and past that it is
+# not going to act, so the turn ends rather than burning round-trips on
+# narration.  The mission loop has always had this recovery; answer mode had
+# none, which is how a research question ended on a promise instead of a report.
+ANSWER_STALL_NUDGE_MAX = 2
 # Foresight: how long the (optional) consequence-prediction model pass may take
 # before the turn stops waiting for it.  A model pass is a full network round
 # trip; without a deadline a hung one wedged the whole turn forever, because
@@ -1712,6 +1720,17 @@ headerbar {
 CODE_FENCE_RE  = re.compile(r"```([a-zA-Z0-9_+-]*)\n?(.*?)```", re.DOTALL)
 INLINE_CODE_RE = re.compile(r"`([^`\n]+)`")
 BOLD_RE        = re.compile(r"\*\*([^*\n]+)\*\*")
+# ASTERISKS ONLY, deliberately — `_underscore_` italics are NOT supported and
+# must not be added.  Underscores are everywhere in the text this app renders
+# (web_read, tool_result, max_tokens, /etc/shadow), so enabling them would
+# italicise the middle of every other snake_case sentence.
+#
+# The consequence of that choice is a CONTRACT: anything this app emits for the
+# operator to read must use the syntax above.  It did not — every status
+# placeholder was written with UNDERSCORES (`_used web_read_`, `_(thinking…)_`,
+# `_(done)_`, `_(stopped)_`), so the renderer passed them straight through and
+# the operator saw the raw markdown in the chat.  Both sides are now held
+# together by tests/test_placeholders.py.
 ITALIC_RE      = re.compile(r"(?<!\*)\*([^*\n]+)\*(?!\*)")
 
 
@@ -1927,11 +1946,11 @@ def _action_summary(calls) -> str:
         if p.startswith("CMD:"):
             parts.append("`$ " + p[4:] + "`")   # render commands as inline code
         else:
-            parts.append("_" + p + "_")
+            parts.append("*" + p + "*")
     more = len(phrases) - 3
     text = "  ".join(parts)
     if more > 0:
-        text += "  _(+%d more)_" % more
+        text += "  *(+%d more)*" % more
     return text
 
 # Mirror of the approval_mode setting so the message renderer (no settings
@@ -2979,11 +2998,11 @@ class MessageWidget(Gtk.Box):
                     display_text = summary
                 else:
                     _act = (_CURRENT_ACTION or "").strip()
-                    display_text = "_(%s)_" % _act if _act else "_(working…)_"
+                    display_text = "*(%s)*" % _act if _act else "*(working…)*"
             else:
                 # No tool calls and no prose in this turn — it really was just
                 # reasoning. Only here is "thinking" the honest label.
-                display_text = "_(thinking…)_"
+                display_text = "*(thinking…)*"
 
         blocks = split_message_into_blocks(display_text) if display_text else []
         for b in blocks:
@@ -4831,6 +4850,12 @@ class MainWindow(Adw.ApplicationWindow):
         # Name of the tool currently being dispatched, so a lambda-wrapped
         # handler can log what it actually is. See _run_tool_call / _tool_simple.
         self._dispatching_tool: str = ""
+        # Per-tool labels for a parallel batch, so the repeat guard can match a
+        # later SOLO call of a tool that already ran inside one.
+        self._batch_members: List[str] = []
+        # Answer-mode stall pushes spent on the current request. See
+        # ANSWER_STALL_NUDGE_MAX.
+        self._answer_stall_nudges: int = 0
         # Set when the operator hits the stop button.  Halts the current
         # stream AND prevents the tool chain from kicking another turn.
         self._stop_requested: bool = False
@@ -6337,7 +6362,7 @@ class MainWindow(Adw.ApplicationWindow):
             # Canonicalise before this partial reply is stored and replayed as
             # history — a stopped turn is still a turn the model will be shown.
             partial = (self.streaming_msg_widget.canonical_content() or "").strip()
-            final_text = partial if partial else "_(stopped)_"
+            final_text = partial if partial else "*(stopped)*"
             try:
                 self.streaming_msg_widget.set_content(final_text)
             except Exception:
@@ -7037,6 +7062,9 @@ class MainWindow(Adw.ApplicationWindow):
             self._tool_chain_depth = 0
             self._tools_locked = False
             self._force_answer_tries = 0
+            # Per-request, like the counters above: a stall on the LAST question
+            # must not spend this question's nudges.
+            self._answer_stall_nudges = 0
 
         # Limit how many model round-trips a turn may chain.  Rather than
         # dead-ending with "chain too long" and no answer (annoying), once
@@ -7072,10 +7100,34 @@ class MainWindow(Adw.ApplicationWindow):
 
         history = self._build_history_for_model(chat_id)
         addendum = self.settings.get("system_prompt", "")
+
+        # ── IS THIS THE TURN THAT ANSWERS, OR A STEP ON THE WAY? ──
+        # _tool_chain_depth is incremented once per model round-trip and reset
+        # when a fresh operator message starts a turn, so depth 1 is "replying
+        # to the operator" and depth 2+ is "continuing after a tool result".
+        #
+        # Everything below used to ignore that distinction, and it is the whole
+        # reason the operator saw the same conclusion four times in a row.  The
+        # directives are properties of his REQUEST — "he is in a hurry, lead
+        # with the answer", "deliver ONE complete answer, then stop" — but they
+        # were rebuilt from `history` on EVERY round-trip.  `last_user` scans
+        # back PAST tool results to find his message, so it found the same
+        # urgent question every time and re-armed the same instruction.  The
+        # model was told "lead with the answer" and "deliver one complete
+        # answer" immediately after every single tool result, and it did
+        # exactly that, every time.  Four web_reads, four complete answers,
+        # each one rendered as its own message.
+        #
+        # The model was not being repetitive. It was being obedient.
+        _continuation = self._tool_chain_depth > 1
+
         # (#3) Urgency fast-path: if the operator's latest message reads as
-        # urgent, tell the model (for THIS turn only) to skip preamble and
-        # go straight to the most likely fix.
-        if self.settings.get("urgency_fast_path", True) and not self._tools_locked:
+        # urgent, tell the model to skip preamble and go straight to the most
+        # likely fix.  FIRST TURN ONLY — "lead with the answer" is advice about
+        # how to open a reply to him, and repeating it mid-chain is an
+        # instruction to answer again from scratch after every tool result.
+        if (self.settings.get("urgency_fast_path", True)
+                and not self._tools_locked and not _continuation):
             try:
                 last_user = ""
                 for m in reversed(history):
@@ -7157,18 +7209,38 @@ class MainWindow(Adw.ApplicationWindow):
             self.terminal_log("── answer tool-cap reached; answering now", "dim")
         if _answer_only:
             if _needs_web_verification(_opening_user):
-                addendum = (addendum + "\n\n[!!! CHECK ONLINE FIRST -- this "
-                    "question is about current or checkable facts, and your "
-                    "training data may be OUT OF DATE. You are FORBIDDEN from "
-                    "answering it from memory. Your FIRST action MUST be to "
-                    "web_read a primary source (or web_read a search-results "
-                    "page and follow the best link), READ it, then answer from "
-                    "what you actually read and cite it. Do NOT state a version, "
-                    "date, price, name, score, or 'latest' anything from memory. "
-                    "If after searching you still cannot confirm it, say plainly "
-                    "that you could not verify it -- never guess. A confident "
-                    "answer from memory here is a hallucination and is wrong.]"
-                    ).strip()
+                if not _continuation:
+                    addendum = (addendum + "\n\n[!!! CHECK ONLINE FIRST -- this "
+                        "question is about current or checkable facts, and your "
+                        "training data may be OUT OF DATE. You are FORBIDDEN from "
+                        "answering it from memory. Your FIRST action MUST be to "
+                        "web_read a primary source (or web_read a search-results "
+                        "page and follow the best link), READ it, then answer from "
+                        "what you actually read and cite it. Do NOT state a version, "
+                        "date, price, name, score, or 'latest' anything from memory. "
+                        "If after searching you still cannot confirm it, say plainly "
+                        "that you could not verify it -- never guess. A confident "
+                        "answer from memory here is a hallucination and is wrong.]"
+                        ).strip()
+                else:
+                    # SAME RULE, RESTATED FROM MID-CHAIN.
+                    # The first-turn wording is an imperative about the opening
+                    # move — "your FIRST action MUST be to web_read". Re-sending
+                    # it after a tool result tells a model that has ALREADY read
+                    # a source that its first action must be to read one, so it
+                    # reads another, and another: four web_reads for one
+                    # question, each followed by a fresh complete answer.
+                    # What still needs saying at this point is only the part
+                    # about not inventing facts.
+                    addendum = (addendum + "\n\n[STILL VERIFY, DON'T RECALL — you "
+                        "have already read at least one source this turn. Keep "
+                        "stating only what you actually read, and cite it. Do NOT "
+                        "re-read a page you have already read, and do NOT open "
+                        "another source to re-confirm something that already came "
+                        "back clean — one successful read IS the confirmation. "
+                        "Fetch again ONLY for a fact you genuinely do not have "
+                        "yet; otherwise answer from what you have, marking "
+                        "anything you could not verify.]").strip()
             addendum = (addendum + "\n\n[ANSWER MODE (leashed) — THIS turn is a "
                 "QUESTION / request, not an autonomous operation. Deliver ONE "
                 "complete, correct, verified answer, then STOP.\n"
@@ -7197,7 +7269,33 @@ class MainWindow(Adw.ApplicationWindow):
                 "direct for an expert operator, no padding — and END your turn. Do "
                 "NOT latch a mission or keep grinding after answering; there is no "
                 "completion token here, just answer and stop.]").strip()
-            self.terminal_log("💬 answer mode: research, confirm, answer once", "dim")
+            if _continuation:
+                # "Deliver ONE complete answer, then STOP" is correct advice for
+                # the turn that replies to the operator and actively harmful on
+                # the turns after it: read literally, after every tool result it
+                # says "answer now, completely".  So on a continuation the same
+                # rule has to be restated from where the model actually is —
+                # mid-chain, having already written prose the operator can see.
+                addendum = (addendum + "\n\n[CONTINUATION TURN — you are partway "
+                    "through answering. The prose you already wrote this turn IS "
+                    "ON SCREEN; the operator has read it.\n"
+                    "- Do NOT restate, re-verify or re-summarise a conclusion you "
+                    "have already given. Saying \"web reading is confirmed "
+                    "working\" a second time tells him nothing and reads as a "
+                    "stutter.\n"
+                    "- You have exactly two useful moves: call the next tool with "
+                    "NO preamble, or give the FINAL answer covering only what is "
+                    "still unsaid, and stop.\n"
+                    "- If everything you set out to check is now checked, stop. "
+                    "Re-confirming something that already succeeded is not "
+                    "thoroughness, it is a loop.]").strip()
+            # Log ONCE per chain, not once per round-trip. These two lines were
+            # printed before every continuation, which is why the terminal log
+            # showed the same pair eleven times for one question — the log was
+            # accurately reporting the bug above, and doubling its noise.
+            if not _continuation:
+                self.terminal_log(
+                    "💬 answer mode: research, confirm, answer once", "dim")
         elif self.settings.get("approval_mode", "none") == "none":
             addendum = (addendum + "\n\n[AUTONOMOUS MODE — THIS OVERRIDES ANY "
                 "CONFLICTING INSTRUCTION ABOVE. The operator turned this on to "
@@ -7634,7 +7732,7 @@ class MainWindow(Adw.ApplicationWindow):
         if _mission_done_signal:
             final = final.replace(MISSION_COMPLETE_TOKEN, "").strip()
             try:
-                self.streaming_msg_widget.set_content(final or "_(done)_")
+                self.streaming_msg_widget.set_content(final or "*(done)*")
             except Exception:
                 pass
         # A stream that reached 'done' cleanly resets the error-retry backoff.
@@ -8123,6 +8221,61 @@ class MainWindow(Adw.ApplicationWindow):
                             obj=self._mission_objective))
                     self._mission_continue()
                     return False
+            # ── ANSWER MODE: an ANNOUNCED next step with no tool call is a
+            #    stall, not an answer. ──
+            # Everything above is gated on `_mission_active`, so in answer mode
+            # (leashed — the normal way a question gets asked) a reply like
+            #
+            #   "I've got the site and the paper metadata. Let me grab the HN
+            #    discussion thread… and also look for a news writeup."
+            #
+            # fell straight through to cleanup. The model narrated its next two
+            # actions instead of emitting the calls, and the turn simply ENDED —
+            # leaving the operator looking at a promise of work that would never
+            # happen, and no report. Asking "did you do it?" then starts a fresh
+            # turn with no memory that anything was pending.
+            #
+            # That gap is not incidental: ANSWER MODE's own directive tells the
+            # model to "chain as many reads as it takes", so a multi-step answer
+            # is the DESIGNED behaviour here — but the only stall recovery in the
+            # file (reply_intends_action, already used by the mission loop) was
+            # never wired to this path. Answer mode could chain N tool calls and
+            # die the moment the model described the next one instead of calling
+            # it.
+            #
+            # BOUNDED, because a model that only ever narrates must not spin:
+            # after ANSWER_STALL_NUDGE_MAX pushes we stop nudging and let the
+            # turn end, so the worst case is a couple of extra round-trips.
+            if (not cancelled and not executable
+                    and not self._stop_requested
+                    and not self._tools_locked
+                    and not looks_degraded(final)
+                    and reply_intends_action(final)
+                    and getattr(self, "_answer_stall_nudges", 0)
+                        < ANSWER_STALL_NUDGE_MAX):
+                self._answer_stall_nudges = getattr(
+                    self, "_answer_stall_nudges", 0) + 1
+                self.terminal_log(
+                    "↻ you said you'd do something but called no tool "
+                    f"— nudging ({self._answer_stall_nudges}/"
+                    f"{ANSWER_STALL_NUDGE_MAX})", "dim")
+                try:
+                    _sc = self.streaming_chat_id or self.current_chat_id
+                    self.store.add_message(
+                        _sc, "user",
+                        "<tool_result>\n[system note: you described what you "
+                        "were going to do next but did not emit a tool call, so "
+                        "NOTHING RAN. Saying it is not doing it. Either emit the "
+                        "tool call now, or — if you already have enough — give "
+                        "the complete final answer to the operator's question in "
+                        "full, with no further preamble.]\n</tool_result>",
+                        meta={"kind": "tool_result"})
+                except Exception as e:
+                    log(f"answer-stall nudge: store write failed: {e}")
+                self.streaming_msg_widget = None
+                self.streaming_msg_db_id = None
+                self._kick_assistant_turn()
+                return False
             self._finish_turn_cleanup()
         return False
 
@@ -8138,7 +8291,7 @@ class MainWindow(Adw.ApplicationWindow):
             # before the error is about to be stored and replayed as history.
             partial = self.streaming_msg_widget.canonical_content() or ""
             sep = "\n\n" if partial.strip() else ""
-            final_text = f"{partial}{sep}_(error: {err})_"
+            final_text = f"{partial}{sep}*(error: {err})*"
             self.streaming_msg_widget.set_content(final_text)
             if self.streaming_msg_db_id:
                 self.store.update_message(self.streaming_msg_db_id,
@@ -8743,10 +8896,45 @@ class MainWindow(Adw.ApplicationWindow):
                 meta={"kind": "call"})
         names = ", ".join(c.name for c in calls)
         self.terminal_log(f"→ batch: {names} ({len(calls)} in parallel)", "info")
-        # A parallel batch is one action from the loop's point of view: it feeds
-        # exactly one combined result, so it gets one recall entry.
+        # ── THE REPEAT GUARD MUST SEE BOTH EXECUTION PATHS ──
+        # It was called only from _execute_tool_calls, so a batch was never
+        # repeat-checked at all — and worse, a batch recorded ONE combined
+        # recall entry ("system_info + disk_usage + processes"), which no
+        # per-tool lookup can ever match.  So `system_info` could run inside a
+        # batch and again on its own a turn later, forever, with the guard
+        # blind to both halves.  That is visible in the operator's log.
+        #
+        # Same drift class as _pure_tool_fn vs dispatch (tests/test_dispatch.py
+        # exists because those two got out of step); this time it was the guard
+        # that sat on one path.
+        #
+        # Individually-blocked calls are DROPPED from the batch rather than
+        # failing the whole thing — the other tools in it are still useful, and
+        # a batch is a convenience, not an atomic unit.
+        _kept, _dropped = [], []
+        for c in calls:
+            if self._repeat_guard_blocks(self._action_label(c)):
+                _dropped.append(c)
+            else:
+                _kept.append(c)
+        if _dropped and not _kept:
+            self._feed_tool_result(
+                self._repeat_guard(self._action_label(_dropped[0]))
+                or "NOT RUN — repeat guard: every tool in that batch has "
+                   "already been run. Pick a different next action.")
+            return
+        if _dropped:
+            calls = _kept
+            names = ", ".join(c.name for c in calls)
+            self.terminal_log(
+                f"⛔ repeat guard: dropped {len(_dropped)} already-run "
+                f"tool(s) from the batch", "error")
+        # Per-tool recall entries so a later SOLO call of the same tool is
+        # recognised as a repeat.  The combined label still names the action
+        # for the log, but the per-tool keys are what the guard counts.
         self._pending_action = " + ".join(
             self._action_label(c) for c in calls)[:400]
+        self._batch_members = [self._action_label(c) for c in calls]
 
         def _bg(feed):
             import concurrent.futures
@@ -9556,10 +9744,18 @@ class MainWindow(Adw.ApplicationWindow):
         try:
             if self._action_log is not None and self._pending_action:
                 self._action_log.record(self._pending_action, result_text or "")
+                # A batch also records each MEMBER under its own label, so a
+                # later solo call of the same tool is seen as the repeat it is.
+                # The combined entry above stays for the digest the model
+                # reads; these are what times_run() can actually match.
+                for _m in (getattr(self, "_batch_members", None) or []):
+                    if _m and _m != self._pending_action:
+                        self._action_log.record(_m, result_text or "")
         except Exception:
             pass
         finally:
             self._pending_action = None
+            self._batch_members = []
 
         self._mark_turn_progress()
         # Route to the chat this turn was started in.  Resolved from
@@ -9642,6 +9838,17 @@ class MainWindow(Adw.ApplicationWindow):
             except Exception:
                 pass
         return n
+
+    def _repeat_guard_blocks(self, label: str) -> bool:
+        """Would the repeat guard refuse this action?  Decision only, no
+        message and no logging — the batch path needs to ask about each of
+        several tools before it knows what it is running."""
+        if self._action_log is None or not label:
+            return False
+        limit = int(self.settings.get("repeat_block_after", 2) or 0)
+        if limit <= 0:
+            return False
+        return self._action_log.should_block(label, limit)
 
     def _repeat_guard(self, label: str):
         """Deterministic backstop for a model that ignores the already-done list.
