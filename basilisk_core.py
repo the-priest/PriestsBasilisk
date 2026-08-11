@@ -757,11 +757,25 @@ class Backend(Protocol):
                     ) -> None: ...
 
 
+# Groq stopped being a CHAT provider in v9.3.0 and its entry left PROVIDERS —
+# but the chain constant GroqBackend reads went with it and the class did not,
+# so `GroqBackend(key)` has been a NameError ever since.  Nothing reaches it
+# today (no ProviderSpec declares engine="groq", so basilisk.py's
+# `if spec.engine == "groq"` branch is unreachable), which is exactly why it
+# went unnoticed: the landmine only detonates for whoever re-registers Groq.
+#
+# Empty, not a guessed model list: Groq retired four of six chain ids in three
+# months, so hardcoding ids nobody has verified would trade a loud NameError
+# for a silent 404 walk.  Empty means re-adding Groq must supply its own chain
+# via ProviderSpec — which is how every other provider already works.
+GROQ_FALLBACK_CHAIN: List[str] = []
+
+
 class GroqBackend:
     name = "groq"
 
     def __init__(self, api_key: str = "",
-                 fallback_chain: List[str] = None):
+                 fallback_chain: Optional[List[str]] = None):
         self.api_key = (api_key or "").strip()
         self._client = None
         self.fallback_chain = fallback_chain or list(GROQ_FALLBACK_CHAIN)
@@ -792,6 +806,13 @@ class GroqBackend:
                     single_model=False) -> None:
         if not self._client:
             on_error("groq not configured")
+            return
+        if not model and not self.fallback_chain:
+            # No chain and no explicit model: say so plainly rather than fall
+            # through the walk below and report "exhausted all models: None",
+            # which reads like an outage instead of a configuration gap.
+            on_error("groq has no model chain configured — register a "
+                     "ProviderSpec with engine='groq' and a chain")
             return
         opts = options or {}
         temperature = opts.get("temperature", 0.7)
@@ -7656,6 +7677,22 @@ _TOOL_DEBRIS_RES = [
 ]
 
 
+def contains_tool_markup(text: str) -> bool:
+    """True when `text` contains tool-call-shaped markup in ANY known dialect.
+
+    Dialect-blind on purpose: it answers "is the model emitting protocol here?"
+    and nothing else, so a caller that must react to a tool call BEFORE the
+    normaliser has run (mid-stream, on a partially-arrived tag) cannot be fooled
+    by a dialect the literal substring `"<tool"` misses.  That substring test is
+    exactly how the TTS suspend guard used to read DSML aloud: `<｜DSML｜｜tool …>`
+    does not contain `<tool`, so the guard never fired and the speaker recited
+    the sentinel.
+    """
+    if not text:
+        return False
+    return any(rx.search(text) for rx in _TOOL_DEBRIS_RES)
+
+
 def looks_like_failed_tool_call(text: str) -> bool:
     """True when a reply contains tool-call-shaped debris that did not parse.
 
@@ -7663,10 +7700,12 @@ def looks_like_failed_tool_call(text: str) -> bool:
     yet. Rather than guessing at the syntax, the host tells the model its call
     was not understood and shows it the one format that works — which fixes the
     class of bug instead of one member of it.
+
+    Same predicate as contains_tool_markup; the two names mark the two
+    situations it is used in (before dispatch: "protocol is arriving"; after
+    dispatch produced nothing: "protocol arrived and we failed to read it").
     """
-    if not text:
-        return False
-    return any(rx.search(text) for rx in _TOOL_DEBRIS_RES)
+    return contains_tool_markup(text)
 
 
 def scrub_tool_debris(text: str) -> str:
@@ -7983,6 +8022,38 @@ def extract_think_blocks(text: str) -> Tuple[str, str]:
 def strip_think_blocks(text: str) -> str:
     """Just the visible text, with all <think> reasoning removed."""
     return extract_think_blocks(text)[0]
+
+
+def speakable_text(text: str) -> str:
+    """The ONE transform between raw model output and the SPEAKER.
+
+    This exists because the speaker was the last consumer of model output still
+    sitting UPSTREAM of the canonicalisation boundary.  Display had been moved
+    behind it (set_content: extract_think_blocks -> strip_tool_calls ->
+    scrub_tool_debris); parsing had been moved behind it (parse_tool_calls
+    normalises first); history had been moved behind it (the stored message is
+    the normalised one).  Speech had not, so it re-implemented its own,
+    dialect-blind stripping in basilisk_voice — and every dialect that was not
+    the canonical `<tool …>` got READ ALOUD:
+
+        "<｜DSML｜｜tool name=run> <｜DSML｜｜parameter name=command …"
+
+    which is where the operator's "it says DSML" came from.  The letters really
+    are not in the reply — they are in the transport, and the transport was
+    being spoken.
+
+    The chain below is deliberately IDENTICAL to the display chain, in the same
+    order, because "what the operator sees" and "what the operator hears" must
+    be the same message.  Any future consumer that turns model output into
+    something a human perceives should call this or set_content's chain, never
+    invent a third one — a third one is how this bug happened.
+    """
+    visible = strip_think_blocks(text or "")
+    # strip_tool_calls normalises internally, so every dialect is folded to the
+    # canonical form before it is removed.  scrub_tool_debris then takes out
+    # wreckage from any dialect the normaliser does not know YET — so a brand
+    # new tag shape costs the operator silence, never gibberish.
+    return scrub_tool_debris(strip_tool_calls(visible))
 
 
 # ═════════════════════════════════════════════════════════════════════

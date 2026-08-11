@@ -83,6 +83,91 @@ _FORKBOMB_RE = re.compile(r":\s*\(\s*\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:")
 # Decode-then-run chains (base64/hex/etc. piped onward to a shell).
 _DECODERS = {"base64", "base32", "xxd", "uudecode"}
 
+# ── Files whose destruction bricks the box ───────────────────────────
+# DELIBERATELY SHORT, and every entry earns its place by being irreversible in
+# the way this gate's docstring means: empty /etc/passwd and nobody logs in
+# again; clobber /etc/fstab and it does not boot.
+#
+# What is NOT here matters as much.  /etc/hosts (mapping a target hostname is
+# routine pentest work), /etc/resolv.conf and sshd_config (hardening work) are
+# all edited legitimately.  chmod/chown are likewise absent from the rules
+# below: wrong permissions are recoverable, and this gate is about the
+# unrecoverable.  A gate that blocks the operator's normal job is a gate he
+# switches off, which is worse than no gate.
+_CRITICAL_FILES = {
+    "/etc/passwd", "/etc/shadow", "/etc/group", "/etc/gshadow",
+    "/etc/sudoers", "/etc/fstab", "/etc/crypttab", "/etc/inittab",
+}
+_CRITICAL_FILE_DIRS = ("/etc/sudoers.d/", "/etc/pam.d/", "/boot/")
+
+
+def _is_critical_file(t: str) -> bool:
+    """True if `t` names a file the system cannot be repaired without."""
+    norm = t.strip("'\"").rstrip("/")
+    if norm in _CRITICAL_FILES:
+        return True
+    return any(norm.startswith(d) for d in _CRITICAL_FILE_DIRS)
+
+
+def _is_critical_top_dir_itself(t: str) -> bool:
+    """True only when `t` IS a bare critical system dir (/etc, /usr, /bin) —
+    not something inside one.  `mv /etc /tmp` ends the system; `mv
+    /usr/local/bin/tool /tmp` is a Tuesday."""
+    expanded = os.path.expanduser(t) if t.startswith("~") else t
+    norm = expanded.rstrip("/")
+    norm = re.sub(r"/\.$", "", norm)
+    return (norm.startswith("/") and norm.count("/") == 1
+            and norm.lstrip("/") in _CRITICAL_TOP)
+
+
+# A TRUNCATING redirect ( > , not >> ) onto one of those files.  shlex eats the
+# redirection operator, so — exactly like _REDIR_BLOCKDEV_RE — this is matched
+# against the raw normalized string.  `>>` is excluded deliberately: appending
+# to /etc/passwd adds an account, which is alarming but recoverable and is a
+# thing an operator does on purpose; `>` empties the file.
+_REDIR_CRITICAL_RE = re.compile(
+    r"(?<!>)>(?!>)\s*['\"]?(?:"
+    r"/etc/(?:passwd|shadow|group|gshadow|sudoers|fstab|crypttab|inittab)\b"
+    r"|/etc/sudoers\.d/|/etc/pam\.d/|/boot/)")
+
+# ── Command substitutions whose OUTPUT is statically knowable ────────
+# `$(echo rm) -rf /` was a clean bypass, and the reason is structural rather
+# than a missing pattern.  The gate lifts a substitution's BODY and scans it as
+# a command — but a substitution's body is not what runs.  Its OUTPUT is,
+# spliced back into the surrounding command line.  Scanning the body of
+# `$(echo rm)` asks "is `echo rm` dangerous?" (no) and never asks the question
+# that matters: what does the line BECOME once the shell has expanded it?
+# (`rm -rf /`).
+#
+# echo/printf are exactly the cases where that answer is knowable without
+# running anything, and they are the whole obfuscation trick in practice.
+# Resolving them collapses a family of bypasses — including `r$(echo m) -rf /`,
+# where the substitution supplies only PART of a word, so no body-scan could
+# ever have caught it — into the plain command the rest of the gate handles.
+_STATIC_SUBST_RE = re.compile(
+    r"\$\(\s*(?:echo|printf)\s+([^()`]*?)\s*\)"
+    r"|`\s*(?:echo|printf)\s+([^`()]*?)\s*`")
+
+
+def _resolve_static_substitutions(command: str, rounds: int = 3) -> str:
+    """Splice `$(echo X)` / `` `echo X` `` / `$(printf X)` back to X.
+
+    Bounded rounds: a nested or self-similar input cannot spin here.
+    """
+    def _expand(m: "re.Match") -> str:
+        body = m.group(1) if m.group(1) is not None else m.group(2)
+        try:                    # strip one layer of quoting, as sh would
+            return " ".join(shlex.split(body))
+        except ValueError:
+            return body
+    out = command
+    for _ in range(rounds):
+        nxt = _STATIC_SUBST_RE.sub(_expand, out)
+        if nxt == out:
+            break
+        out = nxt
+    return out
+
 
 def _normalize(command: str) -> str:
     """Collapse the whitespace-obfuscation tricks that don't change meaning to
@@ -678,6 +763,42 @@ def _sub_is_catastrophic(args: List[str], depth: int) -> bool:
         if roots_dangerous and (deletes or execs_rm):
             return True
 
+    # ── REPLACING a file the system cannot be repaired without ──
+    # Every rule above is about DELETION, so the whole clobber family walked
+    # through: `install -m 000 /dev/null /etc/passwd`, `cp /dev/null
+    # /etc/shadow`, `truncate -s 0 /etc/passwd` and `dd if=/dev/zero
+    # of=/etc/fstab` destroy the file's contents just as finally as rm does,
+    # and none of them is an rm.  Classify by what the command DOES to its
+    # destination, not by whether it is spelled "rm".
+    #
+    # Scoped to _CRITICAL_FILES, so `install -m 755 mytool /usr/local/bin/`
+    # — the normal reason to run install — is untouched.
+    if cmd in ("cp", "install", "mv", "ln"):
+        ops = _operands(rest)
+        # SRC… DEST: only the destination is written.
+        if len(ops) >= 2 and _is_critical_file(ops[-1]):
+            return True
+    if cmd in ("truncate", "tee"):
+        for t in _operands(rest):
+            if _is_critical_file(t):
+                return True
+    if cmd == "dd":
+        for a in rest:
+            if a.startswith("of=") and _is_critical_file(a[3:]):
+                return True
+
+    # ── MOVING a critical directory away ──
+    # `mv /etc /tmp/etc` deletes nothing, so no delete rule fired — and the
+    # machine is finished the moment it returns.  Only the SOURCE operands are
+    # judged (everything but the last), and only when the source IS the bare
+    # critical dir: `mv /usr/local/bin/tool /tmp` stays fine.
+    if cmd == "mv":
+        ops = _operands(rest)
+        for t in ops[:-1]:
+            if (_is_root_or_home(t) or _is_critical_dir_itself(t)
+                    or _is_critical_top_dir_itself(t)):
+                return True
+
     # recursive chmod / chown on root or a system dir
     if cmd in ("chmod", "chown", "chgrp") and _has_recursive_flag(rest):
         for t in _operands(rest):
@@ -754,20 +875,29 @@ def _pipe_chain_is_catastrophic(command: str) -> bool:
                 if t in ("*", ".", "./", "./*", "./.*", "..", "*/"):
                     return True
 
-    # find <dangerous> piped into xargs rm -r*
-    for i in range(len(argvs) - 1):
-        a, nxt = argvs[i], argvs[i + 1]
-        if a and _base(a[0]) == "find":
-            paths = []
-            for x in a[1:]:
-                if x.startswith("-"):
-                    break
-                paths.append(x)
-            if any(_dangerous_target(p) for p in paths):
-                flat = [y for y in nxt if not y.startswith("-")]
-                if nxt and _base(nxt[0]) == "xargs" and flat[1:2] \
-                        and _base(flat[1]) == "rm" and _has_recursive_flag(nxt[1:]):
-                    return True
+    # ANY upstream naming a dangerous path, piped into `xargs rm -r*`.
+    #
+    # This was written for `find` alone, so `echo / | xargs rm -rf` — the same
+    # deletion, one word different — walked straight through, as did `ls / |
+    # xargs rm -rf`.  The command that PRODUCES the path list is irrelevant to
+    # the danger; what matters is that a dangerous path is visibly on its way
+    # into a recursive delete.  So judge the pipeline, not the producer.
+    #
+    # Still requires a dangerous path we can actually SEE: `find /tmp/build |
+    # xargs rm -rf` names nothing dangerous and stays allowed, exactly as
+    # before.
+    for i, args in enumerate(argvs):
+        if i == 0 or not args or _base(args[0]) != "xargs":
+            continue
+        inner = _strip_xargs_opts(args[1:])
+        if not (inner and _base(inner[0]) == "rm"
+                and _has_recursive_flag(inner[1:])):
+            continue
+        for up in argvs[:i]:
+            if not up:
+                continue
+            if any(_dangerous_target(t) for t in _operands(up[1:])):
+                return True
 
     # opaque execution: a shell as a pipe sink, optionally fed by a decoder
     for i, args in enumerate(argvs):
@@ -796,8 +926,18 @@ def _scan(command: str, depth: int = 0) -> bool:
         return True
     if _REDIR_BLOCKDEV_RE.search(norm):
         return True
+    if _REDIR_CRITICAL_RE.search(norm):
+        return True
     if _pipe_chain_is_catastrophic(norm):
         return True
+
+    # Re-scan with statically-knowable substitutions spliced in.  Runs BEFORE
+    # the per-sub pass because the point is to judge the command the shell will
+    # actually build, not the one that was typed.
+    if depth < 4:
+        resolved = _resolve_static_substitutions(norm)
+        if resolved != norm and _scan(resolved, depth + 1):
+            return True
 
     for sub in _split_subcommands(norm):
         args = _argv(sub)

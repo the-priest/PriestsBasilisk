@@ -149,6 +149,48 @@ _LIST_NUM      = re.compile(r"^\s{0,3}\d+[.)]\s+")
 _HRULE         = re.compile(r"^\s{0,3}([-*_])\s*(?:\1\s*){2,}$")
 _WS            = re.compile(r"[ \t]+")
 
+# ── LAST-RESORT PROTOCOL BACKSTOP ────────────────────────────────────
+# Callers are expected to hand this module text that has already been through
+# basilisk_core.speakable_text(), which knows every tool-call dialect and
+# removes them properly.  This is the second line of defence, and it exists
+# because of a real bug: the speech path was the one consumer of model output
+# that never went through the canonicaliser, so a DeepSeek-V4 `<｜DSML｜｜tool …>`
+# call reached the speaker intact and PIPER READ THE SENTINEL OUT LOUD.
+#
+# The rule this encodes: a machine-readable tag is NEVER something a human is
+# meant to hear.  If protocol markup somehow reaches the last common ancestor of
+# every spoken line, the right outcome is that the words vanish — silence is a
+# recoverable failure, reciting transport internals at the operator is not.
+#
+# Deliberately shape-based rather than a copy of the core dialect table: this
+# module stays stdlib-only and importable on its own (it does not import
+# basilisk_core), and it only needs to RECOGNISE markup, not parse it.  That
+# means a dialect nobody has written down yet is still caught here.
+_DS_PIPE_CH    = "｜"          # FULLWIDTH VERTICAL LINE — DeepSeek/DSML
+_SPEECH_DEBRIS = [
+    # <｜DSML｜｜tool …>, <｜tool▁calls▁begin｜>, and every other special-token tag
+    re.compile("<[^>]{0,200}?[" + _DS_PIPE_CH + "▁][^>]{0,200}?>"),
+    # a bare/unterminated one still arriving at end of line
+    re.compile("<[" + _DS_PIPE_CH + "][^\n]{0,200}$"),
+    # canonical and near-canonical call tags in any dialect
+    re.compile(r"<\s*/?\s*(?:tool|tool_call|toolcall|function_call|invoke"
+               r"|antml:invoke)\b[^>]{0,4000}>?", re.I),
+    re.compile(r"<\s*/?\s*(?:antml:)?parameter\b[^>]{0,4000}>?", re.I),
+    re.compile(r"<\s*function\s*=[^>]{0,4000}>|<\s*/\s*function\s*>", re.I),
+    # reasoning must never be spoken — the operator hears the reply, not the
+    # model talking to itself.  Callers strip this; this is the backstop.
+    re.compile(r"<\s*/?\s*think\b[^>]{0,200}>?", re.I),
+]
+
+
+def _strip_protocol(s: str) -> str:
+    """Remove any tool/reasoning markup that survived the caller's cleaning."""
+    if "<" not in s and _DS_PIPE_CH not in s:
+        return s                      # exact: every pattern needs one of these
+    for rx in _SPEECH_DEBRIS:
+        s = rx.sub(" ", s)
+    return s
+
 # ── punctuation smoothing: the marks that make a TTS engine lurch ──
 # Em/en dashes, parentheticals, ellipses and semicolons all read as long dead
 # pauses. Turn them into a comma's worth of natural pause (or none) so speech
@@ -177,6 +219,12 @@ def _smooth_punctuation(s: str) -> str:
 def _clean_inline(line: str) -> str:
     """Strip inline markdown from a single line, leaving readable words."""
     s = line
+    # BEFORE anything else: markup is not prose and must not be spoken.  This
+    # is the single choke point every spoken line passes through — the one-shot
+    # path (clean_for_speech) and the streaming path (SpeechStreamer._fold)
+    # both land here — so scrubbing here covers both by construction rather
+    # than by two callers remembering to.
+    s = _strip_protocol(s)
     s = _MD_LINK.sub(r"\1", s)            # [text](url) -> text
     s = _BARE_URL.sub(" link ", s)        # don't spell out URLs
     s = _INLINE_CODE.sub(r"\1", s)        # `code` -> code
@@ -351,19 +399,51 @@ class SpeechStreamer:
     fully received and outside code fences).  Call flush() at the end to
     drain the final partial line.
 
-    Content grows by appended tokens only, so the committed prefix is
-    stable — we just remember how many lines we've folded in and how much
-    speakable text we've already emitted."""
+    THE CONTRACT: every call in one run must pass the SAME string, grown only
+    by appending.  That is what makes "how many lines have I already folded"
+    a valid way to find the new text.
+
+    The contract used to be implicit, and it was violated in production: the
+    GUI fed think-STRIPPED content on every token but the RAW final text at
+    flush().  Two different strings, so the line count meant nothing at flush —
+    it indexed into a longer string and folded lines that were never new.  The
+    operator heard the reply, then heard the model's chain-of-thought read back
+    at him, then heard the reply again.  That is the "it speaks its thoughts"
+    report, and no amount of stripping at the caller fixes it, because the fault
+    is the streamer trusting a contract it never checked.
+
+    So the contract is now CHECKED, not assumed (see _fold)."""
 
     def __init__(self) -> None:
         self.reset()
 
     def reset(self) -> None:
-        self._committed_lines = 0
+        self._committed: List[str] = []   # the exact lines already folded
         self._in_code = False
         self._pending = ""        # speakable text not yet emitted as sentences
 
+    @property
+    def _committed_lines(self) -> int:
+        return len(self._committed)
+
     def _fold(self, lines: List[str]) -> None:
+        # ── CONTRACT CHECK ──
+        # If what we were handed does not still START with everything we have
+        # already folded, the caller changed the text under us.  Anything we
+        # emit from here is either a repeat or something the caller had
+        # deliberately removed — both get SPOKEN, which is the loudest possible
+        # way to be wrong.  Resynchronise instead: treat the new text as
+        # already-consumed and emit nothing this call.  Losing a tail is
+        # recoverable; reciting the model's private reasoning at the operator
+        # is not.
+        seen = self._committed
+        if lines[:len(seen)] != seen:
+            _log("SpeechStreamer: content changed under the streamer "
+                 f"({len(seen)} lines folded, {len(lines)} handed back) — "
+                 "resyncing rather than re-speaking")
+            self._committed = list(lines)
+            self._pending = ""
+            return
         for ln in lines[self._committed_lines:]:
             stripped = ln.strip()
             if stripped.startswith("```"):
@@ -374,7 +454,7 @@ class SpeechStreamer:
             c = _clean_inline(ln)
             if c:
                 self._pending += c + "\n"
-        self._committed_lines = len(lines)
+        self._committed = list(lines)
 
     def _emit(self, final: bool) -> List[str]:
         if not self._pending.strip():

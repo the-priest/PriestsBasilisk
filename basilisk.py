@@ -111,8 +111,9 @@ from basilisk_core import (
     note_command, recent_duplicate,
     parse_tool_calls, strip_tool_calls, shell_block_command,
     looks_like_failed_tool_call, scrub_tool_debris,
+    contains_tool_markup,
     _normalise_tool_syntax,
-    extract_think_blocks, strip_think_blocks,
+    extract_think_blocks, strip_think_blocks, speakable_text,
     is_online, is_sensitive_path, command_needs_sudo, is_catastrophic_command,
     command_tampers_self, Watcher,
     PROVIDERS, PROVIDERS_BY_KEY,
@@ -3194,8 +3195,36 @@ class MessageWidget(Gtk.Box):
         self._render_stream()
         return False        # GLib.SOURCE_REMOVE — one shot
 
+    def canonical_content(self) -> str:
+        """Fold `_content` to the canonical tool syntax, in place, and return it.
+
+        ── THE BOUNDARY ──
+        A stream becomes "the message" at more than one place: it can FINISH,
+        it can be STOPPED by the operator, or it can ERROR mid-token.  All
+        three write `_content` into the store and into the history that is
+        re-sent to the model on every later turn — so all three must fold the
+        model's native dialect to the canonical form first.  Only the finish
+        path did.  A stopped or errored turn wrote raw `<｜DSML｜｜tool …>` into
+        the database, and strip_tool_calls' own docstring spells out the cost:
+        every later turn re-sent that garbage as history, wasting context and
+        teaching the model the broken format was acceptable.
+
+        Doing it here, on the attribute rather than on a caller's local, is what
+        makes `_content` canonical for EVERY later reader — renderer, store, and
+        the per-message speak button all read it directly.
+
+        _normalise_tool_syntax is idempotent (locked by tests/test_toolsyntax),
+        so calling this twice, or calling it after the caller already
+        normalised, is a no-op rather than a second opinion.
+        """
+        try:
+            self._content = _normalise_tool_syntax(self._content or "")
+        except Exception:
+            pass                      # keep the raw text over losing the reply
+        return self._content
+
     def finish_streaming(self) -> str:
-        final = self._content
+        final = self.canonical_content()
         self._streaming_label = None
         if not getattr(self, "_disposed", False):
             self.set_content(final)
@@ -6305,7 +6334,9 @@ class MainWindow(Adw.ApplicationWindow):
         """Single teardown path for the end of an assistant turn —
         whether it finished, errored, or was stopped."""
         if mark_partial and self.streaming_msg_widget is not None:
-            partial = (self.streaming_msg_widget._content or "").strip()
+            # Canonicalise before this partial reply is stored and replayed as
+            # history — a stopped turn is still a turn the model will be shown.
+            partial = (self.streaming_msg_widget.canonical_content() or "").strip()
             final_text = partial if partial else "_(stopped)_"
             try:
                 self.streaming_msg_widget.set_content(final_text)
@@ -6558,7 +6589,11 @@ class MainWindow(Adw.ApplicationWindow):
         self.tts.stop()
         self._speaking_widget = widget
         widget.set_speak_state("speaking")
-        self.tts.speak_all(getattr(widget, "_content", "") or "")
+        # Third consumer of model output, same transform as the other two.
+        # This one read `_content` raw, so replaying any message that contained
+        # a non-canonical tool call recited the markup — including after a
+        # chat reload, where `_content` comes straight back out of the store.
+        self.tts.speak_all(speakable_text(getattr(widget, "_content", "") or ""))
 
     def _on_tts_state(self, state):
         """Driven from the TTS worker (marshalled here): keep the owning
@@ -7513,10 +7548,13 @@ class MainWindow(Adw.ApplicationWindow):
             return
         if self._tts_streamer is None or self.streaming_msg_widget is None:
             return
-        # Strip the model's <think> reasoning before speaking — only the
-        # actual reply should be read aloud, never the chain-of-thought.
-        content = strip_think_blocks(self.streaming_msg_widget._content or "")
-        if not self._tts_suspended and ("<tool" in content):
+        raw = self.streaming_msg_widget._content or ""
+        # SUSPEND CHECK RUNS ON THE RAW TEXT, and asks "is protocol arriving?"
+        # in every dialect.  It used to ask `"<tool" in content` — a literal
+        # substring — which is false for `<｜DSML｜｜tool …>`, `<invoke …>` and
+        # `<function=…>`.  For those the guard never fired, the speaker kept
+        # running through the tool call, and the operator heard the transport.
+        if not self._tts_suspended and contains_tool_markup(raw):
             # Model is doing a tool turn — stop streaming this widget's
             # audio.  Drop anything already queued from it.
             self._tts_suspended = True
@@ -7525,7 +7563,12 @@ class MainWindow(Adw.ApplicationWindow):
         if self._tts_suspended:
             return
         try:
-            sentences = self._tts_streamer.feed(content)
+            # speakable_text is the SAME transform used at flush below and by
+            # the per-message speak button.  The streamer tracks a prefix across
+            # calls, so feeding it one transform here and a different one at
+            # flush corrupts its bookkeeping — which is exactly how the model's
+            # reasoning ended up being read aloud after the reply finished.
+            sentences = self._tts_streamer.feed(speakable_text(raw))
             if sentences:
                 # This reply now owns the speaker; its per-message button
                 # will show pause while it reads.
@@ -7600,7 +7643,10 @@ class MainWindow(Adw.ApplicationWindow):
                 and not self._tts_suspended and self._tts_streamer is not None
                 and not (meta.get("cancelled") or self._stop_requested)):
             try:
-                for sentence in self._tts_streamer.flush(final):
+                # SAME transform as the per-token feed above — see the note
+                # there.  Passing `final` raw here is what broke the streamer's
+                # prefix invariant and re-spoke the <think> block.
+                for sentence in self._tts_streamer.flush(speakable_text(final)):
                     self.tts.speak(sentence)
             except Exception as e:
                 log(f"tts flush error: {e}")
@@ -8088,7 +8134,9 @@ class MainWindow(Adw.ApplicationWindow):
             # widget and replacing with just the error text discards
             # potentially useful partial output (an explanation that got
             # cut off, a half-finished tool call, etc).
-            partial = self.streaming_msg_widget._content or ""
+            # Same boundary as the finish and stop paths: whatever streamed in
+            # before the error is about to be stored and replayed as history.
+            partial = self.streaming_msg_widget.canonical_content() or ""
             sep = "\n\n" if partial.strip() else ""
             final_text = f"{partial}{sep}_(error: {err})_"
             self.streaming_msg_widget.set_content(final_text)
