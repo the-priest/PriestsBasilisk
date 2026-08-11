@@ -30,6 +30,7 @@ _warnings.filterwarnings("ignore", category=DeprecationWarning,
 import sys
 import os
 import gc
+import io
 import re
 import json
 import threading
@@ -42,7 +43,7 @@ try:
     from basilisk_btn_art import BTN_ART_B64
 except Exception:
     BTN_ART_B64 = {}   # missing module -> art buttons just fall back to symbolic
-from typing import List, Dict, Any, Optional, Callable
+from typing import List, Dict, Any, Optional, Callable, Tuple
 
 from basilisk_core import (
     GroqBackend, OpenAICompatBackend, BackendRouter,
@@ -1905,6 +1906,97 @@ _RENDER_IMAGES = True
 # the button row and by the in-chat in-progress placeholder so both show the
 # action title instead of a generic "working".
 _CURRENT_ACTION = ""
+
+
+# ── TOOL ARGUMENT NORMALISATION ──────────────────────────────────────
+# The accepted argument names are parsed from the PERSONA SPECS — the very
+# text the model is shown — so the validator and the contract cannot drift
+# apart. A hand-maintained second list would be one more pair of tables to
+# keep in step, which is the failure mode half this file's comments are about.
+_SPEC_TOOL_RE = re.compile(r'<tool name="([a-z_0-9]+)">\s*(\{.*?\})\s*</tool>',
+                           re.S)
+_SPEC_KEY_RE = re.compile(r'"([a-z_0-9]+)"\s*:')
+
+# Synonyms a model reaches for. Mapped onto the real key ONLY when the real
+# key is absent, so a correct call is never rewritten.
+_ARG_ALIASES: Dict[str, Dict[str, str]] = {
+    "copy_path":   {"path": "src", "source": "src", "from": "src",
+                    "file": "src", "to": "dst", "dest": "dst",
+                    "destination": "dst", "target": "dst"},
+    "move_path":   {"path": "src", "source": "src", "from": "src",
+                    "file": "src", "to": "dst", "dest": "dst",
+                    "destination": "dst", "target": "dst"},
+    "scan_net":    {"target": "cidr", "network": "cidr", "subnet": "cidr",
+                    "range": "cidr", "host": "cidr", "ip": "cidr"},
+    "read_file":   {"file": "path", "filename": "path", "target": "path"},
+    "delete_path": {"file": "path", "filename": "path", "target": "path"},
+    "make_dir":    {"dir": "path", "directory": "path", "folder": "path"},
+    "web_read":    {"link": "url", "address": "url", "target": "url",
+                    "site": "url"},
+    "find_file":   {"query": "pattern", "name": "pattern", "term": "pattern"},
+    "run":         {"cmd": "command", "shell": "command"},
+    # cve_lookup searches NVD by KEYWORD, so its argument is a PRODUCT name.
+    # The operator's audit caught the model calling it with a CVE id, which
+    # arrived under no accepted key and produced "no product" — a message that
+    # reads like NVD had no data rather than like the argument never landed.
+    # A CVE id is a perfectly good NVD keyword, so route it to `product`
+    # rather than refusing the call.
+    "cve_lookup":  {"cve": "product", "id": "product", "cve_id": "product",
+                    "identifier": "product", "name": "product",
+                    "software": "product", "package": "product"},
+}
+
+_SPEC_ARGS_CACHE: Optional[Dict[str, set]] = None
+
+
+def _spec_arg_names() -> Dict[str, set]:
+    """{tool: {accepted argument names}} lifted from the persona contract."""
+    global _SPEC_ARGS_CACHE
+    if _SPEC_ARGS_CACHE is not None:
+        return _SPEC_ARGS_CACHE
+    out: Dict[str, set] = {}
+    try:
+        import basilisk_persona as _bp
+        src = io.open(_bp.__file__, encoding="utf-8").read()
+        for name, body in _SPEC_TOOL_RE.findall(src):
+            try:
+                keys = set(json.loads(body).keys())
+            except Exception:
+                keys = set(_SPEC_KEY_RE.findall(body))
+            if keys:
+                out.setdefault(name, set()).update(keys)
+    except Exception as e:
+        log(f"tool-arg spec parse failed (validation disabled): {e}")
+        out = {}
+    _SPEC_ARGS_CACHE = out
+    return out
+
+
+def _normalise_tool_args(name: str, args: Any) -> Tuple[Dict[str, Any], str]:
+    """(normalised args, error).  A non-empty error means DO NOT RUN.
+
+    Fails only on the unambiguous case — the model supplied arguments and NOT
+    ONE of them is a name this tool accepts. A call that got at least one key
+    right still runs exactly as before, so this cannot break a working tool.
+    """
+    if not isinstance(args, dict):
+        return ({}, "")
+    out = dict(args)
+    for alias, real in (_ARG_ALIASES.get(name) or {}).items():
+        if alias in out and not str(out.get(real) or "").strip():
+            out[real] = out.pop(alias)
+    if not out:
+        return (out, "")
+    accepted = _spec_arg_names().get(name)
+    if not accepted:
+        return (out, "")            # no declared contract — nothing to check
+    if set(out) & accepted:
+        return (out, "")            # at least one key landed; run it
+    return (out, (
+        f"{name} received only unknown argument(s) "
+        f"{sorted(out)} and would have run with none of them — which silently "
+        f"does the wrong thing rather than nothing. This tool takes "
+        f"{sorted(accepted)}. Re-issue the call using those names."))
 
 
 def _action_summary(calls) -> str:
@@ -9702,6 +9794,32 @@ class MainWindow(Adw.ApplicationWindow):
 
         fn = dispatch.get(call.name)
         if fn:
+            # ── ARGUMENTS THE TOOL CANNOT SEE MUST NOT BE SILENTLY DROPPED ──
+            # Every handler below reads its arguments with `a.get("src")`,
+            # `a.get("cidr")` and friends, so a key the tool does not know is
+            # simply invisible and the call proceeds on defaults. Two live
+            # examples from the operator's own tool audit:
+            #
+            #   copy_path{"path": "/etc/hostname"}  -> src="" -> "source not
+            #       found: ''", which reads like the FILE is missing rather
+            #       than like the argument never arrived; and
+            #   scan_net{"target": "127.0.0.1"}     -> cidr=None -> swept the
+            #       default gateway subnet instead. On a scanner that is worse
+            #       than a no-op: it ran an unrequested active scan of a
+            #       network nobody named.
+            #
+            # `_normalise_tool_args` maps the obvious synonyms onto the real
+            # keys, and refuses outright when NONE of the supplied keys are
+            # ones this tool accepts — telling the model the accepted names so
+            # it can re-issue. Same principle the tool-DIALECT handling already
+            # uses: an unreadable call costs a round trip, never a wrong action.
+            _args, _argerr = _normalise_tool_args(call.name, call.args)
+            if _argerr:
+                self.terminal_log(
+                    f"✗ {call.name}: {_argerr}", "error")
+                self._feed_tool_result(f"NOT RUN — {_argerr}")
+                return
+            call.args = _args
             self.terminal_log(f"→ tool: {call.name}({json.dumps(call.args, separators=(',',':'))[:80]})", "info")
             # The name the log line below should use. Set here because this is
             # the ONE place that knows it; _tool_simple reads it synchronously

@@ -259,6 +259,20 @@ def _strip_to_host(token: str) -> str:
     m = _SCHEME_RE.match(t)
     if m:
         t = m.group(2)
+    # ── KEEP A CIDR PREFIX ──
+    # The `/` split below exists to drop a URL PATH, and it was also eating the
+    # prefix length of a NETWORK: `10.0.0.0/8` became `10.0.0.0`, so the gate
+    # judged a 16-million-host sweep as a single address. With scope
+    # 10.0.0.0/24 that made `nmap -sS 10.0.0.0/8` ALLOWED — and made
+    # `nmap 10.0.0.0/24` allowed while the single host `10.0.0.1` inside it was
+    # correctly EXCLUDED, so an exclusion could be swept just by naming the
+    # range around it. Both directions are exactly what this gate exists to
+    # prevent.
+    try:
+        ipaddress.ip_network(t, strict=False)
+        return t.strip().lower()               # a real network — prefix kept
+    except ValueError:
+        pass
     t = t.split("/", 1)[0].split("?", 1)[0].split("#", 1)[0]
     if "@" in t:
         t = t.rsplit("@", 1)[1]
@@ -706,31 +720,63 @@ def _is_loopback(host: str) -> bool:
         return False
 
 
+def _as_network(t: str):
+    """`t` as an ip_network, or None when it is not an address/range at all."""
+    try:
+        return ipaddress.ip_network((t or "").strip(), strict=False)
+    except ValueError:
+        return None
+
+
 def _match_rule(host: str, rule: str) -> bool:
-    """Identical semantics to engage._match_one — kept in lockstep."""
+    """Is `host` AUTHORISED by `rule`?  Lockstep twin of engage._match_one.
+
+    CONTAINMENT, not equality, whenever both sides are addresses or ranges.
+    A target may be a whole network now that _strip_to_host keeps the prefix,
+    and "the operator authorised 10.0.0.0/24" must NOT authorise a scan of
+    10.0.0.0/8 that merely starts at the same address. Comparing IPs as
+    STRINGS was wrong for the same reason: `2001:db8::1` and
+    `2001:db8:0:0:0:0:0:1` are one host and compared unequal.
+    """
     rule = (rule or "").strip().lower().rstrip(".")
     if not rule or not host:
         return False
-    if "/" in rule:
-        try:
-            net = ipaddress.ip_network(rule, strict=False)
-            try:
-                return ipaddress.ip_address(host) in net
-            except ValueError:
-                return False
-        except ValueError:
-            pass
-    try:
-        ipaddress.ip_address(rule)
-        return host == rule
-    except ValueError:
-        pass
+    rnet, hnet = _as_network(rule), _as_network(host)
+    if rnet is not None:
+        # An address/range target is authorised only if it lies ENTIRELY
+        # inside the authorised range.
+        if hnet is None:
+            return False
+        return hnet.version == rnet.version and hnet.subnet_of(rnet)
+    if hnet is not None:
+        # Numeric target vs a hostname rule — never a match.
+        return False
     if host == rule or host.endswith("." + rule):
         return True
     if rule.startswith("*."):
         bare = rule[2:]
         return host == bare or host.endswith("." + bare)
     return False
+
+
+def _touches_rule(host: str, rule: str) -> bool:
+    """Does `host` REACH anything covered by `rule`?  Used for EXCLUSIONS.
+
+    Deliberately weaker than _match_rule: any overlap counts.  Authorisation
+    asks "is all of this inside the permitted set" (containment); an exclusion
+    asks "does any part of this hit the carve-out" (overlap).  Using the
+    authorisation test for exclusions is what let a /24 sweep step over a
+    single excluded address inside it.
+    """
+    rule = (rule or "").strip().lower().rstrip(".")
+    if not rule or not host:
+        return False
+    rnet, hnet = _as_network(rule), _as_network(host)
+    if rnet is not None and hnet is not None:
+        return hnet.version == rnet.version and hnet.overlaps(rnet)
+    if rnet is not None or hnet is not None:
+        return False            # one numeric, one a name — no relation
+    return _match_rule(host, rule)      # hostname semantics are unchanged
 
 
 def _window_open(state: Dict[str, Any], now: Optional[datetime] = None
@@ -802,8 +848,15 @@ def check_command(command: str, state: Optional[Dict[str, Any]] = None,
                     % ", ".join(sorted(set(ext.tools)))))
         return verdict
 
+    # EXCLUSIONS USE OVERLAP, NOT CONTAINMENT.
+    # _match_rule answers "is this target authorised BY this rule", which needs
+    # containment. An exclusion asks the opposite question — "does this command
+    # TOUCH the carved-out host" — and a range that merely overlaps an excluded
+    # address touches it. With containment only, `nmap 10.0.0.0/24` sailed past
+    # an exclusion of 10.0.0.1 that `nmap 10.0.0.1` was correctly refused for,
+    # which is a carve-out anyone can step over by naming the range around it.
     excluded = [t for t in targets
-                if any(_match_rule(t, r) for r in exclusions)]
+                if any(_touches_rule(t, r) for r in exclusions)]
     if excluded:
         verdict.update(
             allowed=False, failure="excluded", excluded=excluded,

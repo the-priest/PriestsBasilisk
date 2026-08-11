@@ -136,6 +136,14 @@ def _host_of(target: str) -> str:
         return ""
     # strip scheme
     t = re.sub(r"^[a-zA-Z][a-zA-Z0-9+.\-]*://", "", t)
+    # Keep a CIDR prefix — the split below is for a URL PATH, and it was also
+    # eating the prefix length of a network, so `10.0.0.0/8` became one
+    # address. Lockstep with basilisk_scope._strip_to_host; see the note there.
+    try:
+        ipaddress.ip_network(t, strict=False)
+        return t.strip().lower()
+    except ValueError:
+        pass
     # strip path/query
     t = t.split("/", 1)[0].split("?", 1)[0]
     # strip userinfo
@@ -161,23 +169,27 @@ def _match_one(host: str, rule: str) -> bool:
     if not rule or not host:
         return False
 
-    # CIDR / IP-range rule
-    if "/" in rule:
+    # ── LOCKSTEP WITH basilisk_scope._match_rule ──
+    # These two are documented as identical, and divergence IS a bypass: the
+    # gate refuses while scope_check tells the operator he is in scope, or the
+    # reverse. Both now use CONTAINMENT for address/range comparisons, so a
+    # target range is authorised only when it lies ENTIRELY inside an
+    # authorised range — `10.0.0.0/24` in scope must not authorise a scan of
+    # `10.0.0.0/8`. String equality on IPs was wrong for the same reason:
+    # `2001:db8::1` and `2001:db8:0:0:0:0:0:1` are one host, compared unequal.
+    def _net(x):
         try:
-            net = ipaddress.ip_network(rule, strict=False)
-            try:
-                return ipaddress.ip_address(host) in net
-            except ValueError:
-                return False  # host isn't an IP; a CIDR rule can't cover a name
+            return ipaddress.ip_network((x or "").strip(), strict=False)
         except ValueError:
-            pass  # not a CIDR; fall through to string logic
+            return None
 
-    # exact IP rule
-    try:
-        ipaddress.ip_address(rule)
-        return host == rule
-    except ValueError:
-        pass
+    _rnet, _hnet = _net(rule), _net(host)
+    if _rnet is not None:
+        if _hnet is None:
+            return False   # host isn't numeric; an IP/CIDR rule can't cover a name
+        return _hnet.version == _rnet.version and _hnet.subnet_of(_rnet)
+    if _hnet is not None:
+        return False       # numeric target vs a hostname rule
 
     # domain rule: exact, or a subdomain of it
     if host == rule:

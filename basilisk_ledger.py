@@ -134,9 +134,34 @@ class EvidenceLedger:
                 se_b = stderr.encode("utf-8", "replace")
 
                 artifact_rel = None
+                artifact_sha = None
                 if so_b or se_b:
                     artifact_rel = self._write_artifact(
                         engagement, step, command, so_b, se_b)
+                    # ── HASH THE FILE THAT WAS ACTUALLY WRITTEN ──
+                    # The per-section hashes below stay, but they cannot BE the
+                    # integrity check.  verify() had to RE-DERIVE stdout and
+                    # stderr by string-splitting the human-readable artifact on
+                    # "\n# --- stderr ---\n", and any captured output containing
+                    # that literal split it in the wrong place — so an untouched
+                    # artifact reported "hash mismatch" and the ledger accused
+                    # itself.  Reading a previous artifact is something the tool
+                    # contract actively tells Basilisk to do, so this was
+                    # reachable in ordinary use.
+                    #
+                    # Hashing the whole file deletes the re-derivation step: any
+                    # byte that changes is caught, whatever it happens to
+                    # contain.  It also closes the hole where a step with EMPTY
+                    # stdout recorded `stdout_sha256: None` and the check
+                    # `None in (None, <hash>)` passed unconditionally — forged
+                    # output could be pasted into that artifact and verify()
+                    # still said intact.
+                    if artifact_rel:
+                        try:
+                            artifact_sha = _sha256(
+                                (self.base_dir / artifact_rel).read_bytes())
+                        except Exception:
+                            artifact_sha = None
 
                 event = {
                     "ts": round(ts, 3),
@@ -157,6 +182,7 @@ class EvidenceLedger:
                     "stdout_sha256": _sha256(so_b) if so_b else None,
                     "stderr_sha256": _sha256(se_b) if se_b else None,
                     "artifact": artifact_rel,
+                    "artifact_sha256": artifact_sha,
                 }
                 line = json.dumps(event, ensure_ascii=False)
                 with open(self._ledger_path(engagement), "a",
@@ -194,12 +220,27 @@ class EvidenceLedger:
                     if not ln:
                         continue
                     try:
-                        events.append(json.loads(ln))
+                        obj = json.loads(ln)
                     except Exception:
                         continue  # skip a corrupted line, keep the rest
+                    # …and skip a line that PARSES but is not an event.
+                    # `null`, `123` and `[]` are all valid JSON, so they got
+                    # appended and every consumer then called e.get(...) on
+                    # them: summary(), verify() and export_markdown() all died
+                    # with AttributeError. Given this module's own threat model
+                    # — someone editing the evidence directory — a five-byte
+                    # append turned the whole evidence system into a traceback
+                    # instead of a tamper report, which is denial-of-evidence.
+                    if isinstance(obj, dict):
+                        events.append(obj)
         except Exception:
             return events
-        if limit is not None and limit >= 0:
+        # `events[-0:]` is the WHOLE list, so `limit=0` returned everything —
+        # the exact opposite of what it says. Latent today (no caller passes
+        # it), which is also why nothing caught it.
+        if limit is not None:
+            if limit <= 0:
+                return []
             return events[-limit:]
         return events
 
@@ -240,16 +281,36 @@ class EvidenceLedger:
             except Exception:
                 problems.append({"step": e.get("step"), "issue": "artifact unreadable"})
                 continue
-            # The artifact embeds stdout between the two markers; re-derive and
-            # hash exactly what was hashed at record time.
-            so = _extract_section(blob, b"# --- stdout ---\n", b"\n# --- stderr ---\n")
+            # ── WHOLE-FILE HASH IS THE CHECK ──
+            # Nothing is re-derived: the bytes on disk are hashed and compared
+            # to the hash taken the moment they were written. Whatever the
+            # output contains — including this file's own section markers —
+            # cannot confuse it, and there is no "missing hash" branch to pass
+            # through, so a step whose stdout was empty is verified exactly as
+            # strictly as one whose stdout was not.
+            recorded = e.get("artifact_sha256")
+            if recorded:
+                if _sha256(blob) == recorded:
+                    matched += 1
+                else:
+                    problems.append({"step": e.get("step"),
+                                     "issue": "hash mismatch"})
+                continue
+            # LEGACY EVENT (written before artifact_sha256 existed). Fall back
+            # to the section comparison so an older evidence directory still
+            # verifies — but WITHOUT the hole: a recorded None now means "this
+            # section must be empty", it is not a free pass.
+            so = _extract_section(blob, b"# --- stdout ---\n",
+                                  b"\n# --- stderr ---\n")
             se = _extract_section(blob, b"\n# --- stderr ---\n", None)
-            so_ok = (e.get("stdout_sha256") in (None, _sha256(so)) if so or e.get("stdout_sha256") else True)
-            se_ok = (e.get("stderr_sha256") in (None, _sha256(se)) if se or e.get("stderr_sha256") else True)
+            so_ok = (e.get("stdout_sha256") or None) == (_sha256(so) if so else None)
+            se_ok = (e.get("stderr_sha256") or None) == (_sha256(se) if se else None)
             if so_ok and se_ok:
                 matched += 1
             else:
-                problems.append({"step": e.get("step"), "issue": "hash mismatch"})
+                problems.append({"step": e.get("step"),
+                                 "issue": "hash mismatch",
+                                 "legacy": True})
         return {
             "engagement": _safe_name(engagement or self._engagement),
             "artifacts_checked": checked,
