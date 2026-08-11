@@ -586,6 +586,11 @@ DEFAULT_SETTINGS = {
     "headroom_min_chars":      1200,    # don't compress a block under this size
     "headroom_keep_recent":    2,       # leave the last N tool results full
     "headroom_target_ratio":   0.35,    # fallback engine: keep ~this fraction
+    # Tools whose output is never compressed, by name. These are the readers
+    # whose entire value is verbatim content — compressing a page you fetched
+    # in order to READ it is self-defeating, and you paid for the fetch anyway.
+    "headroom_skip_tools": ["web_read", "web_search", "read_file",
+                            "workspace_read", "cve_lookup"],
 
     # Click-to-open "Thoughts" panel on a reply, shown when the model
     # exposes its reasoning (a reasoning_content stream or inline <think>).

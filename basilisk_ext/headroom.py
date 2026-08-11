@@ -51,6 +51,23 @@ _JSON_SAMPLE = 8               # array elements kept head+tail when sampling
 
 _TOOL_RE = re.compile(r"<tool_result>\n?(.*?)\n?</tool_result>",
                       re.DOTALL)
+# The host writes `[tool: web_read]` as the first line inside the envelope.
+_SOURCE_RE = re.compile(r"^\s*\[tool:\s*([A-Za-z_][\w.-]*)\s*\]\s*$", re.M)
+
+# Readers whose entire value is verbatim content — never compress these.
+_DEFAULT_SKIP_TOOLS = ("web_read", "web_search", "read_file",
+                       "workspace_read", "cve_lookup")
+
+
+def _source_tool(body: str) -> str:
+    """The tool named by the `[tool: …]` line, or '' when untagged.
+
+    Only the first 400 chars are searched: the marker is written as the first
+    line, and scanning a whole 200KB dump for it on every frame is a cost with
+    no upside.
+    """
+    m = _SOURCE_RE.search(body[:400])
+    return (m.group(1) or "").strip().lower() if m else ""
 _ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[a-zA-Z]")
 _WS_RUN_RE = re.compile(r"[ \t]{3,}")
 
@@ -70,6 +87,85 @@ _SIGNAL_RE = re.compile(
     # branches above already catch.
     r")\b",
     re.IGNORECASE)
+
+# An opaque placeholder standing in for text that lives somewhere else —
+# headroom-ai's cache-compress reference `<<ccr:5eb8f2bbc609,string,6.6KB>>`
+# and anything shaped like it.  Text containing one of these is a receipt, not
+# content: the model cannot dereference it, so accepting it is data loss.
+_REFERENCE_RE = re.compile(r"<<\s*[A-Za-z][\w.-]{1,20}\s*:[^>]{4,200}>>")
+
+# ── PROSE vs MACHINE OUTPUT ──────────────────────────────────────────
+# Everything above assumes the block is machine output: noise is repetitive,
+# signal is rare and keyword-shaped, and the middle is expendable.  For a page
+# of PROSE that assumption inverts — every line is signal, no line repeats, and
+# _SIGNAL_RE matches almost nothing.  Applied to a fetched web page it kept the
+# lines containing "http://" and "fail", dropped 114 lines of the actual answer
+# as "noise", and produced something that READS complete while missing the
+# point of the document.  That last part is what made it expensive: the model
+# could not tell it had been given a gutted page, so it re-fetched the same URL
+# over and over hunting for content that was deleted before delivery.
+#
+# So the compressor needs a notion it did not have: "this is not the kind of
+# text I know how to shred safely."
+_STRUCTURED_HINT_RE = re.compile(
+    r"\d+/(?:tcp|udp)"                     # port lines
+    r"|^\s*[\w.\-\[\]]+\s*[:=]\s"          # key: value / key=value
+    r"|^\s*[\[{\]}]"                       # JSON / bracketed structure
+    r"|^\s*[|+\-]{2,}"                     # table rules
+    r"|\S\s{3,}\S"                         # column alignment
+    r"|^\s*(?:[/~]|[A-Za-z]:\\)\S*\s*$"    # a bare path
+    r"|^\s*\$\s"                           # shell prompt echo
+    , re.MULTILINE)
+
+_WORD_RE = re.compile(r"[A-Za-z][A-Za-z'’-]+")
+_PROSE_SAMPLE_LINES = 300   # enough evidence; see _looks_like_prose
+
+
+def _looks_like_prose(lines: List[str]) -> bool:
+    """True when the block reads as natural language rather than tool output.
+
+    Judged on SHAPE, not on which tool produced it, so it protects every
+    prose-bearing result — a fetched page, a CVE description, a README pulled
+    in by read_file, a markdown doc out of the workspace — including the ones
+    nobody remembered to tag.
+
+    Conservative by construction: it must be clearly prose to qualify, because
+    a false positive here only costs tokens, while a false negative costs the
+    operator the answer he was looking for.
+    """
+    body = [ln.strip() for ln in lines if ln.strip()]
+    if len(body) < 4:
+        return False
+    # SAMPLE, don't scan.  This runs on every candidate block, and the blocks
+    # that matter most for cost are the huge ones — a 200k-line journal tail
+    # does not need 200k regex searches to be recognised as not-prose.
+    #
+    # THREE CONTIGUOUS WINDOWS, not a stride.  A stride was the obvious way and
+    # it is wrong here: documents are periodic (heading, paragraph, blank,
+    # heading…), so `body[::stride]` can land on the same phase every time and
+    # sample only headings — which read as not-prose and lost the protection
+    # for exactly the long documents that need it most.  Contiguous windows
+    # preserve local structure, and taking one from the start, middle and end
+    # still refuses to judge a log by its prose preamble.
+    if len(body) > _PROSE_SAMPLE_LINES:
+        w = _PROSE_SAMPLE_LINES // 3
+        mid = len(body) // 2
+        body = (body[:w]
+                + body[mid - w // 2: mid + (w - w // 2)]
+                + body[-w:])
+    sentences = 0
+    structured = 0
+    for ln in body:
+        if _STRUCTURED_HINT_RE.search(ln):
+            structured += 1
+            continue
+        words = _WORD_RE.findall(ln)
+        # A prose line: several real words, mostly lowercase (not a banner or
+        # a column header), and long enough to be a sentence fragment.
+        if len(words) >= 6 and sum(1 for w in words if w[0].islower()) >= 3:
+            sentences += 1
+    n = len(body)
+    return (structured / n) < 0.25 and (sentences / n) >= 0.55
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -103,18 +199,51 @@ def _real_compress(text: str, target_ratio: float) -> Optional[str]:
         msgs = [{"role": "user", "content": text}]
         res = fn(msgs, compress_user_messages=True, protect_recent=0,
                  target_ratio=target_ratio)
-        out = ""
+        parts: List[str] = []
         for m in getattr(res, "messages", []) or []:
             c = m.get("content", "")
             if isinstance(c, str):
-                out = c
+                parts.append(c)
             elif isinstance(c, list):
-                out = "\n".join(
-                    p.get("text", "") for p in c
-                    if isinstance(p, dict) and p.get("type") == "text")
-        out = out.strip()
+                for p in c:
+                    if not isinstance(p, dict):
+                        continue
+                    if p.get("type") == "text":
+                        parts.append(p.get("text", ""))
+                    else:
+                        # A non-text content part is data we cannot render back
+                        # into the prompt — a cache handle, an image ref, an
+                        # unknown future type.  Silently dropping it (what this
+                        # loop used to do) turns "compressed" into "deleted"
+                        # with no marker anywhere.  Refuse the whole result and
+                        # let the structural compressor have it.
+                        return None
+        # ACCUMULATE, don't overwrite.  This was `out = c` per message, so a
+        # package returning more than one message kept only the last.
+        out = "\n".join(p for p in parts if p).strip()
+        if not out:
+            return None
+        # ── VALIDATE, DON'T JUST MEASURE LENGTH ──
+        # The old acceptance test was `len(out) < len(text) * 0.95` and nothing
+        # else.  "Is it shorter?" is the one question a cache REFERENCE always
+        # answers best: headroom-ai handed back
+        #     {"ok":true,"status":200,"text":"<<ccr:5eb8f2bbc609,string,6.6KB>>"}
+        # for an 8KB page — 67 chars, a 99.2% "win", and completely unreadable.
+        # It sailed through the check, and the model was left holding a hash
+        # where the page used to be with no way to tell that had happened.
+        #
+        # A compressor that returns a POINTER has not compressed anything; it
+        # has moved the data somewhere this process cannot reach.  Length is
+        # the wrong question — READABILITY is the question.
+        if _REFERENCE_RE.search(out):
+            return None
+        # Defence in depth for a reference shape nobody has seen yet: no real
+        # summary of a substantial block is 2% of it.  Set far below any
+        # plausible summary ratio so it catches pointers and nothing else.
+        if len(text) > 800 and len(out) < max(120, len(text) * 0.02):
+            return None
         # Only accept a real win; otherwise fall back to our structural pass.
-        if out and len(out) < len(text) * 0.95:
+        if len(out) < len(text) * 0.95:
             return out
         return None
     except Exception:
@@ -199,9 +328,69 @@ def _sample_json(text: str) -> Optional[str]:
         return None
 
 
-def _crush(text: str, target_ratio: float) -> str:
+_PROSE_MIN_KEEP = 0.60      # a document keeps at least this fraction
+# Below this, a document is passed through WHOLE.  ~12KB is roughly 3k tokens —
+# an ordinary article, reference page or README — and cutting one of those is a
+# few hundred tokens saved against a real chance of deleting the sentence the
+# operator asked about.  The saving that actually matters comes from scan and
+# log dumps, which are hundreds of KB and are not prose.
+_PROSE_FLOOR_CHARS = 12000
+
+
+def _crush_prose(lines: List[str], target_ratio: float) -> str:
+    """Compress a document without shredding it.
+
+    Two rules, both learned from the web_read failure:
+
+      1. CONTIGUOUS.  Keep a run from the top and a run from the bottom and
+         drop the middle in one piece.  Never cherry-pick lines by keyword —
+         scattered surviving sentences reassemble into something that reads
+         like a whole document and is not one, which is worse than an obvious
+         hole because nothing downstream can detect it.
+
+      2. LOUD.  The gap marker says, in words, that content was REMOVED and
+         that the block is incomplete.  The model's correct response to a
+         truncated document is to fetch the rest or say it could not read it;
+         it can only do that if it knows.
+
+    Retention floor is high on purpose.  Prose is what the operator asked a
+    question about; shaving tokens off the answer is a false economy when the
+    alternative is the model re-fetching the same page three times.
+    """
+    body = "\n".join(lines)
+    if len(body) <= _PROSE_FLOOR_CHARS:
+        return body
+    keep = max(_PROSE_MIN_KEEP, min(max(target_ratio, 0.0), 1.0))
+    if keep >= 1.0:
+        return body
+    n = len(lines)
+    room = int(n * keep)
+    if room >= n:
+        return body
+    head_n = max(1, int(room * 0.75))       # front-weighted: documents lead
+    tail_n = max(1, room - head_n)          # with the substance
+    if head_n + tail_n >= n:
+        return body
+    dropped = n - head_n - tail_n
+    dropped_chars = len("\n".join(lines[head_n:n - tail_n]))
+    marker = (f"        ┄┄ [INCOMPLETE] {dropped} lines "
+              f"({dropped_chars} chars) of this document were REMOVED to save "
+              f"context. This is not the whole page — if the part you need is "
+              f"missing, say so or fetch it again rather than assuming it is "
+              f"absent from the source. ┄┄")
+    return "\n".join(lines[:head_n] + [marker] + lines[n - tail_n:])
+
+
+def _crush(text: str, target_ratio: float,
+           prose: Optional[bool] = None) -> str:
     """The structural fallback compressor.  Lossy on noise, lossless on
-    signal lines."""
+    signal lines.
+
+    `prose` lets the caller pass a verdict it has already computed — the shape
+    test is the most expensive thing in this module, and _compress_block needs
+    the same answer to set its floor.  Left as None it works it out itself, so
+    calling _crush directly still behaves.
+    """
     if not text:
         return text
 
@@ -213,6 +402,15 @@ def _crush(text: str, target_ratio: float) -> str:
     text = _ANSI_RE.sub("", text)
     text = _WS_RUN_RE.sub("  ", text)
     lines = text.split("\n")
+
+    # ── PROSE PATH ──
+    # Checked BEFORE _collapse_runs, which masks numbers to spot near-identical
+    # lines: on scan output that is exactly right, on a document it can merge
+    # two genuinely different sentences that differ only by a figure — and a
+    # figure is usually the answer ("within six months", "104 weeks").
+    if prose if prose is not None else _looks_like_prose(lines):
+        return _crush_prose(lines, target_ratio)
+
     lines = _collapse_runs(lines)
 
     budget = max(_HEAD_LINES + _TAIL_LINES + 4,
@@ -242,15 +440,65 @@ def _crush(text: str, target_ratio: float) -> str:
     return "\n".join(parts)
 
 
+def _json_carries_prose(text: str) -> bool:
+    """True for a JSON envelope with a big natural-language string inside it.
+
+    This is the shape web_read actually returns — `{"ok":true,"status":200,
+    "text":"<the whole page>"}` — and it defeats a line-based prose test
+    completely, because JSON escapes the newlines: a 7KB article arrives as
+    ONE line and reads to any line-shape heuristic as structured data.
+    """
+    t = text.strip()
+    if not (t.startswith("{") or t.startswith("[")):
+        return False
+    try:
+        data = json.loads(t)
+    except Exception:
+        return False
+
+    def walk(o: Any, depth: int = 0) -> bool:
+        if depth > 6:
+            return False
+        if isinstance(o, str):
+            if len(o) < 800:
+                return False
+            return _looks_like_prose(o.split("\n"))
+        if isinstance(o, dict):
+            return any(walk(v, depth + 1) for v in o.values())
+        if isinstance(o, list):
+            return any(walk(v, depth + 1) for v in o[:50])
+        return False
+
+    return walk(data)
+
+
 def _compress_block(text: str, target_ratio: float) -> str:
     """Compress one tool-result body: try the real package, else the
-    built-in crusher.  Whichever yields the smaller result wins."""
+    built-in crusher.  Whichever yields the smaller result wins —
+    subject to a floor when the block is a document.
+
+    ── WHY THE FLOOR IS HERE AND NOT IN ONE ENGINE ──
+    "Don't shred prose" is a fact about the CONTENT, not about which
+    compressor happens to be installed.  Putting the rule in _crush alone
+    protected the fallback path and left the headroom-ai path — the one that
+    was actually running on the operator's box — free to summarise a legal
+    reference page down to 4.5% of itself.  A summary that loses "within six
+    months" and "104 weeks" has kept the topic and thrown away the answer,
+    and nothing downstream can tell that happened.
+    """
+    # Computed ONCE and handed to _crush.  It used to be evaluated here and
+    # again inside _crush, which doubled the cost of the most expensive check
+    # in the module on every block.
+    line_prose = _looks_like_prose(text.split("\n"))
+    protected = line_prose or _json_carries_prose(text)
+    floor = int(len(text) * _PROSE_MIN_KEEP) if protected else 0
+
     best = text
     real = _real_compress(text, target_ratio)
-    if real is not None and len(real) < len(best):
+    if real is not None and len(real) < len(best) and len(real) >= floor:
         best = real
-    fb = _crush(text, target_ratio)
-    if len(fb) < len(best):
+    fb = _crush(text, target_ratio, prose=line_prose)
+    if len(fb) < len(best) and len(fb) >= floor:
         best = fb
     return best
 
@@ -293,6 +541,18 @@ def compress_messages(
     except (TypeError, ValueError):
         target = _DEFAULT_TARGET_RATIO
 
+    # Tools whose output must never be compressed, by name.  Default covers the
+    # readers whose whole value is verbatim content: compressing a page you
+    # fetched in order to READ it is self-defeating, and the operator pays for
+    # the fetch either way.
+    raw_skip = s.get("headroom_skip_tools", _DEFAULT_SKIP_TOOLS)
+    if isinstance(raw_skip, str):
+        raw_skip = [p for p in re.split(r"[,\s]+", raw_skip) if p]
+    try:
+        skip_tools = {str(t).strip().lower() for t in (raw_skip or []) if t}
+    except TypeError:
+        skip_tools = set(_DEFAULT_SKIP_TOOLS)
+
     # Index of every tool-result message, so we can spare the most recent.
     tr_positions = [
         i for i, m in enumerate(messages)
@@ -320,6 +580,13 @@ def compress_messages(
             nonlocal before_total, after_total, blocks
             body = mo.group(1)
             if len(body) < min_chars:
+                return mo.group(0)
+            # The host tags each envelope with the tool that produced it (see
+            # _feed_tool_result).  An explicit source beats inferring one from
+            # content, and it makes the exclusion list something the operator
+            # can change in settings instead of something only a code edit can.
+            src = _source_tool(body)
+            if src and src in skip_tools:
                 return mo.group(0)
             comp = _compress_block(body, target)
             if len(comp) >= len(body):

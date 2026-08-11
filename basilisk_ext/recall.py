@@ -59,6 +59,46 @@ _WS = re.compile(r"\s+")
 _NOISE = re.compile(
     r"^\s*(\$|#|\.{3}|-{3,}|={3,}|\*{3,})?\s*$")
 
+# ── "did this run actually TELL us anything?" ────────────────────────
+# The guard's premise is "you already did this, so doing it again teaches you
+# nothing".  That premise fails when the result never reached the model: a page
+# fetched twice and compressed to a stub both times was, from the model's side,
+# never read at all — and the guard then locked it out of the one source that
+# had the answer.  Counting a destroyed result as a completed run turns a
+# delivery failure into a permanent dead end.
+#
+# DELIBERATELY NARROW: this matches evidence that the result was damaged IN
+# TRANSIT, not evidence that the tool FAILED.  A command that errors three
+# times is exactly what the guard should stop — re-running it is unproductive
+# in precisely the way the guard exists to catch.  The report suggested also
+# releasing on "shorter than ~500 chars", which is not adopted: plenty of
+# legitimate results are short, and that rule would quietly disable the guard.
+_DAMAGED_IN_TRANSIT = re.compile(
+    r"\[headroom:\s*\d+"                    # headroom compression note
+    r"|\[INCOMPLETE"                        # prose/history truncation marker
+    r"|earlier tool output trimmed"         # history trim note
+    r"|<<\s*[A-Za-z][\w.-]{1,20}\s*:[^>]{4,200}>>",   # unhydrated cache ref
+    re.IGNORECASE)
+
+# How many extra attempts a repeatedly-damaged action gets before the guard
+# closes anyway.  Without a ceiling, "the result was unusable" becomes an
+# infinite retry licence — trading a dead end for a loop, which is worse.
+UNUSABLE_GRACE = 2
+
+
+def outcome_is_usable(text: str) -> bool:
+    """False ONLY when a result was destroyed before the model could read it.
+
+    An EMPTY result is usable.  That looks wrong at first and is not: plenty of
+    commands legitimately say nothing when they succeed (`mkdir`, `chmod`, a
+    grep with no match), and "it ran and produced no output" is a real answer
+    that does not get truer by running it again.  Treating empty as "never
+    delivered" would hand every silent command an extra pair of free retries
+    and quietly loosen the guard everywhere — which is what it did to
+    tests/test_recall.py's limit cases the first time this was written.
+    """
+    return not _DAMAGED_IN_TRANSIT.search(text or "")
+
 
 def normalise(action: str) -> str:
     """Canonical form used to decide whether two actions are 'the same'.
@@ -117,6 +157,9 @@ class ActionLog:
         self._max = max(4, int(max_entries))
         self._entries: List[Dict[str, Any]] = []
         self._counts: Dict[str, int] = {}
+        # Runs that actually delivered a readable result. The guard counts
+        # THESE, not raw attempts — see outcome_is_usable.
+        self._useful: Dict[str, int] = {}
         self._step = 0
 
     # ── lifecycle ────────────────────────────────────────────────────
@@ -126,6 +169,7 @@ class ActionLog:
         with self._lock:
             self._entries = []
             self._counts = {}
+            self._useful = {}
             self._step = 0
 
     def __len__(self) -> int:
@@ -138,15 +182,19 @@ class ActionLog:
         key = normalise(action)
         if not key:
             return {}
+        usable = outcome_is_usable(outcome)
         with self._lock:
             self._step += 1
             self._counts[key] = self._counts.get(key, 0) + 1
+            if usable:
+                self._useful[key] = self._useful.get(key, 0) + 1
             entry = {
                 "step": self._step,
                 "action": action.strip()[:ACTION_CHARS],
                 "key": key,
                 "outcome": digest_outcome(outcome),
                 "times": self._counts[key],
+                "usable": usable,
             }
             self._entries.append(entry)
             if len(self._entries) > self._max:
@@ -159,6 +207,11 @@ class ActionLog:
     def times_run(self, action: str) -> int:
         with self._lock:
             return self._counts.get(normalise(action), 0)
+
+    def times_delivered(self, action: str) -> int:
+        """Runs that returned something the model could actually read."""
+        with self._lock:
+            return self._useful.get(normalise(action), 0)
 
     def previous(self, action: str) -> Optional[Dict[str, Any]]:
         """The most recent stored entry for this action, if it is still in the
@@ -185,10 +238,22 @@ class ActionLog:
         draft had the docstring promising the third would be refused while the
         arithmetic permitted a fourth, which is the kind of off-by-one that
         makes a guard look present and do nothing.
+
+        A run whose result was destroyed in transit (compressed to a stub,
+        trimmed away, returned as an unhydrated cache reference) does NOT
+        count towards the limit: from the model's side that action never
+        produced anything, and refusing the retry strands it — it cannot get
+        the data and cannot ask again.  That is a delivery failure being
+        reported as a reasoning failure.
+
+        A ceiling still applies (UNUSABLE_GRACE extra attempts), because
+        "the result was unusable" must not become an unlimited retry licence.
         """
         if limit <= 0:
             return False
-        return self.times_run(action) >= limit
+        if self.times_delivered(action) >= limit:
+            return True
+        return self.times_run(action) >= limit + UNUSABLE_GRACE
 
     def cycle(self, max_len: int = 4, reps: int = 2) -> Optional[List[str]]:
         """Detect a repeating cycle at the tail: A A A, A B A B, A B C A B C…

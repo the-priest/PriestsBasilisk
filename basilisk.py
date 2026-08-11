@@ -9538,6 +9538,18 @@ class MainWindow(Adw.ApplicationWindow):
             self._deferred_note = ""
             result_text = (result_text or "") + _note
 
+        # The pending action is `"<tool>: <argument>"` (see _action_label), so
+        # the tool name is already here — capture it BEFORE the recall block
+        # below clears it, and tag the envelope with it further down.  Same
+        # single hook, same reason: instrumenting thirty-odd dispatch sites is
+        # how they drift apart.
+        _tool = ""
+        try:
+            _pa = self._pending_action or ""
+            _tool = _pa.split(":", 1)[0].strip() if ":" in _pa else _pa.strip()
+        except Exception:
+            _tool = ""
+
         # ACTION RECALL: attach this result to whatever action produced it. One
         # hook here covers every tool, instead of instrumenting each of the
         # thirty-odd dispatch sites (which is how they drift apart).
@@ -9561,10 +9573,27 @@ class MainWindow(Adw.ApplicationWindow):
         # restarting the app. A failure here must still hand the loop back.
         try:
             chat_id = self.streaming_chat_id or self.current_chat_id
+            # ── NAME THE SOURCE TOOL, INSIDE the envelope ──
+            # The compressor needs to know what produced a block: a page of
+            # prose and an nmap dump want opposite treatment, and guessing from
+            # content alone is fragile.  The tag goes on its OWN LINE INSIDE
+            # `<tool_result>` rather than as an attribute on the opening tag,
+            # which is the obvious way to do it and would have been a silent
+            # disaster: nine places in this file test `"<tool_result>" in
+            # content` as a literal, plus headroom's _TOOL_RE and
+            # _trim_tool_result's synthesised closing tag.  Changing the opener
+            # to `<tool_result source="web_read">` breaks every one of them
+            # without an error — operational-message detection, dedup and
+            # history trimming would all just quietly stop matching.
+            #
+            # So the envelope stays byte-identical and the identity rides
+            # inside it, where adding it can't break a matcher.
+            _src = (_tool or "").strip()
+            _hdr = f"[tool: {_src}]\n" if _src else ""
             self.store.add_message(
                 chat_id, "user",
-                f"<tool_result>\n{result_text}\n</tool_result>",
-                meta={"kind": "tool_result"})
+                f"<tool_result>\n{_hdr}{result_text}\n</tool_result>",
+                meta={"kind": "tool_result", "tool": _src or None})
         except Exception as e:
             log(f"feed_tool_result: store write failed: {e}")
             self.terminal_log(f"✗ could not record the tool result: {e}",
@@ -10942,12 +10971,45 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _trim_tool_result(self, content: str) -> str:
         """Shrink an older, already-consumed tool_result so a long research
-        chat doesn't re-bill the full (sometimes huge) output every turn."""
+        chat doesn't re-bill the full (sometimes huge) output every turn.
+
+        This is a SECOND, INDEPENDENT compression layer — headroom runs in the
+        router, this runs while building history — and the two do not know
+        about each other.  Fixing one leaves the other, which is why a page
+        could still arrive gutted after headroom was taught to skip web_read.
+
+        Two things were wrong beyond the size:
+
+          * It cut at a byte offset with no regard for structure, so a JSON
+            result was left with an unterminated string and a synthesised
+            `</tool_result>` glued on.  The model got malformed JSON and no
+            indication that it was malformed rather than genuinely short.
+          * Head-only.  A document's conclusion — the redress, the deadline,
+            the verdict — lives at the END, so a head-only cut reliably keeps
+            the preamble and drops the answer.
+
+        The budget is unchanged; this spends it better and says clearly that
+        the block is incomplete, so the model can re-read rather than conclude
+        the source did not contain what it was looking for.
+        """
         if len(content) <= HISTORY_TRIM_HEAD_CHARS + 200:
             return content
-        head = content[:HISTORY_TRIM_HEAD_CHARS]
-        return (head + f"\n…[earlier tool output trimmed to save tokens — "
-                f"{len(content)} chars originally]\n</tool_result>")
+        body = content
+        closer = ""
+        if body.rstrip().endswith("</tool_result>"):
+            # Trim the BODY and put the operator's real closing tag back,
+            # rather than truncating through it and inventing a new one.
+            cut = body.rstrip()[: -len("</tool_result>")]
+            closer = "\n</tool_result>"
+            body = cut
+        head_n = int(HISTORY_TRIM_HEAD_CHARS * 0.7)
+        tail_n = HISTORY_TRIM_HEAD_CHARS - head_n
+        head = body[:head_n]
+        tail = body[-tail_n:] if tail_n > 0 else ""
+        return (f"{head}\n…[INCOMPLETE — {len(content) - HISTORY_TRIM_HEAD_CHARS}"
+                f" chars of this earlier tool output were removed to save "
+                f"tokens; {len(content)} chars originally. The middle is gone, "
+                f"not empty — re-run the tool if you need it.]\n{tail}{closer}")
 
     def _next_provider_with_key(self) -> Optional[str]:
         """Pick the next cloud provider (after the current active one) that
