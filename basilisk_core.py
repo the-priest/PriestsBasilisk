@@ -2461,23 +2461,28 @@ def _timeout_note(command: str, timeout: int) -> str:
     return note
 
 
-def tool_run_command(command: str, timeout: int = 30,
-                     cwd: Optional[str] = None,
-                     sudo_password: Optional[str] = None) -> Dict[str, Any]:
-    """Run a shell command as the operator's user.
+def gate_command(command: str) -> Optional[Dict[str, Any]]:
+    """THE floor. Returns a refusal dict, or None when the command may run.
 
-    If `sudo_password` is supplied and the command needs root, we
-    authenticate and run in the SAME shell session (so the credential
-    actually applies), and transparently fall back to SUDO_ASKPASS if a
-    hardened sudoers config defeats the cached credential.  The password
-    is never written to disk, the log, or the command's own stdin.
+    ── WHY THIS IS A FUNCTION AND NOT A BLOCK INSIDE tool_run_command ──
+    The destructive floor and the scope gate are documented as being enforced
+    "at the execution PRIMITIVE, with no override, not just the GUI".  That was
+    true of ONE primitive.  `tool_launch_app` is a second one — it takes a
+    model-supplied program and argument string, builds an argv, and Popens it
+    detached — and it called neither gate.  So while
+
+        run("rm -rf /")                     was refused by the floor,
+        launch_app("rm", "-rf /")           spawned it, as root, ungated,
+
+    and `launch_app("nmap", "<out-of-scope-host>")` walked straight past the
+    authorisation boundary that exists precisely to stop that.  Both gates were
+    correct; only one of the two doors had them fitted.
+
+    An inlined block can only ever protect the function it is inlined in, so
+    the rule now lives in one place and every primitive calls it.  Anything
+    added later that spawns a process from model input must call this too —
+    tests/test_gates.py asserts the set of callers.
     """
-    # ── HARD SAFETY FLOOR (defence-in-depth) ─────────────────────────────
-    # The GUI gate already refuses these before we get here, but enforce it at
-    # the execution PRIMITIVE too: no code path — GUI, batch, or a future caller
-    # — can push a catastrophic command (disk wipe / fs nuke / recursive root or
-    # $HOME delete / fork bomb) or a raw write to Basilisk's own safety source
-    # through this function. There is no override; it never runs.
     if is_catastrophic_command(command):
         return {"ok": False, "refused": True, "catastrophic": True,
                 "error": ("REFUSED - catastrophic command (would irreversibly "
@@ -2495,10 +2500,10 @@ def tool_run_command(command: str, timeout: int = 30,
     # ── AUTHORISATION BOUNDARY ───────────────────────────────────────────
     # Scope used to be advice in the persona prompt plus one enforcing tool
     # (sqlmap_plan). Everything else — nmap, nuclei, ffuf, hydra, curl — reached
-    # this function with nothing checking WHO it was aimed at. Under UNLEASH
-    # that is a prompt-level control on an autonomous loop, which is not a
-    # control. Enforce it here, at the primitive, like the destructive floor:
-    # the model cannot route around it, because this IS the execution path.
+    # the execution path with nothing checking WHO it was aimed at. Under
+    # UNLEASH that is a prompt-level control on an autonomous loop, which is not
+    # a control. Enforce it at the primitive, like the destructive floor: the
+    # model cannot route around it, because this IS the execution path.
     #
     # Passive/local commands are not inspected at all, so ordinary work is
     # unaffected. Active commands must resolve every target into the recorded
@@ -2520,6 +2525,24 @@ def tool_run_command(command: str, timeout: int = 30,
                           + str(_verdict.get("reason", ""))
                           + " " + str(_verdict.get("hint", ""))).strip(),
                 "command": command}
+    return None
+
+
+def tool_run_command(command: str, timeout: int = 30,
+                     cwd: Optional[str] = None,
+                     sudo_password: Optional[str] = None) -> Dict[str, Any]:
+    """Run a shell command as the operator's user.
+
+    If `sudo_password` is supplied and the command needs root, we
+    authenticate and run in the SAME shell session (so the credential
+    actually applies), and transparently fall back to SUDO_ASKPASS if a
+    hardened sudoers config defeats the cached credential.  The password
+    is never written to disk, the log, or the command's own stdin.
+    """
+    # ── HARD SAFETY FLOOR (defence-in-depth) ─────────────────────────────
+    _refusal = gate_command(command)
+    if _refusal is not None:
+        return _refusal
 
     needs_sudo = command_needs_sudo(command)
 
@@ -3393,6 +3416,18 @@ def tool_launch_app(app: str, args: str = "") -> Dict[str, Any]:
     app = (app or "").strip()
     if not app:
         return {"ok": False, "error": "no app specified"}
+    # SECOND EXECUTION PRIMITIVE, SAME FLOOR.  This spawns a model-chosen
+    # program with model-chosen arguments, detached and (when Basilisk runs as
+    # root) as root — so `launch_app("rm", "-rf /")` used to do what
+    # `run("rm -rf /")` is refused for, and `launch_app("nmap", "<host>")`
+    # walked past the authorisation boundary.  Judge the equivalent command
+    # line, exactly as the run tool would.
+    _gate_line = f"{app} {args}".strip()
+    _refusal = gate_command(_gate_line)
+    if _refusal is not None:
+        _refusal["command"] = _gate_line
+        _refusal["tool"] = "launch_app"
+        return _refusal
     extra = args.split() if args else []
 
     def _spawn(argv):
