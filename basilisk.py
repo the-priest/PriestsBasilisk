@@ -1946,6 +1946,24 @@ _ARG_ALIASES: Dict[str, Dict[str, str]] = {
                     "software": "product", "package": "product"},
 }
 
+# Arguments without which the tool cannot do anything but damage or nonsense.
+# Kept SHORT and obvious: only the ones where an empty value reaches a real
+# side-effecting call (a filesystem path, a URL, a command line). A tool that
+# has a sensible default for a missing argument does not belong here.
+_REQUIRED_ARGS: Dict[str, Tuple[str, ...]] = {
+    "copy_path":    ("src", "dst"),
+    "move_path":    ("src", "dst"),
+    "read_file":    ("path",),
+    "write_file":   ("path",),
+    "delete_path":  ("path",),
+    "make_dir":     ("path",),
+    "propose_edit": ("path",),
+    "web_read":     ("url",),
+    "run":          ("command",),
+    "cve_lookup":   ("product",),
+    "find_file":    ("pattern",),
+}
+
 _SPEC_ARGS_CACHE: Optional[Dict[str, set]] = None
 
 
@@ -1985,6 +2003,23 @@ def _normalise_tool_args(name: str, args: Any) -> Tuple[Dict[str, Any], str]:
     for alias, real in (_ARG_ALIASES.get(name) or {}).items():
         if alias in out and not str(out.get(real) or "").strip():
             out[real] = out.pop(alias)
+    # ── REQUIRED ARGUMENTS MUST ACTUALLY BE PRESENT ──
+    # Checking "did ANY key land" is not enough, and the operator's round-2
+    # audit proved it: `copy_path{path=/etc/hostname}` aliased cleanly to
+    # src=/etc/hostname, passed the any-key check, and then ran with dst=""
+    # — so the tool called shutil.copy2(src, "") and reported
+    #     FileNotFoundError: [Errno 2] No such file or directory: ''
+    # The first fix turned "argument missing" into a DIFFERENT confusing
+    # filesystem error instead of removing it. A tool that needs two paths and
+    # is given one must say THAT.
+    missing = [k for k in (_REQUIRED_ARGS.get(name) or ())
+               if not str(out.get(k) or "").strip()]
+    if missing:
+        return (out, (
+            f"{name} is missing required argument(s) {missing}. It takes "
+            f"{sorted(_REQUIRED_ARGS.get(name) or ())} — you supplied "
+            f"{sorted(out) or 'nothing'}. Re-issue the call with all of them; "
+            f"running it as-is would act on an empty path."))
     if not out:
         return (out, "")
     accepted = _spec_arg_names().get(name)

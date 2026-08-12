@@ -46,11 +46,21 @@ def _emit(event: Dict[str, Any]) -> None:
     event["ts"] = time.time()
     with open(SPOOL, "a", encoding="utf-8") as f:
         f.write(json.dumps(event) + "\n")
-    # keep the spool bounded
+    # Keep the spool bounded.
+    #
+    # ATOMIC REPLACE, not truncate-then-write. `SPOOL.write_text(...)` opens
+    # the live spool with "w", which empties it before a single byte of the
+    # kept tail is written — so a crash, a kill during shutdown, or a full
+    # disk at that instant loses EVERY event rather than the oldest few. This
+    # is the file the UI reads to tell the operator what the background worker
+    # saw, and it is rewritten on every emit, so the window is hit often.
+    # Writing a sibling and renaming makes the swap all-or-nothing.
     try:
         lines = SPOOL.read_text().splitlines()
         if len(lines) > 500:
-            SPOOL.write_text("\n".join(lines[-500:]) + "\n")
+            tmp = SPOOL.with_suffix(SPOOL.suffix + f".tmp{os.getpid()}")
+            tmp.write_text("\n".join(lines[-500:]) + "\n", encoding="utf-8")
+            os.replace(tmp, SPOOL)
     except Exception:
         pass
 
@@ -81,7 +91,13 @@ def main() -> int:
     core = _try_core()
 
     last_update_check = 0.0
-    last_curate = 0.0
+    # Primed to NOW, not 0.0. At 0.0 the `now - last_curate > 24*3600` guard is
+    # true on the very first tick, so the "daily" curator ran on every start —
+    # and a service that restarts (a crash loop, a laptop suspending, an
+    # install) curated every time instead of once a day. The update check is
+    # left primed at 0.0 on purpose: checking for security updates immediately
+    # on start is the behaviour you want.
+    last_curate = time.time()
     known_downloads: Optional[set] = None
 
     _emit({"kind": "worker", "msg": "started", "core": bool(core)})
@@ -131,7 +147,14 @@ def main() -> int:
             if now - last_curate > 24 * 3600:
                 last_curate = now
                 try:
-                    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+                    # sys.path was extended HERE, inside the loop, so every
+                    # curation tick prepended the same directory again and the
+                    # list grew without bound for the life of the daemon —
+                    # slowly making every subsequent import scan a longer path.
+                    # This process runs for weeks. Insert once, if at all.
+                    _pp = str(Path(__file__).resolve().parent.parent)
+                    if _pp not in sys.path:
+                        sys.path.insert(0, _pp)
                     from basilisk_ext import skills as _sk  # type: ignore
                     store = _sk.SkillStore(EXT_DIR / "skills")
                     res = store.curate()

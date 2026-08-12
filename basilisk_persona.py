@@ -1351,8 +1351,27 @@ def is_persistence_directive(text: str) -> bool:
 def direct_answer_turn(text: str) -> bool:
     """True when the message is a genuine QUESTION / informational request that
     should get a direct, concise answer — NOT a task to grind on in the relentless
-    autonomous loop. This is what lets 'how does the oracle decide a bug is
-    confirmed?' get answered and STOP, instead of dropping into never-stop mode.
+    autonomous loop.
+
+    ── RETAINED BUT NOT WIRED INTO THE TURN LOOP ──
+    NOTHING CALLS THIS. basilisk.py imports it and never uses it, and that is
+    DELIBERATE rather than an oversight: UNLEASH replaced the old
+    question-vs-task gating as the single control over whether a message latches
+    a mission. The latch in basilisk.py says so outright — "even a question
+    becomes 'go find out and don't stop' (that's what unleashed means)" — and
+    only conversational_turn (bare greetings) is consulted there.
+
+    So do NOT re-wire this into the mission latch on the assumption it was
+    forgotten. That would re-introduce the two-control ambiguity Unleash exists
+    to remove. It is kept because it is a tested classifier
+    (tests/test_leanchat.py) a future non-Unleash caller may want, and because
+    deleting a function whose absence is invisible is how the next person
+    re-invents it badly. Same posture, and same reason, as
+    _next_provider_with_key in basilisk.py.
+
+    Original intent, for context: this is what let 'how does the oracle decide a
+    bug is confirmed?' get answered and STOP instead of dropping into never-stop
+    mode.
 
     High-precision on the QUESTION side; anything genuinely ambiguous, imperative,
     or naming a live target defaults to task (return False) so a real engagement is

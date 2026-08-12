@@ -123,7 +123,10 @@ ck("cve_lookup declares product",
 print("\n== the exact failures from the tool audit ==")
 _a, _e = norm("copy_path", {"path": "/etc/hostname"})
 ck("copy_path path= now reaches src", _a.get("src") == "/etc/hostname", str(_a))
-ck("…and is not refused", _e == "")
+# Round 2 of his audit showed why "aliased, therefore fine" is not enough:
+# this call has no DESTINATION at all, so running it copies to "". It must be
+# refused for the missing dst, not run.
+ck("…and is refused for the still-missing dst", bool(_e), str(_a))
 
 _a, _e = norm("scan_net", {"target": "127.0.0.1"})
 ck("scan_net target= now reaches cidr", _a.get("cidr") == "127.0.0.1", str(_a))
@@ -181,10 +184,17 @@ for _t, _in in [("copy_path", {"foo": "bar"}),
                 ("run", {"bogus": "id"})]:
     _a, _e = norm(_t, _in)
     ck(f"{_t}({_in}) is refused", bool(_e), str(_a))
-    ck(f"…and names the accepted arguments",
-       all(k in _e for k in sorted(_spec.get(_t, set()))), _e[:100])
-    ck(f"…and says it would otherwise have run on none of them",
-       "none of them" in _e, _e[:80])
+    # The message must name real argument names the model can act on. The
+    # required-args refusal lists the REQUIRED ones (`run` needs `command`,
+    # not the optional `reason`), so assert overlap rather than the full set.
+    ck(f"…and names argument(s) the tool actually takes",
+       bool(_spec.get(_t, set()) & {w.strip("'[],") for w in _e.split()}),
+       _e[:100])
+    # Either refusal is correct and both are actionable: a tool with REQUIRED
+    # arguments reports the missing ones (the more specific message and the
+    # one that fires first), a tool without them reports that nothing landed.
+    ck(f"…and explains what to do about it",
+       ("none of them" in _e) or ("missing required argument" in _e), _e[:90])
 
 # One right key is enough — a partially-odd call still runs, so this can never
 # block work that used to succeed.
@@ -213,6 +223,57 @@ ck("the dispatcher normalises before calling the handler",
    "_normalise_tool_args(call.name, call.args)" in _src)
 ck("…and refuses rather than running on a bad arg set",
    'self._feed_tool_result(f"NOT RUN — {_argerr}")' in _src)
+
+
+# ── 7. ROUND-2 REGRESSIONS ───────────────────────────────────────────
+# The operator re-ran his audit after the first fix pass. copy_path was STILL
+# broken, and worse, differently broken: the alias filled `src` and left `dst`
+# empty, so the call passed the any-key check and reached
+# shutil.copy2(src, "") -> FileNotFoundError: ... ''. Checking "did any key
+# land" is not the same as checking the tool got what it NEEDS.
+print("\n== a partially-supplied call is refused, not run on an empty path ==")
+_a, _e = norm("copy_path", {"path": "/etc/hostname"})
+ck("copy_path{path=...} still aliases to src", _a.get("src") == "/etc/hostname")
+ck("…but is REFUSED for the missing dst", bool(_e), str(_a))
+ck("…naming the argument that is missing", "dst" in _e, _e[:110])
+ck("…and saying it would have acted on an empty path",
+   "empty path" in _e, _e[:110])
+
+for _t, _in, _want in [
+    ("move_path",  {"src": "/a"},              "dst"),
+    ("web_read",   {},                          "url"),
+    ("run",        {"reason": "x"},             "command"),
+    ("read_file",  {},                          "path"),
+    ("cve_lookup", {"version": "9.6"},          "product"),
+    ("make_dir",   {},                          "path"),
+]:
+    _a, _e = norm(_t, _in)
+    ck(f"{_t}({_in}) refused for missing {_want}",
+       bool(_e) and _want in _e, _e[:90] or "NOT REFUSED")
+
+print("\n== complete calls still run ==")
+for _t, _in in [("copy_path", {"src": "/a", "dst": "/b"}),
+                ("copy_path", {"path": "/a", "dst": "/b"}),
+                ("move_path", {"src": "/a", "dst": "/b"}),
+                ("run", {"command": "id"}),
+                ("web_read", {"url": "https://x"}),
+                ("cve_lookup", {"product": "OpenSSH", "version": "9.6"}),
+                ("scan_net", {})]:
+    _a, _e = norm(_t, _in)
+    ck(f"runs: {_t}({_in})", _e == "", _e[:80])
+
+print("\n== and the tools themselves refuse an empty path ==")
+import basilisk_core as _C
+ck("tool_copy_path('x','') refuses",
+   _C.tool_copy_path("/etc/hostname", "").get("ok") is False)
+ck("…naming both arguments",
+   "src" in _C.tool_copy_path("/etc/hostname", "")["error"]
+   and "dst" in _C.tool_copy_path("/etc/hostname", "")["error"])
+ck("tool_move_path('x','') refuses",
+   _C.tool_move_path("/etc/hostname", "").get("ok") is False)
+ck("…and neither mentions a FileNotFoundError on ''",
+   "No such file or directory: ''" not in
+   _C.tool_copy_path("/etc/hostname", "")["error"])
 
 print(f"\ntoolargs: {_p} passed, {_f} failed")
 sys.exit(1 if _f else 0)

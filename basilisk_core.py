@@ -2228,15 +2228,50 @@ def _ensure_askpass_helper() -> Optional[str]:
         return None
 
 
+# Control characters that no terminal tool means as TEXT.  Tab, newline and
+# carriage return are kept; everything else in C0, plus DEL and the C1 block,
+# is replaced.
+_CTRL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
+
+
+def _clean_capture(s: str) -> Tuple[str, int]:
+    """(text safe to carry, how many control bytes were replaced).
+
+    A command that writes RAW BINARY to stdout — `grim` with no output file,
+    `cat` on an image, `dd` without `of=` — used to put NUL and control bytes
+    straight into the tool result, and from there into the message history and
+    the JSON body of the next API request.  The operator's audit shows those
+    turns coming back with no output at all, and the working form of the same
+    command differed only by redirecting that output to a file.
+
+    Whether the provider or the renderer is what chokes, carrying raw control
+    bytes into either is indefensible: they are not text, nothing downstream
+    wants them, and their presence is invisible in the log. Replace them and
+    SAY how many, so a truncated-looking result is explained rather than
+    mysterious.
+    """
+    if not s:
+        return ("", 0)
+    cleaned, n = _CTRL_RE.subn("�", s)
+    return (cleaned, n)
+
+
 def _format_run_result(command: str, p, needs_sudo: bool) -> Dict[str, Any]:
-    stderr = p.stderr or ""
+    stderr, _se_n = _clean_capture(p.stderr or "")
+    stdout, _so_n = _clean_capture(p.stdout or "")
     result = {
         "ok": True, "command": command, "rc": p.returncode,
-        "stdout": (p.stdout or "")[:80_000],
+        "stdout": stdout[:80_000],
         "stderr": stderr[:20_000],
         "truncated_stdout": len(p.stdout or "") > 80_000,
         "needs_sudo": needs_sudo,
     }
+    if _so_n or _se_n:
+        result["binary_output_scrubbed"] = _so_n + _se_n
+        result["note"] = (
+            f"{_so_n + _se_n} control/binary byte(s) in this command's output "
+            f"were replaced with U+FFFD — it wrote raw binary to the terminal. "
+            f"Redirect it to a file (`> /tmp/out.bin`) if you need the bytes.")
     low = stderr.lower()
     if needs_sudo and p.returncode != 0 and (
             "a terminal is required" in low
@@ -2641,15 +2676,39 @@ def tool_run_command(command: str, timeout: int = 30,
                 stall_unblock_s=_unblock.STALL_UNBLOCK_S * _patience,
                 stall_harvest_s=_unblock.STALL_HARVEST_S * _patience,
                 max_wall_s=None)          # deliberate: no wall-clock limit
+            # Same scrub as the fallback path — this is the branch that
+            # actually runs, so leaving it out would have fixed nothing.
+            _so, _so_n = _clean_capture(r.get("stdout") or "")
+            _se, _se_n = _clean_capture(r.get("stderr") or "")
             out = {
                 "ok": bool(r.get("ok")),
                 "command": command,
                 "rc": r.get("rc"),
-                "stdout": (r.get("stdout") or "")[:80_000],
-                "stderr": (r.get("stderr") or "")[:20_000],
+                "stdout": _so[:80_000],
+                "stderr": _se[:20_000],
                 "truncated_stdout": len(r.get("stdout") or "") > 80_000,
                 "needs_sudo": needs_sudo,
             }
+            if _so_n or _se_n:
+                out["binary_output_scrubbed"] = _so_n + _se_n
+                out["note"] = (
+                    f"{_so_n + _se_n} control/binary byte(s) in this command's "
+                    f"output were replaced with U+FFFD — it wrote raw binary to "
+                    f"the terminal. Redirect it to a file if you need the bytes.")
+            # A result with NO output, NO rc and NO error is the shape the
+            # operator kept seeing reported as "error: None" — a turn that
+            # tells him nothing at all. If the executor came back that empty,
+            # say so explicitly rather than emitting a dict whose only content
+            # is a null.
+            if (out["rc"] is None and not out["stdout"] and not out["stderr"]
+                    and not r.get("partial")):
+                out["ok"] = False
+                out["error"] = (
+                    "the command produced no output and no exit status — the "
+                    "executor returned nothing. It may have been killed, or it "
+                    "wrote only to a terminal device. Re-run it redirecting "
+                    "both streams to files (`cmd >/tmp/o 2>/tmp/e; echo rc=$?`) "
+                    "and read those.")
             if r.get("partial"):
                 # NOT ok, but the output is still here — that is the whole
                 # point. Never report a stall as an empty failure.
@@ -3476,60 +3535,150 @@ def tool_launch_app(app: str, args: str = "") -> Dict[str, Any]:
         return {"ok": False, "error": f"{type(e).__name__}: {e}"}
 
 
+# ── WAYLAND IS NOT ONE THING ────────────────────────────────────────
+# The window tools treated "wayland" as a single platform and reached for
+# wlrctl, which speaks the WLROOTS control protocol. KDE's compositor is KWin,
+# which does not implement it — so on the operator's KDE/Wayland box the tools
+# failed AND told him to install a package that could never have worked. Wrong
+# advice is worse than no advice: he can act on it and still be broken.
+#
+# So: pick the helper by COMPOSITOR, and when none is available name the one
+# that fits the desktop actually running.
+def _kde_session() -> bool:
+    de = (_desktop_env() or "").lower()
+    return ("kde" in de or "plasma" in de
+            or bool(os.environ.get("KDE_FULL_SESSION")))
+
+
+def _window_helper() -> Tuple[str, str]:
+    """(helper, why-not) for the current session.  helper is '' when none fits."""
+    sess = _session_type()
+    if sess == "x11" and _have("wmctrl"):
+        return ("wmctrl", "")
+    if sess == "wayland":
+        # kdotool drives KWin through its scripting API and is the correct
+        # tool on Plasma; wlrctl only works on wlroots compositors.
+        if _kde_session():
+            if _have("kdotool"):
+                return ("kdotool", "")
+            # XWayland windows are still reachable through wmctrl — partial,
+            # but better than nothing and honest about being partial.
+            if _have("wmctrl"):
+                return ("wmctrl-xwayland", "")
+            return ("", "this is KDE/KWin, which does NOT implement the "
+                        "wlroots control protocol — wlrctl cannot work here. "
+                        "Install kdotool (KWin scripting) instead: "
+                        + install_hint("kdotool"))
+        if _have("wlrctl"):
+            return ("wlrctl", "")
+        return ("", "no wlroots window helper — install wlrctl: "
+                    + install_hint("wlrctl"))
+    if sess == "x11":
+        return ("", "no X11 window helper — install wmctrl: "
+                    + install_hint("wmctrl"))
+    return ("", f"unknown session type ({sess})")
+
+
 def tool_list_windows() -> Dict[str, Any]:
     """List open windows (title + app id) for focusing/closing.
 
-    X11 uses wmctrl; Wayland uses wlrctl (wlroots/Phosh).  Returns a
-    clear error if neither helper is present."""
+    X11 uses wmctrl. On Wayland the helper depends on the COMPOSITOR: kdotool
+    for KDE/KWin, wlrctl for wlroots. See _window_helper."""
     sess = _session_type()
-    if sess == "x11" and _have("wmctrl"):
+    helper, why = _window_helper()
+    if helper in ("wmctrl", "wmctrl-xwayland"):
         rc, out, _ = _ro(["wmctrl", "-l"], timeout=5)
         wins = []
         for line in out.splitlines():
             parts = line.split(None, 3)
             if len(parts) >= 4:
                 wins.append({"id": parts[0], "title": parts[3]})
-        return {"ok": True, "session": sess, "windows": wins}
-    if sess == "wayland" and _have("wlrctl"):
+        res = {"ok": True, "session": sess, "helper": helper, "windows": wins}
+        if helper == "wmctrl-xwayland":
+            res["partial"] = True
+            res["note"] = ("KDE/Wayland: wmctrl only sees XWayland windows, so "
+                           "native Wayland windows are missing from this list. "
+                           "Install kdotool for the full list: "
+                           + install_hint("kdotool"))
+        return res
+    if helper == "kdotool":
+        rc, out, err = _ro(["kdotool", "search", "--name", ""], timeout=8)
+        wins = []
+        for wid in [ln.strip() for ln in out.splitlines() if ln.strip()]:
+            _rc, nm, _e = _ro(["kdotool", "getwindowname", wid], timeout=5)
+            wins.append({"id": wid, "title": (nm or "").strip()})
+        if wins or rc == 0:
+            return {"ok": True, "session": sess, "helper": "kdotool",
+                    "windows": wins}
+        return {"ok": False, "session": sess,
+                "error": f"kdotool returned nothing ({(err or '').strip()[:160]})"}
+    if helper == "wlrctl":
         rc, out, _ = _ro(["wlrctl", "window", "list"], timeout=5)
         wins = [{"title": ln.strip()} for ln in out.splitlines() if ln.strip()]
-        return {"ok": True, "session": sess, "windows": wins}
-    return {"ok": False,
-            "error": f"no window-list helper for {sess} session "
-                     f"(install wmctrl on X11, or wlrctl on Wayland)"}
+        return {"ok": True, "session": sess, "helper": "wlrctl",
+                "windows": wins}
+    return {"ok": False, "session": sess, "desktop": _desktop_env(),
+            "error": f"no window-list helper for this session — {why}"}
 
 
 def tool_focus_window(title: str) -> Dict[str, Any]:
     """Bring a window matching `title` (substring) to the front."""
+    if not str(title or "").strip():
+        return {"ok": False, "error": "focus_window needs a title to match"}
     sess = _session_type()
-    if sess == "x11" and _have("wmctrl"):
+    helper, why = _window_helper()
+    if helper in ("wmctrl", "wmctrl-xwayland"):
         rc, _o, err = _ro(["wmctrl", "-a", title], timeout=5)
         if rc == 0:
-            return {"ok": True, "focused": title}
+            return {"ok": True, "focused": title, "helper": helper}
         return {"ok": False, "error": err or f"no window matching '{title}'"}
-    if sess == "wayland" and _have("wlrctl"):
+    if helper == "kdotool":
+        rc, out, err = _ro(["kdotool", "search", "--name", title], timeout=8)
+        wid = (out or "").strip().splitlines()
+        if not wid:
+            return {"ok": False,
+                    "error": err or f"no window matching '{title}'"}
+        rc2, _o, err2 = _ro(["kdotool", "windowactivate", wid[0]], timeout=5)
+        if rc2 == 0:
+            return {"ok": True, "focused": title, "helper": "kdotool"}
+        return {"ok": False, "error": err2 or f"could not focus '{title}'"}
+    if helper == "wlrctl":
         rc, _o, err = _ro(["wlrctl", "window", "focus", title], timeout=5)
         if rc == 0:
-            return {"ok": True, "focused": title}
+            return {"ok": True, "focused": title, "helper": "wlrctl"}
         return {"ok": False, "error": err or f"no window matching '{title}'"}
-    return {"ok": False,
-            "error": f"no window-control helper for {sess} session"}
+    return {"ok": False, "session": sess, "desktop": _desktop_env(),
+            "error": f"no window-control helper for this session — {why}"}
 
 
 def tool_close_window(title: str) -> Dict[str, Any]:
     """Gracefully close a window matching `title` (substring)."""
+    if not str(title or "").strip():
+        return {"ok": False, "error": "close_window needs a title to match"}
     sess = _session_type()
-    if sess == "x11" and _have("wmctrl"):
+    helper, why = _window_helper()
+    if helper in ("wmctrl", "wmctrl-xwayland"):
         rc, _o, err = _ro(["wmctrl", "-c", title], timeout=5)
         if rc == 0:
-            return {"ok": True, "closed": title}
+            return {"ok": True, "closed": title, "helper": helper}
         return {"ok": False, "error": err or f"no window matching '{title}'"}
-    if sess == "wayland" and _have("wlrctl"):
+    if helper == "kdotool":
+        rc, out, err = _ro(["kdotool", "search", "--name", title], timeout=8)
+        wid = (out or "").strip().splitlines()
+        if not wid:
+            return {"ok": False,
+                    "error": err or f"no window matching '{title}'"}
+        rc2, _o, err2 = _ro(["kdotool", "windowclose", wid[0]], timeout=5)
+        return {"ok": rc2 == 0, "closed": title if rc2 == 0 else None,
+                "helper": "kdotool",
+                "error": (err2 or f"could not close '{title}'") if rc2 else None}
+    if helper == "wlrctl":
         rc, _o, err = _ro(["wlrctl", "window", "close", title], timeout=5)
         return {"ok": rc == 0, "closed": title if rc == 0 else None,
+                "helper": "wlrctl",
                 "error": err if rc else None}
-    return {"ok": False,
-            "error": f"no window-control helper for {sess} session"}
+    return {"ok": False, "session": sess, "desktop": _desktop_env(),
+            "error": f"no window-control helper for this session — {why}"}
 
 
 def tool_notify(message: str, title: str = "Basilisk") -> Dict[str, Any]:
@@ -3778,6 +3927,14 @@ def tool_make_dir(path: str) -> Dict[str, Any]:
 
 def tool_copy_path(src: str, dst: str) -> Dict[str, Any]:
     """Copy a file or directory tree from src to dst."""
+    # An EMPTY path is a missing argument, not a filesystem condition. Passing
+    # "" through to shutil produced `FileNotFoundError: [Errno 2] No such file
+    # or directory: ''`, which reads like a path problem and sent the model
+    # hunting for a file that was never named. Say which argument is missing.
+    if not str(src or "").strip() or not str(dst or "").strip():
+        return {"ok": False, "error": (
+            "copy_path needs BOTH src and dst; got src=%r dst=%r. "
+            "Nothing was copied." % (src, dst))}
     try:
         rsrc = os.path.expanduser(src)
         rdst = os.path.expanduser(dst)
@@ -3795,6 +3952,12 @@ def tool_copy_path(src: str, dst: str) -> Dict[str, Any]:
 
 def tool_move_path(src: str, dst: str) -> Dict[str, Any]:
     """Move or rename a file or directory."""
+    # Same reason as tool_copy_path — and worse here, since a move with an
+    # empty destination can DELETE the source on some paths.
+    if not str(src or "").strip() or not str(dst or "").strip():
+        return {"ok": False, "error": (
+            "move_path needs BOTH src and dst; got src=%r dst=%r. "
+            "Nothing was moved." % (src, dst))}
     guard = _fs_guard(src)
     if guard:
         return {"ok": False, "error": guard}

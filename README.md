@@ -14,6 +14,9 @@
 
 <p><b><em>You bring the model. Basilisk gives it hands, a memory, a methodology — and a leash you hold.</em></b></p>
 
+<p><sub><b>Version 9.7.0 — mature, in daily use, and finished in the way real tools are finished:</b><br/>
+the surface is stable, the safety floors are settled, and what work remains is hunted, published and pinned to a test.</sub></p>
+
 <p align="center"><b>⚠ This is professional offensive-security tooling. ⚠</b><br/>
 <sub>It is built for people who already run engagements, already have authorisation in writing,<br/>
 and already know what they are legally and ethically responsible for. If that is not you,<br/>
@@ -31,12 +34,14 @@ this is not a tool you should be pointing at anything.</sub></p>
 <tr>
 <td align="center"><b>87 / 113</b><br/><sub>OWASP Juice Shop<br/>black-box, autonomous</sub></td>
 <td align="center"><b>22 / 22</b><br/><sub>Duck Store API<br/>black-box, autonomous</sub></td>
-<td align="center"><b>3.8×</b><br/><sub>the nearest<br/>competing agent</sub></td>
-<td align="center"><b>~$0</b><br/><sub>every benchmark run<br/>on a budget model</sub></td>
+<td align="center"><b>2.4×</b><br/><sub>the leading commercial<br/>agent, like for like</sub></td>
+<td align="center"><b>$0</b><br/><sub>MIT — free to own,<br/>free to run</sub></td>
 </tr>
 </table>
 
-<p><em>Read that last column again. Basilisk beat frontier-model agents that were <b>handed the source code</b> — from the outside, on one of the cheapest models money can buy.<br/><b>The scaffolding scores. Not the price tag.</b></em></p>
+<p><em><b>The comparison that matters:</b> the leading commercial agent scores <b>49 / 113</b> when you <b>hand it your source code</b>.<br/>
+Basilisk scores <b>87 / 113</b> with no source at all — <b>1.8× its white-box run, blind</b> — on one of the cheapest models money can buy.<br/>
+<b>One of them is sold through a sales team. The other is this repo.</b></em></p>
 
 <br/>
 
@@ -53,7 +58,7 @@ this is not a tool you should be pointing at anything.</sub></p>
 <img src="https://img.shields.io/badge/Linux-X11%20%7C%20Wayland-6d7680?style=for-the-badge&logo=linux&logoColor=white&labelColor=08090b" alt="Linux X11/Wayland">
 <img src="https://img.shields.io/badge/python-3.10+-6d7680?style=for-the-badge&logo=python&logoColor=white&labelColor=08090b" alt="Python 3.10+">
 <img src="https://img.shields.io/badge/runs%20on-NetHunter-6d7680?style=for-the-badge&labelColor=08090b" alt="Runs on NetHunter">
-<img src="https://img.shields.io/badge/tests-2313%20assertions-6d7680?style=for-the-badge&labelColor=08090b" alt="2313 assertions">
+<img src="https://img.shields.io/badge/tests-2363%20assertions-6d7680?style=for-the-badge&labelColor=08090b" alt="2363 assertions">
 
 <br/><br/>
 
@@ -69,6 +74,7 @@ this is not a tool you should be pointing at anything.</sub></p>
 <a href="#-everything-in-the-box"><img src="https://img.shields.io/badge/Toolbox-08090b?style=flat-square&labelColor=7d121b&color=08090b" height="26" alt="Toolbox"></a>
 <a href="#-what-it-is-not-and-what-it-cant-do"><img src="https://img.shields.io/badge/Limits-08090b?style=flat-square&labelColor=7d121b&color=08090b" height="26" alt="Limits"></a>
 <a href="#-how-you-know-it-works"><img src="https://img.shields.io/badge/Verification-08090b?style=flat-square&labelColor=7d121b&color=08090b" height="26" alt="Verification"></a>
+<a href="#-why-its-free"><img src="https://img.shields.io/badge/Why%20it's%20free-08090b?style=flat-square&labelColor=7d121b&color=08090b" height="26" alt="Why it's free"></a>
 <a href="#-install"><img src="https://img.shields.io/badge/Install-e11d2b?style=flat-square&labelColor=08090b&color=e11d2b" height="26" alt="Install"></a>
 
 </div>
@@ -184,29 +190,41 @@ A claim is worth exactly the number you can regenerate. Basilisk is scored on **
 
 Turned loose **fully autonomously** and **black-box** — no per-command approval, no source on the machine — it solved **87 of 113 (77%)**.
 
-| Agent | Black-box | White-box *(source provided)* |
-|---|---:|---:|
-| **🐍 Basilisk** *(v7.6.0)* | **87 / 113** | — |
-| Basilisk *(v7.5.3)* | 81 / 113 | — |
-| Basilisk *(v7.1.0)* | 73 / 113 | — |
-| Basilisk *(v6.0.0)* | 58 / 113 | — |
-| Cascade *(Windsurf / Escape)* | 36 / 113 | 49 / 113 |
-| Claude Opus 4.8 *(bare model)* | 23 / 113 | 24 / 113 |
+| Agent | Licence | Black-box | White-box *(source provided)* |
+|---|---|---:|---:|
+| **🐍 Priest's Basilisk** *(v7.6.0)* | **MIT · free** | **87 / 113** | — |
+| Priest's Basilisk *(v7.5.3)* | MIT · free | 81 / 113 | — |
+| Priest's Basilisk *(v7.1.0)* | MIT · free | 73 / 113 | — |
+| Priest's Basilisk *(v6.0.0)* | MIT · free | 58 / 113 | — |
+| Cascade *(Windsurf / Escape)* | commercial, quote-only | 36 / 113 | 49 / 113 |
+| Claude Opus 4.8 *(bare model)* | metered API | 23 / 113 | 24 / 113 |
+
+**Read the two right-hand columns together, because that is the whole story.**
+
+Cascade's best number — **49 / 113** — is its *white-box* run: it was **handed the source code**. Basilisk's **87 / 113** is *black-box*: no source on the machine, nothing but the target's own attack surface, the way a real engagement actually starts.
+
+> **Basilisk, blind, beats Cascade holding the answer sheet — by 38 challenges. That is 1.8× its white-box score.**
+>
+> Scored like for like, black-box against black-box, it is **2.4× Cascade** (87 vs 36, +51 challenges) and **3.8× a bare frontier model**.
+
+And the column that should be hardest to explain away: Cascade is a commercial product you buy through a sales conversation. Basilisk is MIT, costs nothing to own, and every figure above was produced driving **DeepSeek-V4-Flash** — one of the cheapest models on the market — against a paid product running frontier models.
 
 > [!IMPORTANT]
-> **The model is not the point — the loop is.** Every Basilisk figure above was produced driving **DeepSeek-V4-Flash**, one of the cheapest models available. The agents it beats run on far pricier frontier models and still scored lower. The result comes from the verified-exploitation loop wrapped around the model, not from the model itself — which is why a budget model tops the board.
+> **The model is not the point — the loop is.** A budget model tops this board because the verified-exploitation loop wrapped around it is doing the work: hypothesis → deterministic exploit builder → fire → *prove it against ground truth* → keep the receipt. Swap in a frontier model and the loop gets better, not the other way round. What you are looking at is scaffolding beating spend.
 
 Published work generally puts fully-autonomous LLM pentest agents at **20–30%** on comparable tasks; Basilisk clears ~77%. Other agents' figures above are from the earlier v6-era session and were not re-run.
 
 ```
-        SOLVE RATE BY DIFFICULTY                     PROGRESSION (same scoring)
-  ★     ████████████████████████ 100%          v6.0.0  ████████████         58
-  ★★    ████████████████████████ 100%          v7.1.0  ███████████████      73
-  ★★★   ██████████████████████░░  92%          v7.5.3  █████████████████    81
-  ★★★★  ███████████░░░░░░░░░░░░░  48%          v7.6.0  ██████████████████   87
-  ★★★★★ ████████████████░░░░░░░░  68%
-  ★★★★★★████████████░░░░░░░░░░░░  58%          Cascade ████████            36
-                                               Opus    █████               23
+        SOLVE RATE BY DIFFICULTY                THE BOARD  (Juice Shop, 113 challenges)
+
+  ★     ████████████████████████ 100%     Basilisk  v7.6.0 ██████████████████ 87  black-box · free
+  ★★    ████████████████████████ 100%     Basilisk  v7.5.3 █████████████████  81  black-box · free
+  ★★★   ██████████████████████░░  92%     Basilisk  v7.1.0 ███████████████    73  black-box · free
+  ★★★★  ███████████░░░░░░░░░░░░░  48%     Basilisk  v6.0.0 ████████████       58  black-box · free
+  ★★★★★ ████████████████░░░░░░░░  68%     ─────────────────────────────────────────────────────
+  ★★★★★★████████████░░░░░░░░░░░░  58%     Cascade  white-box ██████████       49  SOURCE PROVIDED
+                                          Cascade  black-box ████████         36  commercial
+                                          Opus 4.8 bare      █████            23  metered API
 ```
 
 The curve is the honest part. It clears the entire lower half, then thins as the chains get deeper — and it *climbs again* at five and six stars, because that's where the verified-exploitation oracle earns its keep. A flat line would mean the benchmark was memorised, not solved.
@@ -438,7 +456,7 @@ The scope gate was audited the same way and did **not** share the hole — it fa
 
 If you find a twenty-second shape, open an issue. That is the arrangement.
 
-All of it is pinned in the test suite — **2,313 assertions across 41 suites**, stdlib-only, runnable before you trust it with anything. Basilisk writes and runs real exploits against authorized targets, because that's the job. It will not produce standalone weaponized malware (reverse shells, implants, ransomware, backdoors), and the destructive class can never run through it at all.
+All of it is pinned in the test suite — **2,363 assertions across 41 suites**, stdlib-only, runnable before you trust it with anything. Basilisk writes and runs real exploits against authorized targets, because that's the job. It will not produce standalone weaponized malware (reverse shells, implants, ransomware, backdoors), and the destructive class can never run through it at all.
 
 <img src="https://capsule-render.vercel.app/api?type=rect&color=0:08090b,100:7d121b&height=3&section=header" width="100%" alt="">
 
@@ -497,7 +515,7 @@ Claims are cheap. Every claim on this page is either a number you can regenerate
 for f in tests/test_*.py; do python3 "$f" || echo "RED $f"; done
 ```
 
-Stdlib only. No pytest, no network, no fixtures, no account, nothing to install. **41 suites, 2,313 assertions**, done in under a minute on a laptop. You don't have to believe any of this — you can check it.
+Stdlib only. No pytest, no network, no fixtures, no account, nothing to install. **41 suites, 2,363 assertions**, done in under a minute on a laptop. You don't have to believe any of this — you can check it.
 
 What that suite is actually for — because "we have tests" means nothing on its own:
 
@@ -507,6 +525,10 @@ What that suite is actually for — because "we have tests" means nothing on its
 - **The shipped artifact is what's verified.** The release zip is extracted fresh and the full suite run from inside it — not from the working tree it was built in.
 
 The parts that carry the most risk are locked down hardest: the immutable guardrail block is hash-checked on every release, and the safety, scope and ledger modules are diffed byte-for-byte so a change to any of them is deliberate and visible.
+
+**What "finished" means here.** Not "we stopped finding bugs" — that claim is always a lie, and a tool that makes it is telling you it stopped looking. It means the architecture has settled, the safety floors have stopped moving, and the failure modes that remain are the ones you find by *reading*, not by using. Every release ships the hunt as well as the fix: the twenty-one gate bypasses, the quadratic regexes that froze the UI, the tool-call dialect that leaked into the chat, the compressor that returned a cache pointer instead of a page — all found in this codebase, all published, all pinned to a test that fails against the release before them.
+
+That is the standard this tool is held to, and it is the only honest way to sell you something you're about to hand a real shell on a real machine. If you find the next one, open an issue — it will be fixed, pinned, and written up like the rest.
 
 <img src="https://capsule-render.vercel.app/api?type=rect&color=0:08090b,100:7d121b&height=3&section=header" width="100%" alt="">
 
@@ -561,18 +583,34 @@ The model picker shows context window, price per million tokens and what each mo
 
 <img src="https://capsule-render.vercel.app/api?type=rect&color=0:08090b,100:7d121b&height=3&section=header" width="100%" alt="">
 
+## 🜃 Why it's free
+
+There is a version of this that has a pricing page. Three tiers, a "contact sales" button, a seat count, an enterprise plan with SSO and a quarterly invoice. Everything on this page would still be true, and the number at the bottom would be four figures a year.
+
+I'd rather it went to the people who'd actually use it.
+
+Some men aren't looking for anything logical like money. Some of us just want to see the thing built properly, put in the hands of people who know what to do with it, and left there.
+
+So: **MIT. All of it.** Not a trial, not a community edition with the good parts removed, not open-core with the safety gates behind a licence key. There is no paid tier, because there is no held-back tier — the benchmark scores on this page were produced by the same code you're about to clone, on a budget model, with the receipts committed to the repo.
+
+No account. No telemetry. No usage cap. No "upgrade to unlock". Nothing phones home, and nothing ever will, because the day it does is the day it stops being the thing I wanted to build.
+
+If it earns its place in your kit, star the repo and tell someone who runs engagements. That's the whole price.
+
+<img src="https://capsule-render.vercel.app/api?type=rect&color=0:08090b,100:7d121b&height=3&section=header" width="100%" alt="">
+
 ## 📜 License
 
-**MIT.** Take it, fork it, use it on what you're allowed to break.
+**MIT.** Take it, fork it, use it on what you're allowed to break. Ship it inside your own product if you want to — the licence means what it says.
 
 <div align="center">
 
 <br/>
 
-### Built by one person, verified by 1,886 assertions.
+### Built by one person. Verified by 2,363 assertions. Priced at nothing.
 
-<sub>No VC, no waitlist, no "contact sales". Clone it, read it, run the suite,<br/>
-then point it at something you own and watch it work.</sub>
+<sub>No VC, no waitlist, no "contact sales", no seat count, no upgrade path.<br/>
+Clone it, read it, run the suite, then point it at something you own and watch it work.</sub>
 
 <br/>
 

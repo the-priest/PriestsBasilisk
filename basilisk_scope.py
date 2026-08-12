@@ -184,8 +184,27 @@ _VALUE_FLAGS_NOT_TARGET: Set[str] = {
 }
 
 # Flags that name a FILE full of targets — statically unknowable, so uncertain.
+# Flags whose VALUE is a file of targets ("read the hosts from here"), which
+# the gate cannot resolve statically and must therefore treat as uncertain.
+#
+# `-f` IS DELIBERATELY ABSENT. It was here, and it is also in _BOOLEAN_FLAGS,
+# and the file branch is tested first — so `-f` swallowed the token after it on
+# every tool where it is an ordinary boolean:
+#
+#     curl -f https://acme.com/health   -> REFUSED (uncertain)
+#     nmap -f acme.com                  -> REFUSED (uncertain)
+#     gobuster dir -f -u http://acme.com -w w.txt -> `-f` ate `-u`
+#
+# Those are in-scope, everyday commands. `-f` means --fail on curl, fragment
+# packets on nmap, and force on a dozen other tools; it means "targets file"
+# on almost nothing. A gate that refuses ordinary work is a gate the operator
+# switches off, and then it protects nothing at all — so the false-refusal
+# cost here is a SECURITY cost, not a convenience one.
+#
+# The real target-file flags below are unambiguous.
 _TARGET_FILE_FLAGS: Set[str] = {
-    "-iL", "--input-list", "-il", "--file", "-f", "--targets-file",
+    "-iL", "--input-list", "-il", "--file", "--targets-file",
+    "--target-file", "--hosts-file", "--host-list",
 }
 
 # Extensions that make a dotted token a filename, not a hostname.
@@ -226,10 +245,33 @@ _TOOL_NAME_CONSUMERS: Set[str] = {
     "guix", "conda", "poetry", "uv", "asdf", "mise", "update-alternatives",
     "yay", "paru", "zypper", "apk", "brew", "port", "emerge", "snap",
     "flatpak", "pip", "pip3", "pipx", "npm", "yarn", "gem", "cargo", "go",
-    "echo", "printf", "cat", "grep", "rg", "ag", "find", "ls", "stat", "file",
-    "systemctl", "service", "journalctl", "docker", "podman", "kubectl",
-    "git", "make", "cmake", "test", "wc", "head", "tail", "sed", "awk",
+    "echo", "printf", "cat", "grep", "rg", "ag", "ls", "stat", "file",
+    "systemctl", "service", "journalctl",
+    "test", "wc", "head", "tail", "sed", "awk",
 }
+
+# ── HEADS THAT MENTION A TOOL *AND* RUN IT ───────────────────────────
+# The set above exists so `which nmap` and `apt install nmap` are not read as
+# a scan: they NAME a tool without running it, so the unattributed-tool
+# backstop must not fire. `find`, `docker`, `podman`, `kubectl`, `git`, `make`
+# and `go` were in that set too — and they EXECUTE what follows:
+#
+#     find . -exec nmap 8.8.8.8 \;                       -> was ALLOWED
+#     docker run --rm kalilinux/kali nmap -sS 8.8.8.8    -> was ALLOWED
+#     sudo find . -exec masscan 198.51.100.0/24 \;       -> was ALLOWED
+#
+# Being on the introspection list skipped BOTH the quoted-argument recursion
+# and the backstop, so the scan was invisible to the gate. Judge these on
+# their arguments like any other command.
+# bash/ksh socket redirection: /dev/tcp/<host>/<port> and /dev/udp/…
+_DEV_SOCKET_RE = re.compile(
+    r"/dev/(?:tcp|udp)/([^/\s'\"|;&>()]+)/\d+")
+
+_TOOL_NAME_EXECUTORS: Set[str] = {
+    "find", "docker", "podman", "kubectl", "git", "make", "cmake", "go",
+    "nix-shell", "distrobox", "toolbox", "chroot", "ip", "ssh",
+}
+_TOOL_NAME_CONSUMERS -= _TOOL_NAME_EXECUTORS
 
 # Wrappers whose -c/--command argument is a COMMAND STRING to execute, so it
 # must be recursed into exactly like a shell's. `su -c 'nmap 8.8.8.8' root`
@@ -321,8 +363,31 @@ def _looks_like_target(token: str) -> bool:
     # authorisation decision must be a pure function of the command string —
     # the moment it depends on mutable disk state, anything that can create a
     # file can move the boundary.
-    if t.startswith(("/", "./", "../", "~")) or os.sep in t:
+    # A PATH is a file. `host/path` is a HOST.
+    #
+    # `os.sep in t` treated every token containing a "/" as a filename, so a
+    # scheme-less URL vanished from the extracted set entirely:
+    #
+    #     curl acme.com evil.com/admin   -> targets ['acme.com'] -> ALLOWED
+    #
+    # …and curl fetches BOTH. One in-scope operand laundered an out-of-scope
+    # one. The distinction that matters is where the slash is: a token that
+    # STARTS with a path prefix is a path, and so is one whose first segment
+    # is not host-shaped. `evil.com/admin` is neither.
+    if t.startswith(("/", "./", "../", "~")):
         return False
+    if os.sep in t:
+        first = t.split("/", 1)[0]
+        # No dot in the first segment (and not an IP) => a relative path like
+        # `wordlists/big.txt`, not a host.
+        if "." not in first:
+            return False
+        if not _HOSTNAME_RE.match(first.rstrip(".")):
+            try:
+                ipaddress.ip_address(first)
+            except ValueError:
+                return False
+        # first segment IS host-shaped — fall through and judge it as a host.
 
     if not _HOSTNAME_RE.match(host):
         return False
@@ -571,6 +636,24 @@ def extract_targets(command: str, _depth: int = 0) -> Extraction:
         return out
     try:
         norm = _normalize(command)
+
+        # ── /dev/tcp AND /dev/udp: A CONNECTION WITH NO BINARY ──
+        # The whole gate keys off recognising a network TOOL by its basename,
+        # so bash's own socket redirection was invisible to it:
+        #
+        #     cat < /dev/tcp/evil.com/80          -> ALLOWED, and it connects
+        #     exec 3<>/dev/tcp/evil.com/80        -> ALLOWED
+        #     printf 'GET / HTTP/1.0\r\n\r\n' > /dev/tcp/evil.com/80
+        #
+        # There is no nmap, no curl, nothing to attribute — just a redirection
+        # bash turns into a TCP connection. Matched on the raw string because
+        # shlex hands the redirection back as an ordinary token and the host
+        # sits inside the pseudo-path.
+        for _m in _DEV_SOCKET_RE.finditer(norm):
+            _h = _strip_to_host(_m.group(1))
+            if _h:
+                out.tools.append("bash-" + _m.group(0).split("/")[1])
+                out.targets.append(_h)
 
         # Command substitutions execute independently of the line that contains
         # them — lift them out and parse each as its own command.
