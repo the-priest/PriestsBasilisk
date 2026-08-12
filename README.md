@@ -58,7 +58,7 @@ Basilisk scores <b>87 / 113</b> with no source at all — <b>1.8× its white-box
 <img src="https://img.shields.io/badge/Linux-X11%20%7C%20Wayland-6d7680?style=for-the-badge&logo=linux&logoColor=white&labelColor=08090b" alt="Linux X11/Wayland">
 <img src="https://img.shields.io/badge/python-3.10+-6d7680?style=for-the-badge&logo=python&logoColor=white&labelColor=08090b" alt="Python 3.10+">
 <img src="https://img.shields.io/badge/runs%20on-NetHunter-6d7680?style=for-the-badge&labelColor=08090b" alt="Runs on NetHunter">
-<img src="https://img.shields.io/badge/tests-2835%20assertions-6d7680?style=for-the-badge&labelColor=08090b" alt="2835 assertions">
+<img src="https://img.shields.io/badge/tests-2921%20assertions-6d7680?style=for-the-badge&labelColor=08090b" alt="2921 assertions">
 
 <br/><br/>
 
@@ -456,7 +456,7 @@ The scope gate was audited the same way and did **not** share the hole — it fa
 
 If you find a twenty-second shape, open an issue. That is the arrangement.
 
-All of it is pinned in the test suite — **2,835 assertions across 44 suites**, stdlib-only, runnable before you trust it with anything. Basilisk writes and runs real exploits against authorized targets, because that's the job. It will not produce standalone weaponized malware (reverse shells, implants, ransomware, backdoors), and the destructive class can never run through it at all.
+All of it is pinned in the test suite — **2,921 assertions across 45 suites**, stdlib-only, runnable before you trust it with anything. Basilisk writes and runs real exploits against authorized targets, because that's the job. It will not produce standalone weaponized malware (reverse shells, implants, ransomware, backdoors), and the destructive class can never run through it at all.
 
 <img src="https://capsule-render.vercel.app/api?type=rect&color=0:08090b,100:7d121b&height=3&section=header" width="100%" alt="">
 
@@ -515,7 +515,7 @@ Claims are cheap. Every claim on this page is either a number you can regenerate
 for f in tests/test_*.py; do python3 "$f" || echo "RED $f"; done
 ```
 
-Stdlib only. No pytest, no network, no fixtures, no account, nothing to install. **44 suites, 2,835 assertions**, done in under a minute on a laptop. You don't have to believe any of this — you can check it.
+Stdlib only. No pytest, no network, no fixtures, no account, nothing to install. **45 suites, 2,921 assertions**, done in under a minute on a laptop. You don't have to believe any of this — you can check it.
 
 What that suite is actually for — because "we have tests" means nothing on its own:
 
@@ -563,6 +563,34 @@ The test suites are stdlib-only, so you can verify the safety claims yourself be
 for t in tests/test_*.py; do python3 "$t"; done
 ```
 
+### 🐍 Or install from PyPI
+
+```bash
+pip install priestsbasilisk
+```
+```bash
+basilisk
+```
+
+**Install the GTK stack first.** Basilisk is a native GTK4/libadwaita app, and PyGObject ships source-only on PyPI — it compiles against your system's GObject-introspection headers rather than downloading a wheel. On a desktop that already has PyGObject from its own package manager, pip sees it and is satisfied. On a bare machine, install these first:
+
+| Distro | Command |
+| --- | --- |
+| **Arch / CachyOS** | `sudo pacman -S python-gobject gtk4 libadwaita` |
+| **Debian / Kali / Ubuntu** | `sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 libgirepository1.0-dev` |
+| **Fedora** | `sudo dnf install python3-gobject gtk4 libadwaita-devel` |
+| **openSUSE** | `sudo zypper install python3-gobject gtk4 libadwaita-devel` |
+
+Optional features are lazily imported, so the app runs without them and turns the feature off instead of failing. Install them if you want them: `pip install "priestsbasilisk[all]"` — or individually, `[vision]` for image analysis, `[web]` for brotli-compressed fetches, `[pentest]` for YAML template parsing.
+
+**Which install should you use?** `install.sh` is still the recommended path and the one the rest of this README documents: it sets up the desktop entry, the icon theme, the launcher and the optional systemd user unit, and it updates in place. `pip install` gives you the application and the `basilisk` command, and nothing else — no `.desktop` file, no icon, no service. Use it if you want Basilisk inside a virtualenv, in a container, or managed by your own tooling.
+
+Building the distribution yourself is one command, and the packaging is pinned by its own test suite so the wheel cannot silently drop a module or an asset:
+
+```bash
+python3 -m build && python3 -m twine check dist/*
+```
+
 ### 🔌 Bring your own model
 
 Multi-provider — you only need a key for the one you want. Set it in **Settings → Backends**.
@@ -607,7 +635,7 @@ If it earns its place in your kit, star the repo and tell someone who runs engag
 
 <br/>
 
-### Built by one person. Verified by 2,835 assertions. Priced at nothing.
+### Built by one person. Verified by 2,921 assertions. Priced at nothing.
 
 <sub>No VC, no waitlist, no "contact sales", no seat count, no upgrade path.<br/>
 Clone it, read it, run the suite, then point it at something you own and watch it work.</sub>

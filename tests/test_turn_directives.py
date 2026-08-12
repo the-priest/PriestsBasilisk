@@ -53,6 +53,7 @@ Run:  python3 tests/test_turn_directives.py
 
 from __future__ import annotations
 
+import io
 import os
 import sys
 import types
@@ -312,6 +313,101 @@ _w3._action_log = _w._action_log
 _w3.terminal_log = lambda *a, **k: None
 ck("repeat_block_after=0 still disables the guard entirely",
    _w3._repeat_guard_blocks("system_info") is False)
+
+# ── the same answer three times ──────────────────────────────────────
+#
+# Reported from real use: "it answers a question 3 times sometimes".  The count
+# is not a coincidence -- it is 1 answer + ANSWER_STALL_NUDGE_MAX (2) nudged
+# re-answers, and _answer_stall_nudges resets per question, so every question
+# could spend the full budget.
+#
+# The answer-mode stall nudge was wired to reply_intends_action(), whose own
+# docstring says it is the MISSION loop's predicate: "is it mid-task, or
+# finished?"  Answer mode asks a different question -- "did it answer, or only
+# narrate?" -- and the two disagree on exactly the common case: a COMPLETE
+# answer that also mentions a next step, or that simply ends with the courtesy
+# "Let me know if you want more".  "let me know" contains the intent marker
+# "let me ", so a finished reply was classified as a stall, nudged, answered
+# again, classified again, nudged again.  One predicate, two consumers, second
+# consumer asking something else -- the same shape as every other defect in
+# this file.
+#
+# Two fixes, tested separately: sign-offs are no longer read as intent (which
+# helps the mission loop too -- a finished report ending "let me know" was
+# reading as mid-task), and answer mode now asks whether the reply DELIVERED
+# anything, because a reply carrying facts, a list, a table or a code block has
+# already given the operator something and nudging it can only duplicate it.
+print("\n== a complete answer is never nudged into repeating itself ==")
+
+_COMPLETE = [
+    "You're on kernel 7.1.8-1-cachyos, Ryzen 5 PRO 4650U, 12 cores, 15.7 GiB "
+    "RAM. Let me know if you want the full uname output.",
+    "The audit came back Grade C, score 12: 1 high (SSH root login permitted), "
+    "3 medium, 1 low, 2 info. The high is in /etc/ssh/sshd_config -- "
+    "PermitRootLogin is set to yes. Let me know if you want the mediums.",
+    "I'll summarise what I found:\n\n- 192.168.1.1 is the only live host\n"
+    "- ports 53, 80, 443 open\n- nginx 1.24 on 80/443\n\nThat's the subnet.",
+    "Here's the answer: CVE-2024-3094 scores 10.0 CRITICAL. It's the xz-utils "
+    "backdoor. Let me know if you need the affected version range.",
+    "Done -- 6 files in ~/Downloads, newest is tor-browser. Let me know if you "
+    "want them sorted differently.",
+    "Your disk usage: / is 116 GiB, /home 549 GiB, swap 2.0 GiB. Nothing is "
+    "close to full. I'll be happy to dig into any mount point.",
+    "```\nPermitRootLogin yes\n```\nThat's the offending line. I'll fix it if "
+    "you say go.",
+    "| port | service |\n|---|---|\n| 80 | nginx |\n| 443 | nginx |\n\n"
+    "I'll scan the rest next if you want.",
+    "The scan found 1 live host, 192.168.1.1, running nginx 1.24 with ports 53, "
+    "80 and 443 open. Nothing else responded. Next step would be a version "
+    "sweep.",
+]
+for _t in _COMPLETE:
+    ck(f"not a stall: {_t[:44]!r}", Bc.reply_is_bare_stall(_t) is False)
+
+# The counter-property is the whole reason the nudge exists: a reply that
+# promises work and delivers nothing must still be pushed, or answer mode goes
+# back to dying mid-task with a promise the operator never sees kept.
+print("\n   -- but a bare stall is still nudged --")
+for _t in [
+    "I've got the site and the paper metadata. Let me grab the HN discussion "
+    "thread... and also look for a news writeup.",
+    "Let me check the sshd config first.",
+    "I'll run a port scan on the subnet now.",
+    "Next, I'll enumerate the web server.",
+    "Now I'll look at the firewall rules.",
+    "First, I'll check what's listening.",
+    "Proceeding to the next check...",
+]:
+    ck(f"still a stall: {_t[:44]!r}", Bc.reply_is_bare_stall(_t) is True)
+
+print("\n   -- and an empty / degraded reply is not a stall to nudge --")
+for _t in ("", "   ", "\n"):
+    ck(f"empty is not a stall: {_t!r}", Bc.reply_is_bare_stall(_t) is False)
+
+# The mission loop keeps its own predicate, and gains the sign-off fix.
+print("\n== the mission predicate still answers ITS question ==")
+for _t, _want in [
+    ("I'll now enumerate the web server.", True),
+    ("Found 3 hosts. Let me scan them.", True),
+    ("Next step: test the login form.", True),
+    ("Assessment complete. Let me know if you want the report.", False),
+    ("Found 3 hosts. Let me know if you want detail.", False),
+    ("I'd be happy to go deeper on any of these.", False),
+    ("Mission complete.", False),
+]:
+    ck(f"intends_action={_want}: {_t[:44]!r}",
+       Bc.reply_intends_action(_t) is _want)
+
+# The arithmetic that produced "three times" is pinned so the budget cannot be
+# raised without someone reading this.
+ck("the nudge budget is 2 (1 answer + 2 nudges was the '3 times')",
+   Bk.ANSWER_STALL_NUDGE_MAX == 2, str(Bk.ANSWER_STALL_NUDGE_MAX))
+_gsrc = io.open(os.path.join(_ROOT, "basilisk.py"), encoding="utf-8").read()
+ck("answer mode is wired to reply_is_bare_stall, not the mission predicate",
+   "and reply_is_bare_stall(final)" in _gsrc)
+ck("reply_is_bare_stall is imported by the host",
+   "reply_is_bare_stall," in _gsrc)
+
 
 print(f"\nturn_directives: {_p} passed, {_f} failed")
 sys.exit(1 if _f else 0)

@@ -1,0 +1,122 @@
+# ══════════════════════════════════════════════════════════════════════
+# PriestsBasilisk — packaging
+#
+# The repo layout is deliberately UNCHANGED by this file.  install.sh, the
+# flat installed layout under ~/.local/share/basilisk, and all 44 test suites
+# keep working exactly as before; this only adds a second way to ship the
+# same tree.
+#
+# Two things are worth knowing before you publish:
+#
+#   1. The module names stay flat (basilisk, basilisk_core, ...) because every
+#      intra-project import is absolute and the test suite pins them.  They are
+#      all `basilisk*`-prefixed, which is a namespace in practice.
+#   2. The art is NOT duplicated.  `[tool.setuptools.package-dir]` maps the
+#      package name `basilisk_assets` onto the existing assets/app/ directory,
+#      so the wheel carries one copy and the repo keeps one copy.
+#
+# Build:    python3 -m build
+# Check:    python3 -m twine check dist/*
+# Publish:  python3 -m twine upload dist/*
+# ══════════════════════════════════════════════════════════════════════
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "priestsbasilisk"
+# Kept in lockstep with basilisk.VERSION by tests/test_packaging.py.  Not
+# derived with [tool.setuptools.dynamic] on purpose: reading it that way
+# imports basilisk.py, which imports gi at module scope, so the BUILD would
+# need GTK installed just to learn a version string.
+version = "9.7.0"
+description = "Autonomous AI penetration-testing agent — a native Linux desktop app that turns any LLM into a working pentester, and repairs your own repos the same way."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "the-priest" }]
+keywords = [
+    "security", "penetration-testing", "pentest", "offensive-security",
+    "ai-agent", "llm", "autonomous-agent", "gtk4", "libadwaita",
+    "vulnerability-scanner", "red-team", "owasp",
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: X11 Applications :: GTK",
+    "Intended Audience :: Information Technology",
+    "Intended Audience :: System Administrators",
+    # No "License ::" classifier: PEP 639 superseded those with the `license`
+    # expression above, and modern setuptools hard-errors if both are present.
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Security",
+    "Topic :: System :: Systems Administration",
+]
+
+# GTK4/libadwaita are SYSTEM libraries; PyGObject binds to them and ships
+# source-only on PyPI (no wheels), so it compiles against gobject-introspection
+# headers at install time.  On a desktop that already has PyGObject from its
+# distro package manager, pip sees it and is satisfied.  On a bare machine,
+# install the system packages FIRST — see README ("Install").
+dependencies = [
+    "PyGObject>=3.42",
+    "pycairo>=1.20",
+]
+
+[project.optional-dependencies]
+# Everything below is imported lazily and guarded at the call site: the app
+# runs without any of it, with the corresponding feature disabled.
+vision = ["opencv-python-headless>=4.5"]     # analyze_image, detect_faces
+web = ["brotli>=1.0"]                        # brotli-compressed page fetches
+pentest = ["PyYAML>=6.0"]                    # nuclei/template parsing
+all = [
+    "opencv-python-headless>=4.5",
+    "brotli>=1.0",
+    "PyYAML>=6.0",
+]
+dev = ["build>=1.0", "twine>=5.0"]
+
+[project.urls]
+Homepage = "https://github.com/the-priest/PriestsBasilisk"
+Repository = "https://github.com/the-priest/PriestsBasilisk"
+Issues = "https://github.com/the-priest/PriestsBasilisk/issues"
+
+[project.scripts]
+basilisk = "basilisk:main"
+priestsbasilisk = "basilisk:main"
+
+# ── layout ────────────────────────────────────────────────────────────
+[tool.setuptools]
+# Explicit, not auto-discovered.  Auto-discovery on a flat layout sweeps up
+# tests/ and any stray top-level .py, and silently DROPS a new module rather
+# than failing — the same class of gap install.sh's EXT_FILES had.
+# tests/test_packaging.py asserts this list matches the repo.
+py-modules = [
+    "basilisk",
+    "basilisk_core",
+    "basilisk_safety",
+    "basilisk_scope",
+    "basilisk_ledger",
+    "basilisk_persona",
+    "basilisk_voice",
+    "basilisk_btn_art",
+]
+packages = [
+    "basilisk_ext",
+    "basilisk_assets",
+]
+include-package-data = true
+
+[tool.setuptools.package-dir]
+# One copy of the art. `assets/app/` in the repo IS `basilisk_assets` in the
+# wheel; assets/app/__init__.py is what makes that legal.
+basilisk_assets = "assets/app"
+
+[tool.setuptools.package-data]
+basilisk_assets = ["*.png", "*.svg", "*.jpg", "*.webp"]

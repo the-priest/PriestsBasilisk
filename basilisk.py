@@ -108,6 +108,7 @@ from basilisk_core import (
     tool_benchmark_compare,
     quick_facts as tool_quick_facts,
     sudo_cached, detect_urgency, looks_degraded, reply_intends_action,
+    reply_is_bare_stall,
     reply_is_strong_conclusion,
     note_command, recent_duplicate,
     parse_tool_calls, strip_tool_calls, shell_block_command,
@@ -2486,13 +2487,35 @@ class ProposedEditWidget(Gtk.Box):
 _APP_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
+# Installed as a wheel, the art ships inside the `basilisk_assets` package
+# (pyproject maps that name onto assets/app/, so the repo keeps exactly one
+# copy of a 7 MB tree).  Resolved once, at import, and never allowed to raise:
+# a missing or unimportable asset package must degrade to "no art", never to
+# "no app".
+def _packaged_asset_dir() -> Optional[str]:
+    try:
+        import basilisk_assets                                  # type: ignore
+        d = os.path.dirname(os.path.abspath(basilisk_assets.__file__))
+        return d if os.path.isdir(d) else None
+    except Exception:
+        return None
+
+
+_PKG_ASSET_DIR = _packaged_asset_dir()
+
+
 def _asset_paths(filename: str) -> List[str]:
     """Every place a runtime asset may live, most-specific first."""
-    return [
+    paths = [
         os.path.expanduser("~/.local/share/basilisk/" + filename),  # installed
         os.path.join(_APP_DIR, "assets", "app", filename),          # repo layout
         os.path.join(_APP_DIR, filename),                           # legacy flat
     ]
+    # Last, so a dev checkout and an install.sh install behave exactly as they
+    # did before packaging existed.
+    if _PKG_ASSET_DIR:
+        paths.append(os.path.join(_PKG_ASSET_DIR, filename))        # wheel
+    return paths
 
 
 def _find_asset(filename: str) -> Optional[str]:
@@ -8373,11 +8396,17 @@ class MainWindow(Adw.ApplicationWindow):
             # BOUNDED, because a model that only ever narrates must not spin:
             # after ANSWER_STALL_NUDGE_MAX pushes we stop nudging and let the
             # turn end, so the worst case is a couple of extra round-trips.
+            # reply_is_bare_stall, NOT reply_intends_action: the latter answers
+            # the MISSION loop's question ("mid-task or finished?"), and wiring
+            # it here asked it the wrong one. A complete answer that mentions a
+            # next step — or just ends "Let me know if you want more" — was read
+            # as a stall and nudged, and with a budget of 2 nudges the operator
+            # got the SAME ANSWER THREE TIMES for one question.
             if (not cancelled and not executable
                     and not self._stop_requested
                     and not self._tools_locked
                     and not looks_degraded(final)
-                    and reply_intends_action(final)
+                    and reply_is_bare_stall(final)
                     and getattr(self, "_answer_stall_nudges", 0)
                         < ANSWER_STALL_NUDGE_MAX):
                 self._answer_stall_nudges = getattr(

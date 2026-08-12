@@ -10,7 +10,11 @@ backups/
 .idea/
 .vscode/
 
-# PyInstaller
+# Build artefacts (PyInstaller, and `python3 -m build` for the PyPI wheel)
 build/
 dist/
 *.spec
+*.egg-info/
+.eggs/
+.venv/
+venv/

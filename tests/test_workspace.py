@@ -558,6 +558,97 @@ ck("workspace.py is in install.sh EXT_FILES",
    "workspace.py" in open(os.path.join(_ROOT, "install.sh"),
                           encoding="utf-8").read())
 
+# ── 12. the undo promise must match what undo actually does ──────────
+#
+# A self-test run reported workspace_revert as a CRITICAL silent failure:
+# create a file, delete it, revert -> revert says {"ok":true,"reverted":[f]}
+# and the file is still gone.  revert() was right (it returns the workspace to
+# the IMPORTED state, and that file was never in the import) and the REPORT was
+# right that something was broken -- but the broken thing was what the operator
+# had been told.  Three defects, one root cause:
+#
+#   a. delete() said "recoverable with workspace_revert" for EVERY file,
+#      including files created in-session that revert deliberately removes.
+#      The operator is told his data is recoverable at the moment it stops
+#      being.  A false undo promise is the same defect as a wrong undo
+#      command: it reads as "safe to do" when it is not.
+#   b. revert() reported such a file under "reverted", which reads as "it is
+#      back".  Restoring and removing are different outcomes and now say so.
+#   c. "this file did not exist at import" was encoded TWICE -- as zero bytes
+#      in the stash and as membership in _STATE.created -- and revert had to
+#      agree with both.  That is why _mark() could not drop a deleted file
+#      from `created`: doing so would have flipped revert from "remove it" to
+#      "restore it as an empty file".  The two encodings had to be kept out of
+#      sync for the answer to come out right, so status() reported a file as
+#      created AND deleted at once.  One explicit marker fixes all of it, and
+#      un-breaks the genuinely-empty imported file, which is byte-identical to
+#      the old "didn't exist" marker.
+print("\n== the undo promise matches the undo ==")
+_ws = os.path.join(BASE, "undo")
+os.makedirs(_ws, exist_ok=True)
+_z = os.path.join(_ws, "repo.zip")
+with zipfile.ZipFile(_z, "w") as _zf:
+    _zf.writestr("repo/README.md", "# hello\n")
+    _zf.writestr("repo/app.py", "print('hi')\n")
+    _zf.writestr("repo/empty.txt", "")          # genuinely empty AT IMPORT
+W.import_zip(_z)
+
+# (a) a file created in-session: delete must NOT claim recoverability
+W.write("probe.txt", "probe v1", create=True)
+ck("a created file is listed as created", "probe.txt" in W.status()["created"])
+_d = W.delete("probe.txt")
+ck("delete of a created file reports recoverable=False",
+   _d.get("recoverable") is False, str(_d))
+ck("and says so in the note", "NOT recoverable" in _d.get("note", ""), str(_d))
+
+# (c) state is coherent: not created AND deleted at the same time
+_st = W.status()
+ck("a deleted file leaves the created list", "probe.txt" not in _st["created"],
+   str(_st["created"]))
+ck("a deleted file is in the deleted list", "probe.txt" in _st["deleted"])
+
+# (b) revert distinguishes removed from restored
+_rv = W.revert()
+ck("revert reports it as REMOVED, not restored",
+   _rv.get("removed") == ["probe.txt"] and _rv.get("restored") == [], str(_rv))
+ck("reverted stays the union for existing callers",
+   _rv.get("reverted") == ["probe.txt"], str(_rv))
+ck("and the file really is gone", W.read("probe.txt").get("ok") is False)
+
+# the case that MUST still recover: an imported file
+_d = W.delete("README.md")
+ck("delete of an imported file reports recoverable=True",
+   _d.get("recoverable") is True, str(_d))
+ck("and promises the revert", "recoverable with workspace_revert" in _d["note"])
+_rv = W.revert()
+ck("revert reports it as RESTORED",
+   _rv.get("restored") == ["README.md"] and _rv.get("removed") == [], str(_rv))
+ck("the imported file is back with its content",
+   W.read("README.md").get("content") == "# hello\n")
+
+# an empty file at import is a FILE, not a "did not exist" marker
+W.write("empty.txt", "now has content", create=False)
+_rv = W.revert()
+ck("an edited empty file is restored, not deleted",
+   W.read("empty.txt").get("ok") is True, str(_rv))
+ck("and restored as empty", W.read("empty.txt").get("content") == "")
+_d = W.delete("empty.txt")
+ck("deleting an empty imported file is recoverable",
+   _d.get("recoverable") is True, str(_d))
+W.revert()
+ck("and it comes back", W.read("empty.txt").get("ok") is True)
+
+# multi-edit revert still walks all the way back to the zip, not one step
+W.write("app.py", "print('one')\n", create=False)
+W.write("app.py", "print('two')\n", create=False)
+W.write("app.py", "print('three')\n", create=False)
+W.revert()
+ck("three edits revert to the IMPORTED content, not the previous edit",
+   W.read("app.py").get("content") == "print('hi')\n")
+ck("the workspace is clean again", W.status()["dirty"] is False)
+W.close()
+
+
 shutil.rmtree(BASE, ignore_errors=True)
 print(f"\nworkspace: {_p} passed, {_f} failed")
 sys.exit(1 if _f else 0)

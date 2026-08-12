@@ -3253,10 +3253,36 @@ _INTENT_MARKERS = (
 )
 
 
+# Courtesy sign-offs that CONTAIN an intent marker but mean the opposite of one.
+# "Let me know if you want the full output" ends with an offer, not a plan — yet
+# it contains "let me ", so the scan below called a finished answer a stall.
+# These are removed before the intent scan rather than added to the conclusion
+# list, because they can appear mid-reply as well as at the end.
+_SIGNOFF_NON_INTENT = (
+    "let me know", "let us know", "just let me know", "do let me know",
+    "i'll be happy", "i will be happy", "i'd be happy", "i would be happy",
+    "i'll gladly", "let me clarify if", "i'll leave", "i'll stop",
+)
+
+
+def _without_signoffs(t: str) -> str:
+    for _s in _SIGNOFF_NON_INTENT:
+        t = t.replace(_s, " ")
+    return t
+
+
+def _has_intent(t: str) -> bool:
+    t = _without_signoffs((t or "").lower())
+    return any(m in t for m in _INTENT_MARKERS)
+
+
 def reply_intends_action(text: str) -> bool:
     """True if the reply reads as a stall/preamble that intends a NEXT action;
-    False if it reads as a conclusion (or is empty/uncertain). Used only by the
-    mission loop to choose 'nudge it to act' vs 'it's done, wrap up'."""
+    False if it reads as a conclusion (or is empty/uncertain).
+
+    THE MISSION LOOP'S QUESTION: 'is it mid-task, or finished?'  Answer mode
+    asks a DIFFERENT question and must use reply_is_bare_stall() below.
+    """
     t = (text or "").strip().lower()
     if not t:
         return False
@@ -3264,13 +3290,52 @@ def reply_intends_action(text: str) -> bool:
     if any(m in t for m in _CONCLUSION_MARKERS):
         return False
     # An explicit intent-to-act phrase means it's mid-task.
-    if any(m in t for m in _INTENT_MARKERS):
+    if _has_intent(t):
         return True
     # A trailing ellipsis reads as "more coming".
     ts = t.rstrip()
     if ts.endswith("...") or ts.endswith("…"):
         return True
     return False
+
+
+# How much non-forward-looking prose has to survive before a reply counts as
+# having DELIVERED something.  Deliberately small: the bar is "said anything of
+# substance at all", not "wrote a report".
+_SUBSTANCE_MIN_CHARS = 80
+_LIST_ITEM_RE = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+\S", re.M)
+_TABLE_ROW_RE = re.compile(r"^\s*\|.*\|", re.M)
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+|\n+")
+
+
+def reply_is_bare_stall(text: str) -> bool:
+    """ANSWER MODE'S QUESTION: did the reply ONLY narrate a next step, or did it
+    also deliver something to the operator?
+
+    This exists because answer mode was wired to reply_intends_action(), which
+    answers the mission loop's question instead.  The consequence was visible
+    and specific: a COMPLETE answer that merely mentioned a next step — or
+    merely ended "Let me know if you want more" — was classified as a stall, so
+    the host nudged the model to answer again.  The nudge budget is 2, so the
+    operator got the same answer THREE TIMES for one question.
+
+    The distinguishing feature of a real stall is not that it looks forward; it
+    is that it delivers NOTHING.  A reply carrying a table, a code block, a
+    list, or any real prose has already given the operator something, and
+    nudging it can only produce a duplicate.
+    """
+    if not reply_intends_action(text):
+        return False
+    t = (text or "").strip()
+    # Structural content is substance on its own.
+    if "```" in t or _TABLE_ROW_RE.search(t):
+        return False
+    if len(_LIST_ITEM_RE.findall(t)) >= 2:
+        return False
+    # Otherwise: drop every forward-looking sentence and see what is left.
+    rest = " ".join(s for s in _SENTENCE_SPLIT_RE.split(t)
+                    if s.strip() and not _has_intent(s)).strip()
+    return len(rest) < _SUBSTANCE_MIN_CHARS
 
 
 # The DECISIVE subset of conclusion phrases — an unambiguous "the work is

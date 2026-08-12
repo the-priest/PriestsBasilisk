@@ -673,6 +673,33 @@ def read(path: str, start: int = 1, end: int = 0,
 # EDIT
 # ═════════════════════════════════════════════════════════════════════
 
+# A file that did not exist at import gets an explicit marker beside the
+# stash, NOT an empty stash file.
+#
+# "Did not exist at import" used to be encoded TWICE — as zero bytes in the
+# stash, and as membership in _STATE.created — and revert() had to consult
+# both to decide whether to RESTORE the file or REMOVE it.  Two encodings of
+# one fact is the shape every other bug in this codebase has had, and it made
+# the state incoherent on the way through: _mark() could not drop a file from
+# `created` when it was deleted (leaving it listed as created AND deleted at
+# the same time), because dropping it would have flipped revert from "remove
+# it" to "restore it as an EMPTY file".  The two encodings had to be kept
+# deliberately out of sync for the result to come out right.
+#
+# One marker file, one meaning, one place to read it.  It also un-breaks the
+# genuinely-empty imported file, which is byte-identical to the old
+# "didn't exist" marker and could only be told apart by that second encoding.
+_ABSENT_SUFFIX = ".basilisk-absent-at-import"
+
+
+def _absent_marker(od: Path, rel: str) -> Path:
+    return od / (rel + _ABSENT_SUFFIX)
+
+
+def _was_absent_at_import(od: Path, rel: str) -> bool:
+    return _absent_marker(od, rel).exists()
+
+
 def _stash_original(root: str, fp: str, rel: str) -> None:
     """Keep the pre-edit bytes ONCE per file, the first time it changes.
 
@@ -682,13 +709,14 @@ def _stash_original(root: str, fp: str, rel: str) -> None:
     """
     od = _orig_dir()
     dest = od / rel
-    if dest.exists():
+    marker = _absent_marker(od, rel)
+    if dest.exists() or marker.exists():
         return
     dest.parent.mkdir(parents=True, exist_ok=True)
     if os.path.exists(fp):
         shutil.copy2(fp, dest)
     else:
-        dest.write_bytes(b"")          # marker: file did not exist before
+        marker.write_bytes(b"")        # this file did not exist at import
 
 
 def _mark(rel: str, kind: str) -> None:
@@ -705,8 +733,15 @@ def _mark(rel: str, kind: str) -> None:
     elif kind == "deleted":
         if rel not in _STATE.deleted:
             _STATE.deleted.append(rel)
-        if rel in _STATE.modified:
-            _STATE.modified.remove(rel)
+        # A deleted file is no longer a modified one OR a created one.  Only
+        # `modified` was cleared, so a file created and then deleted in the
+        # same session was reported as created AND deleted simultaneously —
+        # incoherent to the operator and to the model reading status().  It
+        # could not be fixed while `created` doubled as revert's "this had no
+        # original" flag; now that the marker carries that, it can.
+        for lst in (_STATE.modified, _STATE.created):
+            if rel in lst:
+                lst.remove(rel)
     else:
         if rel not in _STATE.modified and rel not in _STATE.created:
             _STATE.modified.append(rel)
@@ -848,10 +883,28 @@ def delete(path: str) -> Dict[str, Any]:
             return {"ok": False, "error": f"no such file: {path}"}
         with _LOCK:
             _stash_original(root, fp, rel)
+            recoverable = not _was_absent_at_import(_orig_dir(), rel)
             os.remove(fp)
             _mark(rel, "deleted")
+        # TELL THE TRUTH ABOUT THE UNDO.  This said "recoverable with
+        # workspace_revert" for every file, unconditionally.  revert() undoes
+        # back to the IMPORTED state, so a file CREATED in this session has no
+        # state to go back to: revert removes it and the content is gone.  The
+        # note promised otherwise, which is how a self-test concluded revert
+        # was silently broken — it isn't, but the operator was being told his
+        # data was recoverable at the exact moment it stopped being.
+        #
+        # A wrong undo promise is the same defect as a wrong undo command: it
+        # reads as "this is safe to do" when it is not.
         return {"ok": True, "path": rel, "deleted": True,
-                "note": "recoverable with workspace_revert"}
+                "recoverable": recoverable,
+                "note": ("recoverable with workspace_revert"
+                         if recoverable else
+                         "NOT recoverable: this file was created in this "
+                         "session, so there is no imported version to go back "
+                         "to. workspace_revert will leave it deleted. Its "
+                         "content is gone — re-create it with workspace_write "
+                         "if you still need it.")}
     except ContainmentError as e:
         return {"ok": False, "error": str(e)}
     except Exception as e:
@@ -910,6 +963,8 @@ def revert(path: str = "") -> Dict[str, Any]:
                    else sorted(set(_STATE.modified + _STATE.created
                                    + _STATE.deleted)))
         done: List[str] = []
+        restored: List[str] = []
+        removed: List[str] = []
         # `with`, not acquire/release: an exception between a bare acquire
         # and its release leaves the lock held forever and every later edit
         # deadlocks -- a strictly worse failure than the race being fixed.
@@ -917,28 +972,37 @@ def revert(path: str = "") -> Dict[str, Any]:
             for rel in targets:
                 fp = _confine(root, rel)
                 orig_fp = od / rel
-                if rel in _STATE.created and not orig_fp.exists():
+                # ONE question, asked once: did this file exist at import?
+                absent = _was_absent_at_import(od, rel)
+                # Legacy stashes (pre-marker) encoded that as zero bytes plus
+                # membership in `created`.  Honour them so a workspace opened
+                # across the upgrade still reverts correctly.
+                if not absent and orig_fp.exists() and rel in _STATE.created \
+                        and orig_fp.stat().st_size == 0:
+                    absent = True
+                if absent:
                     if os.path.isfile(fp):
                         os.remove(fp)
+                    removed.append(rel)
                     done.append(rel)
-                    continue
-                if orig_fp.exists():
-                    data = orig_fp.read_bytes()
-                    if data == b"" and rel in _STATE.created:
-                        if os.path.isfile(fp):
-                            os.remove(fp)
-                    else:
-                        os.makedirs(os.path.dirname(fp), exist_ok=True)
-                        shutil.copy2(orig_fp, fp)
+                elif orig_fp.exists():
+                    os.makedirs(os.path.dirname(fp), exist_ok=True)
+                    shutil.copy2(orig_fp, fp)
+                    restored.append(rel)
                     done.append(rel)
             for rel in done:
                 for lst in (_STATE.modified, _STATE.created, _STATE.deleted):
                     if rel in lst:
                         lst.remove(rel)
-                op = od / rel
-                if op.exists():
-                    op.unlink()
-        return {"ok": True, "reverted": done, "count": len(done)}
+                for op in (od / rel, _absent_marker(od, rel)):
+                    if op.exists():
+                        op.unlink()
+        # `reverted` is the union, kept for callers that already read it.
+        # `restored` vs `removed` is the distinction the operator actually
+        # needs: "reverted" alone reads as "your file is back", which is a
+        # lie for a file that never existed at import.
+        return {"ok": True, "reverted": done, "count": len(done),
+                "restored": restored, "removed": removed}
     except ContainmentError as e:
         return {"ok": False, "error": str(e)}
     except Exception as e:
