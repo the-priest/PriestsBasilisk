@@ -151,11 +151,20 @@ def _expand_query_tokens(query: str, qtoks: List[str]) -> List[str]:
 
 
 def _prefix_match(q: str, h: str) -> bool:
-    """Two tokens count as the same word if they share a >=4-char prefix.
-    Cheap stemming so 'command'/'commands', 'scan'/'scanning', 'fix'/'fixed'
-    all match without a real stemmer or FTS tokenizer config."""
+    """Two tokens count as the same word if they share a prefix as long as the
+    shorter one, up to 5 chars.  Cheap stemming so 'command'/'commands',
+    'scan'/'scanning', 'fix'/'fixed' all match without a real stemmer or FTS
+    tokenizer config.
+
+    The floor was 4, which silently excluded the docstring's OWN third example:
+    _tokens() only ever emits tokens of 3+ chars, so every 3-char token — fix,
+    dir, log, run, web, sql — fell to exact equality and got no stemming at
+    all.  That is also the class _SYNONYM_GROUPS deliberately expands into
+    ('dir' -> 'directory'), so the two halves of recall disagreed about whether
+    a 3-char token was a stem.  3 is the real floor because 3 is the tokenizer's
+    floor."""
     n = min(len(q), len(h))
-    if n < 4:
+    if n < 3:
         return q == h
     p = min(n, 5)
     return q[:p] == h[:p]
@@ -212,7 +221,34 @@ class MemoryStore:
             )""")
         # FTS5 is the fast path for keyword recall but is not guaranteed to be
         # compiled into the stock NetHunter python sqlite.  Probe once; fall
-        # back to LIKE scanning if the module is missing.
+        # back to overlap scanning if the module is missing.
+        #
+        # THE INDEX IS NEVER ALLOWED TO VETO A WRITE.  Recall speed is an
+        # optimisation; storing the memory is the job.  Two things conspired to
+        # invert that:
+        #
+        #   1. `CREATE VIRTUAL TABLE IF NOT EXISTS` SHORT-CIRCUITS on a table
+        #      that already exists — sqlite never loads the fts5 module, so it
+        #      does not raise.  The try/except below therefore could not detect
+        #      a missing fts5 on an EXISTING db, and left self._fts wrongly True.
+        #   2. The mem_ai/mem_ad triggers live in the DB schema, not in this
+        #      process.  They survive whether or not this interpreter can use
+        #      fts5 — and a trigger whose target table is unusable fails the
+        #      statement that fired it.
+        #
+        # So a memory.db created where fts5 exists, then opened where it does
+        # not (a phone, a rebuilt python, a synced data dir — exactly the case
+        # this module's own docstring anticipates), made EVERY `INSERT INTO
+        # memories` raise "no such module: fts5".  remember() propagated it,
+        # observe_turn() let it through, and record_turn() swallowed it into a
+        # log file: memory silently stopped persisting while the feature still
+        # looked enabled.  The worst failure shape there is.
+        #
+        # Fixed at both ends.  Here: probe by TOUCHING the table, and if it is
+        # unusable drop the triggers so writes cannot be taken down by it.  In
+        # _write(): retry once after disabling, so an index that breaks later —
+        # corruption, a mid-life interpreter change — still cannot lose a
+        # memory.
         try:
             c.execute("CREATE VIRTUAL TABLE IF NOT EXISTS mem_fts "
                       "USING fts5(text, content='memories', content_rowid='id')")
@@ -225,6 +261,8 @@ class MemoryStore:
                   INSERT INTO mem_fts(mem_fts, rowid, text)
                   VALUES('delete', old.id, old.text);
                 END""")
+            # The real probe: reading the table forces the module to load.
+            c.execute("SELECT rowid FROM mem_fts LIMIT 1").fetchone()
             self._fts = True
             # Repopulate the external-content index from the content table.  On
             # a fresh DB this is a no-op; on a DB whose rows predate the FTS
@@ -233,11 +271,36 @@ class MemoryStore:
             # hiccup never disables an otherwise-working FTS path.
             try:
                 c.execute("INSERT INTO mem_fts(mem_fts) VALUES('rebuild')")
-            except sqlite3.OperationalError:
+            except sqlite3.DatabaseError:
                 pass
-        except sqlite3.OperationalError:
-            self._fts = False
+        except sqlite3.DatabaseError:
+            self._disable_fts()
         c.commit()
+
+    def _disable_fts(self) -> None:
+        """Demote the FTS index to absent: stop using it for recall, and remove
+        the triggers that would otherwise let it fail a write.  Caller holds
+        self._lock (or is __init__)."""
+        self._fts = False
+        for stmt in ("DROP TRIGGER IF EXISTS mem_ai",
+                     "DROP TRIGGER IF EXISTS mem_ad"):
+            try:
+                self._db.execute(stmt)
+            except sqlite3.DatabaseError:
+                pass
+        try:
+            self._db.commit()
+        except sqlite3.DatabaseError:
+            pass
+
+    def _write(self, sql: str, params: Tuple) -> sqlite3.Cursor:
+        """Run a write against `memories`, retrying once without the FTS
+        triggers if the index is what failed.  Caller holds self._lock."""
+        try:
+            return self._db.execute(sql, params)
+        except sqlite3.DatabaseError:
+            self._disable_fts()
+            return self._db.execute(sql, params)
 
     # ── write ─────────────────────────────────────────────────────────
     def remember(self, text: str, kind: str = "fact",
@@ -255,7 +318,7 @@ class MemoryStore:
                 emb = _pack(v)
             except Exception:
                 emb = None
-        cur = self._db.execute(
+        cur = self._write(
             "INSERT INTO memories(ts, kind, text, salience, source, embedding) "
             "VALUES(?,?,?,?,?,?)",
             (time.time(), kind, text, max(0.0, min(1.0, salience)), source, emb))
@@ -477,7 +540,7 @@ class MemoryStore:
         if not q:
             return 0
         if q.isdigit():
-            cur = self._db.execute("DELETE FROM memories WHERE id=?", (int(q),))
+            cur = self._write("DELETE FROM memories WHERE id=?", (int(q),))
             self._db.commit()
             return cur.rowcount
         kws = [w.lower() for w in re.findall(r"[A-Za-z0-9_]{3,}", q)]
@@ -489,7 +552,7 @@ class MemoryStore:
             if all(w in hay for w in kws):
                 ids.append(row["id"])
         for i in ids:
-            self._db.execute("DELETE FROM memories WHERE id=?", (i,))
+            self._write("DELETE FROM memories WHERE id=?", (i,))
         self._db.commit()
         return len(ids)
 

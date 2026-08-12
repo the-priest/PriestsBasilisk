@@ -470,8 +470,16 @@ def verify(
         "has_primary_source": has_primary,
         "state_media": state_media,
         "satire": satire,
+        # Sets are scoring scratch, not output, and json.dumps() cannot encode
+        # them.  This used to exclude "salient" BY NAME; when the anchor channel
+        # was added for the CVE case it produced a second set, "anchors", and
+        # the name-list did not know about it — so the whole result became
+        # unserialisable, which for a tool result is a crash at the point of
+        # handing it to the model.  Filtering on TYPE states the actual rule, so
+        # the next scratch set cannot reintroduce this.
         "sources": [
-            {k: v for k, v in x.items() if k != "salient"} for x in sources
+            {k: v for k, v in x.items() if not isinstance(v, (set, frozenset))}
+            for x in sources
         ],
         "text": "\n".join(lines),
     }

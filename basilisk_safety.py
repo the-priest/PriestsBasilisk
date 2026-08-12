@@ -782,6 +782,31 @@ def _sub_is_catastrophic(args: List[str], depth: int) -> bool:
         for t in _operands(rest):
             if _is_critical_file(t):
                 return True
+
+    # ── A DOWNLOADER IS A FILE WRITER ──
+    # The clobber rule above covered cp/install/mv/ln/truncate/tee/dd and missed
+    # the tools this app reaches for most: `curl -o /etc/shadow http://…` and
+    # `wget -O /boot/vmlinuz http://…` overwrite a file the system cannot be
+    # repaired without, from a source the operator does not control. Nothing
+    # else in the floor looks at a download's DESTINATION.
+    #
+    # Both spellings matter: `-o /path` and `--output-document=/path`. The
+    # equals form is the one foresight's own local-write check also misses.
+    if cmd in ("curl", "wget", "aria2c", "axel", "httpie", "http", "wget2"):
+        _outs: List[str] = []
+        for i, a in enumerate(rest):
+            if a in ("-o", "-O", "--output", "--output-document",
+                     "--output-file", "--dest", "--destination"):
+                if i + 1 < len(rest):
+                    _outs.append(rest[i + 1])
+            elif "=" in a and a.startswith("--"):
+                _k, _, _v = a.partition("=")
+                if _k in ("--output", "--output-document", "--output-file",
+                          "--dest", "--destination"):
+                    _outs.append(_v)
+        for t in _outs:
+            if _is_critical_file(t):
+                return True
     if cmd == "dd":
         for a in rest:
             if a.startswith("of=") and _is_critical_file(a[3:]):

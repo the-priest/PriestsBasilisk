@@ -66,38 +66,85 @@ _CATASTROPHIC: List = [
      "hard", "system", "recursive 777 from root — wrecks the permission model"),
 ]
 
-_RISKY: List = [
-    (re.compile(r"\b(iptables|nft)\b.*(-F|flush)"),
-     "hard", "network", "flushes firewall rules — drops your packet filtering"),
-    (re.compile(r"\bufw\s+(disable|reset)\b"),
-     "hard", "network", "disables/resets the host firewall"),
-    (re.compile(r"\bsystemctl\s+(stop|disable|mask)\s+(ssh|sshd|NetworkManager|network)"),
-     "reversible", "network", "stops/disables connectivity or remote access — lockout risk"),
-    (re.compile(r"\bip\s+link\s+set\s+\w+\s+down\b"),
-     "reversible", "network", "brings an interface down — you may lose the link you're on"),
-    (re.compile(r"(?<![\w/])(passwd|usermod|chsh)\b"),
-     "hard", "user", "changes an account credential/shell"),
-    (re.compile(r"\bapt(-get)?\s+(remove|purge|autoremove)\b"),
-     "hard", "system", "removes packages — may pull dependencies with them"),
-    (re.compile(r"\bgit\s+(reset\s+--hard|clean\s+-[a-z]*f|push\s+.*--force)"),
-     "hard", "user", "discards/overwrites git history or working tree"),
-    (re.compile(r"\bkill(all)?\s+-9\b"),
-     "reversible", "process", "hard-kills processes — unsaved state in them is lost"),
-    (re.compile(r"\b(curl|wget)\b.*\|\s*(sudo\s+)?(bash|sh|python)"),
-     "hard", "system", "pipes a remote script straight into a shell — runs unaudited code"),
-    (re.compile(r"\bchown\s+-R\b.*/(?!home|tmp|opt)"),
-     "hard", "system", "recursive ownership change on a system path"),
-]
-
 _UNDO_HINTS = {
     "apt": "reinstall with: apt install <pkg>  (apt keeps removed-pkg lists in /var/log/apt/history.log)",
     "pacman": "reinstall with: sudo pacman -S <pkg>  (removed-pkg history is in /var/log/pacman.log; cached .pkg.tar.zst files under /var/cache/pacman/pkg let you reinstall the exact version offline)",
     "dnf": "reinstall with: sudo dnf install <pkg>  (undo the whole transaction with: sudo dnf history undo last)",
+    "zypper": "reinstall with: sudo zypper install <pkg>  (roll the whole transaction back with: sudo zypper rollback, or a btrfs snapper snapshot if configured)",
+    "rpm": "reinstall with: sudo rpm -i <pkg>.rpm, or via your package manager (rpm itself keeps no transaction history — dnf/zypper do)",
     "iptables": "rules are not saved unless you persisted them; reboot or reload your saved ruleset to restore",
     "ufw": "re-enable with: ufw enable  (and reload your rule profile)",
     "systemctl": "restart/enable the unit: systemctl enable --now <unit>",
     "git_reset": "recover via: git reflog  (reachable commits survive ~30 days)",
+    "ip_link": "bring it back with: sudo ip link set <iface> up  (if this is the link you are on, you will need console/out-of-band access)",
 }
+
+# Each rule carries the KEY of its own undo hint (or None when the action has no
+# honest undo — a hard kill loses unsaved state, an unaudited script has already
+# run, a recursive chown has no generic inverse).
+#
+# The undo used to be looked up by scanning the whole command string for any
+# tool name in _UNDO_HINTS and taking the first dict-order hit. That is the same
+# defect twice over. It fired on names that were merely MENTIONED — `killall -9
+# apt` and `chown -R apt:apt /srv/thing` were both offered "reinstall with: apt
+# install <pkg>", and `git_reset` matched any command containing the letters
+# g-i-t, including `rm -rf /var/log/digital-archive` and anything mentioning
+# "legitimate". And it could not see the rule that actually fired, so dict order
+# decided ties. A wrong undo is worse than none: it reads as "this is
+# recoverable" at the exact moment the operator is deciding whether to let a
+# risky command run. Tying the hint to the rule makes a mismatch unrepresentable
+# — there is no string to re-scan and no order to depend on.
+#
+# COVERAGE, likewise, was one-sided: _UNDO_HINTS carried pacman and dnf entries,
+# but the only package-removal RULE was apt's. So foresight cautioned on Debian
+# and stayed silent on Arch, Fedora, openSUSE and raw rpm — `sudo pacman -Rdd
+# glibc` came back a plain "allow". The hint table was the evidence of intent;
+# the rule table just never caught up.
+_RISKY: List = [
+    (re.compile(r"\b(iptables|nft)\b.*(-F|flush)"),
+     "hard", "network", "flushes firewall rules — drops your packet filtering",
+     "iptables"),
+    (re.compile(r"\bufw\s+(disable|reset)\b"),
+     "hard", "network", "disables/resets the host firewall", "ufw"),
+    (re.compile(r"\bsystemctl\s+(stop|disable|mask)\s+(ssh|sshd|NetworkManager|network)"),
+     "reversible", "network",
+     "stops/disables connectivity or remote access — lockout risk", "systemctl"),
+    (re.compile(r"\bip\s+link\s+set\s+\w+\s+down\b"),
+     "reversible", "network",
+     "brings an interface down — you may lose the link you're on", "ip_link"),
+    (re.compile(r"(?<![\w/])(passwd|usermod|chsh)\b"),
+     "hard", "user", "changes an account credential/shell", None),
+    (re.compile(r"\bapt(-get)?\s+(remove|purge|autoremove)\b"),
+     "hard", "system", "removes packages — may pull dependencies with them",
+     "apt"),
+    (re.compile(r"\bpacman\s+(?:-[A-Za-z]*R|--remove)"),
+     "hard", "system", "removes packages — may pull dependencies with them",
+     "pacman"),
+    (re.compile(r"\bpacman\s+(?:-[A-Za-z]*R[A-Za-z]*d{2}|--nodeps\s+--nodeps)"),
+     "hard", "system",
+     "removes packages while IGNORING dependencies — this is how a box loses "
+     "glibc and stops booting", "pacman"),
+    (re.compile(r"\b(dnf|yum|microdnf)\s+(remove|erase|autoremove)\b"),
+     "hard", "system", "removes packages — may pull dependencies with them",
+     "dnf"),
+    (re.compile(r"\bzypper\b.*\b(remove|rm)\b"),
+     "hard", "system", "removes packages — may pull dependencies with them",
+     "zypper"),
+    (re.compile(r"\brpm\s+(?:--erase\b|-[a-zA-Z]*e[a-zA-Z]*\b)"),
+     "hard", "system",
+     "removes a package with no transaction history to undo it", "rpm"),
+    (re.compile(r"\bgit\s+(reset\s+--hard|clean\s+-[a-z]*f|push\s+.*--force)"),
+     "hard", "user", "discards/overwrites git history or working tree",
+     "git_reset"),
+    (re.compile(r"\bkill(all)?\s+-9\b"),
+     "reversible", "process",
+     "hard-kills processes — unsaved state in them is lost", None),
+    (re.compile(r"\b(curl|wget)\b.*\|\s*(sudo\s+)?(bash|sh|python)"),
+     "hard", "system",
+     "pipes a remote script straight into a shell — runs unaudited code", None),
+    (re.compile(r"\bchown\s+-R\b.*/(?!home|tmp|opt)"),
+     "hard", "system", "recursive ownership change on a system path", None),
+]
 
 
 # Offensive-security tooling. Running these against an AUTHORISED target is
@@ -119,8 +166,15 @@ _OFFENSIVE_TOOLS = frozenset({
 
 # Writing fetched/scanned output to a SENSITIVE local path is not benign recon —
 # let the floor/model judge those instead of auto-allowing.
+# NOTE the flag alternation: `-o /path`, `-O /path` AND the equals forms
+# `--output=/path` / `--output-document=/path`. Only the space form was matched,
+# so `wget --output-document=/etc/passwd http://x` was classified as ordinary
+# offensive-security work — "a payload's contents never touch the local box" —
+# when it overwrites a local file the system cannot be repaired without. The
+# destructive floor now refuses that outright; this keeps foresight's own
+# reasoning honest rather than leaving it to one layer.
 _LOCAL_WRITE_DANGER = re.compile(
-    r"(-[oO]\s+|>>?\s*)\s*("
+    r"(-[oO]\s+|--output(?:-document|-file)?[=\s]+|>>?\s*)\s*("
     r"/etc/|/root/|/boot/|/usr/|/bin/|/sbin/|/lib/|/var/spool/cron|"
     r"/etc/systemd|~/\.ssh|\$HOME/\.ssh|"
     r"[~/][^\s]*(authorized_keys|\.bashrc|\.zshrc|\.profile|crontab|id_rsa))")
@@ -155,16 +209,14 @@ def _rule_floor(command: str) -> Dict[str, Any]:
             return {"verdict": "block", "reversibility": rev,
                     "blast_radius": blast, "reasons": [reason],
                     "undo": None, "rule": "catastrophic"}
-    for rx, rev, blast, reason in _RISKY:
+    for rx, rev, blast, reason, undo_key in _RISKY:
         if rx.search(cmd):
-            undo = None
-            for key, hint in _UNDO_HINTS.items():
-                if key.split("_")[0] in cmd:
-                    undo = hint
-                    break
+            # The hint comes from the rule that MATCHED — never from re-scanning
+            # the command text. See the note above _RISKY for what that scan did.
             return {"verdict": "caution", "reversibility": rev,
                     "blast_radius": blast, "reasons": [reason],
-                    "undo": undo, "rule": "risky"}
+                    "undo": _UNDO_HINTS.get(undo_key) if undo_key else None,
+                    "rule": "risky"}
     # default: nothing matched
     blast = "system" if re.search(r"\bsudo\b", cmd) else "user"
     return {"verdict": "allow", "reversibility": "reversible",

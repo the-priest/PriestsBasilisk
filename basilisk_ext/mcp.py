@@ -35,8 +35,10 @@ for the screen; it does not import the GTK layer.
 
 from __future__ import annotations
 
+import collections
 import json
 import os
+import queue
 import re
 import subprocess
 import threading
@@ -85,6 +87,11 @@ class MCPServer:
         self._next_id = 0
         self._tools: List[Dict[str, Any]] = []
         self._initialized = False
+        # ONE reader per stream, owned by the connection — see _pump_stdout.
+        self._inbox: "queue.Queue[Optional[str]]" = queue.Queue()
+        self._stderr_tail: "collections.deque[str]" = collections.deque(maxlen=50)
+        self._readers: List[threading.Thread] = []
+        self._generation = 0
 
     # ── lifecycle ─────────────────────────────────────────────────────
     def start(self, timeout: int = _DEFAULT_TIMEOUT) -> None:
@@ -104,13 +111,89 @@ class MCPServer:
             raise MCPError(f"server '{self.name}': command not found: {self.command}")
         except Exception as e:
             raise MCPError(f"server '{self.name}': failed to launch: {e}")
+        self._start_readers()
         self._handshake(timeout)
+
+    # ── stream ownership ──────────────────────────────────────────────
+    #
+    # Both streams get exactly ONE reader thread, started with the process and
+    # ending with it.  Three separate defects came from not doing this:
+    #
+    #   A. stderr was piped and NEVER READ.  A server that logs verbosely fills
+    #      the ~64KB OS pipe buffer and then blocks forever on its next write —
+    #      so a perfectly good server that happens to be chatty on stderr goes
+    #      permanently silent and every call reports "timed out".  Reproduced
+    #      with 300KB of stderr: the server wedged and never answered.
+    #
+    #   B. reads used a THROWAWAY thread per message, joined with a timeout.
+    #      A join that expires does not cancel the thread — it is still parked
+    #      in readline().  So every timed-out call leaked a thread for the life
+    #      of the process, and the next call started a SECOND reader on the same
+    #      stream: two threads racing for lines, one of which discards whatever
+    #      it wins into a dead local.  Against a wedged server (A), each retry
+    #      leaked another one.
+    #
+    #   C. the per-message timeout was re-armed on every loop iteration, so the
+    #      REQUEST deadline was never enforced.  A server emitting log
+    #      notifications faster than once a second kept _request alive forever —
+    #      a call made with timeout=3 was still running after 20 seconds.
+    #
+    # A queue fixes all three: one reader, no leak, no race, and a get() that
+    # can be given whatever time is actually left on the deadline.
+    _INBOX_SOFT_CAP = 2000
+
+    def _start_readers(self) -> None:
+        p = self._proc
+        if not p:
+            return
+        self._generation += 1
+        gen = self._generation
+        self._inbox = queue.Queue()
+        self._stderr_tail = collections.deque(maxlen=50)
+        inbox, tail = self._inbox, self._stderr_tail
+
+        def _pump_stdout():
+            try:
+                for line in iter(p.stdout.readline, ""):
+                    if gen != self._generation:
+                        return
+                    line = line.strip()
+                    if not line:
+                        continue
+                    # A chatty server must not be able to grow this without
+                    # bound.  Replies (which carry an id) are always kept;
+                    # notifications are dropped once the backlog is absurd.
+                    if inbox.qsize() >= self._INBOX_SOFT_CAP \
+                            and '"id"' not in line:
+                        continue
+                    inbox.put(line)
+            except Exception:
+                pass
+            finally:
+                inbox.put(None)          # EOF sentinel
+
+        def _pump_stderr():
+            try:
+                for line in iter(p.stderr.readline, ""):
+                    tail.append(line.rstrip("\n"))
+            except Exception:
+                pass
+
+        self._readers = []
+        for fn in (_pump_stdout, _pump_stderr):
+            t = threading.Thread(target=fn, daemon=True)
+            t.start()
+            self._readers.append(t)
 
     def stop(self) -> None:
         with self._lock:
             p = self._proc
             self._proc = None
             self._initialized = False
+            # Retire this generation so the pumps exit instead of feeding a
+            # queue nobody will ever read.
+            self._generation += 1
+            self._readers = []
         if not p:
             return
         try:
@@ -140,35 +223,20 @@ class MCPServer:
         except Exception as e:
             raise MCPError(f"server '{self.name}': write failed: {e}")
 
-    def _read_message(self, timeout: int) -> Dict[str, Any]:
-        """Read one newline-delimited JSON message from the server's stdout,
-        with a wall-clock timeout enforced via a reader thread (stdio has no
-        portable read-with-timeout)."""
+    def _read_message(self, timeout: float) -> Dict[str, Any]:
+        """Take the next JSON message the stdout pump has queued.  No thread is
+        created here, so a timeout costs nothing and leaks nothing."""
         if not (self._proc and self._proc.stdout):
             raise MCPError(f"server '{self.name}': not running")
-        result: Dict[str, Any] = {}
-        holder: List[Optional[str]] = [None]
-
-        def _rdr():
-            try:
-                holder[0] = self._proc.stdout.readline()
-            except Exception:
-                holder[0] = None
-
-        t = threading.Thread(target=_rdr, daemon=True)
-        t.start()
-        t.join(timeout)
-        if t.is_alive():
+        try:
+            line = self._inbox.get(timeout=max(0.0, timeout))
+        except queue.Empty:
             raise MCPError(f"server '{self.name}': timed out waiting for reply")
-        line = holder[0]
-        if not line:
-            err = ""
-            try:
-                if self._proc and self._proc.stderr:
-                    err = self._proc.stderr.readline() or ""
-            except Exception:
-                pass
-            raise MCPError(f"server '{self.name}': closed the connection {err}".strip())
+        if line is None:
+            err = " | ".join(x for x in list(self._stderr_tail)[-3:] if x)
+            raise MCPError(
+                f"server '{self.name}': closed the connection"
+                + (f" (stderr: {err})" if err else ""))
         try:
             return json.loads(line)
         except Exception as e:
@@ -185,7 +253,13 @@ class MCPServer:
                         "params": params or {}})
             deadline = time.time() + timeout
             while True:
-                remaining = max(1, int(deadline - time.time()))
+                # The REQUEST deadline, not a fresh per-message one.  Re-arming
+                # it each iteration let a server that streams notifications
+                # keep this loop alive indefinitely.
+                remaining = deadline - time.time()
+                if remaining <= 0:
+                    raise MCPError(f"server '{self.name}': {method} timed out "
+                                   f"after {timeout}s")
                 msg = self._read_message(remaining)
                 if msg.get("id") == rid:
                     if "error" in msg:
