@@ -228,7 +228,7 @@ SILICONFLOW_CATALOGUE: List[ModelInfo] = [
               vision=True, tier="flagship"),
 
     # ── Workhorse: the everyday tier. The pinned default lives here ──
-    ModelInfo("deepseek-v4-flash-0731", "DeepSeek-V4-Flash",
+    ModelInfo("deepseek-ai/DeepSeek-V4-Flash", "DeepSeek-V4-Flash",
               1049,
               0.13, 0.28,
               "PINNED DEFAULT. 284B/13B, 1M ctx. Every benchmark in the "
@@ -289,7 +289,7 @@ SILICONFLOW_CATALOGUE: List[ModelInfo] = [
 #
 # chain[0] is the PINNED DEFAULT and is locked by tests — do not reorder.
 SILICONFLOW_CHAIN = [
-    "deepseek-v4-flash-0731",
+    "deepseek-ai/DeepSeek-V4-Flash",
     "deepseek-ai/DeepSeek-V4-Pro",
     "zai-org/GLM-5.2",
     "tencent/Hy3",
@@ -634,11 +634,6 @@ def _migrate_settings(merged: Dict[str, Any], raw: Dict[str, Any]) -> None:
     # selects it in the model switcher, which persists their choice below.)
     if "active_provider" not in raw:
         merged["active_provider"] = "siliconflow"
-    # Migrate the previous pinned SiliconFlow Flash id to the current dated
-    # model id. This only rewrites the old built-in default; an operator's
-    # deliberate selection of another model is left untouched.
-    if merged.get("siliconflow_model") == "deepseek-ai/DeepSeek-V4-Flash":
-        merged["siliconflow_model"] = "deepseek-v4-flash-0731"
     # ONE-TIME self-heal: builds before the provider pin could auto-hop the
     # active provider to Groq on a degraded reply and PERSIST it, leaving the
     # operator silently stuck on Groq forever. That auto-hop is gone. If a

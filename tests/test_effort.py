@@ -125,7 +125,7 @@ def _run(settings, effort, urlopen):
     return out
 
 
-PINNED = "deepseek-v4-flash-0731"
+PINNED = "deepseek-ai/DeepSeek-V4-Flash"
 
 
 # ── 1. the default is genuinely free ─────────────────────────────────

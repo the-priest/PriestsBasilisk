@@ -54,7 +54,7 @@ SF = C.PROVIDERS_BY_KEY["siliconflow"]
 
 # ── 1. the pinned default ────────────────────────────────────────────
 print("\n== pinned default ==")
-PINNED = "deepseek-v4-flash-0731"
+PINNED = "deepseek-ai/DeepSeek-V4-Flash"
 ck("chain[0] is the pinned default", SF.chain[0] == PINNED, SF.chain[0])
 ck("default_model agrees", SF.default_model == PINNED)
 ck("pinned default is also pickable", PINNED in SF.pick_ids)
@@ -88,8 +88,8 @@ ck("no duplicate ids", len(_ids) == len(set(_ids)),
    str([i for i in _ids if _ids.count(i) > 1]))
 _labels = [m.label for m in SF.catalogue]
 ck("no duplicate labels", len(_labels) == len(set(_labels)))
-_bad = [i for i in _ids if i != PINNED and ("/" not in i or i != i.strip())]
-ck("every id is vendor/model and unpadded (except pinned dated id)", not _bad, str(_bad))
+_bad = [i for i in _ids if "/" not in i or i != i.strip()]
+ck("every id is vendor/model and unpadded", not _bad, str(_bad))
 
 # Models SiliconFlow has announced as discontinued.  A regression here means
 # somebody re-added a dead id from an old branch or an out-of-date memory.
@@ -150,7 +150,7 @@ ck("no vision list points at a removed provider",
 # lever an agent has, because an agent re-sends the same prompt every step.
 print("\n== cached pricing ==")
 _CACHED = {
-    "deepseek-v4-flash-0731": 0.028,  # SiliconFlow: 80% off cached
+    "deepseek-ai/DeepSeek-V4-Flash": 0.028,  # SiliconFlow: 80% off cached
 }
 for _mid, _want in _CACHED.items():
     _info = SF.info(_mid)
@@ -187,7 +187,7 @@ _inst = open(os.path.join(os.path.dirname(os.path.dirname(
 ck("installer names no removed provider",
    '"groq":' not in _inst and '"google":' not in _inst)
 ck("installer names the current default model",
-   "deepseek-v4-flash-0731" in _inst)
+   "deepseek-ai/DeepSeek-V4-Flash" in _inst)
 ck("installer lists no provider outside the registry",
    all(f'"{k}":' not in _inst
        for k in ("novita", "github", "openai", "anthropic")),
@@ -199,7 +199,7 @@ ck("installer lists no provider outside the registry",
 # lever an agent has, because an agent re-sends the same prompt every step.
 print("\n== cached pricing ==")
 _CACHED = {
-    "deepseek-v4-flash-0731": 0.028,  # SiliconFlow: 80% off cached
+    "deepseek-ai/DeepSeek-V4-Flash": 0.028,  # SiliconFlow: 80% off cached
 }
 for _mid, _want in _CACHED.items():
     _info = SF.info(_mid)
@@ -288,9 +288,9 @@ ck("siliconflow has a catalogue", bool(SF.catalogue))
 ck("chain matches SILICONFLOW_CHAIN",
    list(SF.chain) == list(C.SILICONFLOW_CHAIN))
 ck("info() returns metadata for a catalogue model",
-   SF.info("deepseek-v4-flash-0731") is not None)
+   SF.info("deepseek-ai/DeepSeek-V4-Flash") is not None)
 ck("info() carries a real context window",
-   (SF.info("deepseek-v4-flash-0731")
+   (SF.info("deepseek-ai/DeepSeek-V4-Flash")
     or C.ModelInfo("", "", 0, 0, 0)).ctx_k > 0)
 ck("knows() works off the chain", SF.knows(SF.chain[0]))
 ck("pick_ids covers the catalogue",

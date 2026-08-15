@@ -137,7 +137,7 @@ class TestProviderRegistry(unittest.TestCase):
         # The locked default model. Guards against an accidental reorder of the
         # chain that would silently change which model fresh installs use.
         sf = basilisk_core.PROVIDERS_BY_KEY["siliconflow"]
-        self.assertEqual(sf.chain[0], "deepseek-v4-flash-0731")
+        self.assertEqual(sf.chain[0], "deepseek-ai/DeepSeek-V4-Flash")
 
 
 # Persona fixtures for the guardrail tests.  A GUARDRAIL block is delimited by
@@ -264,7 +264,7 @@ class TestChatStore(unittest.TestCase):
         self._tmp.cleanup()
 
     def test_create_append_read_roundtrip(self):
-        cid = self.store.create_chat("Test chat", "deepseek-v4-flash-0731")
+        cid = self.store.create_chat("Test chat", "deepseek-ai/DeepSeek-V4-Flash")
         self.assertIsInstance(cid, int)
         self.assertGreater(cid, 0)
 
