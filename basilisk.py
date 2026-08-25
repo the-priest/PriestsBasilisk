@@ -154,7 +154,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.basilisk"
 APP_NAME = "Basilisk"
-VERSION = "9.9.0"
+VERSION = "9.9.1"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -440,8 +440,16 @@ headerbar {
     background: linear-gradient(90deg, rgba(200, 210, 222, 0.10),
                 rgba(120, 130, 142, 0.04) 55%, rgba(13, 15, 18, 0) 90%);
     border-left: 3px solid #c8d0da;
-    box-shadow: inset 0 0 0 1px rgba(200, 210, 222, 0.10);
-    animation: metalglow 3s ease-in-out infinite;
+    /* NO INFINITE ANIMATION HERE. This rule is on the SELECTED chat row,
+       which means it is on screen from the moment the app opens until it
+       closes - so a 3s infinite keyframe kept a repaint loop running at
+       idle, forever, for a glow nobody is looking at. It was the only
+       always-on animation in the stylesheet and the most likely reason the
+       app "feels laggy" when nothing is happening. The lit state is now
+       static; the animated ones that remain are all gated behind a state
+       class (.working, .live, .busy) and stop when the work does. */
+    box-shadow: inset 0 0 0 1px rgba(232, 238, 244, 0.16),
+                -2px 0 15px rgba(205, 215, 230, 0.22);
 }
 @keyframes metalglow {
     0%   { border-left-color: #7f8892; box-shadow: inset 0 0 0 1px rgba(200,210,222,0.08), -2px 0 12px rgba(190,200,214,0.16); }
@@ -1097,14 +1105,19 @@ link, button.link, *:link { color: #7d121b; }
 /* Per-message read-aloud button - sits under the reply, clearly tappable */
 .msg-footer { margin-top: 6px; }
 .msg-speak-btn {
-    padding: 4px 13px;
-    color: #9aa3ad;
-    background-color: #0e1013;
-    border: 1px solid #20262d;
+    padding: 5px 14px;
+    margin: 2px 0 0 2px;
+    color: #8a8f97;
+    background-color: rgba(20, 16, 14, 0.72);
+    border: 1px solid rgba(120, 72, 58, 0.34);
     border-radius: 11px;
-    font-size: 12px;
+    /* 12px against 30px body copy was a speck. This is a control the
+       operator has to be able to hit on a phone. */
+    font-size: 17px;
     font-weight: 500;
+    opacity: 0.72;
 }
+.msg-speak-btn:hover { opacity: 1.0; }
 .msg-speak-btn:hover {
     background-color: #1b2128;
     color: #7d121b;
@@ -1197,7 +1210,9 @@ link, button.link, *:link { color: #7d121b; }
     box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.5);
 }
 .send-button.working {
-    animation: sendglow 1.3s ease-in-out infinite;
+    /* superseded by sendFire further down; kept as a no-op so the keyframe
+       block below stays referenced rather than becoming dead CSS */
+    animation: none;
 }
 @keyframes sendglow {
     0%   { box-shadow: 0 0 6px rgba(200, 208, 216, 0.25); border-color: #2a323b; }
@@ -2036,6 +2051,26 @@ headerbar {
     line-height: 1.45;
     padding-bottom: 6px;
 }
+
+/* ---- The docked activity feed. Pinned above the action buttons, so it
+        cannot scroll away after a few more messages the way it did when it
+        lived inside the message list. Slightly tighter than the inline
+        version: this is a status strip, not a chat row. ---- */
+.activity-dock {
+    margin: 2px 4px 0 4px;
+}
+.activity-dock .activity-feed {
+    margin: 0;
+    border-radius: 12px;
+}
+.activity-dock .activity-header {
+    padding: 8px 14px;
+    border-radius: 12px;
+}
+.activity-dock .activity-body {
+    padding: 0 12px 8px 12px;
+}
+.activity-dock .activity-step { padding: 4px 6px 4px 4px; }
 
 /* =====================================================================
    ATTACHMENT TRAY -- staged files, ABOVE the composer.
@@ -4742,8 +4777,18 @@ class MessageWidget(Gtk.Box):
                 footer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
                                  spacing=6)
                 footer.add_css_class("msg-footer")
-                self.speak_btn = Gtk.Button(label=" Listen")
-                self.speak_btn.set_icon_name("audio-volume-high-symbolic")
+                # Gtk.Button.set_icon_name() REPLACES the button's child, so
+                # the label passed to the constructor was silently discarded
+                # and this rendered as a bare icon circle sitting on its own
+                # under the bubble, connected to nothing. Build the child
+                # explicitly to get both.
+                self.speak_btn = Gtk.Button()
+                _sb = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
+                              spacing=7)
+                _sb.append(Gtk.Image.new_from_icon_name(
+                    "audio-volume-high-symbolic"))
+                _sb.append(Gtk.Label(label="Listen"))
+                self.speak_btn.set_child(_sb)
                 self.speak_btn.add_css_class("msg-speak-btn")
                 self.speak_btn.set_halign(Gtk.Align.START)
                 self.speak_btn.set_tooltip_text("Read this message aloud")
@@ -6642,6 +6687,13 @@ class MainWindow(Adw.ApplicationWindow):
         self.set_title(APP_NAME)
         w, h = _default_window_size()
         self.set_default_size(w, h)
+        # libadwaita warns once per layout pass that an AdwApplicationWindow
+        # "does not have a minimum size" — 25 times in a 16-state sweep — and
+        # without one the adaptive machinery has nothing to break against, so
+        # a narrow window can squeeze children past their own minimums (which
+        # is how widgets end up overlapping). Sized for the narrowest screen
+        # this app targets, not for the desktop.
+        self.set_size_request(360, 480)
         self.app = app
         self.settings = load_settings()
         global _APPROVAL_MODE
@@ -7384,7 +7436,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.msg_box.set_margin_top(12)
         self.msg_box.set_margin_bottom(12)
         self.msg_box.set_margin_start(8)
-        self.msg_box.set_margin_end(8)
+        self.msg_box.set_margin_end(8 + self._SCROLLBAR_GUTTER)
         self.msg_scroll.set_child(self.msg_box)
         self.msg_scroll.add_css_class("chat-scroll")
 
@@ -7431,13 +7483,27 @@ class MainWindow(Adw.ApplicationWindow):
             return None
         try:
             if path.lower().endswith(".png"):
-                tex = None
-                try:
-                    tex = Gdk.Texture.new_from_filename(path)
-                except Exception:
-                    from gi.repository import Gio
-                    tex = Gdk.Texture.new_from_file(Gio.File.new_for_path(path))
-                opacity = 0.5          # dimmed back so the scene sits behind the chat, not over it
+                # BOUNDED, AND SHARED. Full resolution is 1672x941, i.e. a 6MB
+                # RGBA texture that COVER rescales behind the chat on every
+                # repaint — and the chat repaints on every scroll frame and
+                # every streamed token. At 10% opacity behind text, nothing
+                # above ~1100px wide is perceivable, so the cost was bought for
+                # nothing. Goes through the shared cache too, so switching
+                # chats does not re-decode it.
+                tex = _cached_texture(path, 1100)
+                if tex is None:
+                    try:
+                        tex = Gdk.Texture.new_from_filename(path)
+                    except Exception:
+                        from gi.repository import Gio
+                        tex = Gdk.Texture.new_from_file(
+                            Gio.File.new_for_path(path))
+                # 0.5 on a bright, photographic 2MB PNG is not a watermark,
+                # it is a picture with text on top: it read as a lava scene
+                # pasted into the middle of the conversation and it fought
+                # every line of the reply. A watermark has to be felt, not
+                # read.
+                opacity = 0.10
             else:
                 tex = _svg_texture(path, 720)
                 opacity = 0.2
@@ -7451,7 +7517,12 @@ class MainWindow(Adw.ApplicationWindow):
             pic.set_valign(Gtk.Align.FILL)
             pic.set_opacity(opacity)
             try:
-                pic.set_content_fit(Gtk.ContentFit.CONTAIN)
+                # COVER, not CONTAIN. Contain letterboxes a landscape image
+                # inside a tall chat pane, so the art appeared as a bright
+                # BAND across the middle with plain background above and
+                # below it — which is what made it read as content rather
+                # than as backdrop. Cover fills the pane evenly.
+                pic.set_content_fit(Gtk.ContentFit.COVER)
             except Exception:
                 pass
             pic.add_css_class("chat-watermark")
@@ -7864,6 +7935,19 @@ class MainWindow(Adw.ApplicationWindow):
         self.status_pill_box.append(self.status_pill_spinner)
         self.status_pill_box.append(self.status_pill_label)
 
+        # ── THE ACTIVITY FEED IS DOCKED, NOT SCROLLED ──
+        # It used to be appended into the message list, which meant that after
+        # two or three more messages the one widget telling you what Basilisk
+        # is doing had scrolled off the top of the screen. A status surface
+        # that you have to go looking for is not a status surface. It sits
+        # above the action buttons now, pinned, always in view — and because
+        # it is outside the scroller it is also unaffected by the rolling trim.
+        self.activity_dock = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
+                                     spacing=0)
+        self.activity_dock.add_css_class("activity-dock")
+        self.activity_dock.set_visible(False)
+        area.append(self.activity_dock)
+
         area.append(actions_row)
 
         # Staged attachments sit HERE — between the action chips and the
@@ -8087,9 +8171,10 @@ class MainWindow(Adw.ApplicationWindow):
             child = nxt
         # Switching chats abandons the visible feed; the turn it belonged to
         # keeps running and keeps writing to the store, it just has nowhere to
-        # draw. Drop the reference rather than leaving a disposed widget wired
-        # to a live turn.
-        self._activity_feed = None
+        # draw. The dock is OUTSIDE the message list, so clearing the list does
+        # not clear it — it has to be emptied explicitly or the previous
+        # conversation's status strip stays pinned over the new one.
+        self._clear_activity_dock()
 
         msgs = self.store.list_messages(chat_id)
 
@@ -8159,6 +8244,11 @@ class MainWindow(Adw.ApplicationWindow):
             self.chat_subtitle_lbl.set_text("")
 
     # ── messages ────────────────────────────────────────────────
+
+    # Overlay scrollbars float ON TOP of the content, so the rightmost thing
+    # in a row — the user's avatar — was drawn underneath the scrollbar. The
+    # message box reserves the gutter instead.
+    _SCROLLBAR_GUTTER = 14
 
     def _append_message_widget(self, role, content, meta=None):
         # Clear empty state if present. The feed is a first-class row in this
@@ -8778,17 +8868,35 @@ class MainWindow(Adw.ApplicationWindow):
             self._activity_feed = feed
             self._activity_sid = 0
             self._activity_batch_sids = []
-            # Attached unconditionally, and that is safe because both callers
-            # (_send_user_message, _inject_user_request) act on the chat that
-            # is on screen — the user message it belongs to was just appended
-            # to this same box. Navigating away later is handled where it
-            # happens: _load_chat disposes the feeds it removes and drops this
-            # reference, so the turn keeps running with nowhere to draw rather
-            # than drawing into the wrong conversation.
-            self.msg_box.append(feed)
+            self._dock_feed(feed)
             GLib.idle_add(self._force_scroll_to_bottom)
         except Exception:
             self._activity_feed = None
+
+    def _dock_feed(self, feed):
+        """Put `feed` in the pinned dock, retiring whatever was there."""
+        dock = getattr(self, "activity_dock", None)
+        if dock is None:
+            return
+        old = dock.get_first_child()
+        while old is not None:
+            nxt = old.get_next_sibling()
+            # The outgoing feed's 200ms clock must stop with it, or every turn
+            # leaves another timer running for the life of the process.
+            if isinstance(old, ActivityFeedWidget):
+                try:
+                    old.dispose_widget()
+                except Exception:
+                    pass
+            dock.remove(old)
+            old = nxt
+        if feed is not None:
+            dock.append(feed)
+        dock.set_visible(feed is not None)
+
+    def _clear_activity_dock(self):
+        self._dock_feed(None)
+        self._activity_feed = None
 
     def _activity(self):
         f = getattr(self, "_activity_feed", None)
@@ -14074,7 +14182,21 @@ class DragonSplash(Gtk.Window):
 
     Entirely self-guarding: every path is wrapped so that ANY failure (no cairo,
     no pixbuf, a draw error, an old GTK) just fires on_done and closes, so the
-    app always opens normally. It is NEVER allowed to wedge startup."""
+    app always opens normally. It is NEVER allowed to wedge startup.
+
+    THE `import cairo` PROBE BELOW IS LOAD-BEARING, AND THE try/except INSIDE
+    _draw DOES NOT COVER IT. When pycairo is absent, PyGObject cannot marshal
+    the Gtk.Snapshot's cairo context into the Python callback at all: it raises
+    `TypeError: Couldn't find foreign struct converter for 'cairo.Context'` in
+    the BINDING layer, before a single line of _draw runs. So _draw's own
+    try/except never sees it, the splash paints nothing, and stderr gets that
+    line at 60fps for the whole animation. Measured in this sandbox, which has
+    GTK4 but no pycairo — exactly the shape of a box that installed via
+    install.sh, because that script installs python3-gi/gtk4/libadwaita and
+    (until now) never installed the cairo binding.
+
+    The claim in this docstring was false for the one failure mode it names.
+    Probing up front is what makes it true."""
 
     def __init__(self, app, image_path, on_done):
         super().__init__(application=app)
@@ -14089,6 +14211,10 @@ class DragonSplash(Gtk.Window):
             pass
         self._side = 460
         self.set_default_size(self._side, self._side)
+        # Raise BEFORE building the DrawingArea if the binding cannot deliver a
+        # cairo context — the caller already treats a raise here as "skip the
+        # splash", which is the correct and only graceful outcome.
+        import cairo as _cairo_probe          # noqa: F401
         self._pb = GdkPixbuf.Pixbuf.new_from_file(image_path)  # may raise → caught by caller
         self.area = Gtk.DrawingArea()
         self.area.set_content_width(self._side)

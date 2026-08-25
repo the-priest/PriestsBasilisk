@@ -312,10 +312,10 @@ else
     # yet. `-S --needed` uses the database the operator already has; if a
     # package is genuinely missing from it, the fix is a full `-Syu`, which
     # is his call to make and not this script's.
-    $ESC pacman -S --needed --noconfirm python-gobject gtk4 libadwaita \
+    $ESC pacman -S --needed --noconfirm python-gobject python-cairo gtk4 libadwaita \
       || fatal "pacman install failed — run '$ESC pacman -Syu' first, then re-run this installer"
   elif command -v dnf >/dev/null; then
-    $ESC dnf install -y python3-gobject gtk4 libadwaita
+    $ESC dnf install -y python3-gobject python3-cairo gtk4 libadwaita
   else
     fatal "unknown package manager — install python3-gi, GTK 4, libadwaita manually"
   fi
@@ -363,6 +363,29 @@ fi
 # context and tokens on long sessions.  Fully optional — Basilisk ships a
 # built-in pure-Python fallback compressor, so if this won't install she
 # still compresses, just a little less aggressively.
+
+step "cairo bindings"
+# pycairo is a HARD dependency (pyproject.toml declares it) and this script
+# never installed it. Without it PyGObject cannot marshal a cairo context into
+# a Python draw callback at all, so the startup splash paints NOTHING and
+# stderr fills with "Couldn't find foreign struct converter for
+# 'cairo.Context'" at 60fps. Checked separately from GTK because python3-gi
+# does not pull it in on Debian/Kali.
+if python3 -c "import cairo" 2>/dev/null; then
+  ok "pycairo present"
+else
+  warn "pycairo missing — the startup animation needs it"
+  if command -v apt-get >/dev/null; then
+    $ESC apt-get install -y python3-cairo python3-gi-cairo 2>/dev/null \
+      && ok "pycairo installed" || warn "could not install pycairo (the app still runs; the splash is skipped)"
+  elif command -v pacman >/dev/null; then
+    $ESC pacman -S --needed --noconfirm python-cairo 2>/dev/null \
+      && ok "pycairo installed" || warn "could not install pycairo (the app still runs; the splash is skipped)"
+  elif command -v dnf >/dev/null; then
+    $ESC dnf install -y python3-cairo 2>/dev/null \
+      && ok "pycairo installed" || warn "could not install pycairo (the app still runs; the splash is skipped)"
+  fi
+fi
 
 step "Headroom context compression (optional)"
 # Probe the ACTUAL API, not just the name. `import headroom` alone is

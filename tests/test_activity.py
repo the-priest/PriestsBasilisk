@@ -406,8 +406,16 @@ print("\n== the clock is stopped on every teardown path ==")
 ck("switching chat disposes the feeds it removes",
    "isinstance(child, ActivityFeedWidget)" in _body("_load_chat")
    and "dispose_widget()" in _body("_load_chat"))
-ck("switching chat drops the stale feed reference",
-   "self._activity_feed = None" in _body("_load_chat"))
+# v9.9.0 moved the live feed OUT of the message list and into a pinned dock
+# above the composer, so "clear the reference" became "empty the dock", which
+# does both. The property is unchanged: after a chat switch no feed from the
+# previous conversation is still live or still on screen.
+ck("switching chat empties the dock",
+   "_clear_activity_dock()" in _body("_load_chat"))
+ck("emptying the dock also drops the reference",
+   "self._activity_feed = None" in _body("_clear_activity_dock"))
+ck("and retiring a feed stops its clock",
+   "dispose_widget()" in _body("_dock_feed"))
 ck("the rolling trim disposes a feed it evicts",
    "isinstance(old, ActivityFeedWidget)" in _body("_append_message_widget"))
 ck("the trim never disposes the LIVE feed",

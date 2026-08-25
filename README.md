@@ -8,10 +8,10 @@
 
 You bring the model. Basilisk gives it hands, a memory, a methodology — and a leash you hold.
 
-<img src="https://img.shields.io/badge/version-9.9.0-7d121b?style=flat-square&labelColor=08090b" alt="version 9.9.0">
+<img src="https://img.shields.io/badge/version-9.9.1-7d121b?style=flat-square&labelColor=08090b" alt="version 9.9.1">
 <img src="https://img.shields.io/badge/license-MIT-7d121b?style=flat-square&labelColor=08090b" alt="MIT license">
 <img src="https://img.shields.io/badge/Juice%20Shop-87%20%2F%20113%20black--box-e11d2b?style=flat-square&labelColor=08090b" alt="Juice Shop 87/113 black-box">
-<img src="https://img.shields.io/badge/tests-3704%20assertions-6d7680?style=flat-square&labelColor=08090b" alt="3704 assertions">
+<img src="https://img.shields.io/badge/tests-3744%20assertions-6d7680?style=flat-square&labelColor=08090b" alt="3744 assertions">
 
 <a href="#-what-it-does">What it does</a> ·
 <a href="#-benchmark">Benchmark</a> ·
@@ -246,7 +246,7 @@ Every tool page lists strengths. Here are the limits, because you'll find them a
 for f in tests/test_*.py; do python3 "$f" || echo "RED $f"; done
 ```
 
-Stdlib only. No pytest, no network, no fixtures, no account. **3,704 assertions across 47 suites**, done in under a minute.
+Stdlib only. No pytest, no network, no fixtures, no account. **3,744 assertions across 48 suites**, done in under a minute.
 
 - **Bugs are pinned, not described.** When a real bug is fixed, the test that catches it is written to **fail against the previous release**. A regression can't quietly return.
 - **Performance is asserted as a shape, not a stopwatch.** A millisecond ceiling passes by luck on a fast machine, so the suite asserts the **scaling exponent** — quadruple the input, the time must not quadruple — which fails on a slow box and a fast one alike.
@@ -326,7 +326,7 @@ If it earns its place in your kit, star the repo and tell someone who runs engag
 
 <div align="center">
 
-### Built by one person. Verified by 3,704 assertions. Priced at nothing.
+### Built by one person. Verified by 3,744 assertions. Priced at nothing.
 
 <sub>Clone it, read it, run the suite, then point it at something you own.</sub>
 

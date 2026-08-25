@@ -1,3 +1,92 @@
+## v9.9.1
+
+### Bugs found by running the app, not by reading it
+
+The v9.9.0 suites were green and the app still looked wrong on screen. Every
+bug below was found by launching the real window headlessly against a seeded
+conversation and looking at what it drew and what it printed to stderr.
+
+**`Gtk.Button.set_icon_name()` throws away the label.** The read-aloud control
+was built as `Gtk.Button(label=" Listen")` and then given an icon name, which
+REPLACES the child - so the word was silently discarded and the control
+rendered as a bare icon circle floating under the reply, attached to nothing.
+Nothing errored; it just looked broken. The child is a box now, with both.
+
+**The chat watermark was a picture, not a watermark.** A bright 1672x941 photo
+at opacity 0.5 with `ContentFit.CONTAIN`. Contain letterboxes a landscape image
+inside a tall pane, so the art appeared as a glowing BAND across the middle of
+the conversation with plain background above and below it - which is what made
+it read as content someone had pasted in rather than as a backdrop, and it
+fought every line of text over it. Now 0.10, `COVER`, and loaded through the
+shared texture cache at a bounded 1100px instead of a 6MB RGBA texture that
+`COVER` rescaled behind the chat on every scroll frame and every streamed
+token.
+
+**Overlay scrollbars float on top of content**, so the rightmost thing in a row
+- the user's avatar - was drawn underneath the scrollbar. The message list
+reserves the gutter.
+
+**The window had no minimum size.** libadwaita said so 25 times in a 16-state
+sweep. Without one there is nothing for the adaptive machinery to break
+against, so a narrow window can squeeze children past their own minimums -
+which is how widgets end up overlapping in the first place.
+
+### The one that would have shipped: pycairo
+
+`pyproject.toml` declares `pycairo` as a hard dependency. **`install.sh` - the
+recommended path, the one the README documents - never installed it**, and
+`python3-gi` does not pull it in on Debian or Kali.
+
+Without it PyGObject cannot marshal a cairo context into a Python draw callback
+*at all*: it raises `TypeError: Couldn't find foreign struct converter for
+'cairo.Context'` in the BINDING layer, before a single line of the callback
+runs. So `DragonSplash`'s own try/except never saw it, its docstring's promise
+to degrade gracefully "if no cairo" was false, the splash painted nothing, and
+stderr took that line at 60fps for the whole animation.
+
+Fixed three ways: the installer installs the binding on apt/pacman/dnf, checks
+for it separately from GTK, and `DragonSplash` now probes for it BEFORE
+building the DrawingArea - which is what actually makes the docstring true,
+because the caller already treats a raise there as "skip the splash".
+
+### The activity feed is docked, not scrolled
+
+It lived in the message list, so after two or three more messages the one
+widget telling you what Basilisk is doing had scrolled off the top. A status
+surface you have to go looking for is not a status surface.
+
+It is pinned above the action buttons now, always in view, outside the scroller
+and therefore outside the rolling trim. One per turn still; a new turn retires
+the previous one through the dock (which stops its clock, or every turn would
+leave another 200ms timer running for the life of the process), and switching
+chats empties it. Replayed history feeds still render inline in the transcript,
+because those are records of past turns rather than live status.
+
+### Idle lag
+
+`.chat-row.selected` carried `animation: metalglow 3s ease-in-out infinite`.
+That rule is on the SELECTED chat row, which is on screen from the moment the
+app opens until it closes - so a repaint loop ran forever, at idle, for a glow
+nobody looks at. It was the only always-on animation in the stylesheet. Now
+static; every animation that remains is gated behind a state class (`.working`,
+`.live`, `.busy`) and stops when the work does. A duplicate dead `sendglow` on
+`.send-button.working` went with it.
+
+Combined with the bounded watermark texture, that removes the two things that
+were costing frames while nothing was happening.
+
+### Verification
+
+New `tests/test_guiwiring.py` (37) - the bugs above pinned as properties, plus
+an audit that fails if any infinite animation loses its state class. **3,744
+assertions across 48 suites, zero red**, verified from a clean extract.
+
+Method note, because it is the reusable part: the app is now driven headlessly
+through 19 states (terminal panel, sidebar, attachments, empty chat, live feed,
+chat switch, working state) with GTK criticals counted per state, and a full
+streamed turn is simulated token-by-token in both DSML pipe renderings. Zero
+criticals, zero cairo errors, zero adwaita warnings.
+
 ## v9.9.0
 
 ### DeepSeek-V4-Flash: the tool-call dialect was arriving in a pipe rendering nothing matched
