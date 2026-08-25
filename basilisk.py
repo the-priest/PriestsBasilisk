@@ -37,6 +37,7 @@ import threading
 import urllib.request
 import datetime
 import base64
+import bisect
 import traceback
 import time
 try:
@@ -153,7 +154,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.basilisk"
 APP_NAME = "Basilisk"
-VERSION = "9.7.0"
+VERSION = "9.8.0"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -1712,6 +1713,294 @@ headerbar {
     50%  { box-shadow: 0 0 22px rgba(255,120,30,0.82); border-color: #ff7a2a; }
     100% { box-shadow: 0 0 6px rgba(255,120,30,0.30); border-color: #3a2016; }
 }
+
+/* =====================================================================
+   LIVE ACTIVITY FEED  (ActivityFeedWidget)
+
+   One panel per operator turn.  Header always readable; body is the live
+   stream while working and folds to the header alone once the turn settles.
+
+   Everything here is ASCII-only, like the rest of this stylesheet: the CSS
+   is a bytes literal and a stray smart-quote or arrow becomes a decode
+   error at startup, which is a black window with a traceback rather than a
+   cosmetic bug.  Glyphs belong in the Python labels, not in here.
+   ===================================================================== */
+
+.activity-feed {
+    margin: 6px 60px 10px 12px;
+    border-radius: 14px;
+    background-color: #0a0807;
+    background-image: linear-gradient(180deg,
+        rgba(255, 150, 60, 0.055) 0%,
+        rgba(255, 120, 40, 0.018) 34%,
+        rgba(0, 0, 0, 0.0) 100%);
+    border: 1px solid rgba(150, 52, 22, 0.34);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 170, 110, 0.07),
+        0 0 0 1px rgba(0, 0, 0, 0.40),
+        0 8px 22px rgba(0, 0, 0, 0.46);
+}
+
+/* Working: a hot rail down the left edge, breathing.  This is the single
+   animated element in the panel -- a per-row animation would be dozens of
+   clocks running at once during a mission, for no extra information. */
+.activity-feed.live {
+    border-color: rgba(226, 96, 34, 0.50);
+    border-left: 3px solid #e2601f;
+    animation: activityRail 1.6s ease-in-out infinite;
+}
+@keyframes activityRail {
+    0%   { border-left-color: #8a2f12; box-shadow: inset 0 1px 0 rgba(255,170,110,0.07), 0 0 0 1px rgba(0,0,0,0.40), 0 8px 22px rgba(0,0,0,0.46), -1px 0 12px rgba(226,96,34,0.20); }
+    50%  { border-left-color: #ff9a44; box-shadow: inset 0 1px 0 rgba(255,170,110,0.10), 0 0 0 1px rgba(0,0,0,0.40), 0 8px 22px rgba(0,0,0,0.46), -1px 0 22px rgba(255,140,50,0.55); }
+    100% { border-left-color: #8a2f12; box-shadow: inset 0 1px 0 rgba(255,170,110,0.07), 0 0 0 1px rgba(0,0,0,0.40), 0 8px 22px rgba(0,0,0,0.46), -1px 0 12px rgba(226,96,34,0.20); }
+}
+.activity-feed.done {
+    border-left: 3px solid rgba(120, 44, 20, 0.55);
+}
+.activity-feed.collapsed {
+    background-image: none;
+}
+
+/* ---- Header: the line that is always true ---- */
+.activity-header {
+    background: none;
+    background-image: none;
+    border: none;
+    box-shadow: none;
+    min-height: 0;
+    padding: 11px 16px;
+    border-radius: 14px;
+}
+.activity-header:hover {
+    background-color: rgba(255, 140, 60, 0.06);
+}
+.activity-header:active {
+    background-color: rgba(255, 140, 60, 0.10);
+}
+
+.activity-spinner {
+    color: #ff9a44;
+    min-width: 18px;
+    min-height: 18px;
+}
+.activity-verdict {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 18px;
+    font-weight: 800;
+    min-width: 18px;
+    color: #7d8794;
+}
+.activity-verdict.ok   { color: #35c46f; text-shadow: 0 0 10px rgba(46, 204, 113, 0.45); }
+.activity-verdict.fail { color: #e5484d; text-shadow: 0 0 10px rgba(229, 72, 77, 0.45); }
+
+.activity-title {
+    color: #ffcf8e;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 19px;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+    text-shadow: 0 0 9px rgba(255, 150, 60, 0.30);
+}
+.activity-feed.done .activity-title {
+    color: #b9c0cb;
+    text-shadow: none;
+}
+.activity-meta {
+    color: #8a929e;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 15px;
+    letter-spacing: 0.2px;
+}
+.activity-chevron {
+    color: #6f7885;
+    font-size: 17px;
+    font-weight: 700;
+    min-width: 14px;
+}
+.activity-header:hover .activity-chevron { color: #ffab5e; }
+
+/* ---- Body: the stream ---- */
+.activity-body {
+    padding: 2px 14px 10px 14px;
+}
+
+.activity-step {
+    padding: 5px 6px 5px 4px;
+    border-radius: 7px;
+}
+.activity-step.run {
+    background-color: rgba(255, 140, 50, 0.055);
+}
+
+.activity-glyph {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 15px;
+    font-weight: 800;
+    min-width: 15px;
+    color: #6f7885;
+}
+.activity-step.run  .activity-glyph { color: #ff9a44; }
+.activity-step.ok   .activity-glyph { color: #35c46f; }
+.activity-step.fail .activity-glyph { color: #e5484d; }
+.activity-step.stop .activity-glyph { color: #b0873a; }
+.activity-step.gate .activity-glyph { color: #e5484d; }
+
+.activity-step-name {
+    color: #dfe4ec;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 17px;
+    font-weight: 700;
+    letter-spacing: 0.2px;
+}
+.activity-step.run .activity-step-name { color: #ffe0b4; }
+.activity-step.note .activity-step-name,
+.activity-step.gate .activity-step-name {
+    font-weight: 500;
+    color: #9aa3b0;
+}
+.activity-step.gate .activity-step-name { color: #e8a2a4; }
+
+.activity-step-detail {
+    color: #838c99;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 16px;
+}
+.activity-step-time {
+    color: #69727e;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14px;
+    letter-spacing: 0.3px;
+}
+.activity-step.run .activity-step-time { color: #c98a44; }
+
+.activity-step.past {
+    padding: 4px 6px 4px 4px;
+}
+.activity-step.past .activity-glyph { color: #5c6673; }
+.activity-step.past .activity-step-name {
+    font-weight: 500;
+    color: #aab2be;
+}
+
+/* ---- Links inside a reply.  The base rule paints them #7d121b, which is
+        the deep accent -- fine on a light chrome surface, but inside a
+        charred bubble it is barely separable from the body text, and a
+        citation the operator cannot SEE is a citation he will not click.
+        ANSWER MODE makes one of these the last line of nearly every leashed
+        reply, so it earns a colour that reads. ---- */
+.msg-assistant link,
+.msg-assistant *:link,
+.msg-user link,
+.msg-user *:link {
+    color: #ff9a44;
+    text-decoration-color: rgba(255, 154, 68, 0.45);
+}
+.msg-assistant *:link:hover,
+.msg-user *:link:hover {
+    color: #ffc27a;
+    text-decoration-color: rgba(255, 194, 122, 0.85);
+}
+.msg-assistant *:visited,
+.msg-user *:visited {
+    color: #d8894a;
+}
+
+.activity-preview-box {
+    padding: 0 6px 6px 27px;
+}
+.activity-preview {
+    color: #7f8894;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 15px;
+    line-height: 1.35;
+}
+
+/* =====================================================================
+   BUBBLE REFINEMENT -- last layer, so it wins.
+
+   The fire identity above is kept; what changes is legibility and rhythm.
+   The big one is TEXT SHADOW: a 9px orange glow behind 30px body text
+   smears every stroke, and at phone scale it reads as a soft focus problem
+   rather than as atmosphere.  Glow belongs on the BORDER and the SURFACE,
+   where it costs nothing to read.  Text keeps a single tight dark shadow
+   for contrast against the ember gradient underneath it.
+   ===================================================================== */
+
+.msg-row {
+    padding: 3px 0;
+}
+
+.msg-user, .msg-assistant {
+    padding: 17px 21px;
+    transition: box-shadow 200ms ease, border-color 200ms ease;
+}
+
+.msg-user {
+    margin: 7px 12px 7px 64px;
+    line-height: 1.45;
+    border-radius: 18px 18px 6px 18px;
+    text-shadow: 0 1px 1px rgba(0, 0, 0, 0.60);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 190, 140, 0.13),
+        inset 0 0 26px rgba(150, 46, 18, 0.14),
+        0 0 0 1px rgba(0, 0, 0, 0.45),
+        0 10px 26px rgba(0, 0, 0, 0.50),
+        0 0 16px rgba(210, 72, 24, 0.22);
+}
+.msg-assistant {
+    margin: 7px 64px 7px 12px;
+    line-height: 1.5;
+    border-radius: 6px 18px 18px 18px;
+    text-shadow: 0 1px 1px rgba(0, 0, 0, 0.60);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 175, 125, 0.11),
+        inset 0 0 28px rgba(150, 40, 22, 0.14),
+        0 0 0 1px rgba(0, 0, 0, 0.45),
+        0 10px 26px rgba(0, 0, 0, 0.50),
+        0 0 16px rgba(196, 60, 26, 0.20);
+}
+
+.msg-user:hover {
+    border-color: rgba(232, 108, 48, 0.78);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 190, 140, 0.16),
+        inset 0 0 30px rgba(160, 50, 20, 0.18),
+        0 0 0 1px rgba(0, 0, 0, 0.45),
+        0 12px 30px rgba(0, 0, 0, 0.54),
+        0 0 26px rgba(230, 90, 34, 0.42);
+}
+.msg-assistant:hover {
+    border-color: rgba(216, 74, 38, 0.78);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 175, 125, 0.14),
+        inset 0 0 32px rgba(160, 44, 24, 0.18),
+        0 0 0 1px rgba(0, 0, 0, 0.45),
+        0 12px 30px rgba(0, 0, 0, 0.54),
+        0 0 26px rgba(216, 74, 34, 0.40);
+}
+
+/* ---- Role labels: quieter, so the eye lands on the message ---- */
+.role-label {
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 1.4px;
+    opacity: 0.72;
+    margin: 0 4px 4px 4px;
+}
+.role-label.user     { color: #d2743c; }
+.role-label.basilisk { color: #d8a86c; }
+
+/* ---- The old inline tool indicator: kept for reloaded history, toned
+        down so it never competes with the activity feed above it ---- */
+.msg-tool-indicator {
+    padding: 4px 14px 4px 70px;
+    margin: 1px 12px;
+}
+.tool-indicator-label {
+    color: #6d7682;
+    font-size: 16px;
+    opacity: 0.80;
+}
 """
 
 
@@ -1760,17 +2049,183 @@ def _evidence_set_engagement(name):
     return {"engagement": new, "steps": led.summary()["steps"]}
 
 
-def text_to_pango(text: str) -> str:
-    safe = (text.replace("&", "&amp;")
-                .replace("<", "&lt;")
-                .replace(">", "&gt;"))
-    safe = BOLD_RE.sub(r"<b>\1</b>", safe)
-    safe = ITALIC_RE.sub(r"<i>\1</i>", safe)
-    safe = INLINE_CODE_RE.sub(
+# Links, both `[text](url)` and a bare pasted URL. These matter more in this
+# app than in most: ANSWER MODE explicitly orders the model to "CITE what you
+# used: name the source or paste the link", so every leashed answer ends in one
+# — and until now every one of them rendered as literal `[kernel.org](https://
+# www.kernel.org/)` at the bottom of the reply.
+MD_LINK_RE = re.compile(r"\[([^\]\n]+)\]\((https?://[^\s)]+)\)")
+BARE_URL_RE = re.compile(r"(?<![\w@/])(https?://[^\s<>\"'`\])]+)")
+# Trailing punctuation belongs to the sentence, not to the URL.
+_URL_TAIL = ".,;:!?"
+
+# Private Use Area, so nothing a model can emit collides with it and none of
+# the three markdown regexes below can match it.
+_LINK_SENTINEL = "\ue000%d\ue001"
+_SENTINEL_RE = re.compile("\ue000" + r"(\d+)" + "\ue001")
+
+
+def _pango_escape(t: str) -> str:
+    return (t.replace("&", "&amp;")
+             .replace("<", "&lt;")
+             .replace(">", "&gt;"))
+
+
+_TAG_RE = re.compile(r"<(/?)([a-zA-Z][a-zA-Z0-9]*)(?:\s[^>]*)?(/?)>")
+
+
+def _markup_is_wellformed(markup: str) -> bool:
+    """Do this string's tags actually nest?
+
+    THE THREE INLINE PASSES CANNOT GUARANTEE THIS AND NEVER COULD.
+    BOLD_RE, ITALIC_RE and INLINE_CODE_RE each run over the whole string
+    independently, so on input with stray `*` and backticks they happily
+    produce `<i>a<span>b</i>c</span>` — overlapping, not nested. GTK does not
+    raise on that: it logs a warning and renders the RAW MARKUP, so the
+    operator sees `<span font_family=...>` in the middle of his answer. The
+    reply is not malformed; the renderer is.
+
+    Measured on 30,000 adversarial strings, the old renderer emitted 382 such
+    strings and the linkifying one 99 — different inputs, same class. Rather
+    than chase the pairing rules, the output is CHECKED and a bad one falls
+    back to something plainer that is guaranteed to nest.
+
+    Attribute values are skipped by the tag regex, so a `>` inside an href
+    cannot be mistaken for the end of a tag."""
+    stack: List[str] = []
+    for m in _TAG_RE.finditer(markup):
+        closing, name, selfclose = m.group(1), m.group(2), m.group(3)
+        if selfclose:
+            continue
+        if closing:
+            if not stack or stack[-1] != name:
+                return False
+            stack.pop()
+        else:
+            stack.append(name)
+    return not stack
+
+
+def _pango_inline(t: str) -> str:
+    """Bold / italic / inline-code, on text that carries no links."""
+    t = BOLD_RE.sub(r"<b>\1</b>", t)
+    t = ITALIC_RE.sub(r"<i>\1</i>", t)
+    t = INLINE_CODE_RE.sub(
         r'<span font_family="JetBrains Mono" '
         r'background="#0a0c0f" foreground="#d6ffdf"> \1 </span>',
-        safe)
-    return safe
+        t)
+    return t
+
+
+def text_to_pango(text: str) -> str:
+    """Markdown-ish to Pango markup.
+
+    LINKS ARE PULLED OUT FIRST, INTO SENTINELS, AND PUT BACK LAST.
+    The obvious implementation — add one more .sub() alongside bold and italic —
+    is wrong in both directions, and both directions fail LOUDLY:
+
+      · a URL is not prose. `*` and `` ` `` are legal in one, and ITALIC_RE or
+        INLINE_CODE_RE matching INSIDE an href injects a tag into an attribute
+        value, which makes set_markup raise and drops the whole message to
+        plain text — so one exotic link silently unstyles the entire reply;
+      · and in the other direction the href, once written, is a fat target for
+        the passes that follow it.
+
+    Sentinels sidestep both: the link text is escaped and inline-formatted on
+    its own, the URL is escaped as an ATTRIBUTE (quotes included, which the
+    body escape does not do), and neither is ever visible to the other passes.
+    The sentinel is Private Use Area, so no model output can forge one.
+    """
+    links: List[str] = []
+
+    def _stash(label: str, url: str, fmt: bool = True) -> str:
+        """fmt=False when the LABEL IS THE URL (a bare pasted link).
+
+        A URL is not prose, and running the inline passes over one is how the
+        first version of this regressed 8 inputs out of 30,000 that the old
+        renderer had handled: `https://host/a**b**c` had its own asterisks
+        turned into a <b> INSIDE the anchor text, and the resulting tag soup
+        was rejected, which drops the whole message to plain text. Markdown
+        link text is prose its author wrote and still gets formatted; the URL
+        itself only ever gets escaped."""
+        url = url.rstrip(_URL_TAIL)
+        href = (url.replace("&", "&amp;").replace("<", "&lt;")
+                   .replace(">", "&gt;").replace('"', "&quot;")
+                   .replace("'", "&apos;"))
+        shown = _pango_escape(label)
+        if fmt:
+            shown = _pango_inline(shown)
+        links.append('<a href="%s">%s</a>' % (href, shown))
+        return _LINK_SENTINEL % (len(links) - 1)
+
+    # Inline code wins over autolinking: a URL the operator wrote inside
+    # backticks is being shown as text, not offered as a destination.
+    #
+    # BISECT, NOT A LINEAR SCAN. The obvious `any(a <= pos < b for a, b in
+    # spans)` is O(spans) per candidate link and therefore O(n^2) in a reply
+    # that is dense in both — which is the ordinary shape of a cited answer,
+    # not an exotic one. This file has shipped a quadratic display path twice
+    # (_ALT_PARTIAL_RE at 25s, and the per-token re-strip); it is not worth
+    # writing a third one to save four lines.
+    _starts: List[int] = []
+    _ends: List[int] = []
+
+    def _index_code(src: str) -> None:
+        del _starts[:], _ends[:]
+        for _m in INLINE_CODE_RE.finditer(src):
+            _a, _b = _m.span()
+            _starts.append(_a)
+            _ends.append(_b)
+
+    def _in_code(pos: int) -> bool:
+        i = bisect.bisect_right(_starts, pos) - 1
+        return i >= 0 and pos < _ends[i]
+
+    _index_code(text)
+
+    out, last = [], 0
+    for m in MD_LINK_RE.finditer(text):
+        if _in_code(m.start()):
+            continue
+        out.append(text[last:m.start()])
+        out.append(_stash(m.group(1), m.group(2)))
+        last = m.end()
+    out.append(text[last:])
+    staged = "".join(out)
+
+    # Second pass for bare URLs. Runs on the STAGED text, so a URL already
+    # captured as a markdown target cannot be matched a second time — it is a
+    # sentinel by now.
+    _index_code(staged)
+    out, last = [], 0
+    for m in BARE_URL_RE.finditer(staged):
+        if _in_code(m.start()):
+            continue
+        url = m.group(1).rstrip(_URL_TAIL)
+        out.append(staged[last:m.start()])
+        out.append(_stash(url, url, fmt=False))
+        last = m.start() + len(url)
+    out.append(staged[last:])
+    staged = "".join(out)
+
+    def _restore(t: str) -> str:
+        return (_SENTINEL_RE.sub(lambda m: links[int(m.group(1))], t)
+                if links else t)
+
+    body = _restore(_pango_inline(_pango_escape(staged)))
+    if _markup_is_wellformed(body):
+        return body
+
+    # Tier 2: drop the emphasis passes, keep the links. The citation stays
+    # clickable, which is the part of a leashed answer that carries the proof.
+    body = _restore(_pango_escape(staged))
+    if _markup_is_wellformed(body):
+        return body
+
+    # Tier 3: plain escaped text. Same thing the caller's except-branch would
+    # have shown, but reached without a GTK warning and without the raw
+    # `<span font_family=...>` soup ever hitting the screen.
+    return _pango_escape(text)
 
 
 def split_message_into_blocks(text: str) -> List[Dict[str, str]]:
@@ -2760,6 +3215,68 @@ def _needs_web_verification(text: str) -> bool:
     return False
 
 
+# ── DECODED-IMAGE CACHE ──────────────────────────────────────────────
+# Every avatar in this file was built with Gtk.Image.new_from_file(path),
+# which decodes the PNG off disk EVERY TIME.  basilisk-avatar.png is 512x512
+# and measures ~9ms to decode; basilisk-priest.png ~3ms.  One assistant avatar
+# is built per message bubble, so:
+#
+#   · a leashed question that chains 12 round-trips paid ~110ms of main-thread
+#     decode, arriving in 9ms chunks exactly when each new bubble appeared —
+#     which is a hitch the operator sees rather than a number in a profile;
+#   · opening a chat is worse, because _load_chat builds the whole window at
+#     once: 40 rendered messages is ~370ms of frozen UI on every chat switch,
+#     for forty identical decodes of two files.
+#
+# A Gdk.Texture is immutable and made to be shared between widgets, so one
+# decode per (file, size) serves every image for the life of the process.
+# Keyed on px as well as path because the same emblem is used at more than one
+# size and a texture carries its own resolution.
+_TEX_CACHE: Dict[Tuple[str, int], Any] = {}
+_TEX_MISSES: set = set()
+
+
+def _cached_texture(path: str, px: int):
+    """One decode per (file, size), shared by every widget that asks.
+
+    A miss is remembered too: a broken or missing file must not be re-opened
+    and re-failed once per message for the rest of the session."""
+    if not path:
+        return None
+    key = (path, int(px))
+    if key in _TEX_CACHE:
+        return _TEX_CACHE[key]
+    if key in _TEX_MISSES:
+        return None
+    tex = None
+    try:
+        pb = GdkPixbuf.Pixbuf.new_from_file_at_size(path, px, px)
+        if pb is not None:
+            tex = Gdk.Texture.new_for_pixbuf(pb)
+    except Exception as e:
+        log(f"texture load failed for {path}: {e}")
+        tex = None
+    if tex is None:
+        _TEX_MISSES.add(key)
+        return None
+    _TEX_CACHE[key] = tex
+    return tex
+
+
+def _cached_image(path: str, px: int, size: int):
+    """A Gtk.Image backed by the shared texture, or None if it can't load."""
+    tex = _cached_texture(path, px)
+    if tex is None:
+        return None
+    try:
+        img = Gtk.Image.new_from_paintable(tex)
+        img.set_pixel_size(size)
+        img.set_size_request(size, size)
+        return img
+    except Exception:
+        return None
+
+
 def _svg_texture(path: str, px: int):
     """Rasterise an SVG file to a px-by-px Gdk.Texture using the pixbuf SVG
     loader (CPU / cairo).  Returns None on any failure.
@@ -2772,14 +3289,11 @@ def _svg_texture(path: str, px: int):
     process at draw time.  Flattening to a fixed-size bitmap first means GTK
     only ever composites one small texture, so any emblem is safe and it still
     looks identical at avatar scale."""
-    try:
-        pb = GdkPixbuf.Pixbuf.new_from_file_at_size(path, px, px)
-        if pb is None:
-            return None
-        return Gdk.Texture.new_for_pixbuf(pb)
-    except Exception as e:
-        log(f"emblem rasterise failed: {e}")
-        return None
+    # Delegates to the shared cache: the rasterise itself is unchanged, it
+    # just happens once per (file, size) for the life of the process instead
+    # of once per caller. A Gdk.Texture is immutable, so sharing one between
+    # widgets is exactly what it is for.
+    return _cached_texture(path, px)
 
 
 def Avatar(kind: str = "user") -> Gtk.Widget:
@@ -2789,67 +3303,44 @@ def Avatar(kind: str = "user") -> Gtk.Widget:
     Gtk.Label (both are valid box children) rather than a custom widget
     subclass — simpler and impossible to crash on vfunc mismatch."""
     size = _scaled(52, floor=28)
+    # 2x the display size so it stays crisp on HiDPI, capped so one cached
+    # texture never gets silly for a 52px avatar.
+    _px = min(max(size * 2, 96), 256)
     if kind == "basilisk" and _AVATAR_PNG_PATH:
         # Preferred: the clean dragon PNG (no ring) as the chat avatar.
-        try:
-            img = Gtk.Image.new_from_file(_AVATAR_PNG_PATH)
-            img.set_pixel_size(size)
+        img = _cached_image(_AVATAR_PNG_PATH, _px, size)
+        if img is not None:
             img.set_valign(Gtk.Align.START)
             img.add_css_class("avatar")
             img.add_css_class("avatar-dragon")
-            img.set_size_request(size, size)
             return img
-        except Exception as e:
-            log(f"dragon PNG avatar load failed: {e}")
     if kind == "basilisk" and _DRAGON_SVG_PATH:
-        try:
-            # Rasterise to a bounded bitmap instead of a live SVG paintable —
-            # see _svg_texture: a filtered, many-path emblem rendered live can
-            # overflow the GL surface limit and crash the process.  2x the
-            # display size keeps it crisp on HiDPI; capped so it stays bounded.
-            px = min(max(size * 2, 96), 256)
-            tex = _svg_texture(_DRAGON_SVG_PATH, px)
-            if tex is not None:
-                img = Gtk.Image.new_from_paintable(tex)
-            else:
-                img = Gtk.Image.new_from_file(_DRAGON_SVG_PATH)
-            img.set_pixel_size(size)
+        # Rasterise to a bounded bitmap instead of a live SVG paintable — see
+        # _svg_texture: a filtered, many-path emblem rendered live can overflow
+        # the GL surface limit and crash the process.  Cached, so the raster
+        # happens once for the session rather than once per bubble.
+        img = _cached_image(_DRAGON_SVG_PATH, _px, size)
+        if img is not None:
             img.set_valign(Gtk.Align.START)
             img.add_css_class("avatar")
             img.add_css_class("avatar-dragon")
-            img.set_size_request(size, size)
             return img
-        except Exception as e:
-            log(f"dragon avatar load failed: {e}")
 
     if kind == "user" and _PRIEST_PNG_PATH:
-        try:
-            img = Gtk.Image.new_from_file(_PRIEST_PNG_PATH)
-            img.set_pixel_size(size)
+        img = _cached_image(_PRIEST_PNG_PATH, _px, size)
+        if img is not None:
             img.set_valign(Gtk.Align.START)
             img.add_css_class("avatar")
             img.add_css_class("avatar-priest")
-            img.set_size_request(size, size)
             return img
-        except Exception as e:
-            log(f"priest avatar load failed: {e}")
 
     if kind == "user" and _CROSS_SVG_PATH:
-        try:
-            px = min(max(size * 2, 96), 256)
-            tex = _svg_texture(_CROSS_SVG_PATH, px)
-            if tex is not None:
-                img = Gtk.Image.new_from_paintable(tex)
-            else:
-                img = Gtk.Image.new_from_file(_CROSS_SVG_PATH)
-            img.set_pixel_size(size)
+        img = _cached_image(_CROSS_SVG_PATH, _px, size)
+        if img is not None:
             img.set_valign(Gtk.Align.START)
             img.add_css_class("avatar")
             img.add_css_class("avatar-cross")
-            img.set_size_request(size, size)
             return img
-        except Exception as e:
-            log(f"cross avatar load failed: {e}")
 
     lbl = Gtk.Label(label="L" if kind == "user" else "K")
     lbl.add_css_class("avatar")
@@ -2896,6 +3387,584 @@ def _make_wrap_label() -> Gtk.Label:
         # will still wrap; it just won't shrink as aggressively.
         pass
     return lbl
+
+
+
+# ── LIVE ACTIVITY FEED ───────────────────────────────
+def _fmt_elapsed(sec: float) -> str:
+    """Wall-clock duration, at the precision a human reads at a glance.
+
+    Sub-second work is the common case for a local tool, so it gets
+    milliseconds; anything past a minute gets m/s, because "94.3s" is a number
+    the eye has to convert and "1m34s" is not."""
+    try:
+        sec = max(0.0, float(sec))
+    except (TypeError, ValueError):
+        return ""
+    if sec < 0.001:
+        # "0ms" reads as "did not happen". It did happen; it was just faster
+        # than the unit.
+        return "<1ms"
+    if sec < 1.0:
+        return "%dms" % int(sec * 1000)
+    if sec < 60.0:
+        return "%.1fs" % sec
+    m = int(sec // 60)
+    s = int(sec % 60)
+    return "%dm%02ds" % (m, s)
+
+
+def _reply_is_tool_only(text: str) -> bool:
+    """True when a stored assistant reply carried tool calls and no prose.
+
+    Those replies are the in-flight steps of a chain, not answers. Live, the
+    activity feed shows them properly; on reload they used to render as a
+    bubble reading `(working...)`, which is why a finished conversation looked
+    like Basilisk had answered the same question four times. Same judgement the
+    renderer makes, kept in one function so the two cannot disagree."""
+    if not text or not text.strip():
+        return False
+    try:
+        if scrub_tool_debris(strip_tool_calls(
+                extract_think_blocks(text)[0])).strip():
+            return False
+        return bool(parse_tool_calls(text))
+    except Exception:
+        return False
+
+
+def _feed_detail(name: str, args: Any) -> str:
+    """The one argument that makes a tool call DISTINCT, for the feed row.
+
+    Deliberately NOT a json dump of every argument: the row has one line, and a
+    dump pushes the part that identifies the call ("which url?", "which
+    command?") off the end.  Mirrors the priority order _action_label uses, so
+    the feed and the repeat guard name the same thing."""
+    if not isinstance(args, dict):
+        return ""
+    for key in ("command", "cmd", "url", "path", "src", "query", "pattern",
+                "target", "cidr", "name", "product", "topic", "text"):
+        v = args.get(key)
+        if isinstance(v, str) and v.strip():
+            v = " ".join(v.split())
+            return v if len(v) <= 120 else v[:117] + "..."
+    for v in args.values():
+        if isinstance(v, str) and v.strip():
+            v = " ".join(v.split())
+            return v if len(v) <= 120 else v[:117] + "..."
+    return ""
+
+
+def _feed_preview(result_text: str) -> str:
+    """A short, honest receipt for a finished step.
+
+    A tool result is JSON far more often than not, so the raw head of it is
+    `{"ok": true, "status": 200, "text": "<!doctype html>...` — punctuation the
+    operator cannot read anything from.  Pull the human-facing field when the
+    shape offers one, and fall back to the first real line otherwise."""
+    if not result_text:
+        return ""
+    txt = result_text.strip()
+    try:
+        obj = json.loads(txt)
+    except Exception:
+        obj = None
+    if isinstance(obj, dict):
+        # An error is the single most important thing a preview can carry, so
+        # it wins over any success field regardless of key order.
+        for k in ("error", "err", "message"):
+            v = obj.get(k)
+            if isinstance(v, str) and v.strip():
+                return " ".join(v.split())[:220]
+        if obj.get("ok") is False:
+            return "failed"
+        for k in ("summary", "text", "output", "stdout", "result", "body"):
+            v = obj.get(k)
+            if isinstance(v, str) and v.strip():
+                s = " ".join(v.split())
+                return (s[:220] + "...") if len(s) > 220 else s
+        keys = [k for k in obj.keys()][:6]
+        if keys:
+            return "returned: " + ", ".join(str(k) for k in keys)
+        return ""
+    for line in txt.splitlines():
+        line = line.strip()
+        if line:
+            return (line[:220] + "...") if len(line) > 220 else line
+    return ""
+
+
+class ActivityFeedWidget(Gtk.Box):
+    """The live "what Basilisk is doing right now" feed.
+
+    ONE feed per OPERATOR TURN — not per model round-trip.  A leashed question
+    can chain a dozen reads across a dozen round-trips, and the operator asked
+    ONE question; splitting that across a dozen widgets is how the old UI made
+    a single answer look like four separate replies.  The feed is created when
+    the operator sends, and every round-trip of that turn appends to the same
+    one.
+
+    Shape is deliberately the one Claude's web app uses, because it is the one
+    that works: a header line that always says what is happening RIGHT NOW,
+    an expanded body while the work is live, and a collapse back to a single
+    summary line the moment the turn settles.  Clicking the header toggles it
+    at any point, and a click PINS the choice so the auto-collapse never fights
+    the operator.
+
+    HONESTY RULES, learned from the log that lied four ways:
+      - a step is only marked done when its result actually came back;
+      - a step still running when the turn tears down is marked STOPPED, never
+        silently left spinning and never retroactively called success;
+      - the header's elapsed clock is wall time from the first event, so a
+        stall is VISIBLE instead of looking like fast work.
+    """
+
+    # Bound the widget count: an unleashed mission runs for hours.  The store
+    # keeps everything; this is the display window.
+    MAX_STEPS = 160
+
+    _GLYPH = {
+        "run":  "▸",   # right-pointing triangle
+        "ok":   "✓",
+        "fail": "✗",
+        "stop": "■",
+        "note": "\u2022",
+        # NOT a warning-sign or no-entry codepoint: those get substituted by
+        # the emoji font, which ignores the row's colour and its metrics, so a
+        # refusal row rendered wider and in the wrong palette than every other
+        # row. A plain ASCII mark inherits both.
+        "gate": "!",
+    }
+
+    def __init__(self):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.add_css_class("activity-feed")
+        self._steps: Dict[int, Dict[str, Any]] = {}
+        self._order: List[int] = []
+        self._next_id = 1
+        self._t0 = time.monotonic()
+        self._tick_src = None
+        self._pinned = False
+        self._done = False
+        self._n_run = 0
+        self._n_ok = 0
+        self._n_fail = 0
+        self._phase = "thinking"
+        self._disposed = False
+        self._collapse_src = None
+        # Set once the header TITLE carries the step count, so the meta column
+        # stops repeating it ("3 steps complete ... 3 steps" reads like two
+        # different numbers that happen to agree).
+        self._title_has_count = False
+        self._build()
+        self._start_tick()
+
+    # ── construction ────────────────────────────────────────────
+
+    def _build(self):
+        self._header_btn = Gtk.Button()
+        self._header_btn.add_css_class("activity-header")
+        self._header_btn.set_has_frame(False)
+        self._header_btn.set_hexpand(True)
+
+        hbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+
+        # Live indicator: a real spinner while working, a static verdict glyph
+        # when settled.  Both live in the same slot so the header never reflows
+        # when the turn ends.
+        self._spinner = Gtk.Spinner()
+        self._spinner.add_css_class("activity-spinner")
+        self._spinner.start()
+        hbox.append(self._spinner)
+        self._verdict = Gtk.Label(label="")
+        self._verdict.add_css_class("activity-verdict")
+        self._verdict.set_visible(False)
+        hbox.append(self._verdict)
+
+        self._title = Gtk.Label(label="thinking", xalign=0.0)
+        self._title.add_css_class("activity-title")
+        self._title.set_ellipsize(Pango.EllipsizeMode.END)
+        self._title.set_hexpand(True)
+        hbox.append(self._title)
+
+        self._meta = Gtk.Label(label="", xalign=1.0)
+        self._meta.add_css_class("activity-meta")
+        hbox.append(self._meta)
+
+        self._chevron = Gtk.Label(label="⌄")   # modifier letter down arrow
+        self._chevron.add_css_class("activity-chevron")
+        hbox.append(self._chevron)
+
+        self._header_btn.set_child(hbox)
+        self._header_btn.connect("clicked", self._on_header_clicked)
+        self.append(self._header_btn)
+
+        self._body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self._body.add_css_class("activity-body")
+        self._revealer = Gtk.Revealer()
+        self._revealer.set_transition_type(
+            Gtk.RevealerTransitionType.SLIDE_DOWN)
+        self._revealer.set_transition_duration(180)
+        self._revealer.set_child(self._body)
+        # Live by default: the whole point is that the operator can watch.
+        self._revealer.set_reveal_child(True)
+        self.append(self._revealer)
+        self.add_css_class("live")
+
+    def dispose_widget(self):
+        """Release references and stop the clock.  Same contract as
+        MessageWidget.dispose_widget: one-way, and every method that touches a
+        nulled container checks _disposed first, because a late GLib callback
+        arriving after a trim must be a no-op rather than an AttributeError
+        that strands the turn."""
+        self._disposed = True
+        self._stop_tick()
+        if self._collapse_src is not None:
+            try:
+                GLib.source_remove(self._collapse_src)
+            except Exception:
+                pass
+            self._collapse_src = None
+        self._steps = {}
+        self._order = []
+        self._body = None
+        self._revealer = None
+
+    # ── the clock ───────────────────────────────────────────────
+
+    def _start_tick(self):
+        if self._tick_src is None:
+            self._tick_src = GLib.timeout_add(200, self._tick)
+
+    def _stop_tick(self):
+        if self._tick_src is not None:
+            try:
+                GLib.source_remove(self._tick_src)
+            except Exception:
+                pass
+            self._tick_src = None
+
+    def _tick(self):
+        if self._disposed:
+            self._tick_src = None
+            return False
+        self._refresh_header()
+        # Running steps carry their own live duration so a slow tool is
+        # obviously slow while it is still slow, not only in hindsight.
+        now = time.monotonic()
+        for sid in self._order:
+            st = self._steps.get(sid)
+            if st is None or st.get("state") != "run":
+                continue
+            lbl = st.get("time_lbl")
+            if lbl is not None:
+                try:
+                    lbl.set_text(_fmt_elapsed(now - st["t0"]))
+                except Exception:
+                    pass
+        return True
+
+    @staticmethod
+    def _plural(n: int, word: str) -> str:
+        return f"{n} {word}" + ("" if n == 1 else "s")
+
+    def _refresh_header(self):
+        if self._disposed:
+            return
+        el = _fmt_elapsed(time.monotonic() - self._t0)
+        n = self._n_ok + self._n_fail + self._n_run
+        bits = []
+        if n and not self._title_has_count:
+            bits.append(self._plural(n, "step"))
+        if self._n_fail:
+            bits.append(f"{self._n_fail} failed")
+        bits.append(el)
+        self._meta.set_text("  ·  ".join(bits))
+
+    # ── expand / collapse ───────────────────────────────────────
+
+    def _on_header_clicked(self, *_a):
+        if self._disposed:
+            return
+        # An explicit click PINS the state.  Without this the auto-collapse
+        # would slam shut a body the operator had just opened to read.
+        self._pinned = True
+        self.set_expanded(not self._revealer.get_reveal_child())
+
+    def set_expanded(self, on: bool):
+        if self._disposed or self._revealer is None:
+            return
+        self._revealer.set_reveal_child(bool(on))
+        if on:
+            self._chevron.set_text("⌄")
+            self.remove_css_class("collapsed")
+        else:
+            self._chevron.set_text("›")
+            self.add_css_class("collapsed")
+
+    # ── phases and steps ────────────────────────────────────────
+
+    def set_phase(self, text: str):
+        """Header title while no tool is in flight (streaming / thinking)."""
+        if self._disposed or self._done:
+            return
+        self._phase = (text or "").strip() or "working"
+        if self._n_run == 0:
+            self._title.set_text(self._phase)
+        self._refresh_header()
+
+    def begin_step(self, name: str, detail: str = "",
+                   kind: str = "tool") -> int:
+        """Open a live step.  Returns the id to hand back to end_step."""
+        if self._disposed or self._body is None:
+            return 0
+        sid = self._next_id
+        self._next_id += 1
+        row = self._make_row(name, detail, kind)
+        st = {
+            "t0": time.monotonic(), "state": "run", "name": name,
+            "row": row["row"], "glyph": row["glyph"],
+            "time_lbl": row["time"], "detail_lbl": row["detail"],
+            "preview": row["preview"], "preview_box": row["preview_box"],
+        }
+        self._steps[sid] = st
+        self._order.append(sid)
+        self._n_run += 1
+        self._title.set_text(name if not detail else f"{name}  {detail}")
+        self._trim()
+        self._refresh_header()
+        return sid
+
+    def end_step(self, sid: int, ok: bool = True, detail: str = "",
+                 preview: str = ""):
+        if self._disposed:
+            return
+        st = self._steps.get(sid)
+        if st is None or st.get("state") != "run":
+            return
+        st["state"] = "ok" if ok else "fail"
+        self._n_run = max(0, self._n_run - 1)
+        if ok:
+            self._n_ok += 1
+        else:
+            self._n_fail += 1
+        dur = time.monotonic() - st["t0"]
+        try:
+            st["glyph"].set_text(self._GLYPH["ok" if ok else "fail"])
+            st["row"].remove_css_class("run")
+            st["row"].add_css_class("ok" if ok else "fail")
+            st["time_lbl"].set_text(_fmt_elapsed(dur))
+            if detail:
+                st["detail_lbl"].set_text(detail)
+                st["detail_lbl"].set_visible(True)
+            if preview:
+                st["preview"].set_text(preview)
+                st["preview_box"].set_visible(True)
+        except Exception:
+            pass
+        if self._n_run == 0 and not self._done:
+            self._title.set_text(self._phase)
+        self._refresh_header()
+
+    def note(self, text: str, kind: str = "note"):
+        """A non-tool event worth showing: a gate refusal, a retry, the repeat
+        guard firing, the tool cap being hit.  These are exactly the moments
+        the old UI was silent about, so the operator saw a stall with no
+        reason attached."""
+        if self._disposed or self._body is None:
+            return
+        row = self._make_row(text, "", kind, note=True)
+        self._order.append(-self._next_id)
+        self._steps[-self._next_id] = {"state": kind, "row": row["row"]}
+        self._next_id += 1
+        self._trim()
+
+    def stop_running(self, why: str = "stopped"):
+        """Mark every still-live step as stopped.  Called from the turn
+        teardown, because a spinner left spinning after the turn ended is the
+        UI telling the operator a lie."""
+        if self._disposed:
+            return
+        for sid in list(self._order):
+            st = self._steps.get(sid)
+            if st is None or st.get("state") != "run":
+                continue
+            st["state"] = "stop"
+            self._n_run = max(0, self._n_run - 1)
+            try:
+                st["glyph"].set_text(self._GLYPH["stop"])
+                st["row"].remove_css_class("run")
+                st["row"].add_css_class("stop")
+                st["time_lbl"].set_text(why)
+            except Exception:
+                pass
+        self._refresh_header()
+
+    def finish(self, summary: str = "", ok: bool = True):
+        """Settle the feed: freeze the clock, show a verdict, and collapse back
+        to one line unless the operator pinned it open."""
+        if self._disposed or self._done:
+            return
+        self._done = True
+        self._stop_tick()
+        self.stop_running("ended")
+        self._refresh_header()
+        try:
+            self._spinner.stop()
+            self._spinner.set_visible(False)
+            self._verdict.set_text(
+                self._GLYPH["ok"] if ok and not self._n_fail
+                else self._GLYPH["fail"])
+            self._verdict.set_visible(True)
+            self._verdict.add_css_class("ok" if ok and not self._n_fail
+                                        else "fail")
+        except Exception:
+            pass
+        self.remove_css_class("live")
+        self.add_css_class("done")
+        done_n = self._n_ok + self._n_fail
+        if summary:
+            self._title.set_text(summary)
+        elif done_n:
+            self._title.set_text(self._plural(done_n, "step") + " complete")
+            self._title_has_count = True
+        else:
+            self._title.set_text("done")
+        self._refresh_header()
+        if not self._pinned:
+            # Hold the finished state on screen for a beat before folding it
+            # away, so the operator sees the last step land instead of the body
+            # vanishing under their eyes.
+            self._collapse_src = GLib.timeout_add(900, self._auto_collapse)
+
+    def _auto_collapse(self):
+        self._collapse_src = None
+        if self._disposed or self._pinned:
+            return False
+        self.set_expanded(False)
+        return False
+
+    def replay_step(self, name: str, detail: str = ""):
+        """Rebuild a row for a call that ran in an EARLIER session.
+
+        The store records that a tool was CALLED; it does not record whether it
+        succeeded — the result rows are trimmed out of history on purpose. So a
+        replayed row gets a NEUTRAL glyph and no duration, never a green tick.
+        Painting a tick over an outcome nobody recorded is the same lie as the
+        unconditional `done` this project already had to dig out of its log,
+        and it would be a lie the operator has no way to check."""
+        if self._disposed or self._body is None:
+            return
+        row = self._make_row(name, detail, "note", note=True)
+        sid = self._next_id
+        self._next_id += 1
+        self._steps[sid] = {"state": "past", "row": row["row"]}
+        self._order.append(sid)
+        self._n_past = getattr(self, "_n_past", 0) + 1
+        try:
+            row["row"].add_css_class("past")
+        except Exception:
+            pass
+        self._trim()
+
+    def finish_history(self):
+        """Settle a REPLAYED feed: no clock, no verdict tick, folded shut at
+        once. There is nothing live to watch, so animating it open and then
+        closed would just make a reopened chat flicker."""
+        if self._disposed:
+            return
+        self._done = True
+        self._stop_tick()
+        n_past = getattr(self, "_n_past", 0)
+        try:
+            self._spinner.stop()
+            self._spinner.set_visible(False)
+            self._verdict.set_text(self._GLYPH["note"])
+            self._verdict.set_visible(True)
+        except Exception:
+            pass
+        self.remove_css_class("live")
+        self.add_css_class("done")
+        self._title.set_text(self._plural(n_past, "step") + " earlier")
+        self._meta.set_text("from history")
+        self.set_expanded(False)
+
+    # ── rows ────────────────────────────────────────────────────
+
+    def _make_row(self, name: str, detail: str, kind: str,
+                  note: bool = False) -> Dict[str, Any]:
+        wrap = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        row.add_css_class("activity-step")
+        if note:
+            row.add_css_class(kind if kind in ("gate", "note") else "note")
+        else:
+            row.add_css_class("run")
+
+        glyph = Gtk.Label(
+            label=self._GLYPH.get(kind if note else "run", "•"))
+        glyph.add_css_class("activity-glyph")
+        row.append(glyph)
+
+        lbl = Gtk.Label(label=name, xalign=0.0)
+        lbl.add_css_class("activity-step-name")
+        lbl.set_ellipsize(Pango.EllipsizeMode.END)
+        row.append(lbl)
+
+        det = Gtk.Label(label=detail, xalign=0.0)
+        det.add_css_class("activity-step-detail")
+        det.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
+        det.set_hexpand(True)
+        det.set_visible(bool(detail))
+        row.append(det)
+
+        tm = Gtk.Label(label="", xalign=1.0)
+        tm.add_css_class("activity-step-time")
+        row.append(tm)
+
+        wrap.append(row)
+
+        # Per-step result preview, hidden until there is one.  Kept to a couple
+        # of lines: this is a receipt that the tool returned something real,
+        # not a second copy of the transcript.
+        pv_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        pv_box.add_css_class("activity-preview-box")
+        pv = Gtk.Label(label="", xalign=0.0)
+        pv.add_css_class("activity-preview")
+        pv.set_wrap(True)
+        pv.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        pv.set_lines(2)
+        pv.set_ellipsize(Pango.EllipsizeMode.END)
+        pv.set_hexpand(True)
+        pv_box.append(pv)
+        pv_box.set_visible(False)
+        wrap.append(pv_box)
+
+        self._body.append(wrap)
+        return {"row": row, "glyph": glyph, "detail": det, "time": tm,
+                "preview": pv, "preview_box": pv_box, "wrap": wrap}
+
+    def _trim(self):
+        """Drop the oldest rows past the cap.  Display only — the store and the
+        terminal log keep the full record."""
+        if self._body is None:
+            return
+        extra = len(self._order) - self.MAX_STEPS
+        while extra > 0:
+            sid = self._order.pop(0)
+            st = self._steps.pop(sid, None)
+            extra -= 1
+            if not st:
+                continue
+            row = st.get("row")
+            if row is None:
+                continue
+            try:
+                parent = row.get_parent()
+                if parent is not None:
+                    self._body.remove(parent)
+            except Exception:
+                pass
 
 
 class MessageWidget(Gtk.Box):
@@ -3130,6 +4199,13 @@ class MessageWidget(Gtk.Box):
         # placeholder when at least one is a proposal — the card speaks for
         # itself.  Only fall back to the placeholder for a bare execution
         # tag with no prose and no card.
+        # Set only by the bare-tool-step branch below. A propose/propose_edit
+        # turn ALSO ends up with empty display_text, and its card is drawn into
+        # this same container further down — so visibility must key off this
+        # flag, not off `not display_text`, or an approval card would be
+        # rendered into a hidden bubble and the operator would be waiting to
+        # click something that is not on screen.
+        _bare_tool_step = False
         if not display_text and self.role == "assistant":
             calls = []
             try:
@@ -3140,20 +4216,28 @@ class MessageWidget(Gtk.Box):
             if has_propose:
                 display_text = ""
             elif calls:
-                # This turn DID something — show the real command it ran / what it
-                # did (e.g. "$ nmap -sV …", "wrote report.md"), not a generic
-                # "thinking". Falls back to the live action title, then working.
-                summary = _action_summary(calls)
-                if summary:
-                    display_text = summary
-                else:
-                    _act = (_CURRENT_ACTION or "").strip()
-                    display_text = "*(%s)*" % _act if _act else "*(working…)*"
+                # THE FEED ALREADY SAID THIS, AND SAID IT BETTER.
+                # This bubble is an in-flight step of a chain, not an answer.
+                # It used to render `(working…)` or a one-line action summary —
+                # so a single question that took four tools drew four bubbles
+                # that all looked like replies, which is exactly the "it
+                # answered me four times" complaint. The activity feed above
+                # carries the tool, its argument, its duration and its outcome,
+                # so this bubble has nothing left to add: hide it. Nothing is
+                # lost — the raw content is already in the store and still goes
+                # to the model as history.
+                display_text = ""
+                _bare_tool_step = True
             else:
                 # No tool calls and no prose in this turn — it really was just
                 # reasoning. Only here is "thinking" the honest label.
                 display_text = "*(thinking…)*"
 
+        if self.role == "assistant":
+            # Visibility is derived, not latched: a bubble hidden as a bare
+            # tool step must come back the moment it is given real text, or a
+            # reused widget would stay invisible for the rest of the chat.
+            self.set_visible(not _bare_tool_step)
         blocks = split_message_into_blocks(display_text) if display_text else []
         for b in blocks:
             if b["kind"] == "code":
@@ -6318,24 +7402,60 @@ class MainWindow(Adw.ApplicationWindow):
         child = self.msg_box.get_first_child()
         while child is not None:
             nxt = child.get_next_sibling()
+            # A live feed keeps a GLib timeout running. Unparenting it is not
+            # enough — the clock would keep ticking against a widget nothing
+            # can see, forever, once per chat switch. Dispose stops it.
+            if isinstance(child, ActivityFeedWidget):
+                try:
+                    child.dispose_widget()
+                except Exception:
+                    pass
             self.msg_box.remove(child)
             child = nxt
+        # Switching chats abandons the visible feed; the turn it belonged to
+        # keeps running and keeps writing to the store, it just has nowhere to
+        # draw. Drop the reference rather than leaving a disposed widget wired
+        # to a live turn.
+        self._activity_feed = None
 
         msgs = self.store.list_messages(chat_id)
 
-        def _renderable(m):
-            # Same rules the append path uses: hide stored tool-result rows,
-            # tool 'call' rows, and empty in-flight assistant placeholders.
-            if (m.meta or {}).get("kind") == "tool_result":
-                return False
-            if m.role == "tool":
-                return False
-            if m.role == "assistant" and not m.content.strip():
-                return False
-            return True
+        # ── HISTORY MUST LOOK LIKE THE RUN LOOKED ──
+        # Tool rows are stored (`⚙ tool: name({...})`, meta kind=call) and were
+        # dropped outright on reload, while the bare-tool-step assistant rows
+        # around them rendered as `(working…)` bubbles. So a reopened chat
+        # showed several near-identical stub replies and no sign of the work
+        # that produced the real one. Rebuild it the way the live view drew it:
+        # the tool calls of a turn collapse into ONE folded feed, and the stub
+        # bubbles they belong to are not drawn at all.
+        items: List[Any] = []
+        pending: List[Any] = []
 
-        renderable = [m for m in msgs if _renderable(m)]
-        if not renderable:
+        def _flush_pending():
+            if pending:
+                items.append(("feed", list(pending)))
+                pending.clear()
+
+        for m in msgs:
+            meta = m.meta or {}
+            if meta.get("kind") == "tool_result":
+                continue
+            if m.role == "tool":
+                if meta.get("kind") == "call":
+                    pending.append(m)
+                continue
+            if m.role == "assistant":
+                if not m.content.strip():
+                    continue
+                if _reply_is_tool_only(m.content):
+                    continue
+                _flush_pending()
+            else:
+                _flush_pending()
+            items.append(("msg", m))
+        _flush_pending()
+
+        if not items:
             self._show_empty_state()
         else:
             # Only build widgets for the most recent window. Older messages stay
@@ -6343,8 +7463,12 @@ class MainWindow(Adw.ApplicationWindow):
             # building them means opening a long conversation is fast and never
             # spikes RAM, instead of constructing then destroying hundreds of
             # heavy widgets.
-            for m in renderable[-MAX_CHAT_ROWS:]:
-                self._append_message_widget(m.role, m.content, m.meta)
+            for kind, payload in items[-MAX_CHAT_ROWS:]:
+                if kind == "feed":
+                    self._append_history_feed(payload)
+                else:
+                    self._append_message_widget(
+                        payload.role, payload.content, payload.meta)
 
         GLib.idle_add(self._force_scroll_to_bottom)
 
@@ -6364,9 +7488,13 @@ class MainWindow(Adw.ApplicationWindow):
     # ── messages ────────────────────────────────────────────────
 
     def _append_message_widget(self, role, content, meta=None):
-        # Clear empty state if present
+        # Clear empty state if present. The feed is a first-class row in this
+        # box now, so "not a MessageWidget" is no longer a safe test for "this
+        # is the empty-state placeholder" — it would delete the activity feed
+        # of the turn currently running.
         first = self.msg_box.get_first_child()
-        if first is not None and not isinstance(first, MessageWidget):
+        if first is not None and not isinstance(
+                first, (MessageWidget, ActivityFeedWidget)):
             self.msg_box.remove(first)
         w = MessageWidget(role, content, meta,
                           on_run_command=self._run_proposed_command,
@@ -6388,6 +7516,15 @@ class MainWindow(Adw.ApplicationWindow):
                 old = self.msg_box.get_first_child()
                 if old is None or old is w:
                     break
+                if isinstance(old, ActivityFeedWidget):
+                    # Same reason as the chat-switch teardown: a trimmed feed
+                    # that is still live keeps a 200ms timeout running against
+                    # a widget nobody can see.
+                    if old is not getattr(self, "_activity_feed", None):
+                        try:
+                            old.dispose_widget()
+                        except Exception:
+                            pass
                 if isinstance(old, MessageWidget):
                     # Never dispose a bubble the WINDOW still holds a live
                     # reference to. The view's rolling trim and the window's
@@ -6419,6 +7556,49 @@ class MainWindow(Adw.ApplicationWindow):
         # the user reading history above.
         GLib.idle_add(self._force_scroll_to_bottom)
         return w
+
+    _HIST_CALL_RE = re.compile(r"tool:\s*([a-zA-Z_0-9]+)\s*\((.*)\)\s*$", re.S)
+
+    def _append_history_feed(self, rows):
+        """One folded feed for the tool calls of a finished turn.
+
+        Parsed from the stored `⚙ tool: name({json})` line rather than from a
+        second, tidier column, because that line is what actually exists in
+        every chat already on disk — a new column would show history only for
+        chats recorded after this build."""
+        try:
+            feed = ActivityFeedWidget()
+        except Exception:
+            return
+        added = 0
+        for m in rows:
+            name, args = "tool", None
+            try:
+                mt = self._HIST_CALL_RE.search(m.content or "")
+                if mt:
+                    name = mt.group(1)
+                    try:
+                        args = json.loads(mt.group(2))
+                    except Exception:
+                        args = None
+            except Exception:
+                pass
+            try:
+                feed.replay_step(name, _feed_detail(name, args))
+                added += 1
+            except Exception:
+                pass
+        if not added:
+            try:
+                feed.dispose_widget()
+            except Exception:
+                pass
+            return
+        try:
+            feed.finish_history()
+        except Exception:
+            pass
+        self.msg_box.append(feed)
 
     def _count_msg_rows(self) -> int:
         n = 0
@@ -6527,6 +7707,10 @@ class MainWindow(Adw.ApplicationWindow):
         self._turn_active = False
         self._set_working(False)
         self._set_send_mode(False)
+        # Settle the feed LAST: stop_running inside finish() marks anything
+        # still open as stopped rather than leaving a spinner running over a
+        # turn that has already ended.
+        self._activity_finish()
 
     def _mission_continue(self, verify: bool = False):
         """Chain another turn of the active mission instead of stopping.  Tears
@@ -6639,6 +7823,8 @@ class MainWindow(Adw.ApplicationWindow):
         cid = self.current_chat_id
         self.store.add_message(cid, "user", text)
         self._append_message_widget("user", text)
+        # ONE feed for this whole turn, however many round-trips it takes.
+        self._activity_new_turn()
         self._maybe_set_title_from_first(cid, text)
 
         # ── Mission latch: driven by UNLEASH ──
@@ -6882,6 +8068,124 @@ class MainWindow(Adw.ApplicationWindow):
             self.input_view.grab_focus()
         return False
 
+    # ── LIVE ACTIVITY FEED ──────────────────────────────────────
+    # One feed per operator turn.  These seven methods are the ONLY way the
+    # window talks to it, for the same reason speakable_text() is the only
+    # transform on the speech path: thirty instrumented call sites is how two
+    # views of the same run drift into disagreeing about what happened.
+    #
+    # Every one of them is total — a missing feed, a disposed feed or a
+    # torn-down turn is a no-op, never an exception.  The feed is DISPLAY.  If
+    # it ever raises it would do so inside a GLib callback in the middle of a
+    # tool chain and strand the turn, which is a far worse bug than a missing
+    # row.
+
+    def _activity_new_turn(self):
+        """Retire the previous turn's feed and open a fresh one, attached under
+        the user's message.  Called from _send_user_message only: a tool chain
+        spanning ten round-trips is ONE turn and shares ONE feed."""
+        try:
+            old = getattr(self, "_activity_feed", None)
+            if old is not None:
+                try:
+                    old.finish()
+                except Exception:
+                    pass
+            feed = ActivityFeedWidget()
+            self._activity_feed = feed
+            self._activity_sid = 0
+            self._activity_batch_sids = []
+            # Attached unconditionally, and that is safe because both callers
+            # (_send_user_message, _inject_user_request) act on the chat that
+            # is on screen — the user message it belongs to was just appended
+            # to this same box. Navigating away later is handled where it
+            # happens: _load_chat disposes the feeds it removes and drops this
+            # reference, so the turn keeps running with nowhere to draw rather
+            # than drawing into the wrong conversation.
+            self.msg_box.append(feed)
+            GLib.idle_add(self._force_scroll_to_bottom)
+        except Exception:
+            self._activity_feed = None
+
+    def _activity(self):
+        f = getattr(self, "_activity_feed", None)
+        if f is None or getattr(f, "_disposed", False):
+            return None
+        return f
+
+    def _activity_phase(self, text: str):
+        f = self._activity()
+        if f is None:
+            return
+        try:
+            f.set_phase(text)
+        except Exception:
+            pass
+
+    def _activity_begin(self, name: str, args: Any = None,
+                        kind: str = "tool") -> int:
+        f = self._activity()
+        if f is None:
+            return 0
+        try:
+            return f.begin_step(name, _feed_detail(name, args), kind)
+        except Exception:
+            return 0
+
+    def _activity_end(self, sid: int, ok: bool = True, preview: str = ""):
+        f = self._activity()
+        if f is None or not sid:
+            return
+        try:
+            f.end_step(sid, ok=ok, preview=preview)
+        except Exception:
+            pass
+
+    def _activity_note(self, text: str, kind: str = "note"):
+        f = self._activity()
+        if f is None:
+            return
+        try:
+            f.note(text, kind)
+        except Exception:
+            pass
+
+    def _activity_finish(self, summary: str = "", ok: bool = True):
+        f = self._activity()
+        if f is None:
+            return
+        try:
+            f.finish(summary=summary, ok=ok)
+        except Exception:
+            pass
+
+    def _activity_close_result(self, result_text: str):
+        """Close whatever step is open with the result that just came back.
+
+        Hung off _feed_tool_result because that is the single choke point every
+        tool result passes through — the same hook ACTION RECALL uses, and for
+        the same reason.  A result whose text says it did not run closes the
+        step as a FAILURE: `✓ done` printed unconditionally is exactly the lie
+        the v9.6.0 log told, and a green tick over a refusal is worse than no
+        row at all."""
+        sid = getattr(self, "_activity_sid", 0)
+        if not sid:
+            return
+        self._activity_sid = 0
+        txt = (result_text or "")
+        head = txt.lstrip()[:220].lower()
+        _h400 = txt[:400]
+        bad = (head.startswith("not run")
+               or head.startswith("error")
+               or head.startswith("unknown tool")
+               or head.startswith("batch error")
+               or '"ok": false' in _h400
+               or '"ok":false' in _h400)
+        try:
+            self._activity_end(sid, ok=not bad, preview=_feed_preview(txt))
+        except Exception:
+            pass
+
     def _set_working(self, working: bool, label: str = "working…"):
         """Update the permanent status pill in the button row (and the shared
         action phrase). Called from the UI thread. The pill lives in the bottom
@@ -6897,6 +8201,12 @@ class MainWindow(Adw.ApplicationWindow):
             # the duplicate log line is suppressed.
             _changed = (_CURRENT_ACTION != label)
             _CURRENT_ACTION = label
+            # The feed header reads the SAME phrase the status pill does, from
+            # the same call, so the two can never disagree about what is
+            # happening. set_phase only claims the title while no tool step is
+            # in flight, so a live tool row is never overwritten by a stale
+            # chain-level label.
+            self._activity_phase(label.rstrip("\u2026 ."))
             if hasattr(self, "status_pill_label"):
                 self.status_pill_label.set_text(label)
                 self.status_pill_spinner.set_visible(True)
@@ -7328,6 +8638,15 @@ class MainWindow(Adw.ApplicationWindow):
             _answer_only = True
         else:
             _answer_only = not self._mission_active
+        if not _continuation:
+            if _answer_only:
+                self._activity_note(
+                    "LEASHED - answer mode: research, verify, answer once, stop",
+                    "note")
+            else:
+                self._activity_note(
+                    "UNLEASHED - mission active: running until complete",
+                    "note")
         # Unleash kickoff (one-shot, fired the turn right after arming): confirm
         # the target and go, or ask for it once if none is set yet.
         if self._unleash_kickoff_pending:
@@ -7357,9 +8676,15 @@ class MainWindow(Adw.ApplicationWindow):
                         "and say plainly if any part is still unverified.]"
                         ).strip()
             self.terminal_log("── answer tool-cap reached; answering now", "dim")
+            self._activity_note(
+                "research budget reached (%d steps) - answering from what is "
+                "gathered" % _ans_cap, "gate")
         if _answer_only:
             if _needs_web_verification(_opening_user):
                 if not _continuation:
+                    self._activity_note(
+                        "checkable claim - reading a primary source before "
+                        "answering (memory not trusted here)", "note")
                     addendum = (addendum + "\n\n[!!! CHECK ONLINE FIRST -- this "
                         "question is about current or checkable facts, and your "
                         "training data may be OUT OF DATE. You are FORBIDDEN from "
@@ -8074,6 +9399,9 @@ class MainWindow(Adw.ApplicationWindow):
                     self.terminal_log(
                         f"↷ {len(_rest)} further call(s) not run this turn "
                         f"— they follow one at a time", "dim")
+                    self._activity_note(
+                        "%d further call(s) queued - they run one at a time"
+                        % len(_rest), "note")
                     self._deferred_note = (
                         f"\n\n[host] NOTE — you emitted {len(executable)} tool "
                         f"calls in that reply and only the FIRST was run. The "
@@ -8471,6 +9799,9 @@ class MainWindow(Adw.ApplicationWindow):
             self.terminal_log(
                 f"↻ stream error — retrying in {delay // 1000}s "
                 f"[{self._error_retries}]", "dim")
+            self._activity_note(
+                "stream error - retrying in %ds (attempt %d): %s"
+                % (delay // 1000, self._error_retries, str(err)[:80]), "gate")
             self._set_working(True, "retrying after error…")
             GLib.timeout_add(max(1, delay),
                              lambda: self._kick_assistant_turn() or False)
@@ -9085,12 +10416,25 @@ class MainWindow(Adw.ApplicationWindow):
             self.terminal_log(
                 f"⛔ repeat guard: dropped {len(_dropped)} already-run "
                 f"tool(s) from the batch", "error")
+            self._activity_note(
+                "repeat guard dropped %d already-run tool(s): %s"
+                % (len(_dropped),
+                   ", ".join(c.name for c in _dropped)[:120]), "gate")
         # Per-tool recall entries so a later SOLO call of the same tool is
         # recognised as a repeat.  The combined label still names the action
         # for the log, but the per-tool keys are what the guard counts.
         self._pending_action = " + ".join(
             self._action_label(c) for c in calls)[:400]
         self._batch_members = [self._action_label(c) for c in calls]
+        # ONE ROW PER TOOL. A parallel batch is the exact case the single
+        # status line could not represent honestly: it has one slot and four
+        # tools are running in it. Each row closes on its own worker's result,
+        # so a slow member is visibly the slow one instead of the whole batch
+        # looking stalled. _activity_sid stays 0 on this path — the combined
+        # result must not close a row that a worker already closed.
+        self._activity_sid = 0
+        _sids = [self._activity_begin(c.name, c.args) for c in calls]
+        self._activity_batch_sids = list(_sids)
 
         def _bg(feed):
             import concurrent.futures
@@ -9104,6 +10448,16 @@ class MainWindow(Adw.ApplicationWindow):
                     txt = json.dumps(res, indent=2, default=str)
                 except Exception as e:
                     txt = f"error: {type(e).__name__}: {str(e)[:200]}"
+                # Close THIS member's row the moment it lands, from the worker
+                # thread, marshalled onto the main loop. Waiting for ex.map to
+                # drain would make four rows all finish at the slowest one's
+                # time, which is a picture of the run that is simply false.
+                _ok = not txt.lstrip().lower().startswith("error")
+                GLib.idle_add(
+                    lambda i=idx, o=_ok, t=txt: (
+                        self._activity_end(_sids[i] if i < len(_sids) else 0,
+                                           ok=o, preview=_feed_preview(t))
+                        or False))
                 return idx, c.name, txt
 
             workers = max(1, min(TOOL_BATCH_MAX_WORKERS, len(calls)))
@@ -9144,6 +10498,9 @@ class MainWindow(Adw.ApplicationWindow):
         self._pending_action = self._action_label(call)
         _blocked = self._repeat_guard(self._pending_action)
         if _blocked is not None:
+            self._activity_note(
+                "repeat guard: %s already ran - not repeating"
+                % self._action_label(call)[:110], "gate")
             self._pending_action = None
             self._feed_tool_result(_blocked)
             return
@@ -9881,10 +11238,16 @@ class MainWindow(Adw.ApplicationWindow):
             if _argerr:
                 self.terminal_log(
                     f"✗ {call.name}: {_argerr}", "error")
+                self._activity_note(f"{call.name} rejected: {_argerr}", "gate")
                 self._feed_tool_result(f"NOT RUN — {_argerr}")
                 return
             call.args = _args
             self.terminal_log(f"→ tool: {call.name}({json.dumps(call.args, separators=(',',':'))[:80]})", "info")
+            # Open the feed row HERE — after normalisation, so the row shows
+            # the arguments that actually ran, not the ones the model emitted.
+            # Closed in _feed_tool_result, the single point every result
+            # passes through.
+            self._activity_sid = self._activity_begin(call.name, call.args)
             # The name the log line below should use. Set here because this is
             # the ONE place that knows it; _tool_simple reads it synchronously
             # inside fn(). Cleared in finally so a later stray call cannot
@@ -9897,6 +11260,7 @@ class MainWindow(Adw.ApplicationWindow):
                 self._dispatching_tool = ""
         else:
             self.terminal_log(f"✗ unknown tool: {call.name}", "error")
+            self._activity_note(f"unknown tool: {call.name}", "gate")
             self._feed_tool_result(f"Unknown tool '{call.name}'.")
 
     def _feed_tool_result(self, result_text):
@@ -9938,6 +11302,14 @@ class MainWindow(Adw.ApplicationWindow):
         finally:
             self._pending_action = None
             self._batch_members = []
+
+        # Close the live feed row with what actually came back, BEFORE the
+        # turn advances. One hook here covers every tool, for the same reason
+        # ACTION RECALL hangs off this method rather than the dispatch sites.
+        try:
+            self._activity_close_result(result_text)
+        except Exception:
+            pass
 
         self._mark_turn_progress()
         # Route to the chat this turn was started in.  Resolved from
@@ -10871,6 +12243,9 @@ class MainWindow(Adw.ApplicationWindow):
         if is_catastrophic_command(command):
             self.terminal_log("■ BLOCKED — catastrophic command refused "
                               "(no override)", "error")
+            self._activity_note(
+                "BLOCKED (no override): catastrophic command  " + command[:90],
+                "gate")
             self._feed_tool_result(
                 "REFUSED. This command is in the catastrophic class — it would "
                 "irreversibly destroy the system or its data — so Basilisk will not "
@@ -10963,6 +12338,8 @@ class MainWindow(Adw.ApplicationWindow):
                         or "predicted irreversible damage to this machine"
                     self.terminal_log(
                         "■ BLOCKED by foresight — not run", "error")
+                    self._activity_note(
+                        "BLOCKED by foresight: " + _why[:110], "gate")
                     self._feed_tool_result(
                         "REFUSED by foresight. Predicted consequence: " + _why
                         + ".\nThis command was NOT run. Do not retry it as-is. "
@@ -11129,6 +12506,8 @@ class MainWindow(Adw.ApplicationWindow):
         if command_tampers_self(command):
             self.terminal_log("■ refused — raw write to Basilisk's own source "
                               "(use the guarded edit path)", "error")
+            self._activity_note(
+                "REFUSED: raw write to Basilisk's own source", "gate")
             self._feed_tool_result(
                 "REFUSED — this command writes directly to one of Basilisk's own "
                 "source files, bypassing the guarded edit path. Not run (this "
@@ -11228,6 +12607,8 @@ class MainWindow(Adw.ApplicationWindow):
         cid = self.current_chat_id
         self.store.add_message(cid, "user", text)
         self._append_message_widget("user", text)
+        # ONE feed for this whole turn, however many round-trips it takes.
+        self._activity_new_turn()
         self._maybe_set_title_from_first(cid, text)
 
     def _user_action_audit(self):

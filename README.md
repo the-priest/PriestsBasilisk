@@ -14,7 +14,7 @@
 
 <p><b><em>You bring the model. Basilisk gives it hands, a memory, a methodology — and a leash you hold.</em></b></p>
 
-<p><sub><b>Version 9.7.0 — mature, in daily use, and finished in the way real tools are finished:</b><br/>
+<p><sub><b>Version 9.8.0 — mature, in daily use, and finished in the way real tools are finished:</b><br/>
 the surface is stable, the safety floors are settled, and what work remains is hunted, published and pinned to a test.</sub></p>
 
 <p align="center"><b>⚠ This is professional offensive-security tooling. ⚠</b><br/>
@@ -45,7 +45,7 @@ Basilisk scores <b>87 / 113</b> with no source at all — <b>1.8× its white-box
 
 <br/>
 
-<img src="https://img.shields.io/badge/version-9.7.0-7d121b?style=for-the-badge&labelColor=08090b" alt="version 9.7.0">
+<img src="https://img.shields.io/badge/version-9.8.0-7d121b?style=for-the-badge&labelColor=08090b" alt="version 9.8.0">
 <img src="https://img.shields.io/badge/license-MIT-7d121b?style=for-the-badge&labelColor=08090b" alt="MIT license">
 <img src="https://img.shields.io/github/last-commit/the-priest/PriestsBasilisk?style=for-the-badge&color=6d7680&labelColor=08090b&logo=github&logoColor=white" alt="last commit">
 
@@ -58,7 +58,7 @@ Basilisk scores <b>87 / 113</b> with no source at all — <b>1.8× its white-box
 <img src="https://img.shields.io/badge/Linux-X11%20%7C%20Wayland-6d7680?style=for-the-badge&logo=linux&logoColor=white&labelColor=08090b" alt="Linux X11/Wayland">
 <img src="https://img.shields.io/badge/python-3.10+-6d7680?style=for-the-badge&logo=python&logoColor=white&labelColor=08090b" alt="Python 3.10+">
 <img src="https://img.shields.io/badge/runs%20on-NetHunter-6d7680?style=for-the-badge&labelColor=08090b" alt="Runs on NetHunter">
-<img src="https://img.shields.io/badge/tests-2921%20assertions-6d7680?style=for-the-badge&labelColor=08090b" alt="2921 assertions">
+<img src="https://img.shields.io/badge/tests-3669%20assertions-6d7680?style=for-the-badge&labelColor=08090b" alt="3669 assertions">
 
 <br/><br/>
 
@@ -456,7 +456,7 @@ The scope gate was audited the same way and did **not** share the hole — it fa
 
 If you find a twenty-second shape, open an issue. That is the arrangement.
 
-All of it is pinned in the test suite — **2,921 assertions across 45 suites**, stdlib-only, runnable before you trust it with anything. Basilisk writes and runs real exploits against authorized targets, because that's the job. It will not produce standalone weaponized malware (reverse shells, implants, ransomware, backdoors), and the destructive class can never run through it at all.
+All of it is pinned in the test suite — **3,669 assertions across 46 suites**, stdlib-only, runnable before you trust it with anything. Basilisk writes and runs real exploits against authorized targets, because that's the job. It will not produce standalone weaponized malware (reverse shells, implants, ransomware, backdoors), and the destructive class can never run through it at all.
 
 <img src="https://capsule-render.vercel.app/api?type=rect&color=0:08090b,100:7d121b&height=3&section=header" width="100%" alt="">
 
@@ -515,7 +515,7 @@ Claims are cheap. Every claim on this page is either a number you can regenerate
 for f in tests/test_*.py; do python3 "$f" || echo "RED $f"; done
 ```
 
-Stdlib only. No pytest, no network, no fixtures, no account, nothing to install. **45 suites, 2,921 assertions**, done in under a minute on a laptop. You don't have to believe any of this — you can check it.
+Stdlib only. No pytest, no network, no fixtures, no account, nothing to install. **46 suites, 3,669 assertions**, done in under a minute on a laptop. You don't have to believe any of this — you can check it.
 
 What that suite is actually for — because "we have tests" means nothing on its own:
 
@@ -635,7 +635,7 @@ If it earns its place in your kit, star the repo and tell someone who runs engag
 
 <br/>
 
-### Built by one person. Verified by 2,921 assertions. Priced at nothing.
+### Built by one person. Verified by 3,669 assertions. Priced at nothing.
 
 <sub>No VC, no waitlist, no "contact sales", no seat count, no upgrade path.<br/>
 Clone it, read it, run the suite, then point it at something you own and watch it work.</sub>

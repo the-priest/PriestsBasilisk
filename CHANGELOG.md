@@ -1,3 +1,154 @@
+## v9.8.0
+
+### Leashed mode narrates itself: a live activity feed that folds back to one line
+
+Answering a question used to look like this: the status pill said `working…`,
+the chat filled with two or three bubbles that each read `(working…)`, and the
+only place that named the actual tool was the terminal panel — which is
+collapsed by default. Three separate surfaces, none of them the one the
+operator was looking at.
+
+There is now ONE activity feed per operator turn, above the reply. It streams
+live while the turn runs — tool, argument, duration, outcome, and a short
+receipt of what came back — and folds itself shut to a single summary line when
+the turn settles. Clicking the header toggles it, and a click PINS that choice
+so the auto-collapse never slams shut a body you just opened.
+
+One feed per TURN, not per model round-trip. A leashed question that chains
+eight reads is one question, and splitting it across eight widgets is precisely
+what made a single answer look like four separate replies.
+
+**The honesty rules, because this project has shipped the opposite three
+times** (`→ running <lambda>` for 150 of 151 tools; `✓ done` printed
+unconditionally over failures; a `used X` row for a call the repeat guard had
+refused):
+
+- a step is marked FAILED when its result says the tool did not run — `NOT RUN`,
+  `error:`, `ok:false` and `Unknown tool` all lose the tick;
+- a step still open when the turn tears down is marked STOPPED. A spinner left
+  spinning over an ended turn is the UI lying;
+- the verdict comes from the ENVELOPE, never the payload, so a page whose text
+  contains the word "error" is still a success;
+- a row replayed from history is NEUTRAL — no tick, no duration. The store
+  records that a tool was CALLED and never records whether it worked, so a tick
+  there would be unfalsifiable;
+- the header clock is wall time from the first event, so a stall is visible
+  instead of looking like fast work.
+
+**A parallel batch gets one row per tool**, each closing on its own worker's
+result. The single status line had one slot for four concurrent tools and could
+not represent that run at all; closing them together would paint four rows all
+finishing at the slowest one's time, which is a false picture.
+
+**Refusals and guards now reach the operator, not just the model.** The
+catastrophic-command block, the foresight refusal, the self-source-tamper
+refusal, the repeat guard, the research budget, the deferred-call queue and a
+stream retry each write a line into the feed. Every one of them already told
+the model why; the operator got a stall with no reason attached.
+
+**The mode is named once per turn** — `LEASHED - answer mode: research, verify,
+answer once, stop`, or `UNLEASHED - mission active` — on the first round-trip
+only. Re-stating it after every tool result is the same mistake the
+request-scoped directives made in v9.5, and it would have printed the mode ten
+times in a row.
+
+### The bubbles the feed replaced
+
+A reply carrying only tool calls is a step, not an answer. Those bubbles used
+to render `(working…)` or a one-line action summary, live and on reload — which
+is the whole of the "it answered me four times" complaint. They are no longer
+drawn; the feed carries them. Reloading a chat rebuilds the same shape: a
+turn's tool calls collapse into one folded feed, parsed from the `tool:` line
+already on disk rather than from a new column that would only show history for
+chats recorded after this build.
+
+Visibility keys off an explicit bare-tool-step flag, NOT off "the display text
+came out empty" — a `propose` turn also ends with empty text and draws its
+approval card into that same container, so the obvious test would have rendered
+a card into a hidden bubble and left the operator waiting to click something
+that was not on screen.
+
+### Avatars were decoded from disk once per message bubble
+
+`Avatar()` called `Gtk.Image.new_from_file()` every time it ran, and it runs
+once per bubble. `basilisk-avatar.png` is 512x512 and measures **11-16 ms** to
+decode through GdkPixbuf.
+
+- a leashed question chaining twelve round-trips paid ~150 ms of main-thread
+  decode, arriving in 12 ms chunks exactly when each new bubble appeared;
+- opening a chat was worse, because the whole window is built at once: forty
+  rendered messages is roughly **half a second of frozen UI on every chat
+  switch**, for forty identical decodes of two files.
+
+A `Gdk.Texture` is immutable and made to be shared. One decode per (file, size)
+now serves every image for the life of the process: **11.17 ms → 0.0003 ms**
+after the first. Misses are remembered too, so a missing file is not re-opened
+and re-failed once per message. `_svg_texture` shares the same cache.
+
+### Cited sources render as links
+
+ANSWER MODE orders the model to "CITE what you used: name the source or paste
+the link", so nearly every leashed reply ends in a citation — and every one of
+them rendered as literal `[kernel.org](https://www.kernel.org/)`.
+`text_to_pango` knew bold, italic and inline code, and nothing else.
+
+Markdown links and bare pasted URLs are now anchors. The implementation is not
+"one more `.sub()` alongside the others", because that fails loudly in both
+directions: a URL is not prose, `*` and `` ` `` are legal in one, and
+ITALIC_RE matching inside an href injects a tag into an attribute value —
+which makes `set_markup` fail and drops the ENTIRE message to plain text. Links
+are pulled into Private Use Area sentinels first and restored last, so neither
+pass can see the other. A URL inside backticks stays code.
+
+**And the renderer now checks its own output.** The three inline passes each
+run over the whole string independently and cannot guarantee their tags nest:
+on stray asterisks and backticks they produce `<i>a<span>b</i>c</span>`. GTK
+does not raise on that — it logs a warning and renders the RAW MARKUP, so
+`<span font_family=...>` appears mid-answer. Measured over 30,000 adversarial
+strings, **the old renderer emitted 382 such strings**. Output is now checked
+for well-formedness and falls back — first to links-only, then to plain escaped
+text.
+
+    rejected by the old renderer   382
+    rejected by the new renderer     0
+    new breaks what old handled      0
+
+Counter-property asserted as hard as the property: over 4,000 realistic replies
+mixing bold, italic, code and links, **100% still get the full formatting** —
+a renderer that stops rendering is not a fix. The link scan uses bisect over
+the code spans, not a linear scan, because this file has shipped a quadratic
+display path twice already; scaling is linear (ratio 2.0 per doubling).
+
+### Also
+
+- The status pill and the feed header read the same phrase from the same
+  `_set_working` call, so the two cannot disagree about what is happening.
+- Feed glyphs are ASCII where the emoji font would otherwise claim the
+  codepoint: U+26D4 was substituted by the emoji face, which ignores the row's
+  colour and metrics, so a refusal row rendered wider and in the wrong palette
+  than every row around it.
+- Sub-millisecond work reports `<1ms` rather than `0ms`, which read as
+  "did not run".
+- Reply links are `#ff9a44` instead of the deep `#7d121b` accent, which was
+  nearly inseparable from body text inside a charred bubble.
+- Body text lost its 9px orange glow. Glow belongs on the border and the
+  surface; behind 30px text it reads as a focus problem.
+- Every feed teardown path stops the widget's 200 ms clock — chat switch,
+  rolling trim, and finish. The trim never disposes the LIVE feed, because the
+  view's trim and the window's live pointer are independent.
+
+### Verification
+
+New `tests/test_activity.py` (111 assertions). **46 suites, 3,669 assertions,
+zero red**, verified from a clean extract of the shipped zip. Additionally
+verified against real GTK 4.14 under Xvfb: the whole stylesheet parses with
+zero errors, the widget builds and drives, 400 steps stay inside the display
+cap at 0.25 ms each, and every `text_to_pango` output is accepted by
+`Gtk.Label.set_markup` with no log warning.
+
+`basilisk_persona.py` is byte-for-byte unchanged (whole-file sha256 verified
+before and after). No asset, button or provider behaviour was touched.
+
 ## v9.7.0
 
 ### The destructive floor let 21 command shapes through — verified against a real shell

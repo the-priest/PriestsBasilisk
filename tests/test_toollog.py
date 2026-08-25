@@ -252,6 +252,14 @@ print("\n== the status line logs on change only ==")
 
 class _Pill:
     _set_working = Bk.MainWindow._set_working
+    # The pill and the activity feed header read the SAME phrase from the same
+    # call, so _set_working now feeds both. Bind the real methods rather than
+    # stubbing them out: with no feed attached _activity() returns None and
+    # _activity_phase is a no-op, which is exactly the path a chat with no live
+    # turn takes, and binding the real ones means this test still fails if that
+    # no-op path ever stops being total.
+    _activity = Bk.MainWindow._activity
+    _activity_phase = Bk.MainWindow._activity_phase
 
     def __init__(self):
         self.lines = []
