@@ -472,8 +472,12 @@ ck("the CSS is ASCII-only",
    _css is not None and not [b for b in _css.group(1) if b > 127],
    "a non-ASCII byte in a bytes literal is a SyntaxError at import")
 
-ck("the version is 1.0.0.0",
-   re.search(r'^VERSION = "1\.0\.0\.0"$', _B.decode("utf-8"), re.M)
+# The point of this check is that the release LINE is intact and machine
+# readable (test_packaging cross-checks it against pyproject and the README
+# badge), not that the build is frozen at the version this suite was written
+# for -- pinning that meant every later patch release started red.
+ck("the version line is present and well formed",
+   re.search(r'^VERSION = "1\.0\.0\.\d+"$', _B.decode("utf-8"), re.M)
    is not None)
 
 

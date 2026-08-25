@@ -256,13 +256,20 @@ print("\n== the sidecar still imports where `resource` does not exist ==")
 
 
 class _Block:
-    """Simulate Windows: no `resource` module."""
+    """Simulate Windows: no `resource` module.
 
-    def find_module(self, name, path=None):
-        return self if name == "resource" else None
+    THIS USED TO USE find_module/load_module, WHICH DO NOTHING ON 3.12.
+    Python removed the legacy meta-path protocol in 3.12, so the blocker was
+    silently ignored: `import resource` still succeeded, the four import
+    assertions below passed against a module that had `resource` all along
+    (vacuously green), and the refusal assertion failed because the sandbox
+    picked its `unshare` tier instead. find_spec is the live protocol.
+    """
 
-    def load_module(self, name):
-        raise ImportError("No module named 'resource'")
+    def find_spec(self, name, path=None, target=None):
+        if name == "resource":
+            raise ImportError("No module named 'resource'")
+        return None
 
 
 _saved = {k: v for k, v in sys.modules.items()
@@ -283,7 +290,16 @@ try:
     # …and it must REFUSE to run, not run unconfined.
     try:
         _sb = importlib.import_module("basilisk_ext.sandbox")
-        _res = _sb.run_python(_script("print('should not run')\n"))
+        # …with the namespace tools hidden too: "no resource module" is a
+        # Windows fact, and on Windows there is no bwrap and no unshare
+        # either. Blocking only the import tested a machine that does not
+        # exist, and let a Linux box answer a Windows question.
+        _have0 = _sb._have
+        _sb._have = lambda _c: False
+        try:
+            _res = _sb.run_python(_script("print('should not run')\n"))
+        finally:
+            _sb._have = _have0
         ck("…and refuses to execute agent code with no isolation at all",
            _res["ok"] is False and _res["tier"] == "none", str(_res)[:140])
         ck("…saying so plainly", "refusing" in _res["stderr"],

@@ -1132,6 +1132,7 @@ class OpenAICompatBackend:
                 req = urllib.request.Request(
                     url, data=data, headers=self._headers())
                 parts: List[str] = []
+                _finish_reason = ""
                 _wall_start = time.time()
                 with urllib.request.urlopen(req, timeout=STREAM_IDLE_TIMEOUT_S) as r:
                     for raw in r:
@@ -1159,6 +1160,19 @@ class OpenAICompatBackend:
                         choices = obj.get("choices") or []
                         if not choices:
                             continue
+                        # ── WHY THE REPLY STOPPED ──
+                        # Nothing in the app read this, so a reply cut off at
+                        # max_tokens was indistinguishable from a finished one.
+                        # That is one of the two reasons a large file write
+                        # "fails every time": the <tool> tag arrives without
+                        # its closing brace, the args land in {"_raw": …}, and
+                        # the operator is told the JSON was badly escaped —
+                        # so the model re-sends the same too-long call and
+                        # hits the same wall. The cap is a fact the host has
+                        # and was throwing away.
+                        _fr = choices[0].get("finish_reason")
+                        if _fr:
+                            _finish_reason = _fr
                         delta = choices[0].get("delta") or {}
                         rtok = (delta.get("reasoning_content")
                                 or delta.get("reasoning") or "")
@@ -1174,6 +1188,10 @@ class OpenAICompatBackend:
                     "backend": self.name,
                     "model": attempt_model,
                     "cancelled": False,
+                    "finish_reason": _finish_reason,
+                    # The one fact the caller needs: the model did not choose
+                    # to stop, it ran out of room.
+                    "truncated": _finish_reason == "length",
                 })
                 return
             except urllib.error.HTTPError as e:
@@ -1884,10 +1902,19 @@ def _check_protected_regions(realpath: str, new_content: str
 
 
 def tool_write_file(path: str, content: str,
-                    make_backup: bool = True) -> Dict[str, Any]:
+                    make_backup: bool = True,
+                    mode: str = "replace") -> Dict[str, Any]:
     """Write `content` to `path` — the executing half of a self-edit.
 
-    Reached ONLY after the operator approves the diff card.  Safety net,
+    mode="append" adds to the end of an existing file instead of replacing
+    it, so a file too large for one reply can be written in SECTIONS. The
+    parse-check below runs against the ASSEMBLED file, not the fragment, so
+    half a module never passes as valid Python.
+
+    NOT reached only via the diff card, whatever this docstring used to say:
+    with approval_mode "none" — the default, and the only posture left —
+    a `write_file` call executes directly (see _run_proposed_edit). That is
+    why the floor below exists here rather than in the GUI.  Safety net,
     in order:
       1. If the target is a .py file, parse-check the NEW content with
          ast BEFORE touching disk.  A syntax error means we refuse the
@@ -1901,6 +1928,40 @@ def tool_write_file(path: str, content: str,
     """
     try:
         rp = os.path.realpath(os.path.expanduser(path))
+
+        # ── 0. THE SAME FLOOR EVERY OTHER WRITE PRIMITIVE ASKS ──
+        # delete_path, move_path and copy_path all run _fs_guard; this one
+        # did not, and it is the primitive with the widest reach. Measured
+        # on the shipped build: delete/copy/move all REFUSED
+        # ~/.ssh/authorized_keys and write_file replaced it, ok:True. Same
+        # for ~/.gnupg. gate_command's docstring is exactly right — a guard
+        # only protects the function it sits in — and this function had none.
+        #
+        # Its own source is deliberately NOT protected: editing basilisk*.py
+        # is a designed feature, with the immutable GUARDRAIL block and the
+        # parse-check as its limits.
+        _fsg = _fs_guard(rp, recursive=False)
+        if _fsg:
+            return {"ok": False, "path": rp, "error": _fsg}
+
+        mode = (mode or "replace").strip().lower()
+        if mode in ("a", "add", "append_to", "appendto"):
+            mode = "append"
+        if mode not in ("replace", "append"):
+            return {"ok": False, "path": rp,
+                    "error": f"unknown mode {mode!r}: use "
+                             f"'replace' (default) or 'append'"}
+        _prior = ""
+        if mode == "append":
+            try:
+                with open(rp, "r", encoding="utf-8") as _f:
+                    _prior = _f.read()
+            except FileNotFoundError:
+                _prior = ""          # append to a file that does not exist yet
+            except OSError as e:
+                return {"ok": False, "path": rp,
+                        "error": f"could not read {path} to append to it: {e}"}
+            content = _prior + content
 
         # 1. parse-check python before we risk the existing file
         if rp.endswith(".py"):
@@ -1971,6 +2032,8 @@ def tool_write_file(path: str, content: str,
             + (f", backup {backup_path}" if backup_path else ""))
         return {"ok": True, "path": rp, "size": size,
                 "created": not existed, "backup": backup_path,
+                "mode": mode,
+                "appended": len(content) - len(_prior) if mode == "append" else 0,
                 "is_python": rp.endswith(".py")}
     except PermissionError:
         return {"ok": False, "path": path,
@@ -3414,6 +3477,21 @@ _CONCLUSION_MARKERS = (
     "fully complete", "objective is complete", "the objective has been",
     "[[mission_complete]]",
 )
+
+# The model is ASKING THE OPERATOR for something, not stalling on its own
+# action. "Give me the target and I'll scan it" contains "give me" and "i'll
+# scan", so it read as a stall and got nudged -- but a nudge cannot answer a
+# question only the operator can, so it just re-asked, forever. A reply that
+# puts the ball in the operator's court is waiting correctly, not stalled.
+_AWAITING_OPERATOR_MARKERS = (
+    "give me the", "give me a target", "give me your", "provide the",
+    "provide a", "please provide", "what target", "which target",
+    "what's the target", "whats the target", "let me know the",
+    "let me know which", "let me know what", "tell me the", "tell me which",
+    "could you provide", "can you provide", "do you want me to",
+    "would you like me to", "should i ", "shall i ", "confirm the target",
+    "what would you like",
+)
 _INTENT_MARKERS = (
     "i'll ", "i will ", "i am going to", "i'm going to", "let me ", "let's ",
     "lets ", "going to ", "gonna ", "next, i", "next i ", "next step",
@@ -3425,6 +3503,19 @@ _INTENT_MARKERS = (
     "first, i", "first i'll", "shall i ", "let me run", "let me check",
     "let me try", "let me start", "run the next", "on to the next",
     "onto the next", "the next step", "my next step",
+    # Polite hedges that announce a pending action with no verb of their own.
+    # "Give me a moment while I check" ends a turn holding a promise exactly
+    # like "I'll check" does, but matched nothing, so no nudge fired and the
+    # turn died silently -- the same dead end as the news-fetch stall, one
+    # phrasing over. Kept to forms that are unambiguously "work is coming":
+    # a bare "one moment" with a delivered answer beside it is still not a
+    # stall, because reply_is_bare_stall requires NO substance to have landed.
+    "give me a moment", "give me a sec", "give me a second", "one moment",
+    "one sec", "just a moment", "just a sec", "hang on", "hold on",
+    "bear with me", "stand by", "let me go ", "let me pull", "let me grab",
+    "let me fetch", "let me search", "let me look", "let me dig",
+    "checking now", "searching now", "looking now", "fetching now",
+    "on it", "working on it",
 )
 
 
@@ -3464,6 +3555,10 @@ def reply_intends_action(text: str) -> bool:
     # A conclusion phrase anywhere is decisive: it's finishing, not continuing.
     if any(m in t for m in _CONCLUSION_MARKERS):
         return False
+    # Asking the operator for input is not a stall on the model's own action —
+    # nudging it just re-asks a question only the operator can answer.
+    if any(m in t for m in _AWAITING_OPERATOR_MARKERS):
+        return False
     # An explicit intent-to-act phrase means it's mid-task.
     if _has_intent(t):
         return True
@@ -3496,6 +3591,16 @@ _PAST_DELIVERY_RE = re.compile(
 # The clause that separates a promise from its delivery in one sentence.
 _DELIVERY_SEP = (":", " -- ", " \u2014 ", " \u2013 ", " - ")
 
+# A tail that OPENS with an action gerund is still a plan, not a result:
+# "On it -- pulling the release notes", "Sure -- searching now". Anchored, so
+# it only fires when the gerund is the FIRST word of the delivered clause; a
+# report that merely mentions one further in ("found 3 hosts, still scanning
+# the rest") is unaffected.
+_ACTION_GERUND_RE = re.compile(
+    r"^(?:pulling|fetching|grabbing|searching|looking|checking|reading|"
+    r"scanning|running|testing|trying|querying|enumerating|digging|"
+    r"gathering|retrieving|loading|downloading|opening)\b", re.I)
+
 
 def _delivered_part(sentence: str) -> Tuple[str, bool]:
     """(what this sentence delivers, was the delivery EXPLICITLY marked).
@@ -3516,7 +3621,14 @@ def _delivered_part(sentence: str) -> Tuple[str, bool]:
         i = s.find(sep)
         if i > 0:
             tail = s[i + len(sep):].strip()
-            if tail and not _has_intent(tail):
+            # The tail delivers only if it is not ITSELF a forward-looking
+            # phrase. "Let me check: the answer is 42" delivers; "On it --
+            # pulling the release notes" does not, because a bare action
+            # gerund ("pulling", "fetching", "searching") is a plan wearing a
+            # dash, not a result. Those gerunds are not in _INTENT_MARKERS (it
+            # keys on "let me pull", not "pulling"), so guard them explicitly
+            # here rather than bloating that list with every -ing form.
+            if tail and not _has_intent(tail) and not _ACTION_GERUND_RE.match(tail):
                 return (tail, True)
     return ("", False)
 
@@ -4855,10 +4967,34 @@ def _trusted_fetch(url: str, timeout: int = 20) -> Tuple[int, str, str]:
         with opener.open(req, timeout=timeout) as r:
             return _read(r)
     except urllib.error.HTTPError as e:
+        # An HTTP status IS a real answer (404/403/500) — return it, don't
+        # retry it. A 5xx is the one exception: it is the server saying "try
+        # again", and a single retry turns a flaky news fetch into a working
+        # one instead of a dead turn.
+        if 500 <= e.code < 600:
+            try:
+                time.sleep(0.8)
+                with opener.open(req, timeout=timeout) as r:
+                    return _read(r)
+            except urllib.error.HTTPError as e2:
+                try:
+                    return _read(e2)
+                except Exception:
+                    return e2.code, "", url
+            except Exception:
+                pass                       # fall through to reading e below
         try:
             return _read(e)
         except Exception:
             return e.code, "", url
+    except (urllib.error.URLError, TimeoutError, ConnectionError, OSError):
+        # A transient TRANSPORT failure — DNS blip, reset connection, timeout.
+        # Not an answer, just a miss. One retry, because a leashed answer-mode
+        # turn that gets a single failure tends to narrate or give up ("can't
+        # even fetch news"), and most of these clear on a second attempt.
+        time.sleep(0.8)
+        with opener.open(req, timeout=timeout) as r:
+            return _read(r)
 
 
 _WR_TAG_RE = re.compile(r"<[^>]+>")
@@ -8093,6 +8229,148 @@ def _loads_lenient(json_src: str) -> Any:
         return None
 
 
+# ══════════════════════════════════════════════════════════════════════
+# WRITING A BIG FILE — WHY IT FAILED EVERY TIME
+# ══════════════════════════════════════════════════════════════════════
+# Reported as: "writing big code fails every time, it has to do it in tiny
+# sections".  Two independent causes, both of which had to be closed.
+#
+# CAUSE 1, and the one that made SMALL writes work: _loads_lenient repairs
+# literal control characters inside a JSON string, and NOTHING else.  Its
+# docstring calls a multi-line `content` "the one mistake models make most" —
+# but the mistake models actually make on a FILE body is an unescaped inner
+# double quote, and almost every real file has one (`print("hi")`, a dict
+# key, a docstring).  Measured on the shipped parser:
+#
+#     literal newlines only          -> repaired
+#     unescaped inner quotes         -> None  -> {"_raw": …} -> no card
+#     newlines AND quotes (any code) -> None  -> {"_raw": …} -> no card
+#
+# Size was never the variable; QUOTE DENSITY was.  A three-line snippet with
+# no quotes went through, a three-line function with a `print("…")` did not,
+# and a 400-line module always contains one — so it looked exactly like "big
+# writes fail", and chopping the file into tiny sections made each section
+# likely enough to be quote-free (or short enough for the model to escape
+# by hand) that the workaround appeared to work.
+#
+# json.loads cannot be made to do this: once a quote closes the string early
+# the rest of the object is garbage to it.  So the value is taken
+# STRUCTURALLY — find the key, take everything to the terminator, decode the
+# escapes that ARE there — which is what a human reads it as.
+#
+# DELIBERATELY NARROW: only for the write tools, only after strict AND
+# lenient parsing have both failed, and only when what is left over on either
+# side is itself valid JSON.  A body that parses normally never reaches here.
+_WRITE_TOOL_NAMES = ("write_file", "propose_edit")
+_WRITE_TAG_HINT_RE = re.compile(
+    r'<tool\s+name\s*=\s*["\']?(?:write_file|propose_edit)', re.I)
+_WRITE_CONTENT_KEY_RE = re.compile(
+    r'"(content|text|body|contents|data|file_text|file_content|filecontent)"'
+    r'\s*:\s*"', re.I)
+_JSON_ESCAPES = {'"': '"', "\\": "\\", "/": "/", "b": "\b", "f": "\f",
+                 "n": "\n", "r": "\r", "t": "\t"}
+
+
+def _decode_json_string_body(raw: str) -> str:
+    """Decode JSON escapes in a string body that may also contain raw ones.
+
+    A lone backslash before an unknown character is kept verbatim rather than
+    dropped: this is a Windows path or a regex in someone's source, and
+    silently eating it would corrupt the file being written.
+    """
+    if "\\" not in raw:
+        return raw
+    out: List[str] = []
+    i, n = 0, len(raw)
+    while i < n:
+        c = raw[i]
+        if c != "\\" or i + 1 >= n:
+            out.append(c)
+            i += 1
+            continue
+        nxt = raw[i + 1]
+        if nxt in _JSON_ESCAPES:
+            out.append(_JSON_ESCAPES[nxt])
+            i += 2
+        elif nxt == "u" and i + 5 < n:
+            try:
+                out.append(chr(int(raw[i + 2:i + 6], 16)))
+                i += 6
+            except ValueError:
+                out.append(c)
+                i += 1
+        else:
+            out.append(c)          # keep `\d`, `\s`, `\U` … as written
+            i += 1
+    return "".join(out)
+
+
+def write_body_is_terminated(json_src: str) -> bool:
+    """Does this write body carry its own closing `"` + `}`?
+
+    False means the reply was CUT OFF mid-file — the response-token cap, in
+    practice.  That is not a parse failure to repair; half a file must never
+    be written, so the caller reports the real cause instead.
+    """
+    tail = (json_src or "").rstrip()
+    return tail.endswith("}") and tail.count('"') >= 4
+
+
+def _structural_write_args(json_src: str) -> Optional[Dict[str, Any]]:
+    """Recover {path, content, …} from a write body json.loads cannot read."""
+    if not json_src or not _WRITE_CONTENT_KEY_RE.search(json_src):
+        return None
+    if not write_body_is_terminated(json_src):
+        return None                       # truncated: never salvage a stub
+    m = _WRITE_CONTENT_KEY_RE.search(json_src)
+    key = m.group(1)
+    head, start = json_src[:m.start()], m.end()
+    src = json_src.rstrip()
+    # ── WHICH QUOTE ENDS THE VALUE ──
+    # Every candidate is a `"` whose remainder finishes the object, and a file
+    # body can contain plenty of those. Two rules decide, and both are needed:
+    #
+    #   · MORE SIBLING KEYS WINS. `{"path": …, "content": "…", "explanation":
+    #     "…"}` has a lazy candidate (the very last quote) that swallows
+    #     `", "explanation": "…"` into the file. The true terminator is the
+    #     one that leaves `explanation` standing as its own argument, so the
+    #     candidate that preserves the most arguments is the right one.
+    #   · TIE GOES RIGHTMOST. Source that embeds JSON — `data = '{"a": "b"}'`,
+    #     which this app writes constantly — offers an early candidate that
+    #     truncates the file mid-line. It preserves no more keys than the real
+    #     terminator, so the rightmost wins and the body survives whole.
+    best: Optional[Tuple[int, int, Dict[str, Any]]] = None
+    tried = 0
+    end = len(src)
+    while tried < 200:
+        end = src.rfind('"', start, end)
+        if end <= start:
+            break
+        tried += 1
+        _bs = len(src[:end]) - len(src[:end].rstrip("\\"))
+        if _bs % 2:
+            continue                      # an escaped quote, not the closer
+        rest = src[end + 1:].lstrip()
+        if not rest.startswith(("}", ",")):
+            continue
+        try:
+            obj = json.loads(head + json.dumps(key) + ': ""' + rest)
+        except Exception:
+            continue
+        if not isinstance(obj, dict):
+            continue
+        sibs = len([k for k in obj if k.lower() != key.lower()])
+        if best is None or (sibs, end) > (best[0], best[1]):
+            best = (sibs, end, obj)
+    if best is None:
+        return None
+    obj = best[2]
+    obj[key] = _decode_json_string_body(src[start:best[1]])
+    if key != "content":
+        obj["content"] = obj.pop(key)
+    return obj
+
+
 # Models sometimes hallucinate a tool name for writing a file (the classic is
 # "write_text_file", which exists nowhere) — or pick a reasonable-but-wrong
 # synonym.  Route every one of them to the real write path so the diff card
@@ -8470,6 +8748,28 @@ def _coerce_param(val: str) -> Any:
     return v
 
 
+_CONTENT_PARAM_NAMES = frozenset(
+    ("content", "text", "body", "contents", "file_text", "file_content",
+     "filecontent", "data"))
+
+
+def _trim_tag_layout(raw: str) -> str:
+    """Drop only the newline a `<parameter>` tag's own layout introduces.
+
+    `<parameter name="content">\\n<file body>\\n</parameter>` opens with a
+    newline that belongs to the MARKUP, and the model writes the closing tag
+    on its own line — which puts the file's own final newline immediately
+    before it. Only the LEADING one is dropped: eating the trailing one too
+    (which .strip() did) means a file written through this dialect can never
+    end in a newline, and almost every text file should.
+    """
+    if raw.startswith("\r\n"):
+        return raw[2:]
+    if raw[:1] == "\n":
+        return raw[1:]
+    return raw
+
+
 def _params_to_args(body: str) -> Optional[Dict[str, Any]]:
     """Decode a `<parameter name="x">value</parameter>` body into an args dict.
 
@@ -8501,7 +8801,17 @@ def _params_to_args(body: str) -> Optional[Dict[str, Any]]:
         found = True
         raw = _unentity(body[om.end():cm.start()])
         sm = _PARAM_STRING_RE.search(attrs)
-        if sm and sm.group(1).lower() == "true":
+        # ── A FILE BODY IS TEXT, WHATEVER IT LOOKS LIKE ──
+        # _coerce_param interprets anything unambiguously JSON-shaped, which is
+        # right for an argument and wrong for a FILE: writing config.json
+        # through this dialect turned `content` into a dict and writing a file
+        # holding `42` turned it into an int, so the write raised TypeError and
+        # came back as "write failed" on a perfectly good call. It also
+        # .strip()s, which silently drops a file's trailing newline. Content
+        # keeps its bytes; only the newline the tag layout adds is removed.
+        if nm.group(1).lower() in _CONTENT_PARAM_NAMES:
+            args[nm.group(1)] = _trim_tag_layout(raw)
+        elif sm and sm.group(1).lower() == "true":
             args[nm.group(1)] = raw.strip()
         else:
             args[nm.group(1)] = _coerce_param(raw)
@@ -8844,6 +9154,27 @@ def parse_tool_calls(text: str) -> List[ToolCall]:
                         _obj = _first_json_object(json_src)
                         if _obj:
                             recovered = _loads_lenient(_obj)
+                    # ── THE FILE BODY, TAKEN STRUCTURALLY ──
+                    # Last resort, write tools only: an unescaped `"` inside
+                    # the file (which is to say, any real code) defeats every
+                    # parser above and is why a big write failed every time.
+                    if recovered is None and (name_attr or "") in _WRITE_TOOL_NAMES:
+                        recovered = _structural_write_args(json_src)
+                        # …and if the body is not terminated, the file itself
+                        # may have contained a literal `</tool>` and the
+                        # non-greedy tag match stopped inside it. Re-cut the
+                        # span at the LAST closer before trying again; a body
+                        # that then parses is the real one.
+                        if (recovered is None
+                                and not write_body_is_terminated(json_src)):
+                            _tail = text[m.start():]
+                            _open = _tail.find(">")
+                            _last = _tail.rfind("</tool>")
+                            if _open > 0 and _last > _open:
+                                _wide = _tail[_open + 1:_last].strip()
+                                if len(_wide) > len(json_src):
+                                    recovered = (_loads_lenient(_wide)
+                                                 or _structural_write_args(_wide))
                 parsed = recovered if recovered is not None else {
                     "_raw": json_src}
 
@@ -9035,6 +9366,25 @@ def _strip_tool_calls_span(text: str) -> str:
     """strip_tool_calls' actual removal pass, over one non-fenced span."""
     if "<" not in text and _DS_PIPE not in text:
         return text
+    # ── A FILE BODY MAY CONTAIN THE CLOSING TAG ──
+    # TOOL_TAG_RE is non-greedy, so `write_file` with a body containing the
+    # literal `</tool>` — which this app's own source does, constantly —
+    # ends the match INSIDE the file, and the rest of the file was printed
+    # into the chat as raw text. The parser re-cuts that span at the last
+    # closer; display has to agree with it or the two disagree about what
+    # the reply said, which is the exact class of bug strip_tool_calls'
+    # docstring exists to warn about.
+    if _WRITE_TAG_HINT_RE.search(text) and text.count("</tool>") > 1:
+        _first = TOOL_TAG_RE.search(text)
+        # ONLY when the first match's body is UNTERMINATED — i.e. the match
+        # really did stop inside a JSON string. A write call followed by a
+        # second call is the common shape and its body closes properly, so
+        # widening there would delete the model's prose between the two.
+        if (_first is not None
+                and not write_body_is_terminated(_first.group(2) or "")):
+            _last = text.rfind("</tool>")
+            if _last > _first.start():
+                text = text[:_first.start()] + text[_last + len("</tool>"):]
     out = TOOL_TAG_RE.sub("", text)
     # Also remove dangling unclosed <tool ...> ... fragments mid-stream
     # The pattern cannot match without a '>' anywhere — skipping is exact, and

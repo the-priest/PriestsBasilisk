@@ -1,3 +1,165 @@
+## v1.0.0.2 — the fetch dead-end
+
+### "it can do one thing and stops — can't even fetch news"
+
+The stall recovery from v1.0.0.1 had a hole that put the model straight back
+into the loop it was meant to end. When the model narrated a next step with
+no tool call ("I'll check the latest headlines now"), the answer-mode nudge
+re-kicked the turn — but `_continuation` keyed purely on `_tool_chain_depth`,
+and the nudge had bumped that depth without any tool having run. So the
+re-kick was treated as a mid-chain continuation and the model was handed:
+
+```
+[STILL VERIFY, DON'T RECALL — you have already read at least one source
+ this turn. Do NOT re-read a page you have already read …]
+```
+
+when it had read **nothing**. It was told it had already done the work, so it
+answered from memory or stopped — exactly at the moment it needed to fetch.
+Reproduced by driving the real `_kick_assistant_turn`:
+
+```
+bare narration stall (no tool ran):
+  before -> "already read a source, don't re-read"   (WRONG)
+  after  -> "CHECK ONLINE FIRST, your FIRST action MUST be web_read"
+```
+
+A continuation is now "the chain advanced AND a tool actually ran" —
+`_tool_ran_this_request`, set at the single `_feed_tool_result` choke point
+every result passes through, reset per request. A real tool continuation
+still gets the mid-chain form (no four-times repeat); a bare stall gets the
+full fetch directive. Both directions pinned in `test_turn_directives.py`,
+which scores 2 failures against v1.0.0.1.
+
+### The stall classifier missed the phrasings models actually stall in
+
+"Give me a moment while I check", "One moment…", "Hang on…", "Bear with me…",
+"On it — pulling the release notes" — all announce a pending action, none
+matched, so no nudge fired and the turn died silently. Added the polite
+hedges, plus two guards so the wider net does not over-fire:
+
+- **Asking the operator for input is not a stall.** "Give me the target and
+  I'll scan it" contains both "give me" and "I'll scan", so it read as a
+  stall and got nudged — but a nudge cannot answer a question only the
+  operator can, so it re-asked forever. A reply that puts the ball in the
+  operator's court is waiting correctly.
+- **A dash tail that opens with an action gerund is still a plan.** "On it —
+  pulling the release notes" was read as delivering "pulling the release
+  notes"; a leading `pulling/fetching/searching/…` is a promise wearing a
+  dash, not a result.
+
+28 narration/answer shapes classified correctly, both directions, pinned.
+
+### A flaky fetch retries instead of dying
+
+`web_read` returned `{ok: false}` on the first transient network miss — a DNS
+blip, a reset connection, a 503 — and a leashed turn that got one failure
+tended to narrate or give up. It now retries once on a transient TRANSPORT
+error and on a 5xx, but never on a real status: a 404 or 403 IS the answer
+and is returned immediately.
+
+### Tests
+
+51 suites, 4,035 assertions (3,190 printed checks + 845 executed unittest
+asserts, recounted). `test_turn_directives.py` grew the fetch dead-end and
+the classifier corpus; `test_bigwrite.py` grew the fetch-retry checks.
+
+## v1.0.0.1 — write pass
+
+### "writing big code fails every time"
+
+Four bugs behind one sentence, and only one of them was about size.
+
+**Quote density, not size.** `_loads_lenient` repairs literal control
+characters inside a JSON string and nothing else — but the mistake a model
+makes on a FILE body is an unescaped inner `"`, and every real file has one
+(`print("hi")`, a dict key, a docstring). Measured on the previous build:
+
+```
+literal newlines only          -> repaired
+unescaped inner quotes         -> None -> {"_raw": …} -> no card, nothing written
+newlines AND quotes (any code) -> None -> {"_raw": …} -> no card
+```
+
+A three-line function failed exactly as reliably as a 400-line module. Tiny
+sections "worked" because they are short enough for the model to hand-escape.
+`json.loads` cannot be made to do this — once a quote closes the string early
+the rest of the object is garbage to it — so the value is now taken
+STRUCTURALLY for the write tools only: find the key, walk candidate
+terminators, decode the escapes that are really there. Which quote ends the
+value is decided by two rules, and both are needed: the candidate that leaves
+the MOST sibling keys standing wins (so `"explanation"` after the body is not
+swallowed into the file), and ties go to the rightmost (so source that embeds
+JSON — `data = '{"a": "b"}'` — is not truncated at its own brace).
+
+**The reply was cut off and nobody looked.** Nothing read `finish_reason`, so
+a call truncated at `max_tokens` was indistinguishable from a finished one.
+The operator was told the JSON was probably badly escaped and the model was
+told to re-send in the correct format — so it re-sent the same oversized call
+into the same cap. Both messages now name the real cause, and the model is
+told to SPLIT rather than re-send.
+
+**Sectioned writing is a real path now.** `write_file` / `propose_edit` take
+`"mode": "append"`, with the Python parse-check running against the ASSEMBLED
+file — half a module cannot pass as valid. Appending to a file that does not
+exist yet creates it; an unknown mode is named rather than guessed.
+
+**The file body was being interpreted.** In the `<parameter>` dialect
+V4-Flash emits, `_coerce_param` turned `config.json`'s contents into a dict
+and a file holding `42` into an int, so `f.write()` raised TypeError and a
+perfectly good call came back as "write failed". It also `.strip()`ed, so a
+file written that way could never end in a newline. Content keeps its bytes;
+only the opening tag's own newline is dropped.
+
+**A file containing `</tool>`** cut its own call short — the non-greedy tag
+match stopped inside the body. The span is re-cut at the last closer when the
+body is unterminated.
+
+### write_file was the fourth write primitive, and the only ungated one
+
+The previous pass put `_fs_guard` on `delete_path`, `move_path` and
+`copy_path`. `write_file` — the primitive with the widest reach — called
+neither it nor `gate_command`. Reproduced on the previous build:
+
+```
+is_sensitive_path(~/.ssh/authorized_keys)  -> True
+delete_path / copy_path / move_path        -> refused
+write_file                                 -> {'ok': True, 'size': 26}
+```
+
+`~/.gnupg/gpg-agent.conf` went the same way. Its docstring said it was
+"reached ONLY after the operator approves the diff card", which has not been
+true since `approval_mode` defaulted to `none`: a `write_file` call executes
+directly through `_run_proposed_edit`. It asks the same question every other
+write asks now. Editing its own `basilisk*.py` is untouched — that is a
+designed feature, bounded by the immutable GUARDRAIL block and the
+parse-check.
+
+### Two suites were testing nothing
+
+`test_bubble_fit.py` listed four UI scales and ran ONE: a `break` at the
+bottom of the loop, because GTK cannot start a second application in one
+process. The single scale it ran was 0.5, and `_detect_ui_scale()` returns
+0.7, 0.85 or 0.9 — so the regression test written because "the bug only
+appears at the scales real machines use" was guarding the one scale no
+machine picks. Each scale now runs in its own interpreter and reports its
+measurements back; an empty measurement is retried once, since a cold first
+process can miss the settle timer.
+
+`test_sandbox_skills.py`'s "simulate Windows: no `resource` module" used
+`find_module`/`load_module`, the meta-path protocol **removed in Python
+3.12**. The blocker was a no-op: `import resource` still succeeded, so four
+assertions passed against a module that had `resource` all along, and the
+fifth failed because the sandbox picked its `unshare` tier. It uses
+`find_spec` now, and hides the namespace tools too — "no rlimits" is a
+Windows fact, and Windows has no `unshare` either.
+
+### Tests
+
+51 suites, 4,006 assertions (3,161 printed checks + 845 executed unittest
+asserts, counted rather than carried forward). `tests/test_bigwrite.py` is
+new and scores 9 failures against the previous release.
+
 ## v1.0.0.0 — GUI pass
 
 ### Text drew outside the bubble

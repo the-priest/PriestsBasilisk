@@ -455,7 +455,12 @@ CORE_MECHANICS = {
     "destructive refused in code": r"refused\s+in code",
     "propose_edit is the only write path": r"ONE and only way you put anything",
     "content is the WHOLE file": r"WHOLE file",
-    "escape JSON in content": r"escape every",
+    # The wording was compressed to pay for the sectioned-write rule that
+    # now sits in the same block; the RULE is what this pins, not the
+    # sentence it was first written in.
+    "escape JSON in content": r"escape \" as",
+    "a big file is written in sections": r"SECTIONS",
+    "append mode is named": r'"mode": "append"',
     "never claim saved unless it succeeded": r"NEVER say a file is saved",
     "cannot write unparseable python": r"fails to parse",
     "guardrail is immutable": r"guardrail is immutable|GUARDRAIL block in "

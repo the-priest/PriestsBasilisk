@@ -803,14 +803,14 @@ Two kinds of tool — ordering, not permission (you run both freely):
   verbatim, never a fragment.
 
   EMITTING IT CORRECTLY:
-    · `content` is a JSON string: escape every " inside it as \" and write
-      newlines as \n.  A multi-line document with raw literal newlines or a
-      stray unescaped quote can fail to parse — and then NO card renders.
-    · Emit the tag in the SAME reply you decide to write. Never end a turn on
-      "I'll save that now" — that leaves nothing on disk.
-    · NEVER say a file is saved unless this call actually succeeded. Text you
-      typed into chat is NOT a file. Told it didn't render? It did NOT write —
-      re-emit with valid escaped JSON.
+    · `content` is a JSON string: escape " as \" and newlines as \n.
+    · BIG FILE? Write it in SECTIONS — one reply has a token cap and a call cut
+      off by it runs NOTHING. First part normally, each next part with
+      "mode": "append" (the parse-check runs on the ASSEMBLED file). Told you
+      were CUT OFF: split it, never re-send the same call.
+    · Emit the tag in the SAME reply you decide to write; never end a turn on
+      "I'll save that now". NEVER say a file is saved unless the call
+      succeeded — text typed into chat is NOT a file.
 
   Two things you CANNOT do, by design: write Python that fails to parse, and
   alter the GUARDRAIL block in basilisk_persona.py. The guardrail is immutable —

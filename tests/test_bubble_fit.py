@@ -195,9 +195,49 @@ def _run_scale(scale: float) -> None:
     _results.append(out)
 
 
+# ── ONE PROCESS PER SCALE ──
+# GTK cannot run a second Gtk.Application in one process, so this used to be
+# a loop with a `break` in it: SCALES listed four values and exactly one --
+# 0.5 -- was ever measured. _detect_ui_scale() returns 0.7 for a desktop, 0.85
+# for a laptop and 0.9 for a phone, so the regression test written because
+# "the bug only exists at the scales real machines use" was guarding the one
+# scale no machine picks. Each scale now runs in its own interpreter and
+# reports its measurements back; the assertions all happen here, once.
+if os.environ.get("BUBBLE_ONE_SCALE"):
+    _run_scale(SCALES[0])
+    print("RESULT " + json.dumps(_results[-1]))
+    sys.exit(0)
+
+import subprocess                                            # noqa: E402
+def _measure(scale, attempt=0):
+    """One child process, one scale. Retries an EMPTY measurement once.
+
+    The first GTK process on a cold box pays font/icon cache warm-up and can
+    miss the harness's own settle timer, which reports "no bubbles to
+    measure" -- an environment flake, not an overflow. A retry distinguishes
+    the two: a real failure is empty twice.
+    """
+    _env = dict(os.environ, BUBBLE_ONE_SCALE="1", BUBBLE_SCALES=str(scale))
+    _r = subprocess.run([sys.executable, os.path.abspath(__file__)],
+                        env=_env, capture_output=True, text=True, timeout=300)
+    _line = ""
+    for _l in (_r.stdout or "").splitlines():
+        if _l.startswith("RESULT "):
+            _line = _l[len("RESULT "):]
+    if _line:
+        _out = json.loads(_line)
+        if _out.get("rows") or _out.get("error") or attempt:
+            return _out
+        return _measure(scale, attempt + 1)
+    if not attempt:
+        return _measure(scale, 1)
+    return {"scale": scale, "rows": [], "viewport": 0,
+            "error": f"harness process failed (rc {_r.returncode}): "
+                     f"{(_r.stderr or '')[-160:]}"}
+
+
 for _s in SCALES:
-    _run_scale(_s)
-    break          # one app instance per process; GTK cannot re-run app.run()
+    _results.append(_measure(_s))
 
 print("== the bubble is never shorter than its own text ==")
 for res in _results:

@@ -154,7 +154,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.basilisk"
 APP_NAME = "Basilisk"
-VERSION = "1.0.0.0"
+VERSION = "1.0.0.2"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -5179,9 +5179,18 @@ class MessageWidget(Gtk.Box):
                         # and letting Basilisk claim a card that isn't there.
                         if "_raw" in call.args or not epath or econtent is None:
                             if "_raw" in call.args:
-                                why = ("the file contents couldn't be parsed — "
-                                       "most likely an unescaped \" or a stray "
-                                       "control character in the JSON")
+                                why = (
+                                    "the reply hit the response-token cap "
+                                    "part-way through the file, so the call "
+                                    "arrived unfinished (raise Max response "
+                                    "tokens in Settings, or have it write the "
+                                    "file in sections)"
+                                    if getattr(self, "_last_stream_truncated",
+                                               False)
+                                    else "the file contents couldn't be "
+                                         "parsed — most likely an unescaped "
+                                         "\" or a stray control character in "
+                                         "the JSON")
                             elif not epath:
                                 why = "no target path was given"
                             else:
@@ -6990,6 +6999,14 @@ class MainWindow(Adw.ApplicationWindow):
         # Answer-mode stall pushes spent on the current request. See
         # ANSWER_STALL_NUDGE_MAX.
         self._answer_stall_nudges: int = 0
+        # Whether a tool has ACTUALLY RUN this request. The continuation
+        # directives ("you already read a source, don't re-read") key off
+        # this, NOT off _tool_chain_depth — because the answer-mode stall
+        # nudge bumps the chain depth without any tool having run, and telling
+        # a model that fetched NOTHING "you already read a source this turn"
+        # is what turned the news-fetch stall into a dead end: it discouraged
+        # the very fetch the nudge existed to force.
+        self._tool_ran_this_request: bool = False
         # Set when the operator hits the stop button.  Halts the current
         # stream AND prevents the tool chain from kicking another turn.
         self._stop_requested: bool = False
@@ -9756,6 +9773,7 @@ class MainWindow(Adw.ApplicationWindow):
             # Per-request, like the counters above: a stall on the LAST question
             # must not spend this question's nudges.
             self._answer_stall_nudges = 0
+            self._tool_ran_this_request = False
 
         # Limit how many model round-trips a turn may chain.  Rather than
         # dead-ending with "chain too long" and no answer (annoying), once
@@ -9810,7 +9828,16 @@ class MainWindow(Adw.ApplicationWindow):
         # each one rendered as its own message.
         #
         # The model was not being repetitive. It was being obedient.
-        _continuation = self._tool_chain_depth > 1
+        # A CONTINUATION for the purpose of the "start here / answer now"
+        # framing is a re-kick after a tool RESULT — not merely a re-kick.
+        # The answer-mode stall nudge re-kicks with NO tool having run, and if
+        # that counted as a continuation the model was told "you already read
+        # a source, don't re-read" when it had read nothing, and "don't restate
+        # your conclusion" when it had reached none — steering it to stop
+        # exactly when it needed to go fetch. So: chain depth advanced AND a
+        # tool actually ran.
+        _continuation = (self._tool_chain_depth > 1
+                         and getattr(self, "_tool_ran_this_request", False))
 
         # (#3) Urgency fast-path: if the operator's latest message reads as
         # urgent, tell the model to skip preamble and go straight to the most
@@ -10471,6 +10498,13 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_stream_done_body(self, meta):
         final = self.streaming_msg_widget.finish_streaming()
+        # ── THE REPLY MAY NOT HAVE FINISHED; THE PROVIDER SAYS SO ──
+        # finish_reason == "length" means the model was cut off at max_tokens.
+        # Kept on the window because the two consumers are far apart: the card
+        # that could not render, and the correction sent back to the model.
+        # Without it, a write cut off mid-file was reported as bad JSON
+        # escaping, and the model "fixed" the escaping and hit the same cap.
+        self._last_stream_truncated = bool(meta.get("truncated"))
         # ── CANONICALISE ONCE, AT THE BOUNDARY ──
         # Everything downstream — parsing, stripping, the stored message, the
         # history re-sent on every later turn, the widget the operator reads —
@@ -10906,6 +10940,24 @@ class MainWindow(Adw.ApplicationWindow):
                 if _locked_drop:
                     _why = ("your tool call was NOT run — the tool budget for "
                             "this question is spent")
+                elif _bad_call and getattr(self, "_last_stream_truncated",
+                                            False):
+                    # NOT a syntax problem. Sending the re-send-in-this-format
+                    # lecture here is worse than useless: the format was right
+                    # and the reply was cut off, so the model re-sends the same
+                    # oversized call and is cut off again. That loop is what
+                    # "writing big code fails every time" looks like from the
+                    # operator's chair.
+                    _why = (
+                        "your last reply was CUT OFF at the response-token "
+                        "cap, mid-tool-call — nothing ran. The format was "
+                        "fine; the reply was too long. Do NOT re-send the "
+                        "same call. Write the file in SECTIONS instead: "
+                        'first <tool name="write_file">{"path": "...", '
+                        '"content": "<the first part>"}</tool>, then the '
+                        'next part with {"path": "...", "mode": "append", '
+                        '"content": "..."} until the file is complete. Keep '
+                        "each section well under the cap")
                 elif _bad_call:
                     _why = (
                         "your last message contained a tool call this host "
@@ -11872,10 +11924,13 @@ class MainWindow(Adw.ApplicationWindow):
                 else:  # propose_edit / write_file
                     _p = (call.args.get("path") or "").strip()
                     _c = call.args.get("content")
+                    _mode = str(call.args.get("mode") or "replace")
                     if _p and _c is not None:
-                        self.terminal_log("• autonomous: applying file write "
-                                          "directly", "dim")
-                        self._run_proposed_edit(_p, _c)
+                        self.terminal_log(
+                            "• autonomous: applying file write directly"
+                            + (" (append)" if _mode.lower().startswith("a")
+                               else ""), "dim")
+                        self._run_proposed_edit(_p, str(_c), mode=_mode)
                         return
                 # args unusable — fall through to the normal re-emit handling
             # …but ONLY if the card actually had the data to render.  A
@@ -12612,6 +12667,13 @@ class MainWindow(Adw.ApplicationWindow):
             self._feed_tool_result(f"Unknown tool '{call.name}'.")
 
     def _feed_tool_result(self, result_text):
+        # A TOOL HAS NOW ACTUALLY RUN this request. This is the single point
+        # every tool result passes through (ACTION RECALL and the activity
+        # feed both hang off it for the same reason), so it is the right place
+        # to record the fact the continuation directives depend on — see
+        # _kick_assistant_turn's _continuation. Setting it anywhere upstream
+        # of a real result would let a dropped/blocked call count as a run.
+        self._tool_ran_this_request = True
         # Carry any "these calls did not run" note into the SAME result, so the
         # model reads it at exactly the moment it is wondering where the other
         # answers went. See the deferred branch in _on_stream_done_body.
@@ -13439,7 +13501,7 @@ class MainWindow(Adw.ApplicationWindow):
             log(f"persona reload failed: {e}")
             return False
 
-    def _run_proposed_edit(self, path, content, card=None):
+    def _run_proposed_edit(self, path, content, card=None, mode="replace"):
         """Called when the operator clicks Apply on a proposed-edit card.
         The click IS the approval.  Mirrors _run_proposed_command: set up
         a turn context, write the file (with the parse-check + backup net
@@ -13471,9 +13533,19 @@ class MainWindow(Adw.ApplicationWindow):
         self._set_send_mode(True)
 
         def _bg(feed):
-            r = tool_write_file(path, content) or {}
+            r = tool_write_file(path, content, mode=mode) or {}
             if r.get("ok"):
-                parts = [f"wrote {r.get('path', path)} ({r.get('size')} bytes)"]
+                # SAY WHICH HALF OF A SECTIONED WRITE THIS WAS. A model
+                # writing a large file in parts needs to know the earlier
+                # parts are still there; "wrote 4KB" after an append reads
+                # like the file was replaced by the fragment.
+                if r.get("mode") == "append":
+                    parts = [f"appended {r.get('appended')} bytes to "
+                             f"{r.get('path', path)} — the file is now "
+                             f"{r.get('size')} bytes. Keep appending until "
+                             f"it is complete."]
+                else:
+                    parts = [f"wrote {r.get('path', path)} ({r.get('size')} bytes)"]
                 if r.get("created"):
                     parts.append("(new file created)")
                 if r.get("backup"):

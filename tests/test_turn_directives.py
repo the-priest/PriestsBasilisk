@@ -132,12 +132,20 @@ URGENT_Q = ("from the things that i made u do is there any things that are not "
 WEBFACT_Q = "what is the latest version of nmap and when was it released"
 
 
-def addendum_for(depth: int, question: str):
-    """Drive the REAL _kick_assistant_turn and return (addendum, log lines)."""
+def addendum_for(depth: int, question: str, tool_ran: bool = True):
+    """Drive the REAL _kick_assistant_turn and return (addendum, log lines).
+
+    tool_ran distinguishes the two ways a turn reaches depth > 1: a real tool
+    CONTINUATION (a page was read) vs the answer-mode STALL nudge, which
+    re-kicks with no tool having run. The continuation directives must fire
+    for the first and NOT the second -- telling a model that fetched nothing
+    "you already read a source, don't re-read" is what dead-ended the
+    news-fetch stall. Default True preserves every existing call."""
     w = object.__new__(Bk.MainWindow)
     w.settings = dict(Bc.DEFAULT_SETTINGS)
     w.settings["approval_mode"] = "none"
     w._stop_requested = False
+    w._tool_ran_this_request = tool_ran
     w._tool_chain_depth = depth - 1        # _kick increments to `depth`
     w._tools_locked = False
     w._force_answer_tries = 0
@@ -407,6 +415,66 @@ ck("answer mode is wired to reply_is_bare_stall, not the mission predicate",
    "and reply_is_bare_stall(final)" in _gsrc)
 ck("reply_is_bare_stall is imported by the host",
    "reply_is_bare_stall," in _gsrc)
+
+
+# ── the news-fetch dead end: a bare stall must be told to FETCH ──────
+# The answer-mode stall nudge re-kicks the turn with no tool having run.
+# Before the fix, _continuation keyed purely on _tool_chain_depth, so that
+# re-kick was treated as a continuation and the model was handed the
+# mid-chain "you already read a source this turn, don't re-read" text --
+# when it had read NOTHING. That steered it to answer from memory (or stop)
+# exactly when it needed to go fetch, which is the "can't even fetch news"
+# report. The fix: a continuation requires a tool to have ACTUALLY run.
+print("\n== a stall with no tool run is told to FETCH, not that it already did ==")
+
+# depth 2, but NO tool ran (the stall path).
+_sa, _ = addendum_for(2, WEBFACT_Q, tool_ran=False)
+ck("the FULL check-online directive fires (fetch is forced)",
+   FIRST_MUST_READ in _sa,
+   "a bare stall must be pushed to read a source, not answer from memory")
+ck("it is NOT told it already read a source",
+   "already read at least one source" not in _sa,
+   "telling a model that fetched nothing it already fetched is the dead end")
+ck("…and NOT told not to restate a conclusion it never reached",
+   "do not simply repeat" not in _sa.lower()
+   or "already read at least one source" not in _sa)
+
+# the counter-property: a REAL continuation (a page was read) is unchanged.
+_ca, _ = addendum_for(2, WEBFACT_Q, tool_ran=True)
+ck("a real tool continuation still gets the mid-chain form",
+   "already read at least one source" in _ca)
+ck("…and is NOT re-told to start over with a read",
+   FIRST_MUST_READ not in _ca)
+
+
+# ── the stall classifier covers the phrasings a model actually stalls in ──
+print("\n== every 'announced but did nothing' phrasing is a stall ==")
+_STALLS = [
+    "I'll check the latest headlines for you now.",
+    "Let me search for that.",
+    "Give me a moment while I check.",
+    "One moment while I look that up.",
+    "Hang on, let me check the sshd config.",
+    "Bear with me, fetching the advisory.",
+    "On it -- pulling the release notes.",
+    "Sure -- searching now.",
+    "Working on it.",
+]
+for _s in _STALLS:
+    ck(f"stall: {_s[:38]!r}", Bc.reply_is_bare_stall(_s), _s)
+
+print("\n== and these are NOT stalls (nudging them loops or repeats) ==")
+_NOT = [
+    ("a delivered answer", "The latest nmap is 7.95, released in 2024."),
+    ("a promise that also delivers", "Let me check: the answer is 42."),
+    ("a report with a gerund mid-sentence",
+     "Found 3 hosts, still scanning the rest -- 192.168.1.1 is up."),
+    ("a request for the operator's input", "Give me the target and I'll scan it."),
+    ("a bare operator question", "Which target should I scan?"),
+    ("a courtesy sign-off", "Let me know if you want me to dig into any of these."),
+]
+for _label, _s in _NOT:
+    ck(f"not a stall: {_label}", not Bc.reply_is_bare_stall(_s), _s)
 
 
 print(f"\nturn_directives: {_p} passed, {_f} failed")
