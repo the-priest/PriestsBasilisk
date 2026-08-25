@@ -204,10 +204,43 @@ class SkillStore:
             problems.append("code must define a top-level `def run(args): ...`")
         return problems
 
+    @staticmethod
+    def _prevalidate_test(test: str) -> List[str]:
+        """A test that asserts nothing is not a test.
+
+        The runner's SKILL_TEST_OK marker catches a test that EXITS early.
+        This catches the one that never had anything to run: a blank string,
+        a comment, a docstring. Both checks are needed -- one is about
+        reaching the end, the other about there being something in between.
+        """
+        problems: List[str] = []
+        src = test or ""
+        if not src.strip():
+            problems.append("a test is required -- `test` was empty.")
+            return problems
+        try:
+            tree = ast.parse(src)
+        except SyntaxError as e:
+            problems.append(f"test syntax error line {e.lineno}: {e.msg}")
+            return problems
+        real = [n for n in tree.body
+                if not (isinstance(n, ast.Expr)
+                        and isinstance(n.value, ast.Constant)
+                        and isinstance(n.value.value, str))]
+        if not real:
+            problems.append("the test body is only comments/docstrings -- "
+                            "it asserts nothing.")
+            return problems
+        if not any(isinstance(n, ast.Assert) for n in ast.walk(tree)):
+            problems.append("the test contains no `assert` -- a test that "
+                            "cannot fail proves nothing.")
+        return problems
+
     # ── commit (after operator Apply) ──────────────────────────────────
     def commit(self, name: str, code: str, test: str, description: str,
                capabilities: List[str]) -> Dict[str, Any]:
         problems = self._prevalidate(name, code, capabilities)
+        problems += self._prevalidate_test(test)
         if problems:
             return {"ok": False, "stage": "validate", "problems": problems}
 
@@ -234,6 +267,29 @@ class SkillStore:
                         "sandbox": res,
                         "reason": ("test failed / errored / timed out in the "
                                    "sandbox; skill not saved.")}
+            # ── THE MARKER HAS TO BE READ ──────────────────────────────
+            # _make_test_runner appends `print('SKILL_TEST_OK')` as the last
+            # line of the runner precisely so that reaching it PROVES the
+            # test body ran all the way through. Nothing read it. The only
+            # condition on saving was res["ok"], which is rc == 0 -- and
+            # rc 0 does not mean the test ran:
+            #
+            #     test = ""                      -> nothing asserted, rc 0
+            #     test = "import sys; sys.exit(0)" -> exits before the marker
+            #     test = "import os; os._exit(0)"  -> same, harder to spot
+            #     test = "# TODO write this"       -> rc 0
+            #
+            # Each of those saved a skill whose test proved nothing, under a
+            # result that reported the test as having passed. The marker was
+            # written for this and then never consulted, which is worse than
+            # not having one -- it reads like a guarantee.
+            if "SKILL_TEST_OK" not in (res.get("stdout") or ""):
+                return {"ok": False, "stage": "test", "sandbox": res,
+                        "reason": ("the test exited 0 without reaching the "
+                                   "end of the test body -- an empty test, a "
+                                   "bare sys.exit()/os._exit(), or output "
+                                   "that never arrived. Nothing was proven, "
+                                   "so the skill was not saved.")}
             # promote
             dst = self.dir / name
             if dst.exists():

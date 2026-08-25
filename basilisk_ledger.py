@@ -102,15 +102,87 @@ class EvidenceLedger:
         return self.base_dir / f"{_safe_name(engagement or self._engagement)}.artifacts"
 
     def _next_step(self, engagement: str) -> int:
-        """One-based step counter — number of lines already in the ledger + 1."""
+        """One-based step counter — one past the HIGHEST step on record.
+
+        This used to be `number of lines + 1`, which aliases the moment a
+        line is removed: delete line 5 of 9 and the next event is numbered 9
+        while step 9 already exists. That is not a cosmetic collision —
+        `_write_artifact` names the file `step-0009.txt`, so the new event
+        OVERWRITES the earlier event's captured output. A single deletion
+        therefore destroyed a second, unrelated piece of evidence, silently,
+        in a module whose entire purpose is that nothing goes missing
+        without a trace.
+
+        Taking the maximum recorded step means step numbers only ever move
+        forward, so a gap stays visibly a gap and no artifact is ever
+        reused. Falls back to the line count if nothing parses.
+        """
         path = self._ledger_path(engagement)
         if not path.exists():
             return 1
         try:
+            highest = 0
+            lines = 0
             with open(path, "r", encoding="utf-8") as f:
-                return sum(1 for _ in f) + 1
+                for ln in f:
+                    if not ln.strip():
+                        continue
+                    lines += 1
+                    try:
+                        obj = json.loads(ln)
+                    except Exception:
+                        continue
+                    if isinstance(obj, dict):
+                        try:
+                            highest = max(highest, int(obj.get("step") or 0))
+                        except (TypeError, ValueError):
+                            continue
+            return max(highest, lines) + 1
         except Exception:
             return 1
+
+    # ── the hash chain ────────────────────────────────────────────────
+    # WHY THIS EXISTS.  Before it, every ledger line was integrity-checked in
+    # ISOLATION: `verify()` re-hashed each artifact against the hash on its
+    # own line. That catches editing a captured output. It does not catch —
+    # and reported `intact: true` for — any of:
+    #
+    #   · deleting a whole line together with its artifact file: the scan
+    #     that ran is simply not in the record, and nothing says so;
+    #   · reordering lines, so the record no longer shows what ran first;
+    #   · rewriting a line's command/reason/rc wholesale, since the only
+    #     hash on the line covered the ARTIFACT, never the line itself.
+    #
+    # For a chat transcript that would be tolerable. For the artefact this
+    # module's docstring calls "a defensible pentest deliverable", tamper
+    # evidence that cannot see a deletion is the wrong shape entirely: the
+    # cheapest and most likely edit is the one that leaves no mark.
+    #
+    # Each event now carries `prev` — the digest of the event before it —
+    # and `entry_sha256`, its own digest. Removing, reordering or editing a
+    # line breaks the link at that point and `verify()` names the step.
+    _GENESIS = "0" * 64
+
+    @staticmethod
+    def _entry_digest(event: Dict[str, Any]) -> str:
+        """Digest of one event, over a canonical form.
+
+        Deliberately independent of how the line happens to be written:
+        sorted keys, no spaces. A re-serialisation with different separators
+        must not read as tampering.
+        """
+        body = {k: v for k, v in event.items() if k != "entry_sha256"}
+        return _sha256(json.dumps(body, ensure_ascii=False, sort_keys=True,
+                                  separators=(",", ":")).encode("utf-8"))
+
+    def _last_digest(self, engagement: str) -> str:
+        """The digest to chain the next event onto."""
+        events = self.read_events(engagement)
+        for e in reversed(events):
+            d = e.get("entry_sha256")
+            if d:
+                return str(d)
+        return self._GENESIS
 
     # ── recording ─────────────────────────────────────────────────────
     def record(self, command: str, reason: str, result: Dict[str, Any],
@@ -183,7 +255,9 @@ class EvidenceLedger:
                     "stderr_sha256": _sha256(se_b) if se_b else None,
                     "artifact": artifact_rel,
                     "artifact_sha256": artifact_sha,
+                    "prev": self._last_digest(engagement),
                 }
+                event["entry_sha256"] = self._entry_digest(event)
                 line = json.dumps(event, ensure_ascii=False)
                 with open(self._ledger_path(engagement), "a",
                           encoding="utf-8") as f:
@@ -311,10 +385,57 @@ class EvidenceLedger:
                 problems.append({"step": e.get("step"),
                                  "issue": "hash mismatch",
                                  "legacy": True})
+        # ── THE CHAIN ──────────────────────────────────────────────────
+        # Everything above verifies each line against ITSELF, which is why
+        # a deleted line used to come back `intact: true` — there was no
+        # line left to disagree with. Walk the links instead: each event
+        # names the digest of the one before it, so a removal, a reorder or
+        # an edited command shows up as a break AT the step where it
+        # happened, which is the report the operator actually needs.
+        chain_checked = chain_ok = 0
+        expected = self._GENESIS
+        legacy = 0
+        started = False
+        for e in events:
+            own = e.get("entry_sha256")
+            if not own:
+                # Written before the chain existed. Not a break — but it is
+                # not evidence of continuity either, and saying so is the
+                # honest report. A legacy prefix is tolerated; a legacy line
+                # AFTER the chain has started is a break, because that is
+                # what a stripped line looks like.
+                if started:
+                    problems.append({"step": e.get("step"),
+                                     "issue": "unchained line inside a "
+                                              "chained ledger"})
+                else:
+                    legacy += 1
+                continue
+            started = True
+            chain_checked += 1
+            recomputed = self._entry_digest(e)
+            if recomputed != own:
+                problems.append({"step": e.get("step"),
+                                 "issue": "ledger line was edited "
+                                          "(entry hash mismatch)"})
+                expected = str(own)      # resync so one edit is one report
+                continue
+            if str(e.get("prev") or "") != expected:
+                problems.append({"step": e.get("step"),
+                                 "issue": ("chain break — the preceding "
+                                           "event is missing, reordered or "
+                                           "altered")})
+            else:
+                chain_ok += 1
+            expected = str(own)
+
         return {
             "engagement": _safe_name(engagement or self._engagement),
             "artifacts_checked": checked,
             "artifacts_matched": matched,
+            "chain_checked": chain_checked,
+            "chain_ok": chain_ok,
+            "legacy_unchained": legacy,
             "intact": len(problems) == 0,
             "problems": problems,
         }

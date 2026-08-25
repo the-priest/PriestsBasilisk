@@ -530,8 +530,50 @@ def _is_critical_dir_itself(t: str) -> bool:
     return norm in _CRITICAL_EXACT
 
 
+def _short_opt_payloads(args: List[str], letters: str) -> List[str]:
+    """Every candidate inline-code string for short option(s) `letters`.
+
+    ── SHORT OPTIONS CLUSTER, AND THAT WAS A FULL BYPASS OF THE FLOOR ──
+    POSIX lets `-c` ride in a cluster: `bash -cx`, `sh -ec`, `bash -xc`,
+    `python3 -Bc`, `python3 -uc`, `python3 -BOc`. The old helpers matched only
+    an EXACT `-c` token or a glued `-c<code>`, so every one of those missed,
+    the recursion into the payload never ran, and argv[0] was judged as a
+    harmless `bash`/`python3`. Verified before the fix:
+
+        is_catastrophic_command('bash -cx "rm -rf /"')            -> False
+        is_catastrophic_command('python3 -Bc "shutil.rmtree(/)"') -> False
+
+    and all of those shapes were then re-run through a real bash with the
+    destructive verb swapped for `touch MARKER` — every one created the marker.
+    A gate documented as having no override had a ten-shape hole in it.
+
+    DELIBERATELY LIBERAL. Returning an extra candidate can only ever cause a
+    BLOCK, never an allow, and over-blocking is the counter-property the benign
+    corpus in tests/test_safety_gate.py already guards. Missing one is
+    unrecoverable; guessing one costs a false positive that a test will catch.
+    """
+    out: List[str] = []
+    for i, a in enumerate(args):
+        if not a.startswith("-") or a.startswith("--") or len(a) < 2:
+            continue
+        body = a[1:]
+        hit = next((j for j, ch in enumerate(body) if ch in letters), None)
+        if hit is None:
+            continue
+        # Glued code in the same token: `-c'rm -rf /'` arrives as `-crm -rf /`.
+        if hit < len(body) - 1:
+            out.append(body[hit + 1:])
+        # …and the next token, because a cluster like `-cx` puts the code
+        # there instead. Both are candidates; the scan decides.
+        if i + 1 < len(args):
+            out.append(args[i + 1])
+    return out
+
+
 def _payload_after(args: List[str], flag: str) -> Optional[str]:
-    """The argument following `flag` (e.g. the string after `-c`)."""
+    """The argument following `flag` (e.g. the string after `-c`).
+
+    Kept for the literal-token separators (`<<<`) that do not cluster."""
     for i, a in enumerate(args):
         if a == flag and i + 1 < len(args):
             return args[i + 1]
@@ -619,21 +661,50 @@ _RMTREE_HOME_RE = re.compile(
     r"(?:pathlib\.)?Path\s*\.\s*home\s*\(\s*\))", re.S)
 
 
-def _inline_payload(rest: List[str], flags) -> Optional[str]:
-    """The code string after an inline flag (`-c "code"`), handling both the
-    space-separated form and the glued short-flag form (`-ccode`)."""
+def _inline_payloads(rest: List[str], flags) -> List[str]:
+    """Every code-string candidate after an inline flag.
+
+    Handles the space-separated form (`-c "code"`), the glued short-flag form
+    (`-ccode`) AND the clustered form (`python3 -Bc "code"`, `-uc`, `-BOc`),
+    which the previous single-result version missed entirely — see
+    _short_opt_payloads for what that cost."""
+    letters = "".join(f[1:] for f in flags if len(f) == 2 and f.startswith("-"))
+    out: List[str] = []
+    if letters:
+        out.extend(_short_opt_payloads(list(rest), letters))
+    # Long or multi-character flags keep the plain exact-token behaviour.
     for i, a in enumerate(rest):
         if a in flags and i + 1 < len(rest):
-            return rest[i + 1]
-        for f in flags:
-            if len(f) == 2 and a.startswith(f) and len(a) > len(f):
-                return a[len(f):]
-    return None
+            out.append(rest[i + 1])
+    # Preserve order, drop duplicates and empties.
+    seen, uniq = set(), []
+    for x in out:
+        if x and x not in seen:
+            seen.add(x)
+            uniq.append(x)
+    return uniq
+
+
+def _inline_payload(rest: List[str], flags) -> Optional[str]:
+    """First inline-code candidate, or None. Thin wrapper kept for callers
+    that only need one; anything making a SAFETY decision must use
+    _inline_payloads and consider all of them."""
+    got = _inline_payloads(rest, flags)
+    return got[0] if got else None
 
 
 def _interpreter_payload_is_catastrophic(cmd: str, rest: List[str],
                                          depth: int) -> bool:
-    payload = _inline_payload(rest, _INLINE_FLAGS.get(cmd, ()))
+    """ALL inline-code candidates, not just the first. A clustered flag can
+    put the real code in a different token than the naive parse picks."""
+    for _pl in _inline_payloads(rest, _INLINE_FLAGS.get(cmd, ())):
+        if _interp_payload_catastrophic_one(cmd, _pl, depth):
+            return True
+    return False
+
+
+def _interp_payload_catastrophic_one(cmd: str, payload: str,
+                                     depth: int) -> bool:
     if not payload:
         return False
     # (a) shelled-out command strings → re-scan as shell (same rules → same FPs)
@@ -676,7 +747,13 @@ _PY_WRITE_TARGET_RES = [_OPEN_WRITE_RE, _PATH_WRITE_RE, _OS_REMOVE_RE,
 
 def _interpreter_payload_tampers_self(cmd: str, rest: List[str],
                                       depth: int) -> bool:
-    payload = _inline_payload(rest, _INLINE_FLAGS.get(cmd, ()))
+    for _pl in _inline_payloads(rest, _INLINE_FLAGS.get(cmd, ())):
+        if _interp_payload_tampers_one(cmd, _pl, depth):
+            return True
+    return False
+
+
+def _interp_payload_tampers_one(cmd: str, payload: str, depth: int) -> bool:
     if not payload:
         return False
     # shelled-out tamper command → re-check via the shell tamper path
@@ -709,9 +786,11 @@ def _sub_is_catastrophic(args: List[str], depth: int) -> bool:
 
     # recurse into `sh -c "<payload>"` / `bash -c …`
     if cmd in _SHELLS:
-        payload = _payload_after(args, "-c")
-        if payload and depth < 4:
-            return _scan(payload, depth + 1)
+        # `-c` may be clustered (`-cx`, `-ec`, `-xc`) — see _short_opt_payloads.
+        if depth < 4:
+            for payload in _short_opt_payloads(args, "c"):
+                if payload and _scan(payload, depth + 1):
+                    return True
         # `sh <<< 'rm -rf /'` — a here-string is a -c payload wearing a
         # different hat.  shlex hands us '<<<' as its own token.
         here = _payload_after(args, "<<<")

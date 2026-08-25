@@ -403,9 +403,18 @@ ck("the two modes are named once per turn, not once per round-trip",
 # ═══════════════════════════════════════════════════════════════════════
 print("\n== the clock is stopped on every teardown path ==")
 
+# v1.0.0.0 widened this: the clear loop now disposes MessageWidget rows too,
+# because a bubble's signal handlers hold a C-side closure back to the bubble
+# and unparenting alone frees nothing (20 chats visited 3 times went 270 ->
+# 452 -> 634 live bubbles). So the assertion is on the PROPERTY -- a removed
+# feed is disposed -- rather than on the literal isinstance line, which is now
+# a tuple and would have to be rewritten again the next time it grows.
+_lc = _body("_load_chat")
 ck("switching chat disposes the feeds it removes",
-   "isinstance(child, ActivityFeedWidget)" in _body("_load_chat")
-   and "dispose_widget()" in _body("_load_chat"))
+   "ActivityFeedWidget" in _lc and "dispose_widget()" in _lc)
+ck("...and the message bubbles it removes, which leak the same way",
+   "MessageWidget" in _lc and "dispose_widget()" in _lc,
+   "a bubble unparented with its handlers still connected is never freed")
 # v9.9.0 moved the live feed OUT of the message list and into a pinned dock
 # above the composer, so "clear the reference" became "empty the dock", which
 # does both. The property is unchanged: after a chat switch no feed from the

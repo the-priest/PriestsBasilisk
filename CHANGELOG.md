@@ -1,3 +1,257 @@
+## v1.0.0.0
+
+### "it answers twice"
+
+That was the report, and it turned out to be four separate bugs pointing the
+same way. Every one of them re-kicked a turn that had already delivered a
+complete answer, and none of them asked whether an answer had been delivered.
+
+**A code fence made the host demand the answer again.** `parse_tool_calls`
+masks ``` fences on purpose -- a tool tag inside a fence is the model showing
+the operator what a call looks like, and executing it would be a real bug.
+`looks_like_failed_tool_call` did not mask them. The host compares the two:
+"nothing parsed, but protocol is present" reads as "the model tried to call a
+tool and we could not read it", so it injected a correction and kicked the
+turn again. The model had nothing new to send, so it repeated its answer --
+twice, because the budget is 2.
+
+One of the debris patterns is a bare `name="..."`>, so this did not even need
+a tool tag. Verified against the real functions:
+
+```
+reply                                            parse  failed_call
+prose + ```xml <tool name="run">{}</tool> ```      0      True
+prose + ```html <input name="username"> ```        0      True
+```
+
+The commonest trigger was asking Basilisk to explain its own tool syntax,
+because the force-answer text quotes that syntax back at the model.
+
+The display side had the same blind spot from the other direction:
+`strip_tool_calls` and `scrub_tool_debris` deleted the example *out of the
+code block*, so the operator was shown an empty ```xml ``` -- which reads as
+the app being broken, the impression those functions exist to prevent. Both
+now work outside fences only, so the parser and the page agree about what the
+reply said.
+
+**A short answer was classified as a stall.** `reply_is_bare_stall` dropped
+every sentence containing a forward-looking phrase and measured the remainder
+against an 80-character bar. When the promise and the answer shared one
+sentence -- which is how people write -- the answer went out with the promise:
+
+```
+"Let me check that for you: the answer is 42."          -> stall
+"I'll summarise: the host is up and port 22 is open."   -> stall
+```
+
+Both complete replies. Nudge budget 2, so: the same answer three times. This
+is the same three-times bug the function's own docstring says was fixed for
+*long* answers; it survived for short ones because the fix measured what was
+left over rather than what was delivered. Now a colon or dash inside an
+intent sentence marks the delivery and is kept at any length, and a
+past-tense report ("I ran the scan. Ports 22 and 80 are open.") counts as
+delivery on its own. 17 answers and 8 genuine stalls, all classified
+correctly, both directions pinned in tests.
+
+**One character was "degraded".** `looks_degraded` returned True for anything
+under 2 characters, and a degraded verdict costs a full extra turn whose reply
+is appended *below* the one already on screen. So "how many open ports?" ->
+"7" was among the likeliest replies to be shown twice. Empty is degraded; one
+character is an answer.
+
+**A delayed kick could not be cancelled, and the app called itself idle while
+one was pending.** Three places scheduled the next turn with a bare
+`GLib.timeout_add(...)` and discarded the source id -- after nulling all three
+fields `_is_busy()` inspects. For up to 60 seconds of error back-off the app
+reported itself free. Type a follow-up in that window and you got two live
+streams writing through the same widget. Press Stop first and it was worse:
+`_stop_requested` was the only guard, and `_send_user_message` clears that
+flag on entry, so Stop did not stop it. Delayed kicks now go through one
+cancellable helper, `_is_busy()` counts a pending kick, and Stop cancels it.
+
+**And no stream knew which turn it belonged to.** The callbacks all acted on
+`self.streaming_msg_widget`, meaning whatever turn is current when the
+callback *runs*. Every stream now carries an epoch; a stale one cannot write
+a token, finalise a turn, or schedule a retry.
+
+### The scroll position was right and the picture was wrong
+
+`GtkAdjustment.set_value()` only emits `::value-changed` when the number
+actually moves, and `GtkViewport` applies a scroll offset only when that
+signal tells it to. Loading a chat clamps the adjustment to the new bottom
+*before* the viewport is allocated, so the snap that followed was a silent
+no-op: the viewport never learned, and nothing ever changed the value again to
+tell it. Measured in the running app -- `value=1174.0, upper=1702.0,
+page=528.0`, a numerically perfect bottom, rendering offset 0. The scrollbar
+reads the adjustment, so its thumb sat confidently at the bottom of a view
+showing the top of the answer.
+
+A snap that would be a no-op now bounces through 0 first, and re-asserts for
+four frames so a snap issued before allocation still lands.
+
+While it was open: an arriving assistant bubble used to slam the view to the
+bottom and re-arm the stick, discarding the position the operator was reading
+at (measured: 4769px, and with the rolling trim the row under the cursor was
+unparented). Sending a message is a request to see it; receiving one is not.
+
+### Every bubble leaked, forever
+
+`dispose_widget()` nulled its Python attributes and its docstring said that
+"breaks any reference cycle so CPython reclaims the widget". It did not. The
+cycle runs
+
+```
+MessageWidget -> speak_btn -> GObject signal closure -> callback -> MessageWidget
+```
+
+and CPython's collector cannot see the two hops that live in C. Measured over
+120 exchanges with a hard 20-row display budget:
+
+```                     rows on screen   live MessageWidget   live CodeBlockWidget
+before                        20               130                  120
+after                         20                20                   10
+```
+
+Exactly one leaked per assistant message, each still holding its Pango
+layouts, textures and TextViews -- the unbounded memory growth, and the reason
+long conversations got slower. Chat switching leaked worse (20 chats visited
+three times: 270 -> 452 -> 634) because the clear loop disposed only activity
+feeds, never bubbles. Handlers are now tracked at connect time and cut on
+disposal, recursively through every block inside the bubble.
+
+### Gates that reported themselves intact
+
+**Clustered short options walked past the destructive floor.** The interpreter
+and shell branches matched their inline-code flag as an exact token, so `-c`
+was recognised and `-Bc` was not -- and `-Bc` is what runs the code.
+`bash -cx`, `bash -xc`, `sh -ec`, `sh -exc`, `bash -lc`, `python3 -Bc`,
+`-uc`, `-BOc` all returned False from `is_catastrophic_command`. Each was
+confirmed to really execute in a real shell first, using this project's own
+marker method. Now 0 bypasses and 0 new false positives over a 34-command
+benign corpus.
+
+**`awk` and `sed` were on the introspection allowlist, and they execute.**
+Membership there short-circuits both the quoted-argument recursion and the
+unattributed-tool backstop, so `awk 'BEGIN{system("nmap -sS 8.8.8.8")}'` was
+allowed with `tools=[]`. Moving them wholesale would have been the wrong
+trade -- `sed 's/nmap/x/' notes.txt` and `awk '{print $1}' scan.txt` are
+ordinary text processing -- so the decision is made on the program text, and
+only the forms that can actually spawn a process are treated as executors.
+The first draft of that pattern matched a pipe beside a quote, which read
+`awk 'BEGIN{FS="|"}'` -- the most common awk idiom there is -- as an executor;
+the counter-property corpus caught it before it shipped.
+
+**Single-label hosts were dropped on the floor.** `nmap -sS acme.com dc01`
+extracted `['acme.com']` and was allowed, while nmap resolves `dc01` through
+the DNS search domain and scans it. One in-scope operand laundered an unlisted
+host. A bare label has no authoritative form to match a scope rule against, so
+it is refused as uncertain with an explanation, not silently kept.
+
+The first draft of that fix escalated on any leftover positional and refused
+`dig acme.com A`, `amass enum -d acme.com` and `nmap -sV --script vuln
+10.0.0.5` -- a record type, a subcommand, and an unknown flag's operand.
+Narrowed to tools whose positionals are host specifications and nothing else,
+and to labels that do not follow a flag. 19 ordinary in-scope commands, none
+refused.
+
+### Features that silently did nothing
+
+- **The heavy-effort rung never fired.** It was guarded by `not _auton`, and
+  `migrate_settings` pops `approval_mode` outright, so `_auton` is always True
+  and the branch was unreachable. `hard_engagement_model` was never consulted
+  and the larger token budget was never granted.
+- **Vision was broken out of the box.** The default `vision_model` named a
+  model no provider in the registry carries, so every image read failed with
+  an error blaming a setting the operator had never touched. The default now
+  names a model the catalogue actually advertises as vision-capable, and a
+  stale id repairs itself at call time.
+- **`launch_app` discarded its arguments** on the gtk-launch path and still
+  reported `ok: True` -- so `launch_app("firefox", "https://acme.com")` opened
+  an empty browser and told the model the URL had been opened.
+- **`tool_screenshot("shot.png")` always failed.** A bare filename gives
+  `os.path.dirname` of `""`, and `os.makedirs("")` raises, outside any try.
+  The most natural argument was the one guaranteed not to work.
+- **`web_read`'s contract claimed a gate it does not have.** The docstring
+  said any non-trusted public host needs operator approval; the gate lives in
+  the GUI wrapper behind `if self._unleashed`. A tool docstring is what the
+  model reasons from, so a safety property that does not hold in the default
+  mode is worse than none. The SSRF floor, which really is unconditional, is
+  now stated first.
+- **`FOO=bar sudo ...` got no askpass.** `command_needs_sudo` accepts leading
+  environment assignments; `_inject_askpass` did not, so the host prompted for
+  the password, wrote the helper, and then ran a `sudo` with nothing to reach
+  for -- which on a thread with no tty hangs until timeout. Both now share one
+  prefix.
+- **A namespaced tool name was unreadable.** `_NAME_ATTR_RE` accepted only
+  `[a-zA-Z_]+`, while the dialect normaliser directly above it emits names
+  captured as `[A-Za-z_][\w.-]*`. So `<function=functions.web_read>` was
+  faithfully rewritten to `<tool name="functions.web_read">` and then refused
+  by the regex meant to read it back: the call leaked onto the screen as raw
+  markup and never ran.
+
+### Two quadratic passes on attacker-supplied bytes
+
+`_wr_html_to_text` stripped script/style blocks with a lazy `.*?`, which on an
+unclosed `<script>` expands to end-of-string and fails -- from every opener in
+the page. This is fed by `web_read`, i.e. by bytes chosen by whoever is on the
+other end of the fetch, on the thread the operator is waiting on. Replaced
+with a linear forward walk; the anchor-text pattern, which has the same shape,
+is bounded.
+
+### Evidence and workspace
+
+- **The ledger had no chain.** Every line was integrity-checked in isolation,
+  so deleting a whole line with its artifact came back `intact: true` -- and
+  the cheapest, likeliest edit is the one that leaves no mark. Worse, the step
+  counter was "line count + 1", so removing a line made the next event reuse
+  an existing step number and *overwrite* that step's artifact: one deletion
+  destroyed a second piece of evidence, silently. Events now carry `prev` and
+  `entry_sha256`, `verify()` walks the links and names the step where the
+  chain breaks, and step numbers only ever move forward.
+- **`export_zip(out_path=...)` wrote anywhere on disk.** Every other path in
+  the workspace module goes through `_confine`, but the default export
+  destination is deliberately *outside* the workspace, so this argument was
+  left unchecked entirely. Now confined to the workspace, its parent and the
+  operator's home, never silently overwriting, and never conjuring a directory
+  tree on the way.
+- **The zip-bomb caps were consulted second.** `zf.testzip()` fully
+  decompresses every member and ran *before* `_safe_members`, the function
+  holding the caps -- so the archive the size cap exists to refuse was expanded
+  in full before anything was allowed to say no. Filter first, then verify CRCs
+  over the accepted members only.
+- **The export gate could be unlocked by running the tests without a
+  baseline.** `compare_to_baseline` zeroed `edits_since_verify` before the
+  no-baseline early return, so a run that by its own admission attributes
+  nothing left the gate with nothing to object to.
+- **A skill could be saved with a test that proved nothing.** The runner
+  appends `print('SKILL_TEST_OK')` precisely so that reaching it proves the
+  test body ran, and nothing read it -- the only condition was rc 0, which an
+  empty test, a bare `sys.exit(0)` or a comment all satisfy. The marker is now
+  read, and a test with no `assert` is rejected before it runs.
+
+### GUI, the rest of it
+
+- A reply in flight survived a chat switch as a widget with no parent: the
+  finished answer went into the database and was invisible until the operator
+  happened to switch chats again. It is re-attached to its own chat now.
+- Activity feeds were spending the 20-row display budget, so a 12-turn
+  agentic chat showed 13 exchanges where a plain one showed 20. The budget
+  counts conversation rows.
+- An empty user message rendered as a padded capsule with nothing in it
+  (`"\n\n"` produced a 210px blank bubble).
+- The window declared a 360px minimum while its content pane needs 480, which
+  does not make things fit -- it clips them off the right edge, with libadwaita
+  saying so on every layout pass. The message bubbles were never the
+  constraint; every block type wraps or scrolls cleanly down to 350px. The
+  declared minimum is now the true one.
+
+### Tests
+
+49 suites, 3,306 checks. `tests/test_v1_regressions.py` is new and every check
+in it fails against v9.9.2 -- including the counter-property corpora, because
+three of these fixes over-blocked on their first draft and the corpus is what
+caught it.
+
 ## v9.9.2
 
 ### The overflow, and two bugs I had introduced myself

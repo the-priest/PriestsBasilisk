@@ -371,15 +371,40 @@ def import_zip(zip_path: str, name: str = "") -> Dict[str, Any]:
         tree.mkdir(parents=True, exist_ok=True)
 
         with zipfile.ZipFile(src) as zf:
-            bad = zf.testzip()
-            if bad is not None:
-                return {"ok": False,
-                        "error": f"archive is corrupt (first bad entry: {bad})"}
+            # ── ORDER MATTERS, AND IT WAS BACKWARDS ────────────────────
+            # `zf.testzip()` fully DECOMPRESSES every member to check its
+            # CRC. It used to run here, BEFORE _safe_members -- which is
+            # the function holding the zip-bomb caps. So the archive that
+            # the size cap exists to refuse was expanded in full, all of
+            # it, before anything was allowed to say no. The caps were
+            # sound; they were simply consulted second.
+            #
+            # A 700 KB archive declaring 1.2 GB of content is refused by
+            # _safe_members in microseconds off the central directory,
+            # and cost seconds of CPU to testzip first. Scale the
+            # declared size up and the pre-check never returns.
+            #
+            # So: filter first, then verify CRCs -- and verify only the
+            # members that survived the filter, since a rejected entry is
+            # never going to be written and its integrity is irrelevant.
             members, rejected = _safe_members(zf, str(tree))
             if not members:
                 return {"ok": False,
                         "error": "archive contained no extractable files",
                         "rejected": rejected[:40]}
+            # Same guarantee testzip gave -- corruption is found before a
+            # single byte is written -- at the cost of the accepted set
+            # only, and streamed rather than materialised.
+            for info in members:
+                try:
+                    with zf.open(info) as fh:
+                        while fh.read(1 << 20):
+                            pass
+                except Exception as exc:
+                    return {"ok": False,
+                            "error": (f"archive is corrupt (bad entry: "
+                                      f"{info.filename}: "
+                                      f"{type(exc).__name__})")}
             for info in members:
                 zf.extract(info, str(tree))
 
@@ -1013,6 +1038,66 @@ def revert(path: str = "") -> Dict[str, Any]:
 # EXPORT
 # ═════════════════════════════════════════════════════════════════════
 
+def _confine_export(root: str, out_path: str) -> str:
+    """Resolve an export destination, or refuse it.
+
+    `_confine` cannot be used here and that is the whole reason this bug
+    existed: the DEFAULT export destination is deliberately OUTSIDE the
+    workspace -- `<root>/../<name>-<stamp>.zip` -- so the operator can pick
+    the zip up without digging into the sandbox. Every other path in this
+    module goes through `_confine`, so `out_path` was left with no check at
+    all and simply did this:
+
+        dest = os.path.realpath(os.path.expanduser(out_path))
+
+    which writes a zip anywhere the process can write. `export_zip(
+    out_path="/etc/cron.d/x")` lands in /etc; `out_path="~/backups/2024.zip"`
+    overwrites a real backup; and the `os.makedirs` that followed created
+    whatever directory tree was needed to get there. The model picks this
+    argument, so "it would never do that" is not a boundary.
+
+    The rule is the smallest one that keeps the feature working: the export
+    may land in the workspace, in the workspace's parent (where the default
+    already goes), or under the operator's home -- and nowhere else. An
+    existing file is never silently overwritten.
+    """
+    if not out_path:
+        raise ContainmentError("empty export path")
+    cand = os.path.realpath(os.path.expanduser(out_path))
+    real_root = os.path.realpath(root)
+    allowed = [real_root, os.path.dirname(real_root)]
+    home = os.path.realpath(os.path.expanduser("~"))
+    if home and home != os.sep:
+        allowed.append(home)
+    try:
+        base = os.path.realpath(str(_base()))
+        if base:
+            allowed.append(base)
+    except Exception:
+        pass
+
+    for a in allowed:
+        if not a or a == os.sep:
+            continue
+        try:
+            if os.path.commonpath([a, cand]) == a:
+                break
+        except ValueError:
+            continue
+    else:
+        raise ContainmentError(
+            "export destination %r is outside the workspace, its parent and "
+            "your home directory -- refusing. Export without out_path and "
+            "move the zip yourself if it really belongs there." % out_path)
+
+    target = cand if cand.endswith(".zip") else cand + ".zip"
+    if os.path.exists(target):
+        raise ContainmentError(
+            "export destination %r already exists -- refusing to overwrite "
+            "it. Choose another name or delete it first." % target)
+    return cand
+
+
 def _export_gate() -> Optional[Dict[str, Any]]:
     """Reasons NOT to export.  None when it is safe to go."""
     dirty = bool(_STATE.modified or _STATE.created or _STATE.deleted)
@@ -1051,12 +1136,27 @@ def export_zip(out_path: str = "", include_secrets: bool = False,
         root = _require()
         stamp = time.strftime("%Y%m%d-%H%M%S")
         if out_path:
-            dest = os.path.realpath(os.path.expanduser(out_path))
+            try:
+                dest = _confine_export(root, out_path)
+            except ContainmentError as exc:
+                return {"ok": False, "refused": True, "reason": "containment",
+                        "error": str(exc)}
         else:
             dest = str(Path(root).parent / f"{_STATE.name}-{stamp}.zip")
         if not dest.endswith(".zip"):
             dest += ".zip"
-        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        parent = os.path.dirname(dest)
+        # Create the immediate directory if it is missing, never a tree.
+        # `os.makedirs(..., exist_ok=True)` would happily conjure
+        # `/opt/a/b/c` on the way to a filename, which is filesystem
+        # mutation the operator never asked for.
+        if parent and not os.path.isdir(parent):
+            if not os.path.isdir(os.path.dirname(parent) or "/"):
+                return {"ok": False, "refused": True, "reason": "containment",
+                        "error": (f"refusing to create a directory tree for "
+                                  f"the export: {parent!r} does not exist and "
+                                  f"neither does its parent")}
+            os.makedirs(parent, exist_ok=True)
 
         # ── EXPORT GATE ────────────────────────────────────────────────
         # Refuse to hand back a zip whose changes were never verified, or
@@ -1345,12 +1445,28 @@ def compare_to_baseline(raw: str, rc: int = 0) -> Dict[str, Any]:
     p = parse_test_output(raw, rc)
     _STATE.verify_count += 1
     _pending = _STATE.edits_since_verify
-    _STATE.edits_since_verify = 0
     if not _BASELINE:
+        # DO NOT CLEAR THE COUNTER HERE.
+        #
+        # It used to be zeroed on the line above this branch, which meant a
+        # verify run with no baseline -- a run that by its own admission
+        # attributes NOTHING -- reset `edits_since_verify` to 0 and left
+        # `last_verdict` unset. _export_gate() checks exactly those two
+        # fields, so it then found nothing to object to and opened. The
+        # export gate is the one hard rule in this module, and it could be
+        # unlocked by running the tests without ever having baselined them.
+        #
+        # An unattributable run has verified nothing, so the edits are
+        # still unverified and the verdict is still absent. Say so, and let
+        # the gate keep refusing until there is a real reading or the
+        # operator passes force=True himself.
+        _STATE.last_verdict = "no-baseline"
         return {"ok": True, "no_baseline": True, "current": p,
+                "edits_still_unverified": _pending,
                 "warning": ("No baseline recorded, so nothing can be "
                             "attributed. Every failure below might predate "
                             "your edits. Revert, baseline, retry.")}
+    _STATE.edits_since_verify = 0
     before = set(_BASELINE.get("failed_names") or [])
     now = set(p["failed_names"])
     fixed = sorted(before - now)

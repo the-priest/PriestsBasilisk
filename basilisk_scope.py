@@ -273,6 +273,73 @@ _TOOL_NAME_EXECUTORS: Set[str] = {
 }
 _TOOL_NAME_CONSUMERS -= _TOOL_NAME_EXECUTORS
 
+# ── awk AND sed BELONG IN BOTH SETS, DEPENDING ON THE PROGRAM ────────
+# They were left on the introspection list when find/docker/git were moved
+# off it, and they execute just as happily:
+#
+#     awk 'BEGIN{system("nmap -sS 8.8.8.8")}'     -> was ALLOWED, tools=[]
+#     sed 's/x/y/e' file                          (GNU sed runs the result)
+#
+# Membership in _TOOL_NAME_CONSUMERS short-circuits BOTH the quoted-argument
+# recursion and the unattributed-tool backstop, so the scan was invisible.
+#
+# Moving them wholesale would be the wrong trade: `sed 's/nmap/x/' notes.txt`
+# and `awk '{print $1}' scan.txt` are ordinary text processing that names a
+# tool without running anything, and blocking those is exactly the
+# over-blocking this module's counter-property corpus forbids. So the decision
+# is made on the PROGRAM TEXT: only the forms that can actually spawn a
+# process are treated as executors.
+# awk executes a process three ways, and ONLY these three.  An earlier draft
+# of this pattern matched a pipe character next to a quote, which made
+# `awk 'BEGIN{FS="|"}{print $2}'` — setting the field separator to a pipe, the
+# single most common awk idiom in this codebase's own corpus — read as an
+# executor.  A false refusal on ordinary text processing is the failure this
+# module's counter-property corpus exists to catch, so the pipe forms are
+# matched as OPERATORS (output redirect into a command, or command-into-
+# getline), never as a character that happens to sit beside a quote.
+_AWK_EXEC_RE = re.compile(
+    r"""system\s*\("""                      # system("...")
+    r"""|\bprintf?\b[^;}\n]*\|"""           # print ... | "cmd"
+    r"""|\|\s*&?\s*getline\b""",            # "cmd" | getline  /  co-process
+    re.S)
+
+# GNU sed executes two ways: the `e` FLAG on s///, and the `e` COMMAND.
+#   s/x/y/e          run the whole pattern space after substituting
+#   1e ls    /x/e c  run the given command (or the pattern space, bare `e`)
+# The command form takes an optional address, so it is anchored at the start of
+# a script or just after a `;` separator — anchoring on whitespace alone made
+# `sed '1e ls'` invisible while `sed 's/end/END/' notes.md` stayed clean only
+# by luck of spacing.
+_SED_EXEC_RE = re.compile(
+    r"""s([^\w\s])(?:[^\\]|\\.)*?\1(?:[^\\]|\\.)*?\1[a-df-z]*e"""
+    r"""|(?:^|;)\s*(?:\d+(?:\s*,\s*(?:\d+|\$))?|\$|/(?:[^/\\]|\\.)*/)?\s*e(?:\s|$|;)""",
+    re.S)
+
+# `-e PROG` arrives as its own shlex token, but `--expression=PROG` does not:
+# the program text is glued to a flag name, which defeats an anchored match.
+_SED_LONG_EXPR_RE = re.compile(r"^--(?:e|ex|exp|expr|expre|expres|express|"
+                               r"expressi|expressio|expression)=", re.I)
+
+
+def _awk_sed_executes(argv: List[str]) -> bool:
+    """True when an awk/sed invocation can spawn a process."""
+    if not argv:
+        return False
+    head = os.path.basename((argv[0] or "").strip().strip("'\""))
+    if head.endswith("awk") or head in ("awk", "gawk", "mawk", "nawk", "busybox"):
+        rx = _AWK_EXEC_RE
+    elif head in ("sed", "gsed"):
+        rx = _SED_EXEC_RE
+    else:
+        return False
+    for a in argv[1:]:
+        a = a or ""
+        if rx is _SED_EXEC_RE:
+            a = _SED_LONG_EXPR_RE.sub("", a)
+        if rx.search(a):
+            return True
+    return False
+
 # Wrappers whose -c/--command argument is a COMMAND STRING to execute, so it
 # must be recursed into exactly like a shell's. `su -c 'nmap 8.8.8.8' root`
 # otherwise consumed the payload as an inert flag value and allowed the scan.
@@ -489,11 +556,31 @@ def _resolve_command(argv: List[str]) -> Tuple[str, int]:
     return ("", -1)
 
 
+# Tools whose POSITIONAL arguments are host specifications and nothing else.
+# Used to decide whether a leftover positional that does not parse as a target
+# is a dropped host or an ordinary operand (a protocol word, a module name).
+# Kept deliberately short. The first draft of this set included dig, amass and
+# wpscan, and the counter-property corpus immediately refused `dig acme.com A`,
+# `amass enum -d acme.com` and `wpscan --url ... --enumerate u` -- the record
+# type, the subcommand and the enumeration mode are all positional words that
+# are not hosts. Only tools whose positional grammar is "one or more host
+# specifications, full stop" belong here.
+_HOST_ONLY_POSITIONALS: Set[str] = {
+    "nmap", "masscan", "naabu", "rustscan", "zmap", "unicornscan", "fping",
+    "hping3", "arp-scan", "netdiscover", "traceroute", "tracepath", "ping",
+    "ping6", "sslscan", "whatweb", "wafw00f",
+}
+
+# One DNS label: no dot, no slash, no scheme. `dc01`, `fileserver`, `web-01`.
+_BARE_LABEL_RE = re.compile(r"^(?![-_])[A-Za-z0-9_-]{1,63}(?<![-_])$")
+
+
 def _extract_from_argv(argv: List[str], out: Extraction) -> None:
     if not argv:
         return
     raw_head = _base(argv[0]).lower()
-    if raw_head in _TOOL_NAME_CONSUMERS and (
+    if (raw_head in _TOOL_NAME_CONSUMERS
+            and not _awk_sed_executes(argv)) and (
             raw_head != "command" or any(a in ("-v", "-V") for a in argv[1:])):
         return          # `which nmap`, `apt install nuclei`, `command -v ffuf`
     tool, idx = _resolve_command(argv)
@@ -557,6 +644,39 @@ def _extract_from_argv(argv: List[str], out: Extraction) -> None:
 
         if _looks_like_target(tok):
             out.targets.append(_strip_to_host(tok))
+        elif (tool in _HOST_ONLY_POSITIONALS
+              and _BARE_LABEL_RE.match(tok)
+              and not (i > 0 and rest[i - 1].startswith("-"))):
+            # SINGLE-LABEL HOSTS WERE DROPPED ON THE FLOOR.
+            #
+            #     nmap -sS acme.com dc01   ->  targets ['acme.com']  -> ALLOWED
+            #
+            # `dc01` has no dot, so _HOSTNAME_RE (which requires at least one)
+            # rejected it and this walk skipped it in silence -- while nmap
+            # resolves it perfectly well through the DNS search domain and
+            # scans it. One in-scope operand laundered an unlisted host, which
+            # is the same laundering the `evil.com/admin` note above fixed for
+            # the dotted case, reached by a different door.
+            #
+            # It cannot be added to `targets`: a bare label has no
+            # authoritative form to match a scope rule against (`dc01` may or
+            # may not be `dc01.acme.com`). So it is UNCERTAIN -- the gate
+            # refuses and tells the operator to name the host in full, which
+            # is a fixable refusal rather than a silent scan.
+            #
+            # Two restrictions keep this from manufacturing false refusals.
+            # First, the tool's positionals must be host specifications and
+            # nothing else -- `hydra -l admin -P pw.txt 10.0.0.5 ssh` takes a
+            # protocol word positionally. Second, the label must not sit
+            # directly after a flag: an UNKNOWN flag is assumed above to take
+            # no value, so `nmap -sV --script vuln 10.0.0.5` presents `vuln`
+            # here as a positional when it is really --script's argument.
+            # Escalating on an unknown flag's operand refused half the
+            # ordinary nmap corpus; escalating on a label that follows a host
+            # or another positional refuses none of it.
+            out.uncertain.append(tok)
+            out.reason = ("a single-label host (%s) cannot be matched against "
+                          "the scope rules -- give it in full" % tok)
         i += 1
 
 
@@ -706,18 +826,41 @@ def extract_targets(command: str, _depth: int = 0) -> Extraction:
             # mentions a network tool, refuse rather than reason about it.
             if b in _INTERPRETERS:
                 flags = _INLINE_FLAGS.get(b, ("-c",))
-                payload = None
-                for j in range(1, len(argv) - 1):
-                    if argv[j] in flags:
-                        payload = argv[j + 1]
-                        break
-                if payload:
-                    low = payload.lower()
-                    for t in _NETWORK_TOOLS:
-                        if re.search(rf"\b{re.escape(t)}\b", low):
-                            out.tools.append(t)
-                            out.uncertain.append(
-                                f"<inline {b} code invoking {t}>")
+                # SHORT OPTIONS CLUSTER. `python3 -Bc "…"`, `-uc`, `-BOc` all
+                # put the code where an exact-token match cannot see it, and
+                # this gate then graded the command "passive/local" — the exact
+                # fail-OPEN the module exists to prevent. Same defect and same
+                # fix as _short_opt_payloads in basilisk_safety.
+                letters = "".join(f[1:] for f in flags
+                                  if len(f) == 2 and f.startswith("-"))
+                payloads = []
+                for j, a in enumerate(argv[1:], start=1):
+                    if a in flags and j + 1 < len(argv):
+                        payloads.append(argv[j + 1])
+                        continue
+                    if (letters and a.startswith("-")
+                            and not a.startswith("--") and len(a) > 1):
+                        body = a[1:]
+                        hit = next((k for k, ch in enumerate(body)
+                                    if ch in letters), None)
+                        if hit is None:
+                            continue
+                        if hit < len(body) - 1:
+                            payloads.append(body[hit + 1:])
+                        if j + 1 < len(argv):
+                            payloads.append(argv[j + 1])
+                if payloads:
+                    _hit = False
+                    for payload in payloads:
+                        low = (payload or "").lower()
+                        for t in _NETWORK_TOOLS:
+                            if re.search(rf"\b{re.escape(t)}\b", low):
+                                out.tools.append(t)
+                                out.uncertain.append(
+                                    f"<inline {b} code invoking {t}>")
+                                _hit = True
+                                break
+                        if _hit:
                             break
                     continue
             _before = len(out.tools)
@@ -748,10 +891,62 @@ def extract_targets(command: str, _depth: int = 0) -> Extraction:
             # runs it. Check the raw head as well as the resolved one, or the
             # wrapper peel turns the former into an apparent ffuf invocation.
             introspective = (raw_head in _TOOL_NAME_CONSUMERS
+                             and not _awk_sed_executes(argv)
                              and (raw_head != "command"
                                   or any(a in ("-v", "-V") for a in argv[1:])))
-            if head in _TOOL_NAME_CONSUMERS or introspective:
+            # `head` is the RESOLVED command (after the wrapper peel), and it
+            # was tested against the introspection list unguarded — so an awk
+            # whose program spawns a process still short-circuited here even
+            # though `introspective` had correctly gone False. Both disjuncts
+            # need the executor guard, not just the raw-head one.
+            if _awk_sed_executes(argv):
+                introspective = False
+            elif head in _TOOL_NAME_CONSUMERS or introspective:
                 continue
+
+            # ── awk/sed PROGRAM TEXT IS INLINE CODE ─────────────────────
+            # Dropping awk and sed off the introspection list stopped them
+            # short-circuiting the walk, but that alone changed no verdict:
+            # the program text is a SINGLE shlex token whose basename is the
+            # whole program, so neither the quoted-argument recursion (which
+            # re-shlexes `BEGIN{system("nmap ...")}` into `BEGIN{system(nmap`)
+            # nor the unattributed-name scan (which compares basenames) can
+            # see the tool inside it.  Read it the same way an interpreter's
+            # -c payload is read: search the text for a known network tool and
+            # refuse as UNCERTAIN, because what a spawned process will
+            # actually touch cannot be determined statically.
+            if _awk_sed_executes(argv):
+                _hit = False
+                for tok in argv[1:]:
+                    low = (tok or "").lower()
+                    for t in _NETWORK_TOOLS:
+                        if re.search(rf"\b{re.escape(t)}\b", low):
+                            out.tools.append(t)
+                            out.uncertain.append(
+                                f"<{raw_head} program spawning {t}>")
+                            out.reason = (
+                                "an awk/sed program that can spawn a process "
+                                "names a network tool; its real targets are "
+                                "not statically determinable")
+                            _hit = True
+                            break
+                    if _hit:
+                        break
+                if _hit:
+                    continue
+                # awk's system("...") argument is normally right there in the
+                # program text, so the word scan above is enough for it. GNU
+                # sed's `e` is not: it executes the PATTERN SPACE -- text
+                # produced at run time from the input file -- so there is
+                # nothing in the command string to scan and no way to know
+                # what it will run. That is the definition of uncertain.
+                if raw_head in ("sed", "gsed"):
+                    out.tools.append("sed-e")
+                    out.uncertain.append("<sed `e` executes generated text>")
+                    out.reason = ("this sed script executes the text it "
+                                  "produces; what it will touch cannot be "
+                                  "determined from the command")
+                    continue
 
             # Nothing was attributed, so a quoted argument may itself BE the
             # command: `watch -n1 'nmap 8.8.8.8'` passes the scan positionally

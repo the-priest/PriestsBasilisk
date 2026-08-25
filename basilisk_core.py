@@ -512,7 +512,16 @@ DEFAULT_SETTINGS = {
     "notif_sound":             True,    # play a chime when a notification arrives
                                         # (off → image links shown as text;
                                         # turn off for OPSEC / no host contact)
-    "vision_model":            "Qwen/Qwen2.5-VL-7B-Instruct",  # vision-capable
+    # VISION WAS BROKEN OUT OF THE BOX.
+    # This defaulted to "Qwen/Qwen2.5-VL-7B-Instruct", which the provider
+    # registry does not know -- PROVIDERS_BY_KEY["siliconflow"].knows(...) is
+    # False for it -- so every image read failed with "check the vision_model
+    # name and that the provider key is set", pointing the operator at a
+    # setting he had never touched. The default now names a model the
+    # catalogue actually carries AND advertises as vision-capable, and
+    # _resolve_vision_model() below re-checks that at call time so a stale
+    # value saved by an older build repairs itself instead of failing.
+    "vision_model":            "Qwen/Qwen3.5-9B",  # vision-capable
                                         # model on the active OpenAI-compatible
                                         # provider (SiliconFlow); lets Basilisk SEE
                                         # images.  Change to any VL model the
@@ -1356,7 +1365,26 @@ class BackendRouter:
         #    own chain + a bigger reasoning budget).  Setting adaptive_effort
         #    False turns it all off and restores flat behaviour.
         if self.settings.get("adaptive_effort", True) and backend is not None:
-            _auton = self.settings.get("approval_mode", "none") == "none"
+            # ── THE HEAVY RUNG OF THE LADDER NEVER FIRED ──
+            # This used to compute
+            #
+            #     _auton = self.settings.get("approval_mode", "none") == "none"
+            #
+            # and guard the heavy branch below with `and not _auton`. But
+            # there is only one posture now -- migrate_settings() pops
+            # "approval_mode" outright ("so nothing can re-enable a
+            # confirmation prompt"), so the key is never present, .get()
+            # always returns its "none" default, _auton is always True, and
+            # `not _auton` is always False.
+            #
+            # The whole heavy branch was therefore unreachable: the bigger
+            # token budget was never granted and hard_engagement_model was
+            # never consulted. A setting the operator can pick in Settings
+            # and that silently does nothing is worse than not offering it.
+            #
+            # The guard's original meaning was "only escalate when a human is
+            # confirming each step". With no supervised mode left, the
+            # condition that survives is simply "the turn asked for heavy".
             if effort == "light":
                 max_tokens = min(
                     max_tokens,
@@ -1370,7 +1398,7 @@ class BackendRouter:
                     _info = _spec.info(model) if _spec is not None else None
                     if _info is not None and _info.think_off:
                         _extra = dict(_info.think_off)
-            elif effort == "heavy" and not _auton:
+            elif effort == "heavy":
                 max_tokens = max(
                     max_tokens,
                     self.settings.get("effort_heavy_max_tokens", 4096))
@@ -2232,7 +2260,26 @@ from basilisk_scope import enforce as _scope_enforce   # noqa: E402
 
 # Same matcher, but capturing the leading boundary so we can inject an
 # askpass flag into each `sudo` invocation when we fall back to that path.
-_SUDO_INJECT_RE = re.compile(r'(^|[\n;&|(]\s*|&&\s*|\|\|\s*)sudo(?=\s|$)')
+#
+# IT HAS TO ACCEPT EXACTLY WHAT _SUDO_RE ACCEPTS, AND IT DID NOT.
+# _SUDO_RE tolerates leading environment assignments — `FOO=bar sudo apt
+# update` is a command-position sudo and is deliberately matched there —
+# while this pattern jumped straight from the boundary to the literal
+# `sudo`. The two run in sequence on the same string, so that one shape
+# produced:
+#
+#     command_needs_sudo(cmd)  -> True   (password prompted, askpass written)
+#     _inject_askpass(cmd)     -> unchanged; no -A anywhere
+#
+# and the sudo that then ran had no askpass to reach for. On a worker thread
+# with no controlling terminal that is not a clean failure: sudo either
+# blocks on a prompt nobody can answer until the command times out, or dies
+# with "no tty present" — after the operator has already typed his password.
+# A detector and its rewriter disagreeing about what they match is worth
+# fixing at the root, so the prefix is now written once and shared.
+_SUDO_ENV_PREFIX = r'(?:\w+=\S*\s+)*'
+_SUDO_INJECT_RE = re.compile(
+    r'(^|[\n;&|(]\s*|&&\s*|\|\|\s*)(' + _SUDO_ENV_PREFIX + r')sudo(?=\s|$)')
 
 
 def _inject_askpass(command: str) -> str:
@@ -2241,7 +2288,10 @@ def _inject_askpass(command: str) -> str:
     command's stdin, so `sudo -A tee file` still works correctly."""
     if " -A" in command and "sudo -A" in command:
         return command
-    return _SUDO_INJECT_RE.sub(r'\1sudo -A', command)
+    # Group 2 is any environment assignments, which belong BEFORE sudo —
+    # `FOO=bar sudo -A ...`, never `sudo -A FOO=bar ...`, which sudo would
+    # read as the command to run.
+    return _SUDO_INJECT_RE.sub(r'\1\2sudo -A', command)
 
 
 def _ensure_askpass_helper() -> Optional[str]:
@@ -2410,9 +2460,27 @@ def _run_sudo_askpass(command: str, password: str, timeout: int,
     except Exception as e:
         return {"ok": False, "command": command,
                 "error": f"{type(e).__name__}: {e}", "needs_sudo": True}
-    finally:
-        # Drop the secret from our env copy promptly.
-        env["BASILISK_SUDO_PW"] = ""
+    # THE `finally` THAT USED TO BE HERE DID NOTHING, AND SAID IT DID.
+    #
+    #     finally:
+    #         # Drop the secret from our env copy promptly.
+    #         env["BASILISK_SUDO_PW"] = ""
+    #
+    # `env` is a local dict that goes out of scope on the next line, and the
+    # child process it was handed to has already exited by the time the
+    # assignment runs. Nothing was scrubbed from anywhere: not the child's
+    # environment (gone with the child), not the parent's os.environ (never
+    # written — the copy exists precisely so it isn't), and not the caller's
+    # `password` string, which CPython will not let anyone overwrite in
+    # place anyway.
+    #
+    # It is deleted rather than replaced because a comment asserting a
+    # security measure that was never taken is worse than no comment: it
+    # answers the question the next reader should have asked. The real
+    # lifetime is the one the docstring describes and it is already the
+    # tight one — the password reaches exactly one child's environment, for
+    # exactly the duration of that one sudo call, and the helper script on
+    # disk holds no secret of its own.
 
 
 # ── command runtime awareness: how long should this take, and when to give up ──
@@ -3242,7 +3310,13 @@ def looks_degraded(text: str) -> bool:
     """Heuristic: is this assistant turn empty, near-empty, or stuck
     repeating?  Used to trigger a provider fallback for the NEXT turn."""
     t = (text or "").strip()
-    if len(t) < 2:
+    # EMPTY IS DEGRADED. ONE CHARACTER IS AN ANSWER.
+    # The bar used to be `len(t) < 2`, which made "7" and "y" degraded --
+    # and a degraded verdict costs a full extra model turn whose reply is
+    # appended BELOW the one already on screen, so the shortest possible
+    # correct answers ("how many open ports?" -> "7") were the ones most
+    # likely to be shown twice.
+    if not t:
         return True
     words = t.split()
     if len(words) >= 8:
@@ -3350,6 +3424,44 @@ _TABLE_ROW_RE = re.compile(r"^\s*\|.*\|", re.M)
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+|\n+")
 
 
+# Past-tense delivery: the reply is REPORTING, not promising. Kept narrow --
+# only first-person completed actions, so "I will check" and "checking" do not
+# match while "I checked" and "I have run" do.
+_PAST_DELIVERY_RE = re.compile(
+    r"\b(?:i|we)\s+(?:have\s+|had\s+|just\s+)?"
+    r"(?:checked|ran|run|scanned|found|tested|looked|read|listed|confirmed|"
+    r"verified|enumerated|reviewed|examined|measured|compared|counted|"
+    r"searched|queried|fetched|inspected|tried|completed|finished)\b",
+    re.I)
+
+# The clause that separates a promise from its delivery in one sentence.
+_DELIVERY_SEP = (":", " -- ", " \u2014 ", " \u2013 ", " - ")
+
+
+def _delivered_part(sentence: str) -> Tuple[str, bool]:
+    """(what this sentence delivers, was the delivery EXPLICITLY marked).
+
+    A sentence with no forward-looking phrase delivers all of itself, but
+    implicitly -- it might still be preamble ("This is important.").
+    One that promises AND delivers marks the boundary with a colon or a dash
+    ("Let me check: the answer is 42"), and that punctuation is the model
+    saying "here comes the content". That is worth trusting at any length.
+    One that only promises delivers nothing.
+    """
+    s = (sentence or "").strip()
+    if not s:
+        return ("", False)
+    if not _has_intent(s):
+        return (s, False)
+    for sep in _DELIVERY_SEP:
+        i = s.find(sep)
+        if i > 0:
+            tail = s[i + len(sep):].strip()
+            if tail and not _has_intent(tail):
+                return (tail, True)
+    return ("", False)
+
+
 def reply_is_bare_stall(text: str) -> bool:
     """ANSWER MODE'S QUESTION: did the reply ONLY narrate a next step, or did it
     also deliver something to the operator?
@@ -3374,10 +3486,43 @@ def reply_is_bare_stall(text: str) -> bool:
         return False
     if len(_LIST_ITEM_RE.findall(t)) >= 2:
         return False
-    # Otherwise: drop every forward-looking sentence and see what is left.
-    rest = " ".join(s for s in _SENTENCE_SPLIT_RE.split(t)
-                    if s.strip() and not _has_intent(s)).strip()
-    return len(rest) < _SUBSTANCE_MIN_CHARS
+    # -- A SENTENCE CAN PROMISE AND DELIVER AT THE SAME TIME --
+    # Dropping every sentence that contains an intent marker threw away the
+    # ANSWER whenever the two shared one sentence, which is how people
+    # actually write. Verified against this function before the change:
+    #
+    #     "Let me check that for you: the answer is 42."        -> stall
+    #     "I'll summarise: the host is up and port 22 is open." -> stall
+    #
+    # Both are complete replies. Classified as stalls they were nudged, and
+    # the nudge budget is 2, so the operator saw the same short answer THREE
+    # TIMES. That is the same three-times bug the docstring above says was
+    # fixed for LONG answers; it survived for short ones because the fix
+    # measured what was LEFT OVER rather than what was DELIVERED.
+    #
+    # So keep the delivered half: where a sentence both promises and
+    # delivers, the delivery follows a colon or a dash and the clause after
+    # it does not itself look forward.
+    parts = [_delivered_part(s) for s in _SENTENCE_SPLIT_RE.split(t)
+             if s and s.strip()]
+    # An EXPLICITLY marked delivery is a delivery at any length. The colon in
+    # "Let me check: the answer is 42" is the model announcing the content;
+    # measuring the 17 characters that follow it against an 80-character bar
+    # for long replies is how a correct short answer got asked for twice more.
+    if any(explicit for _txt, explicit in parts):
+        return False
+    rest = " ".join(txt for txt, _e in parts).strip()
+    if len(rest) >= _SUBSTANCE_MIN_CHARS:
+        return False
+    # -- AND A SHORT ANSWER IS STILL AN ANSWER --
+    # 80 characters is the right bar for "did a long reply deliver anything"
+    # and the wrong one for a reply that is simply brief. A PAST-TENSE report
+    # of work already done is a delivery whatever its length: "First, I
+    # checked the host. It is up." is not a promise to check the host, but
+    # "first, i" is on the intent list, so it was read as one.
+    if _PAST_DELIVERY_RE.search(t):
+        return False
+    return True
 
 
 # The DECISIVE subset of conclusion phrases — an unambiguous "the work is
@@ -3618,11 +3763,22 @@ def tool_launch_app(app: str, args: str = "") -> Dict[str, Any]:
         if _have("gtk-launch"):
             # gtk-launch only works for known desktop ids; verify-ish by
             # trying and catching the immediate failure.
-            rc, _o, err = _ro(["gtk-launch", desktop_id], timeout=4)
+            #
+            # PASS THE ARGUMENTS. This branch used to call
+            # `_ro(["gtk-launch", desktop_id])` and drop `extra` on the
+            # floor, then report `{"ok": True, "launched": desktop_id}` —
+            # so `launch_app("firefox", "https://acme.com")` opened an empty
+            # browser and told the model the URL had been opened. A tool
+            # that silently discards an argument and still reports success
+            # is worse than one that fails: the loop has no way to notice.
+            # gtk-launch's own signature is `gtk-launch APPLICATION [URI…]`,
+            # so the arguments belong here.
+            rc, _o, err = _ro(["gtk-launch", desktop_id] + extra, timeout=4)
             # gtk-launch returns 0 even when it forks the app; a clearly
             # unknown id prints an error and returns non-zero quickly.
             if rc == 0:
-                return {"ok": True, "launched": desktop_id, "via": "gtk-launch"}
+                return {"ok": True, "launched": desktop_id,
+                        "args": extra, "via": "gtk-launch"}
 
         # fall back to treating it as a binary on PATH
         binary = app.split()[0]
@@ -3954,14 +4110,26 @@ def _screenshot_to(path: str, region: Optional[str] = None) -> Dict[str, Any]:
 def tool_screenshot(save_path: str = "") -> Dict[str, Any]:
     """Take a screenshot and save it as a PNG.  Defaults to a timestamped
     file in ~/Pictures (or DATA_DIR if that's missing)."""
+    pics = os.path.expanduser("~/Pictures")
+    base = pics if os.path.isdir(pics) else str(DATA_DIR)
     if save_path:
         path = os.path.expanduser(save_path)
+        # A BARE FILENAME BROKE THIS OUTRIGHT.
+        # `save_path="shot.png"` gives dirname "" and `os.makedirs("")`
+        # raises FileNotFoundError — outside any try, so the whole tool call
+        # failed with a traceback instead of taking a screenshot. A bare
+        # filename is the single most natural thing for the model to pass,
+        # and it was the one input guaranteed not to work. Anchor it to the
+        # same directory the default already uses rather than to whatever
+        # the process cwd happens to be.
+        if not os.path.isabs(path):
+            path = os.path.join(base, path)
     else:
-        pics = os.path.expanduser("~/Pictures")
-        base = pics if os.path.isdir(pics) else str(DATA_DIR)
         ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
         path = os.path.join(base, f"basilisk-shot-{ts}.png")
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    parent = os.path.dirname(path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
     res = _screenshot_to(path)
     if res.get("ok"):
         try:
@@ -4567,6 +4735,53 @@ def _wr_unwrap_ddg(u: str) -> str:
     return u
 
 
+_WR_RAW_OPEN_RE = re.compile(r"(?is)<(script|style|noscript|svg|head)\b[^>]*>")
+
+
+def _wr_strip_raw_blocks(src: str) -> str:
+    """Drop script/style/noscript/svg/head blocks — in LINEAR time.
+
+    This was one regex:
+
+        re.sub(r"(?is)<(script|style|noscript|svg|head)[^>]*>.*?</\\1>", " ", src)
+
+    and the lazy `.*?` is the trap. When an opener has no matching closer —
+    which is ordinary on real pages, and trivially arrangeable on a hostile
+    one — the engine expands it to end-of-string, fails, and starts again
+    from the NEXT opener. N unclosed `<script>` tags therefore cost O(N x
+    len(page)). This function is fed by web_read, i.e. by bytes chosen by
+    whoever is on the other end of the fetch, on the thread the operator is
+    waiting on.
+
+    The forward walk below never rescans: each opener either finds its
+    closer with a single str.find and jumps past it, or has none, in which
+    case everything to the end is dropped -- which is exactly what a browser
+    does with an unterminated <script>.
+    """
+    if not src:
+        return src
+    out: List[str] = []
+    pos = 0
+    # Lowercased ONCE. Calling src.lower() inside the loop would be O(len)
+    # per opener, which is the very cost this function exists to remove --
+    # a linear-looking walk hiding a quadratic body.
+    low = src.lower()
+    while True:
+        m = _WR_RAW_OPEN_RE.search(src, pos)
+        if not m:
+            out.append(src[pos:])
+            break
+        out.append(src[pos:m.start()])
+        out.append(" ")
+        close = "</" + m.group(1).lower()
+        idx = low.find(close, m.end())
+        if idx < 0:
+            break                      # unterminated: the rest is that block
+        gt = src.find(">", idx)
+        pos = (gt + 1) if gt >= 0 else len(src)
+    return "".join(out)
+
+
 def _wr_html_to_text(html_src: str) -> str:
     """Compact HTML → readable text: drop script/style/head, KEEP anchor URLs so
     the model gets real followable/citable links (search results, advisories,
@@ -4574,7 +4789,7 @@ def _wr_html_to_text(html_src: str) -> str:
     strip remaining tags, unescape entities, collapse whitespace.  Enough to
     actually read an advisory or a doc page — and to follow a search result."""
     import html as _h
-    s = re.sub(r"(?is)<(script|style|noscript|svg|head)[^>]*>.*?</\1>", " ", html_src)
+    s = _wr_strip_raw_blocks(html_src)
 
     # Preserve links BEFORE stripping tags: <a href="URL">TEXT</a> -> "TEXT (URL)".
     # Unwrap DuckDuckGo redirect wrappers to the real destination; skip empty /
@@ -4591,7 +4806,13 @@ def _wr_html_to_text(html_src: str) -> str:
         if not txt or txt == href:
             return " " + href + " "
         return f" {txt} ({href}) "
-    s = re.sub(r'(?is)<a\b[^>]*\bhref\s*=\s*["\']([^"\']+)["\'][^>]*>(.*?)</a>', _a, s)
+    # The anchor body is BOUNDED, for the same reason _wr_strip_raw_blocks
+    # exists: an unclosed <a> makes `(.*?)</a>` scan to end-of-string and
+    # fail, from every anchor position in the page. Link TEXT is short —
+    # 4000 characters is already absurd for one — so the bound costs nothing
+    # real and turns O(anchors x page) into O(anchors x 4000).
+    s = re.sub(r'(?is)<a\b[^>]*\bhref\s*=\s*["\']([^"\']+)["\'][^>]*>(.{0,4000}?)</a>',
+               _a, s)
 
     s = re.sub(r"(?i)<(br|/p|/div|/li|/tr|/h[1-6]|/section)\s*/?>", "\n", s)
     s = _WR_TAG_RE.sub(" ", s)
@@ -4603,14 +4824,28 @@ def _wr_html_to_text(html_src: str) -> str:
 
 def tool_web_read(url: str, max_chars: int = 6000) -> Dict[str, Any]:
     """Fetch and read a web page as shielded, readable text (with the final URL
-    so you can cite it). Access is tiered and enforced in code: TRUSTED sources
-    (NVD/NIST, CISA, MITRE, FIRST, OWASP, PortSwigger, Kali docs, official
-    vendor/distro advisories, exploit-db) are read automatically; ANY other
-    public internet host is read only after the operator approves its domain
-    (the same one-tap gate GitHub/Wikipedia use). Internal / private / metadata
-    addresses are refused outright and no approval overrides that (SSRF floor).
-    Reach for it to look up a CVE, an advisory, a tool flag, or a technique from
-    the source instead of guessing."""
+    so you can cite it).
+
+    Internal / private / loopback / link-local / cloud-metadata addresses are
+    refused outright and nothing overrides that -- this is the SSRF floor and
+    it is enforced right here, in this function.
+
+    Public hosts: TRUSTED sources (NVD/NIST, CISA, MITRE, FIRST, OWASP,
+    PortSwigger, Kali docs, official vendor/distro advisories, exploit-db)
+    always fetch. Any OTHER public host fetches immediately in LEASHED mode
+    and needs a one-tap operator approval only while UNLEASHED.
+
+    THAT LAST SENTENCE USED TO SAY THE APPROVAL WAS UNCONDITIONAL, AND IT WAS
+    NOT TRUE. The domain gate lives in the GUI wrapper (MainWindow._web_read)
+    and is guarded by `if self._unleashed`; this function has never had one.
+    A tool docstring IS the contract the model reasons from, so describing a
+    safety property that does not hold in the default mode is worse than
+    describing none -- it invites the model to treat an unvetted page as
+    pre-approved. The SSRF floor, which really is unconditional, is stated
+    first for the same reason.
+
+    Reach for it to look up a CVE, an advisory, a tool flag, or a technique
+    from the source instead of guessing."""
     import urllib.parse  # noqa: F401
     url = (url or "").strip()
     if not url:
@@ -4651,21 +4886,63 @@ def tool_web_read(url: str, max_chars: int = 6000) -> Dict[str, Any]:
 
 def tool_web_sources() -> Dict[str, Any]:
     """Explain web_read's access tiers. Call this when you're unsure whether a
-    source is readable. TRUSTED hosts are fetched automatically; ANY OTHER public
-    internet host is readable once the operator approves its domain (one tap);
-    internal / private / metadata addresses are always refused."""
+    source is readable. TRUSTED hosts are always fetched; any OTHER public host
+    is fetched directly while LEASHED and needs a one-tap operator approval
+    only while UNLEASHED; internal / private / metadata addresses are always
+    refused, in every mode."""
     return {
         "ok": True,
         "trusted_auto": list(_WEB_READ_TRUSTED),
-        "any_other_public_host": "readable after one-tap operator approval",
+        "any_other_public_host": ("read directly while LEASHED; while "
+                                  "UNLEASHED it needs one-tap operator "
+                                  "approval"),
         "always_refused": ("internal / private / loopback / link-local / "
                            "cloud-metadata addresses (SSRF floor)"),
-        "note": ("web_read fetches TRUSTED hosts on its own. Any other PUBLIC "
-                 "site (GitHub, Wikipedia, a vendor blog, a random host) raises "
-                 "a one-tap approval and is read once the operator allows that "
-                 "domain for the session. Internal/private/metadata addresses "
-                 "are refused outright and no approval overrides that."),
+        "note": ("web_read fetches TRUSTED hosts on its own, always. Any "
+                 "other PUBLIC site (GitHub, Wikipedia, a vendor blog, a "
+                 "random host) is read directly in LEASHED mode; while "
+                 "UNLEASHED it instead raises a one-tap approval and is read "
+                 "once the operator allows that domain for the session. "
+                 "Internal/private/metadata addresses are refused outright in "
+                 "BOTH modes and no approval overrides that."),
     }
+
+
+def _resolve_vision_model(model: str, base_url: str = "") -> str:
+    """A vision model the provider actually carries.
+
+    The saved setting is a free-text entry row, and the shipped default was
+    a model id no provider in the registry knows -- so vision failed on a
+    fresh install with an error blaming a setting the operator never touched.
+    Rather than fail, check the name against the provider's own catalogue and
+    fall back to the first model it advertises as vision-capable.
+
+    Returns `model` unchanged when it is known, or when nothing can be
+    checked (an unrecognised base_url, a custom endpoint): a guess must never
+    override a deliberate choice.
+    """
+    m = (model or "").strip()
+    try:
+        spec = None
+        for _sp in PROVIDERS_BY_KEY.values():
+            if base_url and str(getattr(_sp, "base_url", "")).rstrip("/") == \
+                    str(base_url).rstrip("/"):
+                spec = _sp
+                break
+        if spec is None:
+            return m
+        if m and spec.knows(m):
+            return m
+        for cand in (getattr(spec, "catalogue", None) or ()):
+            cid = cand if isinstance(cand, str) else getattr(cand, "id", "")
+            info = spec.info(cid) if cid else None
+            if info is not None and getattr(info, "vision", False):
+                log(f"vision: {m!r} is not in {spec.key}'s catalogue - "
+                    f"using {cid}")
+                return cid
+    except Exception as e:
+        log(f"vision model resolve failed ({e}) - using {m!r} as given")
+    return m
 
 
 def tool_analyze_image(image_path: str, question: str = "",
@@ -4694,8 +4971,9 @@ def tool_analyze_image(image_path: str, question: str = "",
         return {"ok": False,
                 "error": "vision not configured. In Settings -> Display -> "
                          "Images & vision, pick a vision provider you hold a "
-                         "key for (SiliconFlow has Qwen2.5-VL; Groq has Llama "
-                         "vision) and set the vision model, then retry."}
+                         "key for and set the vision model, then retry."}
+    # Repair a stale or mistyped model id rather than failing on it.
+    model = _resolve_vision_model(model, base_url)
     try:
         with open(p, "rb") as f:
             raw = f.read(13_000_000)
@@ -7481,8 +7759,28 @@ TOOL_TAG_RE = re.compile(
     re.DOTALL | re.IGNORECASE)
 
 # Pull name="..." out of the attribute blob.
+#
+# IT WAS NARROWER THAN ITS OWN PRODUCER.  `[a-zA-Z_]+` accepts no digit, dot
+# or hyphen \u2014 but the dialect normaliser directly above emits
+# `<tool name="{name}">` from `_ALT_TAG_RES`, whose "eqname" branch captures
+# `[A-Za-z_][\w.-]*`. So `<function=functions.web_read>` was faithfully
+# rewritten to `<tool name="functions.web_read">` and then this regex refused
+# to read it back: `[a-zA-Z_]+` matches `functions`, needs the closing quote,
+# finds `.`, and fails from every start position.
+#
+# The two places that consequence lands are both bad. In the normaliser the
+# no-match branch returns the tag untouched, so the call leaks into the chat
+# as raw markup. In parse_tool_calls the name simply comes back None and the
+# call is dropped. A namespaced tool name is one of the commonest shapes
+# models emit, so this was not a corner.
 _NAME_ATTR_RE = re.compile(
-    r'\bname\s*=\s*["\'\u201c\u201d]([a-zA-Z_]+)["\'\u201c\u201d]')
+    r'\bname\s*=\s*["\'\u201c\u201d]([A-Za-z_][\w.\-]*)["\'\u201c\u201d]')
+
+# A namespace prefix on a tool name \u2014 `functions.web_read`, `tools.run`,
+# `default_api.screenshot`. Models emit these constantly; the handler table
+# is keyed on the bare name.
+_TOOL_NS_RE = re.compile(
+    r'^(?:functions?|tools?|default_api|api|namespace)\s*[.:]\s*', re.I)
 # Pull json='...' / json="..." out of the attribute blob.
 _JSON_ATTR_RE = re.compile(
     r'\bjson\s*=\s*(?:"((?:[^"\\]|\\.)*)"|\'((?:[^\'\\]|\\.)*)\')',
@@ -8127,7 +8425,37 @@ def contains_tool_markup(text: str) -> bool:
     """
     if not text:
         return False
-    return any(rx.search(text) for rx in _TOOL_DEBRIS_RES)
+    # ── FENCE-BLIND HERE MEANT THE ANSWER WAS SENT THREE TIMES ──
+    #
+    # parse_tool_calls masks ``` fences (see _mask_fences) precisely so that a
+    # reply DOCUMENTING the tool syntax does not fire the tool. This predicate
+    # did not, and the caller compares the two:
+    #
+    #     executable = parse_tool_calls(final)      -> []      (fenced: ignored)
+    #     _bad_call  = looks_like_failed_tool_call(final) -> True
+    #
+    # "no calls parsed, but protocol is present" is read as "the model tried
+    # to call a tool and we could not read it", so the host injects a scold
+    # and re-kicks the turn. The model has nothing new to send, so it repeats
+    # its answer -- twice, because the retry budget is 2. The operator asks
+    # one question and gets the same answer three times.
+    #
+    # Verified against the real functions. Both of these returned parse=0 and
+    # failed_call=True before this change:
+    #
+    #     "Use this format:\n\n```xml\n<tool name=\"run\">{}</tool>\n```"
+    #     "Here is a login form:\n\n```html\n"
+    #     "<input type=\"text\" name=\"username\">\n```"
+    #
+    # The second is not even tool-shaped -- one of the debris patterns is a
+    # bare `name="..."`> attribute -- so ANY reply containing an HTML snippet
+    # with a name attribute triggered the loop. Asking Basilisk to explain its
+    # own tool syntax did it every time, because the force-answer text quotes
+    # that syntax back at the model.
+    #
+    # Masking makes this predicate agree with the parser it is compared
+    # against, which is the only way the comparison means anything.
+    return any(rx.search(_mask_fences(text)) for rx in _TOOL_DEBRIS_RES)
 
 
 def looks_like_failed_tool_call(text: str) -> bool:
@@ -8153,20 +8481,61 @@ def scrub_tool_debris(text: str) -> str:
     """
     if not text:
         return text
-    out = text
-    if _has_dsml(out):
-        out = _DSML_SENTINEL_RE.sub(lambda m: "<" + (m.group(1) or m.group(2)),
-                                    out)
-    out = _DS_TOKEN_RE.sub("", out)
-    out = _ORPHAN_TAG_RE.sub("", out)
-    out = re.sub(r"<\s*/?\s*(?:tool|tool_call|toolcall|function_call|invoke)"
-                 r"\b[^>]*>", "", out, flags=re.I)
-    out = re.sub(r"<\s*function\s*=[^>]*>|<\s*/\s*function\s*>", "",
-                 out, flags=re.I)
-    return out.strip()
+
+    def _scrub(out: str) -> str:
+        if _has_dsml(out):
+            out = _DSML_SENTINEL_RE.sub(
+                lambda m: "<" + (m.group(1) or m.group(2)), out)
+        out = _DS_TOKEN_RE.sub("", out)
+        out = _ORPHAN_TAG_RE.sub("", out)
+        out = re.sub(r"<\s*/?\s*(?:tool|tool_call|toolcall|function_call"
+                     r"|invoke)\b[^>]*>", "", out, flags=re.I)
+        out = re.sub(r"<\s*function\s*=[^>]*>|<\s*/\s*function\s*>", "",
+                     out, flags=re.I)
+        return out
+
+    # ── A FENCE IS THE ONE PLACE THIS MUST NOT TOUCH ──
+    # Scrubbing ran over the whole reply, fences included, so a model
+    # explaining its own call format had the example deleted out of the code
+    # block and the operator was shown an empty ```xml ``` -- which reads as
+    # the app being broken, the exact impression this function exists to
+    # prevent. The parser already treats a fenced tag as an EXAMPLE rather
+    # than a call (_mask_fences); the display has to agree with it, or the
+    # two disagree about what the reply even said.
+    return _outside_fences(text, _scrub).strip()
 
 
 _FENCE_BLOCK_RE = re.compile(r"```.*?```", re.S)
+
+
+def _outside_fences(text: str, fn) -> str:
+    """Apply `fn` to every span of `text` that is NOT inside a ``` fence.
+
+    The complement of _mask_fences: that one hides fenced spans from a
+    SEARCH, this one protects them from a REWRITE. Both exist for the same
+    reason -- a tool tag inside a fence is an example the model is showing
+    the operator, so it must neither fire nor be deleted from the page.
+
+    An unterminated fence protects everything after it, which matches how the
+    text will actually render.
+    """
+    if not text or "```" not in text:
+        return fn(text)
+    out = []
+    pos = 0
+    for m in _FENCE_BLOCK_RE.finditer(text):
+        out.append(fn(text[pos:m.start()]))
+        out.append(m.group(0))
+        pos = m.end()
+    tail = text[pos:]
+    # A trailing unterminated fence: everything from it on is code.
+    cut = tail.find("```")
+    if cut >= 0:
+        out.append(fn(tail[:cut]))
+        out.append(tail[cut:])
+    else:
+        out.append(fn(tail))
+    return "".join(out)
 
 
 def _mask_fences(text: str) -> str:
@@ -8265,7 +8634,11 @@ def parse_tool_calls(text: str) -> List[ToolCall]:
         # hallucinated "write_text_file" → "write_file") so the proposal still
         # renders instead of being dropped as unknown.
         if name:
-            name = _TOOL_NAME_ALIASES.get(str(name).strip().lower(), name)
+            # Drop a namespace prefix BEFORE the alias lookup, or every
+            # aliased name arrives as `functions.write_text_file` and misses
+            # the table it was built to hit.
+            name = _TOOL_NS_RE.sub("", str(name).strip())
+            name = _TOOL_NAME_ALIASES.get(name.lower(), name)
         # Unwrap common nested arg containers — but ONLY when the wrapper is
         # the sole key (a genuine {"arguments": {...}} envelope).  skill_run
         # legitimately takes BOTH name and args, so unwrapping its "args" here
@@ -8373,7 +8746,22 @@ def strip_tool_calls(text: str) -> str:
     # is paid thousands of times per reply.
     if "<" not in text and _DS_PIPE not in text:
         return text.strip()
+    # Normalise the WHOLE buffer, exactly as parse_tool_calls does, so the two
+    # are looking at the same string. Then strip only OUTSIDE fences, again
+    # exactly as parse_tool_calls searches only outside them: a fenced tag is
+    # an example the model is showing the operator. Executing it would be a
+    # bug (the parser already refuses to), and DELETING it is the same bug
+    # seen from the display side -- it left an empty ```xml ``` on screen and
+    # wrote the gutted text into the stored message, so the next turn re-sent
+    # the model a mutilated copy of its own explanation.
     text = _normalise_tool_syntax(text)
+    return _outside_fences(text, _strip_tool_calls_span).strip()
+
+
+def _strip_tool_calls_span(text: str) -> str:
+    """strip_tool_calls' actual removal pass, over one non-fenced span."""
+    if "<" not in text and _DS_PIPE not in text:
+        return text
     out = TOOL_TAG_RE.sub("", text)
     # Also remove dangling unclosed <tool ...> ... fragments mid-stream
     # The pattern cannot match without a '>' anywhere — skipping is exact, and
@@ -8427,7 +8815,7 @@ def strip_tool_calls(text: str) -> str:
                      flags=re.DOTALL | re.IGNORECASE)
         # any leftover opener or orphaned closer remnant
         out = re.sub(r'<\\?\s*/?\s*tool\b[^>]*>?', '', out, flags=re.IGNORECASE)
-    return out.strip()
+    return out
 
 
 # ── Reasoning / "thoughts" blocks ──

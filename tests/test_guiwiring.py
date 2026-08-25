@@ -148,8 +148,24 @@ ck("MainWindow declares a minimum size",
    "libadwaita warns once per layout pass without one, and a window with no "
    "floor can squeeze children past their own minimums")
 _m = re.search(r"set_size_request\((\d+),\s*(\d+)\)", _init)
-ck("the minimum is narrow enough for the smallest target screen",
-   _m and int(_m.group(1)) <= 420, _m.group(1) if _m else "?")
+# THIS ASSERTION USED TO READ `<= 420`, AND IT WAS ENFORCING THE BUG.
+# The declared minimum was 360 -- narrower than the content pane's own
+# measured minimum of 480 -- and a size request below what the children need
+# does not make them fit, it makes GTK allocate less than the minimum and clip
+# the rest off the right edge. At a 458px window the Close button was sliced in
+# half, the model pill was truncated, the avatar was off screen, and
+# libadwaita said so on every layout pass ("AdwToastOverlay exceeds MainWindow
+# width: requested 462 px, 458 px available") -- the exact warning the
+# set_size_request call above was added to silence.
+#
+# The honest property is not "as small as we wish" but "not smaller than we
+# can draw", with an upper bound so nobody quietly makes the app desktop-only.
+ck("the declared minimum is at least what the content can be drawn in",
+   _m and int(_m.group(1)) >= 480,
+   (_m.group(1) if _m else "?") + " -- a floor under the content's own "
+   "minimum clips the header rather than shrinking it")
+ck("...and is still modest enough for a small screen",
+   _m and int(_m.group(1)) <= 560, _m.group(1) if _m else "?")
 
 # ═══════════════════════════════════════════════════════════════════════
 # 5. pycairo — the dependency the installer forgot

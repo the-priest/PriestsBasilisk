@@ -327,5 +327,117 @@ for _c, _want in (("echo `nmap evil.com`", False),
     check(f"unchanged: {_c[:26]}", bool(_v.get("allowed")) is _want,
           str(_v.get("reason"))[:60])
 
+# ══════════════════════════════════════════════════════════════════════
+# v1.0.0.0 — THREE WAYS THE GATE FAILED OPEN
+# ══════════════════════════════════════════════════════════════════════
+
+# ── 1. CLUSTERED SHORT OPTIONS ───────────────────────────────────────
+# The interpreter branch matched its inline-code flag as an EXACT token, so
+# every POSIX cluster walked straight through: `-c` was recognised, `-Bc` was
+# not, and `-Bc` is what actually runs the code. All of these were verified to
+# execute in a real python3/bash before being written down as bypasses.
+print("\n== clustered short options reach the inline payload ==")
+for _c in ('python3 -Bc "import os; os.system(\'nmap 8.8.8.8\')"',
+           'python3 -uc "import os; os.system(\'nmap 8.8.8.8\')"',
+           'python3 -BOc "import os; os.system(\'nmap 8.8.8.8\')"',
+           'bash -cx "nmap -sS 8.8.8.8"',
+           'bash -xc "nmap -sS 8.8.8.8"',
+           'bash -lc "nmap -sS 8.8.8.8"',
+           'sh -ec "nmap -sS 8.8.8.8"',
+           'sh -exc "nmap -sS 8.8.8.8"'):
+    _v = S.check_command(_c, SCOPE)
+    check(f"cluster refused: {_c[:26]}", not _v.get("allowed"),
+          str(_v.get("reason"))[:70])
+
+# The unclustered forms and ordinary inline code must be exactly as before.
+for _c, _want in (('python3 -c "print(1+1)"', True),
+                  ("bash -c 'echo hello'", True),
+                  ('python3 -Bc "print(1+1)"', True),
+                  ('bash -lc "git status"', True),
+                  ('python3 -c "import os; os.system(\'nmap 10.0.0.5\')"', False)):
+    _v = S.check_command(_c, SCOPE)
+    check(f"inline unchanged: {_c[:30]}", bool(_v.get("allowed")) is _want,
+          str(_v.get("reason"))[:60])
+
+# ── 2. awk AND sed ARE EXECUTORS, NOT JUST TOOL-NAME CONSUMERS ───────
+# Both sat on the introspection allowlist, which short-circuits BOTH the
+# quoted-argument recursion and the unattributed-tool backstop. The program
+# text is one shlex token, so nothing downstream could see the tool inside it.
+print("\n== awk/sed programs that spawn a process ==")
+for _c in ('awk \'BEGIN{system("nmap -sS 8.8.8.8")}\'',
+           'gawk \'BEGIN{system("nmap 1.1.1.1")}\'',
+           'awk \'BEGIN{print | "nmap 8.8.8.8"}\'',
+           'awk \'BEGIN{"nmap 8.8.8.8" | getline x}\'',
+           "sed 's/x/y/e' file.txt",
+           "sed '1e ls' file.txt",
+           "sed --expression='1e ls' file.txt"):
+    _v = S.check_command(_c, SCOPE)
+    check(f"executor refused: {_c[:30]}", not _v.get("allowed"),
+          str(_v.get("reason"))[:70])
+
+# THE COUNTER-PROPERTY. Ordinary text processing must stay completely silent
+# — an early draft of the awk pattern matched a pipe beside a quote, which
+# read `BEGIN{FS="|"}` (the most common awk idiom there is) as an executor.
+for _c in ("sed 's/nmap/x/' notes.txt",
+           "sed -n '1,20p' scan.txt",
+           "sed -i.bak 's/foo/bar/g' report.md",
+           "sed -e 's/a/b/' -e 's/c/d/' f.txt",
+           "sed '/^#/d' conf.ini",
+           "sed 's|/usr|/opt|' paths.txt",
+           "sed 's/a/b/w out.txt' f.txt",
+           "awk '{print $1}' scan.txt",
+           "awk -F, '{print $2}' hosts.csv",
+           'awk \'BEGIN{FS="|"}{print $2}\' data.psv',
+           "awk -F'|' '{print $1}' data.psv",
+           "awk 'NR>1{sum+=$3} END{print sum}' data.tsv",
+           'awk \'{print > "out.txt"}\' f.txt',
+           "awk '/error/{c++}END{print c}' app.log",
+           "awk -f prog.awk data.txt"):
+    _v = S.check_command(_c, SCOPE)
+    check(f"text processing allowed: {_c[:30]}", bool(_v.get("allowed")),
+          str(_v.get("reason"))[:70])
+
+# ── 3. SINGLE-LABEL HOSTS WERE DROPPED ON THE FLOOR ──────────────────
+# _HOSTNAME_RE requires a dot, so `dc01` failed _looks_like_target and the
+# walk skipped it in SILENCE — while nmap resolves it through the DNS search
+# domain and scans it. One in-scope operand laundered an unlisted host.
+print("\n== single-label hosts are not silently dropped ==")
+for _c in ("nmap -sS acme.com dc01",
+           "nmap -sn 10.0.0.128/25 fileserver",
+           "ping -c 1 dc01",
+           "masscan 10.0.0.5 web-01 -p80",
+           "traceroute dc01"):
+    _v = S.check_command(_c, SCOPE)
+    check(f"bare label refused: {_c[:30]}", not _v.get("allowed"),
+          str(_v.get("reason"))[:70])
+
+# THE COUNTER-PROPERTY, and this one bit hard: the first draft escalated on
+# ANY leftover positional for a much larger tool set, which refused
+# `dig acme.com A`, `amass enum -d acme.com` and `nmap -sV --script vuln
+# 10.0.0.5` — a record type, a subcommand and an unknown flag's operand.
+for _c in ("nmap -sS -p- acme.com",
+           "nmap -sV --script vuln 10.0.0.5",
+           "nmap -A -T4 --script=http-title acme.com",
+           "nmap -Pn -T4 www.acme.com",
+           "nmap -sn 10.0.0.128/25",
+           "nmap -sS acme.com 10.0.0.7",
+           "dig acme.com A",
+           "dig @192.168.5.10 acme.com",
+           "host acme.com",
+           "nslookup acme.com 192.168.5.10",
+           "amass enum -d acme.com",
+           "wpscan --url https://acme.com --enumerate u",
+           "hydra -l admin -P pw.txt 10.0.0.5 ssh",
+           "hydra -L users.txt -P rockyou.txt 10.0.0.9 smb",
+           "ping -c 4 acme.com",
+           "masscan 10.0.0.128/25 -p80",
+           "whatweb acme.com",
+           "sslscan acme.com:443",
+           "traceroute acme.com"):
+    _v = S.check_command(_c, SCOPE)
+    check(f"in-scope allowed: {_c[:32]}", bool(_v.get("allowed")),
+          str(_v.get("failure")) + " " + str(_v.get("reason"))[:60])
+
+
 print(f"\nscope boundary: {_passed} passed, {_failed} failed")
 sys.exit(1 if _failed else 0)

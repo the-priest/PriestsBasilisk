@@ -154,7 +154,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.basilisk"
 APP_NAME = "Basilisk"
-VERSION = "9.9.2"
+VERSION = "1.0.0.0"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -2742,7 +2742,7 @@ class CodeBlockWidget(Gtk.Box):
         copy_btn = Gtk.Button.new_from_icon_name("edit-copy-symbolic")
         copy_btn.add_css_class("icon-button")
         copy_btn.set_tooltip_text("Copy")
-        copy_btn.connect("clicked", self._on_copy)
+        _track_connect(self, copy_btn, "clicked", self._on_copy)
         header.append(copy_btn)
         self.append(header)
 
@@ -3443,12 +3443,12 @@ class ProposedCommandWidget(Gtk.Box):
         btn_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         self.run_btn = Gtk.Button(label="Run")
         self.run_btn.add_css_class("cmd-run-btn")
-        self.run_btn.connect("clicked", self._on_run_clicked)
+        _track_connect(self, self.run_btn, "clicked", self._on_run_clicked)
         btn_row.append(self.run_btn)
 
         copy_btn = Gtk.Button(label="Copy")
         copy_btn.add_css_class("cmd-copy-btn")
-        copy_btn.connect("clicked", self._on_copy_clicked)
+        _track_connect(self, copy_btn, "clicked", self._on_copy_clicked)
         btn_row.append(copy_btn)
 
         spacer = Gtk.Box()
@@ -3578,7 +3578,7 @@ class ProposedEditWidget(Gtk.Box):
         btn_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         self.apply_btn = Gtk.Button(label="Apply")
         self.apply_btn.add_css_class("cmd-run-btn")
-        self.apply_btn.connect("clicked", self._on_apply_clicked)
+        _track_connect(self, self.apply_btn, "clicked", self._on_apply_clicked)
         btn_row.append(self.apply_btn)
         spacer = Gtk.Box()
         spacer.set_hexpand(True)
@@ -4013,6 +4013,80 @@ def Avatar(kind: str = "user") -> Gtk.Widget:
     return lbl
 
 
+# ══════════════════════════════════════════════════════════════════════
+# SIGNAL HANDLERS ARE WHAT KEPT EVERY BUBBLE ALIVE FOREVER
+# ══════════════════════════════════════════════════════════════════════
+# `dispose_widget()` on every widget class below nulls its Python attributes
+# and its callbacks, and the docstrings say that "breaks any reference cycle
+# so CPython reclaims the widget". It did not, because the cycle does not run
+# through those attributes -- it runs through GObject:
+#
+#     MessageWidget -> speak_btn (a child)      [Python -> C]
+#     speak_btn     -> its signal closure       [C]
+#     closure       -> the lambda / bound method[C -> Python]
+#     lambda        -> MessageWidget            [Python]
+#
+# CPython's cyclic collector cannot see the middle two hops, so the loop is
+# never broken and nulling attributes changes nothing. Measured on the real
+# app: 120 exchanges with a hard 20-row display budget left 130 MessageWidgets
+# and 120 CodeBlockWidgets alive -- exactly one leaked per assistant message,
+# each still holding its Pango layouts, textures and TextViews. That is the
+# unbounded memory growth (and the slow, laggy scrolling) that only shows up
+# in long conversations. With the speak button's handler removed the same run
+# stayed flat at 20.
+#
+# The fix is to keep the handler ids and disconnect them on disposal, which
+# severs the C-side hop. `_track_connect` records; `_drop_signals` cuts.
+
+def _track_connect(owner, widget, signal: str, cb) -> int:
+    """Connect `cb` and remember the handler so disposal can cut it."""
+    hid = widget.connect(signal, cb)
+    try:
+        owner._sig_conns.append((widget, hid))
+    except AttributeError:
+        owner._sig_conns = [(widget, hid)]
+    return hid
+
+
+def _drop_signals_recursive(root) -> None:
+    """_drop_signals for `root` and every widget beneath it.
+
+    A bubble owns its blocks; when the bubble is trimmed the blocks go with
+    it, so their handlers must be cut at the same moment or each block stays
+    pinned by its own button exactly the way the bubble was.
+    """
+    stack = [root]
+    seen = 0
+    while stack and seen < 5000:        # cheap runaway guard
+        w = stack.pop()
+        seen += 1
+        if w is not root:
+            _drop_signals(w)
+        try:
+            c = w.get_first_child()
+        except Exception:
+            continue
+        while c is not None:
+            stack.append(c)
+            c = c.get_next_sibling()
+
+
+def _drop_signals(owner) -> None:
+    """Disconnect everything _track_connect recorded for `owner`.
+
+    Safe to call twice, and safe on a widget already finalised by GTK -- a
+    disposal path that raised here would leave the rest of the teardown
+    undone, which is the failure this whole function exists to prevent.
+    """
+    for widget, hid in list(getattr(owner, "_sig_conns", ()) or ()):
+        try:
+            if widget is not None and hid:
+                widget.disconnect(hid)
+        except Exception:
+            pass
+    owner._sig_conns = []
+
+
 def _make_wrap_label() -> Gtk.Label:
     """Return a Gtk.Label that wraps AND reports a wrapped natural
     width, so it shrinks to fit the parent allocation on narrow
@@ -4259,7 +4333,7 @@ class ActivityFeedWidget(Gtk.Box):
         hbox.append(self._chevron)
 
         self._header_btn.set_child(hbox)
-        self._header_btn.connect("clicked", self._on_header_clicked)
+        _track_connect(self, self._header_btn, "clicked", self._on_header_clicked)
         self.append(self._header_btn)
 
         self._body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
@@ -4281,6 +4355,7 @@ class ActivityFeedWidget(Gtk.Box):
         arriving after a trim must be a no-op rather than an AttributeError
         that strands the turn."""
         self._disposed = True
+        _drop_signals(self)
         self._stop_tick()
         if self._collapse_src is not None:
             try:
@@ -4686,6 +4761,18 @@ class MessageWidget(Gtk.Box):
         `None.get_first_child()` inside a GLib callback — which strands whatever
         turn was driving it."""
         self._disposed = True
+        # FIRST, because it is the one that actually frees the widget. The
+        # attribute nulling below is housekeeping; this is the cycle.
+        _drop_signals(self)
+        # ── AND THE SAME CYCLE EXISTS IN EVERY BLOCK INSIDE THE BUBBLE ──
+        # A CodeBlockWidget's copy button, a proposed command's Run button
+        # and a proposed edit's Apply button each hold their own C-side
+        # closure back to their own widget. Those widgets are children of
+        # this one, so cutting only this widget's handlers still leaves each
+        # block pinned -- measured at 120 live CodeBlockWidgets for 120
+        # exchanges with 20 rows on screen. Nothing else walks in here to
+        # dispose them, so the bubble does it for its own children.
+        _drop_signals_recursive(self)
         self._on_run_command = None
         self._on_apply_edit = None
         self._on_speak = None
@@ -4802,8 +4889,8 @@ class MessageWidget(Gtk.Box):
                 self.speak_btn.add_css_class("msg-speak-btn")
                 self.speak_btn.set_halign(Gtk.Align.START)
                 self.speak_btn.set_tooltip_text("Read this message aloud")
-                self.speak_btn.connect(
-                    "clicked", lambda *_: self._on_speak(self))
+                _track_connect(self, self.speak_btn, "clicked",
+                               lambda *_: self._on_speak(self))
                 footer.append(self.speak_btn)
                 content_box.append(footer)
             row.append(content_box)
@@ -6701,9 +6788,29 @@ class MainWindow(Adw.ApplicationWindow):
         # "does not have a minimum size" — 25 times in a 16-state sweep — and
         # without one the adaptive machinery has nothing to break against, so
         # a narrow window can squeeze children past their own minimums (which
-        # is how widgets end up overlapping). Sized for the narrowest screen
-        # this app targets, not for the desktop.
-        self.set_size_request(360, 480)
+        # is how widgets end up overlapping).
+        #
+        # ── BUT THE NUMBER HAS TO BE TRUE ──
+        # It was 360, chosen as "the narrowest screen this app targets", and
+        # the content pane's own measured minimum is 480. A size request
+        # BELOW what the children need does not make them fit; it forces GTK
+        # to allocate less than the minimum and clip the remainder off the
+        # right edge. Measured: at a 458px window the Close button was sliced
+        # in half, the model pill was truncated, the user avatar was off
+        # screen entirely, and libadwaita said so on every layout pass —
+        #
+        #   AdwToastOverlay exceeds MainWindow width:
+        #   requested 462 px, 458 px available
+        #
+        # — which is the warning this line was added to silence, still being
+        # emitted because the declared minimum was a wish rather than a
+        # measurement. The message bubbles were never the constraint: every
+        # block type wraps or scrolls cleanly down to 350px. The floor is the
+        # header's fixed-size art buttons, and those are not negotiable.
+        #
+        # So declare the truth. The window can still be small; it can no
+        # longer be made smaller than it can draw.
+        self.set_size_request(480, 480)
         self.app = app
         self.settings = load_settings()
         global _APPROVAL_MODE
@@ -6788,6 +6895,14 @@ class MainWindow(Adw.ApplicationWindow):
         if self._unleashed:
             self.current_agent_mode = True
         self.streaming_thread: Optional[threading.Thread] = None
+        # Bumped once per stream. A callback carrying an older value belongs
+        # to a turn that has been replaced and is ignored -- see the block
+        # in the stream setup for the three ways that happens.
+        self._stream_epoch: int = 0
+        # GLib source id of a queued next-turn kick, 0 when none. Declared
+        # here so _is_busy() and _cancel_pending_kick() never depend on a
+        # getattr default to be correct.
+        self._pending_kick_id: int = 0
         self.streaming_cancel: Optional[threading.Event] = None
         self.streaming_msg_widget: Optional[MessageWidget] = None
         self.streaming_msg_db_id: Optional[int] = None
@@ -6992,6 +7107,14 @@ class MainWindow(Adw.ApplicationWindow):
                         self.streaming_cancel.set()
                 except Exception:
                     pass
+                # ABANDONING A STREAM MEANS RETIRING ITS IDENTITY.
+                # The worker is not joined here -- it may be blocked in a
+                # socket read and will not notice the cancel until its own
+                # idle timeout, then call back. By then this turn has been
+                # replaced, and without this bump the dead stream's tokens
+                # would append to the NEW turn's bubble and its error path
+                # would schedule a retry for a turn that is not its own.
+                self._stream_epoch = getattr(self, "_stream_epoch", 0) + 1
                 self.streaming_msg_widget = None
                 self.streaming_msg_db_id = None
                 try:
@@ -8173,11 +8296,21 @@ class MainWindow(Adw.ApplicationWindow):
             # A live feed keeps a GLib timeout running. Unparenting it is not
             # enough — the clock would keep ticking against a widget nothing
             # can see, forever, once per chat switch. Dispose stops it.
-            if isinstance(child, ActivityFeedWidget):
-                try:
-                    child.dispose_widget()
-                except Exception:
-                    pass
+            # DISPOSE THE BUBBLES TOO, not just the feeds.
+            # Only ActivityFeedWidget was disposed here, so every chat switch
+            # unparented its MessageWidgets with their signal handlers still
+            # connected -- and a handler's C-side closure holds the widget, so
+            # unparenting frees nothing. Measured: 20 chats visited 3 times
+            # went 270 -> 452 -> 634 live bubbles. The rolling trim already
+            # disposes; the chat switch has to as well, or it is the larger
+            # leak of the two.
+            if isinstance(child, (ActivityFeedWidget, MessageWidget)):
+                if child is not self.streaming_msg_widget \
+                        and child is not getattr(self, "_speaking_widget", None):
+                    try:
+                        child.dispose_widget()
+                    except Exception:
+                        pass
             self.msg_box.remove(child)
             child = nxt
         # Switching chats abandons the visible feed; the turn it belonged to
@@ -8220,6 +8353,13 @@ class MainWindow(Adw.ApplicationWindow):
                     continue
                 _flush_pending()
             else:
+                # An empty USER row was not filtered, only the assistant one,
+                # so a whitespace-only message rendered as a padded capsule
+                # with nothing in it. `"\n\n"` produced a 210px tall blank
+                # bubble under "YOU" -- it reads as a message that failed to
+                # load rather than one that was never really sent.
+                if not (m.content or "").strip():
+                    continue
                 _flush_pending()
             items.append(("msg", m))
         _flush_pending()
@@ -8232,12 +8372,50 @@ class MainWindow(Adw.ApplicationWindow):
             # building them means opening a long conversation is fast and never
             # spikes RAM, instead of constructing then destroying hundreds of
             # heavy widgets.
-            for kind, payload in items[-MAX_CHAT_ROWS:]:
+            # Same budget, same reason: walk back until MAX_CHAT_ROWS
+            # MESSAGES have been claimed, and keep whatever feeds fall
+            # between them. `items[-MAX_CHAT_ROWS:]` counted feeds against
+            # the budget, so reopening an agentic chat showed roughly half
+            # the exchanges a plain one did.
+            _kept = 0
+            _start = len(items)
+            for _i in range(len(items) - 1, -1, -1):
+                _start = _i
+                if items[_i][0] == "msg":
+                    _kept += 1
+                    if _kept >= MAX_CHAT_ROWS:
+                        break
+            for kind, payload in items[_start:]:
                 if kind == "feed":
                     self._append_history_feed(payload)
                 else:
                     self._append_message_widget(
                         payload.role, payload.content, payload.meta)
+
+        # ── THE REPLY IN FLIGHT BELONGS BACK ON SCREEN ──
+        # The clear loop above unparents everything, including the bubble the
+        # live stream is writing into, and the rebuild cannot replace it: its
+        # stored row is still "" at this point and the loop above skips empty
+        # assistant rows on purpose. So switching away from a chat mid-reply
+        # and back showed NOTHING in flight, and when the stream finished it
+        # wrote the finished answer into a widget with no parent -- the answer
+        # was in the database and invisible until the operator happened to
+        # switch chats again. Measured: rows 11 -> 10 on leaving, still 10 on
+        # returning, and the completed reply nowhere on screen.
+        #
+        # Re-attaching is the whole fix: the widget is intact, it just needs
+        # its place back, and only in the chat that actually owns the stream.
+        _live = self.streaming_msg_widget
+        if _live is not None and self.streaming_chat_id == chat_id:
+            try:
+                if _live.get_parent() is None:
+                    self.msg_box.append(_live)
+                elif _live.get_parent() is not self.msg_box:
+                    _live.get_parent().remove(_live)
+                    self.msg_box.append(_live)
+            except Exception:
+                log("re-attach of in-flight bubble failed: "
+                    + traceback.format_exc())
 
         GLib.idle_add(self._force_scroll_to_bottom)
 
@@ -8324,11 +8502,24 @@ class MainWindow(Adw.ApplicationWindow):
                     gc.collect()
         except Exception:
             pass
-        # New message → force scroll.  This is when the user sent something
-        # or a new assistant turn started; they want to see it.  Mid-stream
-        # token updates use the smart _scroll_to_bottom that respects
-        # the user reading history above.
-        GLib.idle_add(self._force_scroll_to_bottom)
+        # ── FORCE ONLY FOR WHAT THE OPERATOR HIMSELF DID ──
+        # This was unconditional, so a new ASSISTANT bubble slammed the view
+        # to the bottom and re-armed the stick -- discarding the position
+        # _on_vadj_value_changed had just correctly recorded. Measured while
+        # reading history at the top of a 30-message chat: an assistant
+        # append moved the view 4769px and flipped stick False -> True, and
+        # with the rolling trim the row being read was unparented out from
+        # under the cursor.
+        #
+        # Sending a message is a request to see it, so a user row still
+        # forces. An arriving reply is not: it follows the tail only if the
+        # operator was already at the tail, which is exactly what the
+        # streamed TOKENS of that same reply have always done. The two now
+        # agree.
+        if role == "user":
+            GLib.idle_add(self._force_scroll_to_bottom)
+        else:
+            GLib.idle_add(self._scroll_to_bottom)
         return w
 
     _HIST_CALL_RE = re.compile(r"tool:\s*([a-zA-Z_0-9]+)\s*\((.*)\)\s*$", re.S)
@@ -8375,10 +8566,21 @@ class MainWindow(Adw.ApplicationWindow):
         self.msg_box.append(feed)
 
     def _count_msg_rows(self) -> int:
+        """How many CONVERSATION rows are on screen.
+
+        Activity feeds are deliberately not counted. MAX_CHAT_ROWS exists to
+        bound how many message bubbles are built, and a feed is a folded
+        status strip, not an exchange -- counting them spent the budget on
+        the tool log. Measured on a 12-turn agentic chat: 13 bubbles + 7
+        feeds = 20 rows, so a conversation with 24 user/assistant messages
+        showed thirteen of them. The more tools a run uses, the less of the
+        conversation survives, which is backwards.
+        """
         n = 0
         c = self.msg_box.get_first_child()
         while c is not None:
-            n += 1
+            if isinstance(c, MessageWidget):
+                n += 1
             c = c.get_next_sibling()
         return n
 
@@ -8415,13 +8617,78 @@ class MainWindow(Adw.ApplicationWindow):
         adj = adj or self.msg_scroll.get_vadjustment()
         if adj is None:
             return
-        # set_value clamps to upper - page_size; passing upper is the idiomatic
-        # "go to the end" and stays correct if page_size changes underneath.
+        # ── set_value() IS A NO-OP WHEN THE VALUE IS ALREADY THE VALUE ──
+        #
+        # This is the bug behind "the answer is there but I'm looking at the
+        # top of it, and the scrollbar says I'm at the bottom".
+        #
+        # GtkAdjustment::set_value only emits ::value-changed when the number
+        # actually MOVES. GtkViewport does not hold a scroll offset of its
+        # own -- it applies one when that signal tells it to. So if the
+        # adjustment already reads `upper - page_size` at the moment we snap
+        # (which is exactly what happens when a chat is loaded: `upper` grows
+        # during the measure pass and the adjustment is clamped up to the new
+        # bottom BEFORE the viewport has been allocated), the set is silently
+        # dropped, the viewport never learns, and it keeps painting from
+        # offset 0.
+        #
+        # Nothing corrects it afterwards, because a value that never changes
+        # never emits again -- the view stays stuck until the operator
+        # scrolls by hand. Meanwhile GtkScrollbar reads the ADJUSTMENT, so
+        # its thumb sits confidently at the bottom of a view showing the top.
+        # Verified in the real app: value=1174.0, upper=1702.0, page=528.0 --
+        # a numerically perfect bottom -- rendering offset 0.
+        #
+        # Measured, not assumed: bouncing through 0 and back forces the
+        # notify, and the same frame then paints the true bottom.
+        target = max(0.0, adj.get_upper() - adj.get_page_size())
         self._scroll_self = True
         try:
-            adj.set_value(adj.get_upper())
+            if abs(adj.get_value() - target) < 0.5:
+                # The plain set would be dropped. Bounce so it cannot be.
+                # No paint can land between these two calls -- they run
+                # inside one main-loop callback -- so there is no flicker.
+                adj.set_value(0.0)
+            adj.set_value(target)
         finally:
             self._scroll_self = False
+        self._arm_snap_reassert()
+
+    # A snap issued before the scroller has been allocated computes its
+    # target from an `upper` that is still growing. Re-assert it for a few
+    # frames so the final measure wins, then stop -- a permanent tick
+    # callback would repaint forever, which is the lag this session already
+    # removed once by deleting an always-on CSS animation.
+    _SNAP_REASSERT_FRAMES = 4
+
+    def _arm_snap_reassert(self):
+        if getattr(self, "_snap_tick_id", 0):
+            return                       # already armed
+        self._snap_frames_left = self._SNAP_REASSERT_FRAMES
+        try:
+            self._snap_tick_id = self.msg_scroll.add_tick_callback(
+                self._snap_tick)
+        except Exception:
+            self._snap_tick_id = 0
+
+    def _snap_tick(self, _widget, _clock):
+        self._snap_frames_left = getattr(self, "_snap_frames_left", 0) - 1
+        if not getattr(self, "_stick_bottom", True):
+            self._snap_tick_id = 0
+            return GLib.SOURCE_REMOVE
+        adj = self.msg_scroll.get_vadjustment()
+        if adj is not None:
+            target = max(0.0, adj.get_upper() - adj.get_page_size())
+            if abs(adj.get_value() - target) > 0.5:
+                self._scroll_self = True
+                try:
+                    adj.set_value(target)
+                finally:
+                    self._scroll_self = False
+        if self._snap_frames_left <= 0:
+            self._snap_tick_id = 0
+            return GLib.SOURCE_REMOVE
+        return GLib.SOURCE_CONTINUE
 
     def _on_vadj_changed(self, adj):
         """upper / page-size moved: the content was re-measured."""
@@ -8492,6 +8759,10 @@ class MainWindow(Adw.ApplicationWindow):
         self._stop_requested = True
         # Stop is the one true off-switch: end any autonomous mission so no
         # continuation or error-retry can kick another turn behind our back.
+        # A queued kick is exactly such a continuation, and setting the flag
+        # was not enough to stop it -- _send_user_message clears the flag
+        # again on the operator's next message, so the orphan fired anyway.
+        self._cancel_pending_kick()
         self._mission_active = False
         self._mission_kicks = 0
         self._recent_commands = []
@@ -8606,8 +8877,7 @@ class MainWindow(Adw.ApplicationWindow):
                 f"↻ mission continues — objective not done "
                 f"[{self._mission_kicks}]", "dim")
         self._set_working(True, "continuing…")
-        GLib.timeout_add(max(1, delay),
-                         lambda: self._kick_assistant_turn() or False)
+        self._schedule_kick(delay)
 
     def _send_user_message(self):
         if self._is_busy():
@@ -9352,6 +9622,56 @@ class MainWindow(Adw.ApplicationWindow):
                 pass
         threading.Thread(target=_run, daemon=True).start()
 
+    # ══════════════════════════════════════════════════════════════
+    # A DELAYED KICK IS PART OF THE TURN, AND HAS TO BE CANCELLABLE
+    # ══════════════════════════════════════════════════════════════
+    # Three places used to schedule the next turn with a bare
+    # `GLib.timeout_add(delay, lambda: self._kick_assistant_turn())` and throw
+    # the source id away -- after having just nulled streaming_msg_widget,
+    # streaming_msg_db_id and streaming_chat_id, which are the ONLY three
+    # things _is_busy() looks at. For the length of that delay (up to 15s for
+    # a mission continue, up to 60s for an error back-off) the app reported
+    # itself idle while a turn was definitely still coming.
+    #
+    # Two ways that produced a duplicate answer, both reachable by hand:
+    #
+    #   · the operator types a follow-up during the window. _is_busy() says
+    #     no, the message is accepted and kicks a turn -- then the orphan
+    #     timeout fires and kicks a SECOND one. Two live streams write
+    #     through the same self.streaming_msg_widget, so the tokens
+    #     interleave and both finalisers commit.
+    #
+    #   · the operator presses Stop and then sends. _request_stop set
+    #     _stop_requested, which is the only thing _kick_assistant_turn
+    #     checks -- but _send_user_message clears that flag on entry, so the
+    #     orphan timeout sails through the one guard that would have caught
+    #     it. Stop did not stop it.
+    #
+    # Routing every delayed kick through here fixes both: the id is kept, so
+    # it can be cancelled, and _is_busy() counts a pending kick as busy.
+
+    def _schedule_kick(self, delay_ms: int):
+        """Queue the next assistant turn, cancellably."""
+        self._cancel_pending_kick()
+        if self._stop_requested:
+            return
+        def _fire():
+            self._pending_kick_id = 0
+            if self._stop_requested:
+                return False
+            self._kick_assistant_turn()
+            return False
+        self._pending_kick_id = GLib.timeout_add(max(1, int(delay_ms)), _fire)
+
+    def _cancel_pending_kick(self):
+        kid = getattr(self, "_pending_kick_id", 0)
+        if kid:
+            try:
+                GLib.source_remove(kid)
+            except Exception:
+                pass
+        self._pending_kick_id = 0
+
     def _kick_assistant_turn(self):
         self._mark_turn_progress()
         # If the operator hit stop between tool turns, don't start another.
@@ -9912,14 +10232,50 @@ class MainWindow(Adw.ApplicationWindow):
 
         self.streaming_cancel = threading.Event()
 
+        # ══════════════════════════════════════════════════════════════
+        # EVERY STREAM CARRIES ITS OWN IDENTITY
+        # ══════════════════════════════════════════════════════════════
+        # The four callbacks below all act on self.streaming_msg_widget /
+        # streaming_msg_db_id -- mutable fields naming whatever turn is
+        # current WHEN THE CALLBACK RUNS, not the turn that started the
+        # stream. With one stream at a time that is the same thing. It is
+        # not the same thing whenever a second turn starts while the first
+        # is still alive, and there are three ways that happens:
+        #
+        #   · a queued kick fires alongside an operator-sent message
+        #     (fixed above by making kicks cancellable, but defence in
+        #     depth belongs here too -- that fix removes the common cause,
+        #     this one removes the consequence);
+        #   · the turn watchdog abandons a stuck stream and starts a new
+        #     turn without joining the worker, which is still blocked in a
+        #     socket read and will call back later;
+        #   · a cancelled stream whose provider does not observe the
+        #     cancel until its own idle timeout.
+        #
+        # In all three the OLD stream's tokens append to the NEW turn's
+        # widget and its on_done finalises the new turn -- the operator
+        # watches two answers interleave into one bubble, and both get
+        # committed. An epoch captured here, compared on arrival, makes a
+        # stale stream silent instead: it cannot write, cannot finalise,
+        # and cannot schedule a retry on a turn that is no longer its own.
+        self._stream_epoch = getattr(self, "_stream_epoch", 0) + 1
+        _epoch = self._stream_epoch
+
+        def _live() -> bool:
+            return self._stream_epoch == _epoch
+
         def _on_tok(tok):
-            GLib.idle_add(self._on_stream_token, tok)
+            if _live():
+                GLib.idle_add(self._on_stream_token, tok, _epoch)
         def _on_done(meta):
-            GLib.idle_add(self._on_stream_done, meta)
+            if _live():
+                GLib.idle_add(self._on_stream_done, meta, _epoch)
         def _on_err(err):
-            GLib.idle_add(self._on_stream_error, err)
+            if _live():
+                GLib.idle_add(self._on_stream_error, err, _epoch)
         def _on_reason(tok):
-            GLib.idle_add(self._on_stream_reasoning, tok)
+            if _live():
+                GLib.idle_add(self._on_stream_reasoning, tok, _epoch)
 
         def _bg():
             # The turn advances ONLY through _on_done / _on_err.  router.
@@ -9946,7 +10302,18 @@ class MainWindow(Adw.ApplicationWindow):
         self._set_working(True, "thinking…")
         self.terminal_log("── stream start", "dim")
 
-    def _on_stream_token(self, tok):
+    def _stale_stream(self, epoch) -> bool:
+        """True when this callback belongs to a turn that has been replaced.
+
+        `epoch is None` means a caller from before the epochs existed (or a
+        test); those are always treated as live so nothing silently stops
+        working.
+        """
+        return epoch is not None and epoch != getattr(self, "_stream_epoch", 0)
+
+    def _on_stream_token(self, tok, epoch=None):
+        if self._stale_stream(epoch):
+            return False
         self._mark_turn_progress()
         if self.streaming_msg_widget:
             self.streaming_msg_widget.append_streaming(tok)
@@ -9956,9 +10323,11 @@ class MainWindow(Adw.ApplicationWindow):
             self._feed_tts_stream()
         return False
 
-    def _on_stream_reasoning(self, tok):
+    def _on_stream_reasoning(self, tok, epoch=None):
         """Reasoning tokens (model 'thoughts') arrive separately from the
         reply; route them to the message's collapsible thoughts panel."""
+        if self._stale_stream(epoch):
+            return False
         if self.streaming_msg_widget:
             self.streaming_msg_widget.append_thought(tok)
             if self.streaming_chat_id == self.current_chat_id:
@@ -10017,7 +10386,9 @@ class MainWindow(Adw.ApplicationWindow):
         except Exception:
             return ""
 
-    def _on_stream_done(self, meta):
+    def _on_stream_done(self, meta, epoch=None):
+        if self._stale_stream(epoch):
+            return False
         self._mark_turn_progress()
         if not self.streaming_msg_widget:
             self._finish_turn_cleanup()
@@ -10371,8 +10742,23 @@ class MainWindow(Adw.ApplicationWindow):
                     self.terminal_log(
                         f"↻ auto-retry {self._degraded_retries}/3 "
                         f"(staying on selected provider)", "dim")
-                    GLib.timeout_add(
-                        600, lambda: self._kick_assistant_turn() or False)
+                    # ── RETIRE THE JUNK BUBBLE BEFORE RETRYING ──
+                    # Every other re-kick path (force-answer, stall nudge,
+                    # _feed_tool_result, _mission_continue) nulls these two
+                    # first. This one did not, so the degraded reply stayed
+                    # parented in msg_box and the retry appended a SECOND
+                    # bubble underneath it -- the operator saw the junk reply
+                    # and its replacement, up to three times over. Drop the
+                    # row and the refs, then retry into a clean one.
+                    _junk = self.streaming_msg_widget
+                    self.streaming_msg_widget = None
+                    self.streaming_msg_db_id = None
+                    if _junk is not None:
+                        try:
+                            self.msg_box.remove(_junk)
+                        except Exception:
+                            pass
+                    self._schedule_kick(600)
                     return
                 else:
                     # Retries exhausted. Don't loop — just note it. If the model
@@ -10401,13 +10787,37 @@ class MainWindow(Adw.ApplicationWindow):
             # this is the fail-open backstop for the ones it doesn't know yet —
             # tell the model its call wasn't understood and show it the format
             # that works. That fixes the CLASS instead of one member of it.
+            # ── AND IT ONLY COUNTS IF THE ANSWER IS MISSING ──
+            # `_empty_answer` above is gated on `not _visible`; this was not,
+            # so a reply that ANSWERED THE QUESTION IN FULL and merely
+            # contained tag-shaped text was treated as a failed tool call and
+            # the turn was kicked again. The model has nothing new to send,
+            # so it repeats itself -- twice, because the budget below is 2.
+            # That is the "it answers twice" the operator reported, and the
+            # commonest trigger is asking Basilisk to explain its own tool
+            # syntax, because the force-answer text quotes that syntax back.
+            #
+            # (looks_like_failed_tool_call now masks ``` fences too, so a
+            # documented example no longer registers at all -- but the gate
+            # belongs here regardless: a delivered answer is never a reason
+            # to ask for the answer again.)
             _bad_call = (not cancelled and not executable
+                         and not _visible
                          and looks_like_failed_tool_call(final or ""))
             if _bad_call:
                 self.terminal_log(
                     "⚠ the model emitted a tool call in a syntax this build "
                     "doesn't parse — asking it to re-send", "error")
-            if (not cancelled and (_locked_drop or _empty_answer or _bad_call)
+            # ── _locked_drop NEEDS THE SAME GATE, FOR THE SAME REASON ──
+            # A dropped tool call is a reason to ask for the answer in prose
+            # ONLY when there is no answer yet. After the host tells the model
+            # "write the full answer NOW", the very next reply routinely does
+            # exactly that AND appends one more tool call -- which is dropped,
+            # which re-triggers this branch, which asks for the answer again.
+            # The operator reads the same complete answer two or three times.
+            _drop_without_answer = bool(_locked_drop) and not _visible
+            if (not cancelled
+                    and (_drop_without_answer or _empty_answer or _bad_call)
                     and getattr(self, "_force_answer_tries", 0) < 2
                     and not self._stop_requested):
                 self._force_answer_tries = \
@@ -10472,7 +10882,8 @@ class MainWindow(Adw.ApplicationWindow):
                 except Exception:
                     log(f"force-answer kick failed: {traceback.format_exc()}")
 
-            elif not cancelled and (_locked_drop or _empty_answer or _bad_call):
+            elif not cancelled and (_drop_without_answer or _empty_answer
+                                    or _bad_call):
                 # Re-send budget spent and the turn still produced nothing
                 # runnable.  Previously this settled in silence and handed the
                 # operator an empty bubble with no idea why — say it plainly
@@ -10616,7 +11027,11 @@ class MainWindow(Adw.ApplicationWindow):
             self._finish_turn_cleanup()
         return False
 
-    def _on_stream_error(self, err):
+    def _on_stream_error(self, err, epoch=None):
+        if self._stale_stream(epoch):
+            # A dead stream must not schedule a retry for a turn that has
+            # already moved on -- that is a second answer, arriving late.
+            return False
         self._mark_turn_progress()
         self.terminal_log(f"✗ stream error: {err}", "error")
         if self.streaming_msg_widget:
@@ -10656,8 +11071,7 @@ class MainWindow(Adw.ApplicationWindow):
                 "stream error - retrying in %ds (attempt %d): %s"
                 % (delay // 1000, self._error_retries, str(err)[:80]), "gate")
             self._set_working(True, "retrying after error…")
-            GLib.timeout_add(max(1, delay),
-                             lambda: self._kick_assistant_turn() or False)
+            self._schedule_kick(delay)
             return False
         self._set_working(False)
         self._set_send_mode(False)
@@ -13422,6 +13836,12 @@ class MainWindow(Adw.ApplicationWindow):
         if self.streaming_msg_widget is not None:
             return True
         if self.streaming_chat_id is not None:
+            return True
+        # A kick already queued IS the turn, even though every field above
+        # has been cleared in preparation for it. Without this the app
+        # answers "idle" for up to a minute of error back-off and accepts a
+        # second turn on top of the one already coming.
+        if getattr(self, "_pending_kick_id", 0):
             return True
         return False
 
