@@ -502,7 +502,7 @@ headerbar {
     color: #eef2f6;
     border-radius: 12px 12px 4px 12px;
     padding: 18px 22px;
-    margin: 8px 12px 8px 60px;
+    margin: 8px 12px;
     font-size: 30px;
     line-height: 1.45;
     border: 1px solid rgba(64, 20, 96, 0.40);
@@ -514,12 +514,39 @@ headerbar {
     background-color: rgba(125, 18, 27, 0.13);
     color: #eef1f5;
     padding: 16px 20px;
-    margin: 8px 60px 8px 12px;
+    margin: 8px 12px;
     font-size: 30px;
     line-height: 1.55;
     border-radius: 12px 12px 12px 4px;
     border: 1px solid rgba(125, 18, 27, 0.36);
 }
+
+/* ---- WHY THE 60px INSET LIVES HERE AND NOT ON THE BUBBLE ----
+   Both bubbles used to carry the inset themselves:
+
+       .msg-user      { margin: 8px 12px 8px 60px; }
+       .msg-assistant { margin: 8px 60px 8px 12px; }
+
+   and that one-sided margin is what made text spill out of the bubble
+   background. Each bubble is halign:START/END with hexpand:false, so GTK
+   allocates it its NATURAL width -- but the height-for-width query that
+   decided how TALL to make it was answered for a different, wider size.
+   A margin of 12 on one side and 60 on the other widens that disagreement
+   by 48px, and on the steep part of a wrapped list's height curve 48px of
+   width is ~200px of height.
+
+   Measured on a real reply (eight wrapped bullets, 810px window): the
+   bubble asked for 1593px, was given 1394px, and drew its last ~200px of
+   text below its own background -- which is exactly what "text is flowing
+   out of bubbles" looks like. The same 200px inflated the scroll range, so
+   finishing a reply jumped the view to a bottom that was mostly empty.
+
+   Moving the inset one level up fixes both: the column is a plain
+   hexpanding box, so its margin cannot disagree with anything, and the
+   bubble's own margin is symmetric. The rendered inset is unchanged --
+   12 + 48 is the 60 it always was. */
+.msg-column-assistant { margin-right: 48px; }
+.msg-column-user      { margin-left: 48px; }
 
 /* Compact tool indicator (replaces visible JSON dump) */
 .msg-tool-indicator {
@@ -4805,6 +4832,7 @@ class MessageWidget(Gtk.Box):
                                   spacing=2)
             content_box.set_halign(Gtk.Align.END)
             content_box.set_hexpand(False)
+            content_box.add_css_class("msg-column-user")
 
             label = Gtk.Label(label="YOU", xalign=1.0)
             label.add_css_class("role-label")
@@ -4829,6 +4857,7 @@ class MessageWidget(Gtk.Box):
             content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
                                   spacing=2)
             content_box.set_hexpand(True)
+            content_box.add_css_class("msg-column-assistant")
             # Header: role label on the left, a per-message play/pause
             # button on the right (so each reply can be read, paused, and
             # replayed on its own).
@@ -4853,7 +4882,27 @@ class MessageWidget(Gtk.Box):
             # hexpands), so a two-word reply drew a full-screen bubble. START +
             # no-expand makes the bubble size to its text and sit left; the
             # label's max-width-chars cap still wraps long replies.
-            inner.set_halign(Gtk.Align.START)
+            # ── HUGGING WITHOUT BREAKING HEIGHT-FOR-WIDTH ──
+            # This used to be halign=START + hexpand=False on the bubble
+            # itself, and that is what made text draw outside the bubble
+            # background.
+            #
+            # A vertical GtkBox asks its child "how tall are you at MY width",
+            # then -- because halign=START means "take your natural width" --
+            # allocates it something NARROWER. The bubble's content is
+            # wrapped text and a two-column list, so narrower means taller:
+            # it was sized from the answer to a question about a wider box.
+            # Measured on a real reply at ui_scale 0.5: allocated 490px,
+            # needed 576px, and the last paragraph drew 43px below its own
+            # background, on top of the Listen button.
+            #
+            # A HORIZONTAL box does not have this problem: it settles every
+            # child's WIDTH first and only then asks for height, so the width
+            # the bubble is measured at is the width it gets. Hugging moves
+            # to the trailing spacer -- the same pattern the user row above
+            # already uses -- so a two-word reply still draws a small bubble
+            # instead of a full-width one.
+            inner.set_halign(Gtk.Align.FILL)
             inner.set_hexpand(False)
             # Arcane seal: a faint sigil in the corner of every Basilisk reply.
             # Overlaid, non-interactive -> never touches the streamed text, which
@@ -4862,12 +4911,21 @@ class MessageWidget(Gtk.Box):
             _seal = _build_msg_sigil()
             if _seal is not None:
                 _seal_ov = Gtk.Overlay()
-                _seal_ov.set_halign(Gtk.Align.START)
+                _seal_ov.set_halign(Gtk.Align.FILL)
+                _seal_ov.set_hexpand(False)
                 _seal_ov.set_child(inner)
                 _seal_ov.add_overlay(_seal)
-                content_box.append(_seal_ov)
+                _bubble_widget = _seal_ov
             else:
-                content_box.append(inner)
+                _bubble_widget = inner
+            # The hug row: bubble, then a spacer that eats the rest.
+            _hug = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+            _hug.set_hexpand(True)
+            _hug.append(_bubble_widget)
+            _hug_spacer = Gtk.Box()
+            _hug_spacer.set_hexpand(True)
+            _hug.append(_hug_spacer)
+            content_box.append(_hug)
             # Read-aloud control sits UNDERNEATH the message (left-aligned),
             # where it's easy to reach, rather than off on the far right.
             if self._on_speak is not None:

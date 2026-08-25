@@ -1,3 +1,69 @@
+## v1.0.0.0 — GUI pass
+
+### Text drew outside the bubble
+
+Reported with a screenshot: the bubble background stopped partway down a
+reply and the last two entries plus the closing line rendered on the
+wallpaper, over the Listen button.
+
+**It only happens at the UI scales real machines use**, which is why three
+earlier layout sweeps called the bubbles clean. `_detect_ui_scale()` returns
+0.7 for a desktop monitor and 0.85 for a laptop, and `_scale_css` rewrites
+every `Npx` in the stylesheet accordingly — but every harness I had written
+ran at the headless default, where the same reply happened to fit. Repeating
+the measurement across 0.5 / 0.7 / 0.85 / 1.0 found it immediately:
+
+```
+ui_scale 0.5   bubble allocated 490px, needed 576px   43px of text outside
+```
+
+**The cause was the construction that makes a bubble hug its text:**
+
+```python
+inner.set_halign(Gtk.Align.START)
+inner.set_hexpand(False)
+```
+
+inside a VERTICAL box. A vertical `GtkBox` asks its child "how tall are you
+at MY width", and then — because `halign=START` means "take your natural
+width" — allocates it something narrower. The bubble holds wrapped text and a
+two-column list, so narrower means taller: it was sized from the answer to a
+question about a wider box, and the extra lines drew past its own background.
+A one-sided `margin: 8px 60px 8px 12px` widened the disagreement by another
+48px.
+
+**The fix is a horizontal hug row.** A horizontal box settles every child's
+WIDTH first and only then asks for height, so the width the bubble is
+measured at is the width it gets. The bubble fills that row and a trailing
+spacer eats the slack — the same pattern the user row already used. The
+one-sided inset moved up to the column, where a margin cannot disagree with
+anything; `12 + 48` is the same 60px it always was, so nothing moved on
+screen.
+
+Verified at four UI scales across ten block types — short replies, tables,
+code blocks, quotes, wrapped lists, unbreakable tokens, 250-character URLs:
+**zero overflow, nothing wider than the viewport.** And the counter-property
+that construction existed for still holds: a four-character reply draws a
+51px bubble, not a full-width one.
+
+`tests/test_bubble_fit.py` is new and drives the real app under GTK. It skips
+cleanly where there is no display, so the suite still runs anywhere, but
+where it can run it measures pixels rather than reading source.
+
+### On the "huge empty space"
+
+Measured, and it was the same bug rather than a separate one: the scroll
+range was never inflated — the bubble was too SHORT, so the text spilled
+past it and the layout read as broken. After the fix the scroller ends 24px
+below the last widget (the message box's own bottom padding), the view lands
+at the bottom, and the end of the answer is on screen. Checked on the load
+path, the streaming path, and the streaming path with a docked activity
+feed.
+
+### Tests
+
+50 suites, 3,361 checks.
+
 ## v1.0.0.0 — second pass
 
 ### "it does not work": the model promised and never did it
