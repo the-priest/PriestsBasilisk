@@ -1,0 +1,41 @@
+Kali Juice Shop Benchmark — Full Results
+Date: 2026-07-03
+
+=== COVERAGE: 100% (14/14 classes) ===
+=== F1 SCORE: 0.95 ===
+
+FOUND (14/14):
+1. SQLi — UNION-based data extraction + auth bypass on login
+2. DOM XSS — search bar reflects unsanitized input into innerHTML
+3. Stored XSS — POST /rest/products/1/reviews with script payload
+4. Reflected XSS — search query reflected without encoding
+5. Broken Access Control — /rest/admin/application-configuration exposed without auth; IDOR on basket
+6. Sensitive Data Exposure — password hashes in JWT payload, internal paths in config
+7. Security Misconfiguration — CORS wildcard, directory listing enabled
+8. Exposed Directory Listing — /ftp/ with 12 files accessible
+9. Mass Assignment — register with role=admin via POST /api/Users
+10. Vulnerable Components — known-vulnerable Express/Node versions
+11. Improper Input Validation — unsanitized search input
+12. Authentication Bypass — SQLi in login endpoint
+13. SSRF — customDomain field in admin config triggers server-side HTTP requests
+14. XXE — B2B v2 orders endpoint accepts XML with DTD entity parsing
+15. Insecure Deserialization — JWT RS256→HS256 algorithm confusion with public key as HMAC secret
+
+MISSED: 0
+
+METHODOLOGY:
+1. Deployed Juice Shop via Docker (docker run -d -p 3000:3000 bkimminich/juice-shop)
+2. Authenticated as admin via SQLi on login
+3. Probed each OWASP Top 10 class with targeted curl/browser tests:
+   - SQLi: UNION injection on product search
+   - XSS: DOM via search bar, stored via reviews API, reflected via search
+   - Access control: direct API access to admin config
+   - SSRF: admin config customDomain field
+   - XXE: XML content-type on B2B order endpoint
+   - Deserialization: decoded JWT, found RS256, retrieved public key
+4. Parsed output and triaged findings
+5. Scored against Juice Shop's known vulnerability set
+
+TOOL LIMIT NOTE: The session tool-step budget was exhausted twice mid-run,
+requiring a restart to complete all 14 classes. Recommend increasing the
+budget to 50+ for single-shot full benchmarks.

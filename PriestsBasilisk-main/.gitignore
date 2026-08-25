@@ -1,0 +1,20 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.DS_Store
+*.swp
+*.bak
+*.orig
+backups/
+.idea/
+.vscode/
+
+# Build artefacts (PyInstaller, and `python3 -m build` for the PyPI wheel)
+build/
+dist/
+*.spec
+*.egg-info/
+.eggs/
+.venv/
+venv/

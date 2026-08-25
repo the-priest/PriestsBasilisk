@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Basilisk
+GenericName=AI Assistant
+Comment=Autonomous pentesting agent that answers only to you
+Exec=basilisk
+Icon=org.thepriest.basilisk
+Terminal=false
+Categories=Utility;Network;Development;
+Keywords=ai;assistant;pentest;security;basilisk;
+StartupWMClass=org.thepriest.basilisk
+StartupNotify=true

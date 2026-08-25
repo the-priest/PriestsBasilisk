@@ -1,0 +1,145 @@
+v7.x.x Benchmark Report
+===
+Date: 2026-07-14
+Target: Juice Shop (192.168.1.151:3000)
+
+73 / 113 SOLVED
+
+--- SOLVED (73) ---
+
+1-star (12):
+  closeNotificationsChallenge              Mass Dispel
+  directoryListingChallenge                Confidential Document
+  errorHandlingChallenge                   Error Handling
+  exposedMetricsChallenge                  Exposed Metrics
+  localXssChallenge                        DOM XSS
+  missingEncodingChallenge                 Missing Encoding
+  passwordRepeatChallenge                  Repetitive Registration
+  privacyPolicyChallenge                   Privacy Policy
+  redirectCryptoCurrencyChallenge          Outdated Allowlist
+  scoreBoardChallenge                      Score Board
+  web3SandboxChallenge                     Web3 Sandbox
+  xssBonusChallenge                        Bonus Payload
+  zeroStarsChallenge                       Zero Stars
+
+2-star (17):
+  adminSectionChallenge                    Admin Section
+  basketAccessChallenge                    View Basket
+  deprecatedInterfaceChallenge             Deprecated Interface
+  emptyUserRegistration                    Empty User Registration
+  exposedCredentialsChallenge              Exposed credentials
+  feedbackChallenge                        Five-Star Feedback
+  geoStalkingMetaChallenge                 Meta Geo Stalking
+  geoStalkingVisualChallenge               Visual Geo Stalking
+  loginAdminChallenge                      Login Admin
+  loginRapperChallenge                     Login MC SafeSearch
+  nftUnlockChallenge                       NFT Takeover
+  passwordHashLeakChallenge                Password Hash Leak
+  reflectedXssChallenge                    Reflected XSS
+  securityPolicyChallenge                  Security Policy
+  weakPasswordChallenge                    Password Strength
+  weirdCryptoChallenge                     Weird Crypto
+
+3-star (18):
+  basketManipulateChallenge                Manipulate Basket
+  captchaBypassChallenge                   CAPTCHA Bypass
+  changeProductChallenge                   Product Tampering
+  csafChallenge                            Security Advisory
+  csrfChallenge                            CSRF
+  dbSchemaChallenge                        Database Schema
+  forgedFeedbackChallenge                  Forged Feedback
+  forgedReviewChallenge                    Forged Review
+  freeDeluxeChallenge                      Deluxe Fraud
+  ghostLoginChallenge                      GDPR Data Erasure
+  loginAmyChallenge                        Login Amy
+  loginBenderChallenge                     Login Bender
+  loginJimChallenge                        Login Jim
+  privacyPolicyProofChallenge              Privacy Policy Inspection
+  registerAdminChallenge                   Admin Registration
+  resetPasswordBjoernOwaspChallenge        Bjoern's Favorite Pet
+  resetPasswordJimChallenge                Reset Jim's Password
+  restfulXssChallenge                      API-only XSS
+  uploadSizeChallenge                      Upload Size
+  uploadTypeChallenge                      Upload Type
+  xxeFileDisclosureChallenge               XXE Data Access
+
+4-star (10):
+  accessLogDisclosureChallenge             Access Log
+  easterEggLevelOneChallenge               Easter Egg
+  ephemeralAccountantChallenge             Ephemeral Accountant
+  forgottenBackupChallenge                 Forgotten Sales Backup
+  forgottenDevBackupChallenge              Forgotten Developer Backup
+  httpHeaderXssChallenge                   HTTP-Header XSS
+  misplacedSignatureFileChallenge          Misplaced Signature File
+  nullByteChallenge                        Poison Null Byte
+  oauthUserPasswordChallenge               Login Bjoern
+  typosquattingNpmChallenge                Legacy Typosquatting
+  unionSqlInjectionChallenge               User Credentials
+
+5-star (8):
+  dlpPasswordSprayingChallenge             Leaked Access Logs
+  extraLanguageChallenge                   Extra Language
+  jwtUnsignedChallenge                     Unsigned JWT
+  resetPasswordBjoernChallenge             Reset Bjoern's Password
+  retrieveBlueprintChallenge               Retrieve Blueprint
+  tokenSaleChallenge                       Blockchain Hype
+  typosquattingAngularChallenge            Frontend Typosquatting
+  xxeDosChallenge                          XXE DoS
+
+6-star (8):
+  forgedCouponChallenge                    Forged Coupon
+  loginSupportChallenge                    Login Support Team
+  ssrfChallenge                            SSRF
+  sstiChallenge                            SSTi
+
+--- UNSOLVED (40) ---
+
+2-star (2):
+  aiDebuggingChallenge                     AI Debugging
+  chatbotPromptInjectionChallenge          Chatbot Prompt Injection
+
+3-star (5):
+  chatbotGreedyInjectionChallenge          Greedy Chatbot Manipulation
+  negativeOrderChallenge                   Payback Time
+  nftMintChallenge                         Mint the Honey Pot
+  persistedXssUserChallenge                Client-side XSS Protection
+  systemPromptExtractionChallenge          System Prompt Extraction
+
+4-star (12):
+  christmasSpecialChallenge                Christmas Special
+  dataExportChallenge                      GDPR Data Theft
+  dlpPastebinDataLeakChallenge             Leaked Unsafe Product
+  easterEggLevelTwoChallenge               Nested Easter Egg
+  hiddenImageChallenge                     Steganography
+  knownVulnerableComponentChallenge        Vulnerable Library
+  manipulateClockChallenge                 Expired Coupon
+  noSqlCommandChallenge                    NoSQL DoS
+  noSqlReviewsChallenge                    NoSQL Manipulation
+  persistedXssFeedbackChallenge            Server-side XSS Protection
+  redirectChallenge                        Allowlist Bypass
+  resetPasswordBenderChallenge             Reset Bender's Password
+  resetPasswordUvoginChallenge             Reset Uvogin's Password
+  usernameXssChallenge                     CSP Bypass
+
+5-star (11):
+  changePasswordBenderChallenge            Change Bender's Password
+  emailLeakChallenge                       Email Leak
+  leakedApiKeyChallenge                    Leaked API Key
+  lfrChallenge                             Local File Read
+  noSqlOrdersChallenge                     NoSQL Exfiltration
+  rceChallenge                             Blocked RCE DoS
+  resetPasswordMortyChallenge              Reset Morty's Password
+  supplyChainAttackChallenge               Supply Chain Attack
+  svgInjectionChallenge                    Cross-Site Imaging
+  twoFactorAuthUnsafeSecretStorageChallenge Two Factor Authentication
+  yamlBombChallenge                        Memory Bomb
+
+6-star (11):
+  continueCodeChallenge                    Imaginary Challenge
+  fileWriteChallenge                       Arbitrary File Write
+  jwtForgedChallenge                       Forged Signed JWT
+  premiumPaywallChallenge                  Premium Paywall
+  rceOccupyChallenge                       Successful RCE DoS
+  timingAttackChallenge                    Multiple Likes
+  videoXssChallenge                        Video XSS
+  web3WalletChallenge                      Wallet Depletion

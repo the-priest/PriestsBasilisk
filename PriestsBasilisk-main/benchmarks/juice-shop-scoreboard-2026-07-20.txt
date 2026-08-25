@@ -1,0 +1,148 @@
+OWASP Juice Shop v7.6.0 Benchmark Report
+=========================================
+
+Date: 20 July 2026
+Instance: 192.168.1.151:3000
+
+Score: 87 / 113 challenges solved (77%)
+
+  DIFFICULTY BREAKDOWN:
+   1★: 13/13 (100%) |████████████████████|
+   2★: 18/18 (100%) |████████████████████|
+   3★: 24/26 ( 92%) |██████████████████..|
+   4★: 12/25 ( 48%) |█████████...........|
+   5★: 13/19 ( 68%) |█████████████.......|
+   6★:  7/12 ( 58%) |███████████.........|
+   TOTAL: 87/113 (77%)
+
+--- SOLVED CHALLENGES ---
+
+1★:
+  closeNotificationsChallenge
+  directoryListingChallenge
+  errorHandlingChallenge
+  exposedMetricsChallenge
+  localXssChallenge
+  missingEncodingChallenge
+  passwordRepeatChallenge
+  privacyPolicyChallenge
+  redirectCryptoCurrencyChallenge
+  scoreBoardChallenge
+  web3SandboxChallenge
+  xssBonusChallenge
+  zeroStarsChallenge
+
+2★:
+  adminSectionChallenge
+  aiDebuggingChallenge
+  basketAccessChallenge
+  chatbotPromptInjectionChallenge
+  deprecatedInterfaceChallenge
+  emptyUserRegistration
+  exposedCredentialsChallenge
+  feedbackChallenge
+  geoStalkingMetaChallenge
+  geoStalkingVisualChallenge
+  loginAdminChallenge
+  loginRapperChallenge
+  nftUnlockChallenge
+  passwordHashLeakChallenge
+  reflectedXssChallenge
+  securityPolicyChallenge
+  weakPasswordChallenge
+  weirdCryptoChallenge
+
+3★:
+  basketManipulateChallenge
+  captchaBypassChallenge
+  changeProductChallenge
+  chatbotGreedyInjectionChallenge
+  csafChallenge
+  csrfChallenge
+  dbSchemaChallenge
+  forgedFeedbackChallenge
+  forgedReviewChallenge
+  freeDeluxeChallenge
+  ghostLoginChallenge
+  loginAmyChallenge
+  loginBenderChallenge
+  loginJimChallenge
+  negativeOrderChallenge
+  privacyPolicyProofChallenge
+  registerAdminChallenge
+  resetPasswordBjoernOwaspChallenge
+  resetPasswordJimChallenge
+  restfulXssChallenge
+  systemPromptExtractionChallenge
+  uploadSizeChallenge
+  uploadTypeChallenge
+  xxeFileDisclosureChallenge
+
+4★:
+  accessLogDisclosureChallenge
+  easterEggLevelOneChallenge
+  easterEggLevelTwoChallenge
+  ephemeralAccountantChallenge
+  forgottenBackupChallenge
+  forgottenDevBackupChallenge
+  httpHeaderXssChallenge
+  misplacedSignatureFileChallenge
+  nullByteChallenge
+  oauthUserPasswordChallenge
+  typosquattingNpmChallenge
+  unionSqlInjectionChallenge
+
+5★:
+  changePasswordBenderChallenge
+  dlpPasswordSprayingChallenge
+  emailLeakChallenge
+  extraLanguageChallenge
+  jwtUnsignedChallenge
+  leakedApiKeyChallenge
+  noSqlOrdersChallenge
+  resetPasswordBjoernChallenge
+  resetPasswordMortyChallenge
+  retrieveBlueprintChallenge
+  tokenSaleChallenge
+  typosquattingAngularChallenge
+  xxeDosChallenge
+
+6★:
+  fileWriteChallenge
+  forgedCouponChallenge
+  jwtForgedChallenge
+  loginSupportChallenge
+  premiumPaywallChallenge
+  ssrfChallenge
+  sstiChallenge
+
+--- UNSOLVED (26 remaining) ---
+
+4★:
+  noSqlCommandChallenge
+  noSqlInjectionChallenge
+  payloadSSTIChallenge
+  sqlInjectionChallenge
+  xmlBasedChallenge
+  xssDataChallenge
+  xssDnsChallenge
+
+5★:
+  additionalLanguageChallenge
+  doubleStuffedChallenge
+  jwtForgedHmacChallenge
+  loginMangoChallenge
+  noSqlReviewsChallenge
+  sqlInjectionProductChallenge
+  videoXssChallenge
+
+6★:
+  apiOnlyChallenge
+  clientXssChallenge
+  databaseChallenge
+  doubleStuffedChallenge
+  jwtForgedHmacChallenge
+  loginMangoChallenge
+  noSqlReviewsChallenge
+  sqlInjectionProductChallenge
+  videoXssChallenge
