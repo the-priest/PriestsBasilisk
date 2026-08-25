@@ -1039,21 +1039,38 @@ def _detect_device() -> str:
     return ""
 
 
-def _detect_nethunter() -> bool:
-    # Best-effort.  NetHunter Pro is Basilisk-on-device; a few cheap signals.
-    if "nethunter" in _read_first("/etc/os-release").lower():
-        return True
-    for marker in ("/usr/bin/nethunter", "/sbin/nethunter",
-                   "/data/local/nhsystem"):
-        if os.path.exists(marker):
-            return True
-    return False
+def detect_distro_flavour() -> str:
+    """"cachyos", "kali", "arch", "debian" or "" — the two names that change
+    what Basilisk should DO, plus the bases they sit on.
+
+    Read from ID and ID_LIKE in /etc/os-release rather than from a marker file:
+    CachyOS reports ID=cachyos, ID_LIKE=arch, and Kali reports ID=kali with
+    ID_LIKE=debian, so one parse settles both the flavour and its base."""
+    rel = _read_first("/etc/os-release").lower()
+    if not rel:
+        return ""
+    ident = like = ""
+    for line in rel.splitlines():
+        line = line.strip()
+        if line.startswith("id="):
+            ident = line[3:].strip().strip('"\'')
+        elif line.startswith("id_like="):
+            like = line[8:].strip().strip('"\'')
+    if "cachy" in ident or "cachy" in rel:
+        return "cachyos"
+    if "kali" in ident or "kali" in rel:
+        return "kali"
+    if ident == "arch" or "arch" in like:
+        return "arch"
+    if ident in ("debian", "ubuntu") or "debian" in like:
+        return "debian"
+    return ident or ""
 
 
 def host_facts_block() -> str:
     """Auto-detected facts about the machine Basilisk is running on, computed
-    fresh at launch.  Lets Basilisk know whether she's on the OnePlus 6 under
-    NetHunter, the ThinkPad, or the Dell, without being told."""
+    fresh at launch.  Lets Basilisk know whether she's on CachyOS, on Kali, or
+    on something else, without being told."""
     global _HOST_FACTS_CACHE
     if _HOST_FACTS_CACHE:
         return _HOST_FACTS_CACHE
@@ -1072,8 +1089,18 @@ def host_facts_block() -> str:
     desktop = os.environ.get("XDG_CURRENT_DESKTOP", "")
     if session or desktop:
         lines.append(f"  Session: {session or '?'} / {desktop or '?'}")
-    if _detect_nethunter():
-        lines.append("  NetHunter: yes")
+    # The two flavours that change what Basilisk should DO get named
+    # explicitly, with the one operational consequence each. A distro line the
+    # model cannot act on is noise in a prompt that is already near budget.
+    _flav = detect_distro_flavour()
+    if _flav == "cachyos":
+        lines.append("  Distro: CachyOS (Arch-based) - pacman/paru, NOT apt. "
+                     "Security tooling comes from BlackArch or the AUR, and "
+                     "many Kali package names do not exist here")
+    elif _flav == "kali":
+        lines.append("  Distro: Kali - apt, and the kali-tools metapackages. "
+                     "Most offensive tooling is already installed; CHECK with "
+                     "`which` before installing anything")
     # Package manager + escalation tool, so Basilisk issues the RIGHT commands
     # on THIS distro (pacman -S on Arch/CachyOS, not apt install) instead of
     # defaulting to Debian habits.

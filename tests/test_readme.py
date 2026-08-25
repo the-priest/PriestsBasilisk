@@ -187,7 +187,7 @@ FACTS = [
     "Zip bombs", "Symlink entries", "bubblewrap", "workspace_baseline",
     "workspace_verify", "workspace_export", "zday_scan", "code_scan_plan",
     "SiliconFlow", "~/.config/basilisk/settings.json",
-    "Python 3.10+", "GTK4", "NetHunter", "pacman", "doas", "MIT",
+    "Python 3.10+", "GTK4", "CachyOS", "pacman", "doas", "MIT",
     "install.sh", "alg:none", "RS256", "prototype pollution", "interactsh",
     "out-of-band", "memory_forget", "SQLite",
 ]

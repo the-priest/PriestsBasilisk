@@ -154,7 +154,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.basilisk"
 APP_NAME = "Basilisk"
-VERSION = "9.8.0"
+VERSION = "9.9.0"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -1916,14 +1916,215 @@ headerbar {
 }
 
 /* =====================================================================
-   BUBBLE REFINEMENT -- last layer, so it wins.
+   STRUCTURED MARKDOWN -- tables, headings, quotes, rules, lists.
 
-   The fire identity above is kept; what changes is legibility and rhythm.
-   The big one is TEXT SHADOW: a 9px orange glow behind 30px body text
-   smears every stroke, and at phone scale it reads as a soft focus problem
-   rather than as atmosphere.  Glow belongs on the BORDER and the SURFACE,
-   where it costs nothing to read.  Text keeps a single tight dark shadow
-   for contrast against the ember gradient underneath it.
+   A comparison answer arrives as a table, and a report answer arrives as
+   headings and bullets. Rendered as literal pipe characters in a
+   proportional font, neither one lines up, so the most structured thing
+   the model can say was the least readable thing on screen. These give
+   each shape its own compartment, the way a web chat UI does.
+   ===================================================================== */
+
+.md-table {
+    margin: 10px 0 12px 0;
+    border-radius: 10px;
+    background-color: #0a0b0d;
+    border: 1px solid rgba(150, 60, 30, 0.36);
+    box-shadow: 0 3px 12px rgba(0, 0, 0, 0.34);
+}
+.md-table scrolledwindow { border-radius: 10px; }
+.md-table-grid { background-color: transparent; }
+
+.md-th {
+    padding: 10px 14px;
+    background-color: #150e0b;
+    border-bottom: 2px solid rgba(196, 88, 40, 0.55);
+    border-right: 1px solid rgba(120, 60, 40, 0.24);
+}
+.md-th.lastcol { border-right: none; }
+.md-th label {
+    color: #ffcf9c;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 21px;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+}
+
+.md-td {
+    padding: 9px 14px;
+    border-top: 1px solid rgba(120, 70, 50, 0.16);
+    border-right: 1px solid rgba(120, 60, 40, 0.16);
+}
+.md-td.lastcol { border-right: none; }
+.md-td.odd { background-color: rgba(255, 165, 95, 0.055); }
+.md-td label {
+    color: #e2e6ec;
+    font-size: 26px;
+    line-height: 1.35;
+}
+.md-table-more {
+    padding: 8px 14px;
+    color: #8a8377;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 19px;
+    border-top: 1px solid rgba(120, 70, 50, 0.20);
+}
+
+/* ---- Blockquote: an accent rail and an inset panel ---- */
+.md-quote {
+    margin: 9px 0;
+    border-radius: 8px;
+    background-color: rgba(255, 150, 70, 0.045);
+}
+.md-quote-rail {
+    min-width: 3px;
+    background-color: #c4551f;
+    border-radius: 3px;
+}
+.md-quote-body {
+    padding: 10px 16px;
+    color: #cfd4dc;
+    font-size: 28px;
+    font-style: italic;
+    line-height: 1.45;
+}
+
+/* ---- Headings: sections you can scan ---- */
+.md-heading { margin: 14px 0 6px 0; }
+.md-heading:first-child { margin-top: 2px; }
+.md-heading-text {
+    color: #ffd9ab;
+    font-weight: 800;
+    letter-spacing: 0.3px;
+}
+.md-heading.h1 .md-heading-text { font-size: 40px; }
+.md-heading.h2 .md-heading-text { font-size: 35px; }
+.md-heading.h3 .md-heading-text { font-size: 31px; color: #f5c99a; }
+.md-heading.h4 .md-heading-text,
+.md-heading.h5 .md-heading-text,
+.md-heading.h6 .md-heading-text {
+    font-size: 28px;
+    color: #e2bc9a;
+    letter-spacing: 0.6px;
+}
+.md-heading-rule {
+    min-height: 1px;
+    margin-top: 5px;
+    background-color: rgba(196, 88, 40, 0.34);
+}
+
+.md-rule {
+    min-height: 1px;
+    margin: 13px 6px;
+    background-color: rgba(150, 90, 60, 0.32);
+}
+
+/* ---- Lists: a real hanging indent ---- */
+.md-list {
+    margin: 5px 0 7px 0;
+}
+.md-list-marker {
+    color: #d9853f;
+    font-weight: 800;
+    font-size: 26px;
+    padding: 2px 11px 2px 4px;
+    min-width: 22px;
+}
+.md-list-text {
+    color: #e6eaf0;
+    font-size: 30px;
+    line-height: 1.45;
+    padding-bottom: 6px;
+}
+
+/* =====================================================================
+   ATTACHMENT TRAY -- staged files, ABOVE the composer.
+
+   Reads as part of the composer rather than as chat content: same charred
+   surface, one step brighter, so it is obviously "about to be sent" and not
+   "already sent".
+   ===================================================================== */
+
+.attach-tray {
+    padding: 4px 4px 2px 4px;
+}
+
+.attach-chip {
+    padding: 6px 8px 6px 10px;
+    margin: 2px 3px;
+    border-radius: 11px;
+    background-color: #120c09;
+    background-image: linear-gradient(180deg,
+        rgba(255, 150, 60, 0.07), rgba(255, 120, 40, 0.015));
+    border: 1px solid rgba(180, 66, 26, 0.46);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 175, 120, 0.09),
+        0 2px 8px rgba(0, 0, 0, 0.40);
+}
+.attach-chip:hover {
+    border-color: rgba(226, 96, 40, 0.72);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 175, 120, 0.12),
+        0 3px 12px rgba(0, 0, 0, 0.46),
+        0 0 14px rgba(226, 84, 30, 0.26);
+}
+
+.attach-chip-kind {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    font-weight: 800;
+    letter-spacing: 0.8px;
+    padding: 2px 6px;
+    border-radius: 5px;
+    color: #0a0605;
+    background-color: #c97a3c;
+}
+.attach-chip.image .attach-chip-kind { background-color: #b8683a; }
+.attach-chip.file  .attach-chip-kind { background-color: #8d8f96; }
+
+.attach-chip-name {
+    color: #e6dbd1;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 16px;
+    font-weight: 600;
+}
+.attach-chip-size {
+    color: #8a8377;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14px;
+}
+.attach-chip-remove {
+    color: #99908a;
+    font-size: 17px;
+    font-weight: 800;
+    min-width: 22px;
+    min-height: 22px;
+    padding: 0;
+    border-radius: 6px;
+    background: none;
+    background-image: none;
+    border: none;
+    box-shadow: none;
+}
+.attach-chip-remove:hover {
+    color: #ffffff;
+    background-color: #b3373b;
+}
+
+/* =====================================================================
+   BUBBLES -- last layer, so it wins.
+
+   CALM, NOT DIM. The previous pass stacked six shadows per bubble: two
+   inner glows, an outer ring, a drop shadow and a coloured halo, on top of
+   two radial gradients and a linear one. Every element was individually
+   defensible and the sum was a screen where nothing sat still and long text
+   had a permanent orange haze behind it.
+
+   What actually separates a bubble from the background is ONE clear edge
+   and ONE soft drop shadow. That is what is left here. The ember identity
+   moves to where it costs nothing to read: a tinted border, a barely-there
+   top highlight, and a hover state that lifts. No halo behind body text, no
+   text-shadow smearing 30px glyphs, no gradient competing with the words.
    ===================================================================== */
 
 .msg-row {
@@ -1931,52 +2132,46 @@ headerbar {
 }
 
 .msg-user, .msg-assistant {
-    padding: 17px 21px;
-    transition: box-shadow 200ms ease, border-color 200ms ease;
+    padding: 16px 20px;
+    background-image: none;
+    text-shadow: none;
+    transition: border-color 160ms ease, box-shadow 160ms ease;
 }
 
 .msg-user {
+    color: #f2ece7;
     margin: 7px 12px 7px 64px;
     line-height: 1.45;
-    border-radius: 18px 18px 6px 18px;
-    text-shadow: 0 1px 1px rgba(0, 0, 0, 0.60);
+    border-radius: 16px 16px 5px 16px;
+    background-color: #17100c;
+    border: 1px solid rgba(176, 82, 40, 0.42);
     box-shadow:
-        inset 0 1px 0 rgba(255, 190, 140, 0.13),
-        inset 0 0 26px rgba(150, 46, 18, 0.14),
-        0 0 0 1px rgba(0, 0, 0, 0.45),
-        0 10px 26px rgba(0, 0, 0, 0.50),
-        0 0 16px rgba(210, 72, 24, 0.22);
+        inset 0 1px 0 rgba(255, 190, 140, 0.06),
+        0 2px 10px rgba(0, 0, 0, 0.42);
 }
 .msg-assistant {
+    color: #e9edf2;
     margin: 7px 64px 7px 12px;
     line-height: 1.5;
-    border-radius: 6px 18px 18px 18px;
-    text-shadow: 0 1px 1px rgba(0, 0, 0, 0.60);
+    border-radius: 5px 16px 16px 16px;
+    background-color: #101215;
+    border: 1px solid rgba(120, 72, 58, 0.38);
     box-shadow:
-        inset 0 1px 0 rgba(255, 175, 125, 0.11),
-        inset 0 0 28px rgba(150, 40, 22, 0.14),
-        0 0 0 1px rgba(0, 0, 0, 0.45),
-        0 10px 26px rgba(0, 0, 0, 0.50),
-        0 0 16px rgba(196, 60, 26, 0.20);
+        inset 0 1px 0 rgba(220, 190, 170, 0.05),
+        0 2px 10px rgba(0, 0, 0, 0.42);
 }
 
 .msg-user:hover {
-    border-color: rgba(232, 108, 48, 0.78);
+    border-color: rgba(206, 100, 52, 0.62);
     box-shadow:
-        inset 0 1px 0 rgba(255, 190, 140, 0.16),
-        inset 0 0 30px rgba(160, 50, 20, 0.18),
-        0 0 0 1px rgba(0, 0, 0, 0.45),
-        0 12px 30px rgba(0, 0, 0, 0.54),
-        0 0 26px rgba(230, 90, 34, 0.42);
+        inset 0 1px 0 rgba(255, 190, 140, 0.08),
+        0 4px 16px rgba(0, 0, 0, 0.48);
 }
 .msg-assistant:hover {
-    border-color: rgba(216, 74, 38, 0.78);
+    border-color: rgba(158, 96, 74, 0.58);
     box-shadow:
-        inset 0 1px 0 rgba(255, 175, 125, 0.14),
-        inset 0 0 32px rgba(160, 44, 24, 0.18),
-        0 0 0 1px rgba(0, 0, 0, 0.45),
-        0 12px 30px rgba(0, 0, 0, 0.54),
-        0 0 26px rgba(216, 74, 34, 0.40);
+        inset 0 1px 0 rgba(220, 190, 170, 0.07),
+        0 4px 16px rgba(0, 0, 0, 0.48);
 }
 
 /* ---- Role labels: quieter, so the eye lands on the message ---- */
@@ -1984,14 +2179,17 @@ headerbar {
     font-size: 15px;
     font-weight: 700;
     letter-spacing: 1.4px;
-    opacity: 0.72;
+    opacity: 0.62;
     margin: 0 4px 4px 4px;
 }
-.role-label.user     { color: #d2743c; }
-.role-label.basilisk { color: #d8a86c; }
+.role-label.user     { color: #c26c39; }
+.role-label.basilisk { color: #b9a08c; }
 
-/* ---- The old inline tool indicator: kept for reloaded history, toned
-        down so it never competes with the activity feed above it ---- */
+/* The seal is atmosphere, not information -- at full strength it sat behind
+   the last line of every reply. */
+.msg-sigil { opacity: 0.16; }
+
+/* ---- Inline tool indicator from reloaded history: present, not loud ---- */
 .msg-tool-indicator {
     padding: 4px 14px 4px 70px;
     margin: 1px 12px;
@@ -1999,8 +2197,27 @@ headerbar {
 .tool-indicator-label {
     color: #6d7682;
     font-size: 16px;
-    opacity: 0.80;
+    opacity: 0.78;
 }
+
+/* ---- Links inside a reply. The base rule paints them #7d121b, which is
+        nearly inseparable from body text inside a dark bubble -- and ANSWER
+        MODE makes one of these the last line of nearly every leashed reply,
+        so it earns a colour that reads. ---- */
+.msg-assistant link,
+.msg-assistant *:link,
+.msg-user link,
+.msg-user *:link {
+    color: #e8944e;
+    text-decoration-color: rgba(232, 148, 78, 0.42);
+}
+.msg-assistant *:link:hover,
+.msg-user *:link:hover {
+    color: #ffb877;
+    text-decoration-color: rgba(255, 184, 119, 0.85);
+}
+.msg-assistant *:visited,
+.msg-user *:visited { color: #c4855a; }
 """
 
 
@@ -2228,21 +2445,199 @@ def text_to_pango(text: str) -> str:
     return _pango_escape(text)
 
 
-def split_message_into_blocks(text: str) -> List[Dict[str, str]]:
+# ── STRUCTURED MARKDOWN BLOCKS ───────────────────────────────────────
+# A model answering a comparison question replies with a TABLE, and a model
+# writing a report replies with headings, bullets and quotes. All of it used to
+# land in one Gtk.Label as literal text — `| Agent | Score |` and a row of
+# dashes, rendered as prose. The pipes do not line up in a proportional font,
+# so the single most common shape of a structured answer was also the least
+# readable thing on the screen.
+#
+# These are parsed here, as pure functions over text, so the whole grammar is
+# testable without a display. The widgets that draw them are further down.
+
+# A table separator: |---|:--:|---:| — the row that makes a table a table.
+# ONE dash is a legal separator cell: `|:-:|` and `|-|` are both valid
+# markdown and both are things a model actually emits. Requiring two silently
+# rejected every centre-aligned table — caught by tests/test_richblocks.py,
+# not by reading. The "is this really a separator" judgement is finished in
+# _looks_like_table, which also demands a pipe (or a long dash run), so a
+# setext underline under a line of prose is not mistaken for one.
+_TBL_SEP_RE = re.compile(r"^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$")
+_HEADING_RE = re.compile(r"^(#{1,6})\s+(.*?)\s*#*\s*$")
+_RULE_RE = re.compile(r"^\s*(?:-{3,}|\*{3,}|_{3,})\s*$")
+_QUOTE_RE = re.compile(r"^\s*>\s?(.*)$")
+_ULI_RE = re.compile(r"^(\s*)[-*+]\s+(.*)$")
+_OLI_RE = re.compile(r"^(\s*)(\d{1,3})[.)]\s+(.*)$")
+
+
+def _split_table_row(line: str) -> List[str]:
+    """Split one markdown table row on unescaped pipes.
+
+    Hand-walked rather than `line.split("|")` because a cell may legitimately
+    contain an escaped pipe (`\\|`) — a shell pipeline in a cell is exactly the
+    kind of thing this app's answers are full of — and splitting naively cuts
+    the row in the wrong place and shifts every following column."""
+    cells, buf, i = [], [], 0
+    while i < len(line):
+        ch = line[i]
+        if ch == "\\" and i + 1 < len(line) and line[i + 1] == "|":
+            buf.append("|")
+            i += 2
+            continue
+        if ch == "|":
+            cells.append("".join(buf).strip())
+            buf = []
+            i += 1
+            continue
+        buf.append(ch)
+        i += 1
+    cells.append("".join(buf).strip())
+    # A row written with the conventional leading and trailing pipes produces
+    # an empty cell at each end. Drop those, but ONLY when they came from a
+    # border pipe — a genuinely empty first column would otherwise vanish.
+    if cells and not cells[0] and line.lstrip().startswith("|"):
+        cells.pop(0)
+    if cells and not cells[-1] and line.rstrip().endswith("|"):
+        cells.pop()
+    return cells
+
+
+def _table_alignments(sep_line: str, ncols: int) -> List[str]:
+    out = []
+    for c in _split_table_row(sep_line):
+        c = c.strip()
+        left, right = c.startswith(":"), c.endswith(":")
+        out.append("center" if left and right else
+                   "right" if right else "left")
+    while len(out) < ncols:
+        out.append("left")
+    return out[:ncols]
+
+
+def _looks_like_table(lines: List[str], i: int) -> bool:
+    """A header line followed by a separator line is the only reliable tell.
+
+    Requiring the separator is what stops ordinary prose containing a pipe —
+    `cat a | grep b`, or a sentence with a vertical bar — from being eaten as
+    a one-column table."""
+    if i + 1 >= len(lines) or "|" not in lines[i]:
+        return False
+    sep = lines[i + 1] or ""
+    if not _TBL_SEP_RE.match(sep):
+        return False
+    # Relaxing the dash count above means a bare `-` would qualify, so the
+    # separator must still look deliberate: either it has a column pipe, or
+    # it is a run of dashes long enough to be a rule rather than a stray.
+    if "|" not in sep and sep.strip().count("-") < 3:
+        return False
+    return len(_split_table_row(lines[i])) >= 1
+
+
+def parse_rich_blocks(text: str) -> List[Dict[str, Any]]:
+    """Split prose into structured blocks: table / heading / rule / quote /
+    list / text. Code fences and images are handled by the caller."""
+    lines = (text or "").split("\n")
+    blocks: List[Dict[str, Any]] = []
+    buf: List[str] = []
+
+    def flush_text():
+        if buf:
+            body = "\n".join(buf).strip("\n")
+            if body.strip():
+                blocks.append({"kind": "text", "content": body})
+            buf.clear()
+
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+
+        if _looks_like_table(lines, i):
+            flush_text()
+            header = _split_table_row(line)
+            aligns = _table_alignments(lines[i + 1], len(header))
+            rows = []
+            j = i + 2
+            while j < len(lines) and "|" in lines[j] and lines[j].strip():
+                rows.append(_split_table_row(lines[j]))
+                j += 1
+            blocks.append({"kind": "table", "header": header,
+                           "aligns": aligns, "rows": rows})
+            i = j
+            continue
+
+        m = _HEADING_RE.match(line)
+        if m:
+            flush_text()
+            blocks.append({"kind": "heading", "level": len(m.group(1)),
+                           "content": m.group(2)})
+            i += 1
+            continue
+
+        # Checked AFTER the heading and table cases: a `---` directly under a
+        # line of text is a setext heading underline in some dialects and a
+        # table separator in others, and both of those are already claimed
+        # above by the time we get here.
+        if _RULE_RE.match(line):
+            flush_text()
+            blocks.append({"kind": "rule"})
+            i += 1
+            continue
+
+        if _QUOTE_RE.match(line):
+            flush_text()
+            q = []
+            while i < len(lines) and _QUOTE_RE.match(lines[i]):
+                q.append(_QUOTE_RE.match(lines[i]).group(1))
+                i += 1
+            blocks.append({"kind": "quote", "content": "\n".join(q).strip()})
+            continue
+
+        if _ULI_RE.match(line) or _OLI_RE.match(line):
+            flush_text()
+            items = []
+            while i < len(lines):
+                um, om = _ULI_RE.match(lines[i]), _OLI_RE.match(lines[i])
+                if um:
+                    items.append({"indent": len(um.group(1)) // 2,
+                                  "marker": "•", "content": um.group(2)})
+                elif om:
+                    items.append({"indent": len(om.group(1)) // 2,
+                                  "marker": om.group(2) + ".",
+                                  "content": om.group(3)})
+                elif (lines[i].strip() and lines[i].startswith((" ", "\t"))
+                      and items):
+                    # A wrapped continuation line belongs to the item above it,
+                    # not to a new paragraph.
+                    items[-1]["content"] += " " + lines[i].strip()
+                else:
+                    break
+                i += 1
+            blocks.append({"kind": "list", "items": items})
+            continue
+
+        buf.append(line)
+        i += 1
+
+    flush_text()
+    return blocks
+
+
+def split_message_into_blocks(text: str) -> List[Dict[str, Any]]:
     blocks: List[Dict[str, str]] = []
     last = 0
     for m in CODE_FENCE_RE.finditer(text):
         if m.start() > last:
             pre = text[last:m.start()].strip("\n")
             if pre:
-                blocks.extend(_split_text_and_images(pre))
+                blocks.extend(_split_rich(pre))
         lang = m.group(1) or "text"
         code = m.group(2).rstrip("\n")
         blocks.append({"kind": "code", "lang": lang, "content": code})
         last = m.end()
     tail = text[last:].strip("\n")
     if tail:
-        blocks.extend(_split_text_and_images(tail))
+        blocks.extend(_split_rich(tail))
     if not blocks:
         blocks.append({"kind": "text", "content": text})
     return blocks
@@ -2255,6 +2650,21 @@ def split_message_into_blocks(text: str) -> List[Dict[str, str]]:
 IMAGE_MD_RE = re.compile(
     r'!\[([^\]]*)\]\(\s*(<?)(https?://[^)\s]+?|file://[^)\s]+?|/[^)\s]+?)\2'
     r'(?:\s+"[^"]*")?\s*\)')
+
+
+def _split_rich(text: str) -> List[Dict[str, Any]]:
+    """Structure first, then images inside whatever prose is left.
+
+    Order matters and is not arbitrary: an image sitting inside a table cell or
+    a list item must stay part of that structure, so the structural pass runs
+    first and the image pass only ever sees a plain-text run."""
+    out: List[Dict[str, Any]] = []
+    for blk in parse_rich_blocks(text):
+        if blk.get("kind") == "text":
+            out.extend(_split_text_and_images(blk["content"]))
+        else:
+            out.append(blk)
+    return out
 
 
 def _split_text_and_images(text: str) -> List[Dict[str, str]]:
@@ -2421,6 +2831,214 @@ _REQUIRED_ARGS: Dict[str, Tuple[str, ...]] = {
 }
 
 _SPEC_ARGS_CACHE: Optional[Dict[str, set]] = None
+
+
+def _table_to_text(b: Dict[str, Any]) -> str:
+    """Last-resort plain rendering of a parsed table, used only if the widget
+    itself fails to build. Shows the content rather than an empty gap."""
+    try:
+        rows = [list(b.get("header") or [])] + [list(r) for r in
+                                                (b.get("rows") or [])]
+        return "\n".join("  ".join(str(c) for c in r) for r in rows if r)
+    except Exception:
+        return ""
+
+
+class TableWidget(Gtk.Box):
+    """A markdown table drawn as a real grid.
+
+    The old renderer put the raw pipes in a Gtk.Label, which is unreadable for
+    a reason that is not about taste: the body font is proportional, so the
+    columns do not line up, and a comparison table — the single most common
+    shape of a structured answer — became the least readable thing on screen.
+
+    Wide tables scroll INSIDE their own container. A table with eight columns
+    must never be able to push the chat bubble wider than the window; that is
+    the same rule the code blocks and the action chips already follow.
+    """
+
+    MAX_ROWS = 200        # display cap; the full text is still in the store
+    MAX_COLS = 24
+
+    def __init__(self, header: List[str], rows: List[List[str]],
+                 aligns: Optional[List[str]] = None):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.add_css_class("md-table")
+        ncols = min(max(len(header), 1), self.MAX_COLS)
+        aligns = (aligns or [])[:ncols]
+        while len(aligns) < ncols:
+            aligns.append("left")
+
+        grid = Gtk.Grid()
+        grid.add_css_class("md-table-grid")
+        grid.set_column_homogeneous(False)
+
+        for c in range(ncols):
+            grid.attach(self._cell(header[c] if c < len(header) else "",
+                                   aligns[c], header=True, col=c,
+                                   last=(c == ncols - 1)), c, 0, 1, 1)
+
+        shown = rows[:self.MAX_ROWS]
+        for r, row in enumerate(shown, start=1):
+            for c in range(ncols):
+                txt = row[c] if c < len(row) else ""
+                grid.attach(self._cell(txt, aligns[c], header=False, col=c,
+                                       odd=(r % 2 == 1),
+                                       last=(c == ncols - 1)), c, r, 1, 1)
+
+        sw = Gtk.ScrolledWindow()
+        sw.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
+        sw.set_propagate_natural_width(True)
+        sw.set_propagate_natural_height(True)
+        sw.set_kinetic_scrolling(True)
+        # A ScrolledWindow EXPANDS TO FILL by default, and inside a vertical
+        # chat bubble that means the table claims every remaining pixel of
+        # height: the grid drew correctly and then several hundred pixels of
+        # empty bubble sat under it, pushing the rest of the reply off the
+        # screen. propagate_natural_height only sets the NATURAL size; it does
+        # not stop the widget accepting more. Both of these have to be off.
+        sw.set_vexpand(False)
+        sw.set_valign(Gtk.Align.START)
+        grid.set_vexpand(False)
+        grid.set_valign(Gtk.Align.START)
+        sw.set_child(grid)
+        self.set_vexpand(False)
+        self.set_valign(Gtk.Align.START)
+        self.append(sw)
+
+        if len(rows) > self.MAX_ROWS:
+            more = Gtk.Label(
+                label="+%d more rows" % (len(rows) - self.MAX_ROWS),
+                xalign=0.0)
+            more.add_css_class("md-table-more")
+            self.append(more)
+
+    @staticmethod
+    def _cell(text: str, align: str, header: bool, col: int,
+              odd: bool = False, last: bool = False) -> Gtk.Widget:
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        box.add_css_class("md-th" if header else "md-td")
+        if not header and odd:
+            box.add_css_class("odd")
+        if last:
+            box.add_css_class("lastcol")
+        lbl = Gtk.Label(
+            xalign=(1.0 if align == "right"
+                    else 0.5 if align == "center" else 0.0))
+        lbl.set_hexpand(True)
+        # Cells carry inline markdown of their own — a bold winner, a `code`
+        # flag, a link to the source. Rendered through the same one transform
+        # the prose uses, so a table cell cannot format differently from the
+        # sentence above it.
+        try:
+            lbl.set_markup(text_to_pango(text))
+        except Exception:
+            lbl.set_text(text)
+        # ── CELLS DO NOT WRAP, THE TABLE SCROLLS ──
+        # Wrapping cells inside a horizontally-scrolling container is a
+        # contradiction, and GTK resolves it badly: a ScrolledWindow asks its
+        # child for a minimum size at unbounded width, a wrapping Gtk.Label
+        # answers "two characters wide", and the height-for-width that follows
+        # is astronomical. Measured on a three-row table it asked for 2104px of
+        # height and printed
+        #   "reports a minimum width of 20, but minimum width for height of
+        #    1048576 is 33. Expect overlapping widgets."
+        # Single-line cells plus horizontal scroll is also simply what a web
+        # table does, so the fix and the intended look are the same thing.
+        lbl.set_wrap(False)
+        lbl.set_single_line_mode(False)   # keep full glyph height (descenders)
+        lbl.set_max_width_chars(64)
+        lbl.set_ellipsize(Pango.EllipsizeMode.END)
+        if len(text) > 64:
+            # Ellipsis loses information, so the whole cell stays reachable.
+            try:
+                lbl.set_tooltip_text(re.sub(r"[*`_]", "", text))
+            except Exception:
+                pass
+        box.append(lbl)
+        return box
+
+
+class QuoteWidget(Gtk.Box):
+    """A blockquote: an accent rail and an inset panel, so an aside reads as
+    an aside instead of as another paragraph."""
+
+    def __init__(self, text: str):
+        super().__init__(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        self.add_css_class("md-quote")
+        rail = Gtk.Box()
+        rail.add_css_class("md-quote-rail")
+        self.append(rail)
+        body = _make_wrap_label()
+        body.add_css_class("md-quote-body")
+        try:
+            body.set_markup(text_to_pango(text))
+        except Exception:
+            body.set_text(text)
+        self.append(body)
+
+
+class HeadingWidget(Gtk.Box):
+    """A markdown heading. Levels 1-2 get a hairline under them, which is what
+    turns a long answer into sections you can scan rather than one wall."""
+
+    def __init__(self, text: str, level: int = 2):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.add_css_class("md-heading")
+        self.add_css_class("h%d" % max(1, min(level, 6)))
+        lbl = _make_wrap_label()
+        lbl.add_css_class("md-heading-text")
+        try:
+            lbl.set_markup(text_to_pango(text))
+        except Exception:
+            lbl.set_text(text)
+        self.append(lbl)
+        if level <= 2:
+            rule = Gtk.Box()
+            rule.add_css_class("md-heading-rule")
+            self.append(rule)
+
+
+class RuleWidget(Gtk.Box):
+    def __init__(self):
+        super().__init__(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        self.add_css_class("md-rule")
+
+
+class ListWidget(Gtk.Grid):
+    """A bullet/number list with a real hanging indent.
+
+    In a single Label a wrapped bullet's second line returns to the left
+    margin and the list stops looking like a list. A two-column grid — marker,
+    then text — keeps the text block aligned under itself however far it wraps.
+    """
+
+    MAX_ITEMS = 300
+
+    def __init__(self, items: List[Dict[str, Any]]):
+        super().__init__()
+        self.add_css_class("md-list")
+        for r, it in enumerate(items[:self.MAX_ITEMS]):
+            indent = max(0, min(int(it.get("indent", 0)), 6))
+            mk = Gtk.Label(label=str(it.get("marker", "•")), xalign=1.0)
+            mk.add_css_class("md-list-marker")
+            mk.set_valign(Gtk.Align.START)
+            mk.set_margin_start(indent * 18)
+            self.attach(mk, 0, r, 1, 1)
+            body = _make_wrap_label()
+            body.add_css_class("md-list-text")
+            # A Grid asks its children for a minimum width too, and a wrapping
+            # label answers with one word — which drives a vast minimum HEIGHT
+            # (measured: 2479px for three bullets). A real minimum bounds it.
+            # The list is in normal vertical flow, so unlike a table cell it
+            # genuinely should wrap.
+            body.set_width_chars(20)
+            txt = str(it.get("content", ""))
+            try:
+                body.set_markup(text_to_pango(txt))
+            except Exception:
+                body.set_text(txt)
+            self.attach(body, 1, r, 1, 1)
 
 
 def _spec_arg_names() -> Dict[str, set]:
@@ -4243,6 +4861,53 @@ class MessageWidget(Gtk.Box):
             if b["kind"] == "code":
                 self._blocks_container.append(
                     CodeBlockWidget(b["content"], b["lang"]))
+            elif b["kind"] == "table":
+                # Every structural block is built inside its own try: a
+                # malformed table must cost that ONE block, not the whole
+                # reply. Falling back to the raw text keeps the content
+                # visible, which is the property that actually matters.
+                try:
+                    self._blocks_container.append(
+                        TableWidget(b.get("header") or [],
+                                    b.get("rows") or [],
+                                    b.get("aligns")))
+                except Exception as e:
+                    log(f"table render failed: {e}")
+                    _l = _make_wrap_label()
+                    _l.set_text(_table_to_text(b))
+                    self._blocks_container.append(_l)
+            elif b["kind"] == "heading":
+                try:
+                    self._blocks_container.append(
+                        HeadingWidget(b.get("content", ""),
+                                      int(b.get("level", 2))))
+                except Exception:
+                    _l = _make_wrap_label()
+                    _l.set_text(b.get("content", ""))
+                    self._blocks_container.append(_l)
+            elif b["kind"] == "quote":
+                try:
+                    self._blocks_container.append(
+                        QuoteWidget(b.get("content", "")))
+                except Exception:
+                    _l = _make_wrap_label()
+                    _l.set_text(b.get("content", ""))
+                    self._blocks_container.append(_l)
+            elif b["kind"] == "rule":
+                try:
+                    self._blocks_container.append(RuleWidget())
+                except Exception:
+                    pass
+            elif b["kind"] == "list":
+                try:
+                    self._blocks_container.append(
+                        ListWidget(b.get("items") or []))
+                except Exception:
+                    _l = _make_wrap_label()
+                    _l.set_text("\n".join(
+                        "%s %s" % (i.get("marker", "-"), i.get("content", ""))
+                        for i in (b.get("items") or [])))
+                    self._blocks_container.append(_l)
             elif b["kind"] == "image":
                 if _RENDER_IMAGES:
                     self._blocks_container.append(
@@ -6117,6 +6782,9 @@ class MainWindow(Adw.ApplicationWindow):
         # attached to it. Set at dispatch, consumed in _feed_tool_result — one
         # hook covers every tool instead of instrumenting each of them.
         self._pending_action: Optional[str] = None
+        # Files staged for the NEXT message. Shown as chips above the
+        # composer; folded into the text at send.
+        self._attachments: List[Dict[str, Any]] = []
         # Liveness marker for the turn watchdog — bumped whenever the turn
         # actually advances (a token, a tool result, a new step).
         self._turn_progress_ts: float = time.monotonic()
@@ -7198,6 +7866,11 @@ class MainWindow(Adw.ApplicationWindow):
 
         area.append(actions_row)
 
+        # Staged attachments sit HERE — between the action chips and the
+        # composer — so they are visible above the box you type in rather
+        # than pasted inside it.
+        area.append(self._build_attach_tray())
+
         # Input
         ibox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         ibox.add_css_class("input-frame")
@@ -7796,9 +8469,19 @@ class MainWindow(Adw.ApplicationWindow):
         buf = self.input_view.get_buffer()
         text = buf.get_text(buf.get_start_iter(), buf.get_end_iter(),
                             False).strip()
-        if not text:
+        # An attachment with no typed text IS a message ("here, look at this")
+        # — the old code returned early on empty text, which with the tray in
+        # place would silently discard a staged file.
+        if not text and not self._attachments:
             return
         buf.set_text("")
+
+        # Staged attachments join the message here, in the exact form the old
+        # in-composer version produced. Drained (and the tray cleared) only on
+        # a real send, so a cancelled or empty send never loses them.
+        _att = self._drain_attachments()
+        if _att:
+            text = (text + "\n\n" + _att) if text else _att
 
         # (#3) /panic — jump straight to tool-first triage: no preamble, run
         # a batched health-check sweep, report what's abnormal.  Expands into
@@ -12661,8 +13344,127 @@ class MainWindow(Adw.ApplicationWindow):
         self._show_toast("Photo captured")
         return False
 
+    # ── ATTACHMENT TRAY ─────────────────────────────────────────
+    # Attachments used to be pasted INTO the composer: a 40KB text file became
+    # 40KB of text in the box you are trying to type in, and an image became a
+    # line of raw markdown. You could not see your own message, editing it
+    # meant editing around the payload, and removing an attachment meant
+    # hand-deleting the right fence.
+    #
+    # They live ABOVE the composer now, as chips. The message you type stays
+    # the message you type; the payload is folded in at SEND, in exactly the
+    # form the old code produced — so what reaches the model and what is
+    # stored are byte-for-byte what they were before. This is a composer
+    # change only, deliberately: the send path is not where you want a
+    # surprise.
+
+    _ATTACH_MAX_CHIP_NAME = 28
+
+    def _build_attach_tray(self) -> Gtk.Widget:
+        self.attach_tray = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
+                                   spacing=6)
+        self.attach_tray.add_css_class("attach-tray")
+        # Horizontal scroller for the same reason the action chips have one: a
+        # narrow window must scroll them, never be forced wider than the screen.
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
+        scroll.set_propagate_natural_height(True)
+        scroll.set_kinetic_scrolling(True)
+        scroll.set_overlay_scrolling(True)
+        scroll.set_child(self.attach_tray)
+        self._attach_revealer = Gtk.Revealer()
+        self._attach_revealer.set_transition_type(
+            Gtk.RevealerTransitionType.SLIDE_DOWN)
+        self._attach_revealer.set_transition_duration(150)
+        self._attach_revealer.set_child(scroll)
+        self._attach_revealer.set_reveal_child(False)
+        return self._attach_revealer
+
+    def _attach_add(self, kind: str, path: str, payload: str):
+        """Record one attachment and draw its chip. `payload` is the exact text
+        this attachment will contribute to the sent message."""
+        self._attachments.append(
+            {"kind": kind, "path": path, "payload": payload})
+        self._refresh_attach_tray()
+
+    def _refresh_attach_tray(self):
+        tray = getattr(self, "attach_tray", None)
+        if tray is None:
+            return
+        child = tray.get_first_child()
+        while child is not None:
+            nxt = child.get_next_sibling()
+            tray.remove(child)
+            child = nxt
+        for i, att in enumerate(list(self._attachments)):
+            tray.append(self._attach_chip(i, att))
+        self._attach_revealer.set_reveal_child(bool(self._attachments))
+
+    def _attach_chip(self, idx: int, att: Dict[str, Any]) -> Gtk.Widget:
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=7)
+        row.add_css_class("attach-chip")
+        row.add_css_class("image" if att["kind"] == "image" else "file")
+
+        icon = Gtk.Label(label="IMG" if att["kind"] == "image" else "TXT")
+        icon.add_css_class("attach-chip-kind")
+        row.append(icon)
+
+        name = os.path.basename(att["path"]) or att["path"]
+        if len(name) > self._ATTACH_MAX_CHIP_NAME:
+            # Middle-elide by hand: the EXTENSION is the part that says what
+            # the file is, so a plain end-ellipsis throws away the useful half.
+            keep = self._ATTACH_MAX_CHIP_NAME - 3
+            name = name[:keep // 2] + "..." + name[-(keep - keep // 2):]
+        lbl = Gtk.Label(label=name, xalign=0.0)
+        lbl.add_css_class("attach-chip-name")
+        row.append(lbl)
+
+        size = ""
+        try:
+            n = os.path.getsize(att["path"])
+            size = ("%d B" % n if n < 1024 else
+                    "%.0f KB" % (n / 1024) if n < 1024 * 1024 else
+                    "%.1f MB" % (n / (1024 * 1024)))
+        except Exception:
+            size = ""
+        if size:
+            sl = Gtk.Label(label=size)
+            sl.add_css_class("attach-chip-size")
+            row.append(sl)
+
+        rm = Gtk.Button(label="×")          # MULTIPLICATION SIGN
+        rm.add_css_class("attach-chip-remove")
+        rm.set_has_frame(False)
+        rm.set_tooltip_text("Remove this attachment")
+        rm.connect("clicked", lambda *_a, i=idx: self._attach_remove(i))
+        row.append(rm)
+        return row
+
+    def _attach_remove(self, idx: int):
+        # Index into a list that is rebuilt on every refresh, so a stale chip
+        # can only ever point past the end — never at the wrong file.
+        if 0 <= idx < len(self._attachments):
+            self._attachments.pop(idx)
+            self._refresh_attach_tray()
+
+    def _attach_clear(self):
+        self._attachments = []
+        self._refresh_attach_tray()
+
+    def _drain_attachments(self) -> str:
+        """The text the pending attachments contribute, and clear them.
+
+        Byte-identical to what the old in-composer version produced, so the
+        stored message, the rendered bubble and what the model reads are all
+        exactly what they were before the tray existed."""
+        if not self._attachments:
+            return ""
+        parts = [a["payload"] for a in self._attachments]
+        self._attach_clear()
+        return "\n".join(parts)
+
     def _pick_attachment(self):
-        # Gtk.FileDialog is GTK 4.10+.  On older Phosh/NetHunter GTK it doesn't
+        # Gtk.FileDialog is GTK 4.10+.  On an older GTK it doesn't
         # exist, so the attach button silently did nothing — fall back to
         # FileChooserNative there so attaching works on every device.
         if hasattr(Gtk, "FileDialog"):
@@ -12709,14 +13511,11 @@ class MainWindow(Adw.ApplicationWindow):
             return
         ext = os.path.splitext(path)[1].lower()
         if ext in self._ATTACH_IMAGE_EXTS:
-            # Embed an image as markdown pointing at the local file, so it
-            # renders inline in the chat (ImageWidget handles file:// URLs)
-            # instead of being read as binary garbage.
-            buf = self.input_view.get_buffer()
-            cur = buf.get_text(buf.get_start_iter(), buf.get_end_iter(), False)
+            # Markdown pointing at the local file, so it renders inline in the
+            # chat (ImageWidget handles file:// URLs) instead of being read as
+            # binary garbage. Staged as a chip; folded in at send.
             name = os.path.basename(path)
-            ref = f"![{name}](file://{path})"
-            buf.set_text(f"{cur}\n{ref}\n" if cur.strip() else f"{ref}\n")
+            self._attach_add("image", path, f"![{name}](file://{path})")
             self._show_toast(f"Attached image: {name}")
             return
         # Text-like file: read its contents into the message.
@@ -12729,12 +13528,10 @@ class MainWindow(Adw.ApplicationWindow):
         if not r.get("ok"):
             self._show_toast(f"Read error: {r.get('error')}")
             return False
-        buf = self.input_view.get_buffer()
-        cur = buf.get_text(buf.get_start_iter(), buf.get_end_iter(), False)
         body = r["content"]
-        new = (f"{cur}\n\n[attached: {path}]\n```\n{body}\n```\n"
-               if cur else f"[attached: {path}]\n```\n{body}\n```\n")
-        buf.set_text(new)
+        self._attach_add("file", path,
+                         f"[attached: {path}]\n```\n{body}\n```")
+        self._show_toast(f"Attached: {os.path.basename(path)}")
         return False
 
     # ── history ─────────────────────────────────────────────────

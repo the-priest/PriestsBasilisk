@@ -220,7 +220,7 @@ class MemoryStore:
                 embedding BLOB
             )""")
         # FTS5 is the fast path for keyword recall but is not guaranteed to be
-        # compiled into the stock NetHunter python sqlite.  Probe once; fall
+        # compiled into every distro's python sqlite.  Probe once; fall
         # back to overlap scanning if the module is missing.
         #
         # THE INDEX IS NEVER ALLOWED TO VETO A WRITE.  Recall speed is an

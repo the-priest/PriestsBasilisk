@@ -12,7 +12,7 @@ Design contract (read this before wiring):
     keys => every hook is a no-op and Basilisk behaves exactly as it does today.
 
   * Nothing here writes outside ~/.local/share/basilisk/ext/.  No system files,
-    no NetHunter units, no root.  The optional daemon is `systemd --user`.
+    no system units, no root.  The optional daemon is `systemd --user`.
 
 Boot wiring (host side, see WIRING.md):
 

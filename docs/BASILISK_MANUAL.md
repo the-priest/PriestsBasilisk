@@ -2,7 +2,7 @@
 
 *The full reference for Basilisk, the AI security operator that lives on your Linux machine.*
 
-**Version 7.4.0** · GTK4 + libadwaita · X11 & Wayland · desktop and NetHunter mobile
+**Version 7.4.0** · GTK4 + libadwaita · X11 & Wayland · Kali and CachyOS
 
 ---
 
@@ -495,7 +495,7 @@ A **monster voice** (on by default once read-aloud is enabled) runs the spoken o
 - **Status pill** — a permanent indicator in the button row: it reads **"idle"** when nothing's running and the **live action title** ("forging a JWT…", "reading the source…") while Basilisk works. It never moves the other buttons, and it can't be pressed. In-chat, an in-progress reply shows the same action title instead of a generic "working".
 - **Media control** — `media_control` drives whatever media player is running on the desktop (play / pause / next / previous / stop / status) over the standard desktop media interface. (The old in-app audio/video *panel* and its `media_play` / `media_show` tools were removed in 5.1.5; this lighter control tool is what remains.)
 - **Ephemeral chats** — fresh chat per launch, auto-retention, empty-placeholder cleanup — all tunable.
-- **Theme & scale** — the "hellfire" charcoal-and-blood-red theme; UI scale auto-detects (down to a ~540px mobile width for NetHunter) or can be pinned.
+- **Theme & scale** — the "hellfire" charcoal-and-blood-red theme; UI scale auto-detects (down to a ~540px narrow width) or can be pinned.
 
 ---
 

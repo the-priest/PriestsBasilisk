@@ -1,3 +1,192 @@
+## v9.9.0
+
+### DeepSeek-V4-Flash: the tool-call dialect was arriving in a pipe rendering nothing matched
+
+The DSML pass was gated on `_DS_PIPE in text` — U+FF5C, the fullwidth vertical
+line DeepSeek's special tokens are written with. Deployments emit the same
+block with **ASCII pipes**, doubled:
+
+    <||DSML||tool_calls><||DSML||invoke name="web_read">…
+
+That is a tokenizer rendering difference, not a different protocol. But with
+ASCII pipes the gate was false, the whole pass never ran, and the block was
+neither executed **nor stripped** — so raw `<||DSML||invoke name="web_read">`
+printed into the chat and the tool never fired. Reproduced verbatim from the
+field report before changing anything.
+
+Matching is now on a **class** of pipe-shaped characters (U+FF5C, ASCII `|`,
+U+2502, U+01C0), any count, any mix — widened *only* where the literal word
+DSML makes the match unambiguous. The generic `<｜…｜>` special-token stripper
+stays fullwidth-only, because `<|x|>` in ASCII is a shape that legitimately
+occurs in prose and code.
+
+Reproduction of the twelve shapes reported in the wild, before and after:
+
+    ASCII-degraded <||DSML||>          BROKEN -> ok
+    ASCII single-pipe <|DSML|>         BROKEN -> ok
+    corrupted <function_cinvoke>       BROKEN -> ok
+    canonical, doubled, toolcalls,
+    wrapper-omitted, no-newlines,
+    string=false, empty args, ...      ok     -> ok
+
+**And a bug that hit the canonical spelling too.** Stripping the sentinel
+turns the batch wrapper into a plain `<tool_calls>` … `</tool_calls>` pair, and
+nothing removed it: `TOOL_TAG_RE` matches `<tool` followed by a word boundary,
+and `tool_calls` continues with `_`. So **every successful V4 tool call left
+`<tool_calls></tool_calls>` sitting in the reply** — canonical spelling
+included. The completed-text test missed it because the probe only looked for
+`DSML`, `invoke` and `parameter`; a character-by-character stream replay is
+what found it.
+
+Replaying a reply one character at a time, counting frames that show protocol
+to the operator:
+
+    ascii-degraded    197 frames    old: 171 leaked    new: 0
+    canonical         185 frames    old: 145 leaked    new: 0
+
+Also fixed: corrupted `\w*invoke` spellings (`function_cinvoke`) are accepted
+in both the rewrite and the quadratic-guard probe, which have to stay in step
+or a spelling the rewriter knows silently never runs; a partially-arrived
+sentinel is hidden by a **prefix ladder** anchored at end-of-buffer, and the
+guard for it reads a fixed 512-byte tail rather than the whole buffer — by
+that point the normaliser has stripped the word out of every *complete* tag,
+so `_has_dsml()` was false exactly when the pass was needed.
+
+**Counter-property:** 6,027 benign inputs (27 hand-written plus 6,000 fuzzed)
+through the old and new parsers — **0 new tool calls parsed from prose, 0
+characters of legitimate text lost**. The first cut of the partial-tag matcher
+had every component optional, so it matched a bare `<` plus 200 characters of
+prose at the end of the buffer and would have deleted `x < y and some more
+text` from a reply. Rewritten as an explicit prefix ladder where every branch
+requires at least one pipe.
+
+**Sampling now follows the vendor.** DeepSeek's model card asks for
+temperature 1.0 / top_p 0.95 in agentic scenarios — which is every turn this
+app takes — against shipped defaults of 0.7 / 0.9. Applied per model family,
+and **only when the operator has not chosen**: if the setting still holds the
+value this file ships, nobody picked it. Set your own and it is respected.
+
+### Tables, headings, quotes and lists render as themselves
+
+A model answering a comparison question replies with a table. That is not an
+edge case, it is the most common shape of a structured answer — and it
+rendered as literal pipe characters in a proportional font, where the columns
+do not line up. The most structured thing the model could say was the least
+readable thing on screen.
+
+Markdown tables now draw as a real grid: header row, per-column alignment read
+from the `:---:` markers, zebra rows, cell borders, inline markdown inside
+cells, horizontal scrolling for wide ones so a table can never push the bubble
+wider than the window. Headings, blockquotes, horizontal rules and bullet /
+numbered lists each get their own compartment; lists get a real hanging indent
+so a wrapped bullet stays aligned under itself.
+
+**The bug worth writing down is the sizing one.** A wrapping `Gtk.Label`
+reports a minimum width of about two characters, GTK asks "how tall are you at
+that width", and the answer is astronomical. Measured on the first cut:
+
+    four-column, three-row table    2104 px of requested height
+    three-bullet list               2479 px
+    whole message container         2692 px
+
+GTK said so out loud — `reports a minimum width of 20, but minimum width for
+height of 1048576 is 33` — and nothing was watching for it, so a reply with a
+table in it was followed by a screenful of empty bubble with the rest of the
+answer pushed off the bottom. Wrapping cells inside a horizontally-scrolling
+container is a contradiction anyway; cells are single-line with the table
+scrolling (which is also what a web table does), a long cell keeps its full
+text in a tooltip, and list labels carry a real minimum width. Same content
+now measures **273 px, 345 px and 982 px**, with zero GTK criticals.
+
+A separator cell may legally be a **single** dash (`|:-:|`, `|-|`) and models
+emit both; requiring two silently rejected every centre-aligned table. Caught
+by the new suite, not by reading.
+
+The type scale was inverted — headings were sized 20-25px against 30px body
+copy, so an `###` rendered *smaller* than the paragraph under it. Everything
+is now sized relative to the body: headings above it, table text just below.
+
+### Bubbles: calm, not dim
+
+The previous pass stacked six shadows per bubble — two inner glows, an outer
+ring, a drop shadow and a coloured halo — over two radial gradients and a
+linear one, plus a 9px orange `text-shadow` behind 30px body text. Every
+element was individually defensible and the sum was a screen where nothing sat
+still and long text had a permanent haze behind it.
+
+What separates a bubble from the background is one clear edge and one soft
+drop shadow. That is what is left. The ember identity moved to where it costs
+nothing to read: a tinted border, a barely-there top highlight, and a hover
+that lifts. The corner seal drops to 16% opacity — it is atmosphere, not
+information, and at full strength it sat behind the last line of every reply.
+
+### Attachments live above the composer
+
+Attaching a file pasted its contents **into the input box**: a 40 KB text file
+became 40 KB of text in the box you are trying to type in, an image became a
+line of raw markdown, and removing one meant hand-deleting the right fence.
+
+They are chips above the composer now — kind, name, size, and an × — and the
+payload is folded in at send in **byte-identical** form to what the old code
+produced, so the stored message, the rendered bubble and what the model reads
+are exactly what they were. An attachment with no typed text is now a valid
+send; the old early-return on empty text would have discarded it.
+
+### NetHunter Pro is gone; CachyOS and Kali are the targets
+
+Every NetHunter reference is removed from the code, persona, installer, docs,
+site and tests. What replaces it is detection of the two distros that actually
+change what Basilisk should **do**, read from `ID`/`ID_LIKE` so one parse
+settles both the flavour and its base:
+
+- **CachyOS** — pacman/paru, not apt; security tooling comes from BlackArch or
+  the AUR, and many Kali package names do not exist there.
+- **Kali** — apt and the `kali-tools` metapackages; most offensive tooling is
+  already installed, so check with `which` before installing anything.
+
+Two real installer bugs fell out of that work:
+
+- **`sudo` was hardcoded 18 times.** Running as root (a Kali root shell, a
+  container, a rescue boot) or on a `doas`-only box, the install died on the
+  first package step. Escalation is now detected — root → empty, else sudo,
+  else doas — and every call site routes through it.
+- **`pacman -Sy` is a partial upgrade**, the documented way to break an Arch
+  or CachyOS box: the new package links against libraries the system has not
+  upgraded to yet. Now `-S --needed` against the database the operator already
+  has, with a clear message to run `-Syu` himself if a package is missing.
+
+### README
+
+63,645 bytes and 650 lines down to **25,853 and 333** — under half. The badge
+scaffolding and the fifteen-badge nav row are gone, twenty-three headings
+became ten, and the benchmark tables and every load-bearing fact are kept.
+`tests/test_readme.py` still pins all forty of them, plus the anchors, the
+disambiguation block and the version and assertion counts.
+
+### Also
+
+- Cited sources render as links (`text_to_pango` knew bold, italic and inline
+  code and nothing else, so every leashed citation ended in literal
+  `[kernel.org](https://…)`), with the renderer checking its own output for
+  well-formed nesting and falling back rather than letting GTK print raw
+  `<span font_family=…>` mid-answer. Over 30,000 adversarial strings: old
+  renderer 382 rejected, new 0, regressions 0.
+- Avatars are decoded once per (file, size) instead of once per bubble —
+  11.17 ms → 0.0003 ms, roughly half a second of frozen UI removed from every
+  chat switch.
+
+### Verification
+
+New `tests/test_richblocks.py` (44). **3,704 assertions across 47 suites, zero
+red**, verified from a clean extract of the shipped zip. Against real GTK
+4.14 under Xvfb: the stylesheet parses with zero errors, zero GTK criticals
+across the structured blocks, and 40 table edge cases (9 columns, ragged rows,
+4,000 rows, escaped pipes, unicode, prose-that-is-not-a-table) all build
+inside sane bounds.
+
+`basilisk_persona.py`'s immutable GUARDRAIL block is byte-for-byte unchanged
+(sha256 verified before and after). No asset or button was touched.
+
 ## v9.8.0
 
 ### Leashed mode narrates itself: a live activity feed that folds back to one line

@@ -607,6 +607,48 @@ for _p in PROVIDERS:
     DEFAULT_SETTINGS.setdefault(f"{_p.key}_base_url", _p.base_url)
 
 
+# ── VENDOR-RECOMMENDED SAMPLING, PER MODEL FAMILY ────────────────────
+# DeepSeek's V4 model card asks for temperature 1.0 / top_p 0.95 in AGENTIC
+# scenarios, which is every turn Basilisk takes. The shipped defaults here are
+# 0.7 / 0.9 — sane general-chat numbers, and measurably not what the model was
+# tuned for when it is deciding which tool to call.
+#
+# APPLIED ONLY WHEN THE OPERATOR HAS NOT CHOSEN. If the setting still holds the
+# value this file ships, nobody picked it and the vendor's number is strictly
+# better information. The moment he sets his own temperature, that is a
+# decision and it is respected — a "recommendation" that overrides an explicit
+# choice is just a bug with a polite name.
+_MODEL_SAMPLING: Dict[str, Dict[str, float]] = {
+    # Matched as a lowercase SUBSTRING of the model id, so it covers
+    # deepseek-ai/DeepSeek-V4-Flash, -Flash-0731, -Pro and any later point
+    # release without a new entry.
+    "deepseek-v4": {"temperature": 1.0, "top_p": 0.95},
+}
+
+
+def recommended_sampling(model_id: str) -> Dict[str, float]:
+    """Vendor-recommended sampling for this model, or {} if none is known."""
+    mid = (model_id or "").lower()
+    for key, vals in _MODEL_SAMPLING.items():
+        if key in mid:
+            return dict(vals)
+    return {}
+
+
+def sampling_for(opts: Dict[str, Any], model_id: str) -> Tuple[float, float]:
+    """(temperature, top_p) for a request: the operator's choice if he made
+    one, otherwise the model's own recommendation, otherwise the defaults."""
+    rec = recommended_sampling(model_id)
+    temp = opts.get("temperature", DEFAULT_SETTINGS["temperature"])
+    topp = opts.get("top_p", DEFAULT_SETTINGS["top_p"])
+    if rec:
+        if temp == DEFAULT_SETTINGS["temperature"]:
+            temp = rec["temperature"]
+        if topp == DEFAULT_SETTINGS["top_p"]:
+            topp = rec["top_p"]
+    return temp, topp
+
+
 def load_settings() -> Dict[str, Any]:
     if SETTINGS_JSON.exists():
         try:
@@ -820,8 +862,7 @@ class GroqBackend:
                      "ProviderSpec with engine='groq' and a chain")
             return
         opts = options or {}
-        temperature = opts.get("temperature", 0.7)
-        top_p = opts.get("top_p", 0.9)
+        temperature, top_p = sampling_for(opts, model or "")
         max_tokens = opts.get("max_tokens", 2048)
 
         # Build a model order: requested first, then any fallbacks not equal.
@@ -1037,10 +1078,11 @@ class OpenAICompatBackend:
             on_error(f"{self.name} not configured (no API key)")
             return
         opts = options or {}
+        _temp, _topp = sampling_for(opts, model or "")
         body_base = {
             "messages": messages,
-            "temperature": opts.get("temperature", 0.7),
-            "top_p": opts.get("top_p", 0.9),
+            "temperature": _temp,
+            "top_p": _topp,
             "max_tokens": opts.get("max_tokens", 2048),
             "stream": True,
         }
@@ -4095,7 +4137,7 @@ def tool_path_info(path: str) -> Dict[str, Any]:
 # launched with --no-sandbox (so a malicious page reached via prompt
 # injection could exploit the unsandboxed renderer straight into Basilisk's
 # process), and it never launched reliably across the device fleet (ARM
-# NetHunter can't run chromium at all).  For "look something up and read
+# a minimal container can't run chromium at all).  For "look something up and read
 # it", the model uses web_search + web_read (stdlib HTTP, every byte
 # firewalled through webshield); that is the safe, reliable replacement.
 # ═════════════════════════════════════════════════════════════════════
@@ -4740,7 +4782,7 @@ def tool_capture_photo(out_path: str = "") -> Dict[str, Any]:
     suffix = ("; " + last) if last else ""
     return {"ok": False,
             "error": "camera capture failed (no frame produced)" + suffix +
-                     ". Camera access on Phosh/NetHunter can need extra setup."}
+                     ". Camera access under a sandboxed session can need extra setup."}
 
 
 def tool_detect_faces(image_path: str) -> Dict[str, Any]:
@@ -7584,6 +7626,36 @@ _CONTENT_FIELD_ALIASES = ("text", "body", "contents", "data",
 _DS_PIPE = "\uff5c"          # ｜ FULLWIDTH VERTICAL LINE
 _DS_SEP = "\u2581"           # ▁ LOWER ONE EIGHTH BLOCK
 
+# ── THE SENTINEL'S PIPE IS NOT ALWAYS THE FULLWIDTH ONE ──
+# DeepSeek's special tokens are written with U+FF5C, and that is what the
+# official encoding spec shows:
+#
+#     <｜DSML｜tool_calls><｜DSML｜invoke name="x">…
+#
+# But the pipe DEGRADES on the way out. Deployments report the same block
+# arriving as `<||DSML||tool_calls>` — ASCII, doubled — which is a tokenizer
+# rendering difference, not a different protocol. The count varies too: the
+# shape this project first captured had DOUBLED fullwidth pipes, the spec has
+# single ones, and the field reports have doubled ASCII ones.
+#
+# That mattered because the whole DSML pass was gated on `_DS_PIPE in text`.
+# With ASCII pipes the gate was false, the pass never ran, and the block was
+# neither executed NOR stripped — so raw `<||DSML||invoke name="web_read">`
+# printed into the chat. Reproduced verbatim from the field report before this
+# was changed; it is the single largest cause of "V4-Flash isn't compatible".
+#
+# So: match a CLASS of pipe-shaped characters, any number of them, in any mix.
+# Widened ONLY where the literal word DSML makes the match unambiguous — the
+# generic `<｜…｜>` special-token stripper below stays fullwidth-only, because
+# `<|x|>` in ASCII is a shape that can legitimately occur in prose and code.
+_PIPES = (
+    "\uff5c"      # ｜ FULLWIDTH VERTICAL LINE  (canonical)
+    "|"           # ASCII, the documented degradation
+    "\u2502"      # │ BOX DRAWINGS LIGHT VERTICAL
+    "\u01c0"      # ǀ LATIN LETTER DENTAL CLICK (visually identical)
+)
+_PIPE_CLS = "[" + _PIPES.replace("|", "\\|") + "]"
+
 _DEEPSEEK_CALL_RE = re.compile(
     r"<" + _DS_PIPE + r"tool" + _DS_SEP + r"call" + _DS_SEP + r"begin" + _DS_PIPE + r">"
     r"\s*(?:function)?\s*"
@@ -7635,10 +7707,15 @@ _DS_ANY_PARTIAL_RE = re.compile("<" + _DS_PIPE + r".*$", re.S)
 # The scan below is the same decision made linearly: closers only get scarcer
 # left-to-right, so the first opener with no closer after it is the first
 # opener that appears after the LAST closer. Two forward passes, no backtracking.
+# NOTE: `\w*invoke` (not a fixed word list) because the corruption seen in the
+# field glues the preceding wrapper word onto it — `function_cinvoke`. These
+# two must stay in step with _ALT_TAG_RES above: the open/close pair is what
+# lets the quadratic-guard skip the rewrite pass, so a spelling the rewriter
+# knows but the guard does not would silently never run.
 _ALT_OPEN_RE = re.compile(
-    r"<\s*(?:tool_call|toolcall|function_call|invoke|antml:invoke)\b", re.I)
+    r"<\s*(?:tool_call|toolcall|function_call|antml:invoke|\w*invoke)\b", re.I)
 _ALT_CLOSE_RE = re.compile(
-    r"<\s*/\s*(?:tool_call|toolcall|function_call|invoke|antml:invoke)\s*>",
+    r"<\s*/\s*(?:tool_call|toolcall|function_call|antml:invoke|\w*invoke)\s*>",
     re.I)
 _FUNC_OPEN_RE = re.compile(r"<\s*function\s*=", re.I)
 _FUNC_CLOSE_RE = re.compile(r"<\s*/\s*function\s*>", re.I)
@@ -7662,9 +7739,9 @@ def _cut_unclosed(text: str, open_re, close_re) -> str:
 # than teaching the main parser five grammars.
 _ALT_TAG_RES = [
     # <tool_call name="x">…</tool_call>, <toolcall …>, <function_call …>
-    (re.compile(r"<\s*(?:tool_call|toolcall|function_call|invoke|antml:invoke)"
+    (re.compile(r"<\s*(?:tool_call|toolcall|function_call|antml:invoke|\w*invoke)"
                 r"\s+([^>]*?)>(.*?)<\s*/\s*"
-                r"(?:tool_call|toolcall|function_call|invoke|antml:invoke)\s*>",
+                r"(?:tool_call|toolcall|function_call|antml:invoke|\w*invoke)\s*>",
                 re.S | re.I), "attrs"),
     # <function=web_read>{…}</function>
     (re.compile(r"<\s*function\s*=\s*([A-Za-z_][\w.-]*)\s*>(.*?)"
@@ -7708,8 +7785,78 @@ _FENCE_JSON_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.S)
 # one-or-more pipes and accept a slash in either position rather than pinning
 # the exact byte string seen once in one screenshot.
 _DSML_SENTINEL_RE = re.compile(
-    r"<\s*(/?)\s*" + _DS_PIPE + r"+\s*DSML\s*" + _DS_PIPE + r"+\s*(/?)\s*",
+    r"<\s*(/?)\s*" + _PIPE_CLS + r"+\s*DSML\s*" + _PIPE_CLS + r"+\s*(/?)\s*",
     re.I)
+
+# ── THE WRAPPER IS PURE STRUCTURE AND MUST NOT REACH THE SCREEN ──
+# The official V4 encoding wraps the whole batch:
+#
+#     <｜DSML｜tool_calls><｜DSML｜invoke name="x">…</｜DSML｜invoke></｜DSML｜tool_calls>
+#
+# Stripping the sentinel turns the wrapper into a plain `<tool_calls>` …
+# `</tool_calls>` pair. Nothing then removed it: TOOL_TAG_RE matches `<tool`
+# followed by a word boundary and `tool_calls` continues with `_`, so the pair
+# survived every pass and the operator saw `<tool_calls></tool_calls>` sitting
+# in the reply after EVERY successful V4 tool call — canonical spelling
+# included, not just the degraded ones.
+#
+# It carries no information (the invoke tags inside carry all of it), so it is
+# deleted here, in the normaliser, which is what keeps parse and strip
+# agreeing about it.
+#
+# Requires NO attributes and the plural form, so `<tool_call name="x">` — a
+# real single call — cannot be mistaken for a wrapper.
+_WRAPPER_TAG_RE = re.compile(
+    r"<\s*/?\s*(?:tool_calls|toolcalls|function_calls|antml:function_calls)"
+    r"\s*/?\s*>", re.I)
+
+def _prefix_alt(*words: str) -> str:
+    """Regex alternation matching any non-empty PREFIX of the given words.
+
+    Used to hide a wrapper tag whose name has started to arrive but whose `>`
+    has not. Written as an explicit prefix list rather than a generic
+    `<[A-Za-z_]*$` because the generic form also hides ordinary prose: a frame
+    ending in `the value is < y` would blink out and back as the next token
+    lands. Naming the three words that can legitimately appear here keeps the
+    hiding exact."""
+    seen = set()
+    for w in words:
+        for i in range(len(w), 0, -1):
+            seen.add(w[:i])
+    return "(?:" + "|".join(sorted(seen, key=len, reverse=True)) + ")"
+
+
+# A batch wrapper that has begun to arrive but has not closed. Anchored at
+# end-of-buffer: mid-stream `<tool_calls` (sentinel already stripped, `>` not
+# yet here) was the last thing still reaching the screen, one frame at the
+# start of a call and one at the end.
+_WRAPPER_PARTIAL_RE = re.compile(
+    r"<\s*/?\s*" + _prefix_alt("tool_calls", "toolcalls", "function_calls")
+    + r"$", re.I)
+
+# Cheap pre-filter for every DSML pass. Keyed on the WORD, not the pipe —
+# keying it on the pipe is precisely the bug described above. The regexes still
+# demand the full `<…DSML…>` shape, so prose that merely mentions DSML (someone
+# asking Basilisk about this very bug, say) is never rewritten.
+def _has_dsml(t: str) -> bool:
+    return "DSML" in t or "dsml" in t
+
+
+# A DSML tag that has only just begun to arrive. Deployments report the
+# sentinel being SPLIT ACROSS STREAMED DELTAS ("marker splitting"), which is
+# what puts half a sentinel on screen for a frame or two. Everything COMPLETE
+# has already been rewritten by the time this runs, so a survivor is by
+# definition still in flight: hide from it to the end of the buffer.
+# WRITTEN AS AN EXPLICIT PREFIX LADDER, not as "optional bits then anything".
+# The first version was `<` + optional-pipes + optional-DSML + `[^>]{0,200}$`,
+# and because every piece was optional it happily matched a bare `<` followed
+# by 200 characters of ordinary prose at the end of the buffer — so `x < y and
+# some more text` would have been DELETED from the reply. Every alternative
+# below requires at least one pipe, and the tail is only permitted AFTER the
+# full word DSML has arrived.
+_DSML_PARTIAL_RE = re.compile(
+    r"<\s*/?\s*" + _PIPE_CLS + r"+"
+    r"(?:D(?:S(?:M(?:L(?:" + _PIPE_CLS + r"*[^>]{0,200})?)?)?)?)?$", re.I)
 
 # Argument child tags, with or without the sentinel (it is stripped first).
 # `name` here is deliberately LOOSER than _NAME_ATTR_RE: that one names a TOOL
@@ -7880,9 +8027,13 @@ def _normalise_tool_syntax(text: str) -> str:
     #    teaching each regex about the sentinel is what keeps parse and strip
     #    in agreement; the moment they disagree, a call executes but survives
     #    stripping and the raw markup reaches the screen and the database.
-    if _DS_PIPE in out and "DSML" in out:
+    if _has_dsml(out):
         out = _DSML_SENTINEL_RE.sub(lambda m: "<" + (m.group(1) or m.group(2)),
                                     out)
+    # 0b. …and the now-plain batch wrapper it leaves behind. Cheap literal
+    #     pre-check first: this runs on every streamed frame.
+    if "_calls" in out or "toolcalls" in out:
+        out = _WRAPPER_TAG_RE.sub("", out)
 
     # 1. DeepSeek native tokens.
     if _DS_PIPE in out:
@@ -7934,7 +8085,11 @@ def _normalise_tool_syntax(text: str) -> str:
 # understand it". Used only after a turn produced no executable calls.
 _TOOL_DEBRIS_RES = [
     re.compile(r"<\s*/?\s*tool\b", re.I),
-    re.compile(r"</?\s*(?:tool_call|toolcall|function_call|invoke)\b", re.I),
+    re.compile(r"</?\s*(?:tool_call|toolcall|function_call|\w*invoke)\b", re.I),
+    # DSML in ANY pipe rendering. Without this the fail-open backstop and the
+    # TTS suspend guard both miss an ASCII-degraded block, which is how the
+    # speaker ends up reciting the sentinel out loud.
+    re.compile(r"<\s*/?\s*" + _PIPE_CLS + r"+\s*DSML", re.I),
     re.compile(r'\bname\s*=\s*"[a-z_][\w.]*"\s*>'),
     re.compile("<" + _DS_PIPE),
     re.compile(r"<\s*function\s*=", re.I),
@@ -7985,7 +8140,7 @@ def scrub_tool_debris(text: str) -> str:
     if not text:
         return text
     out = text
-    if _DS_PIPE in out and "DSML" in out:
+    if _has_dsml(out):
         out = _DSML_SENTINEL_RE.sub(lambda m: "<" + (m.group(1) or m.group(2)),
                                     out)
     out = _DS_TOKEN_RE.sub("", out)
@@ -8213,6 +8368,21 @@ def strip_tool_calls(text: str) -> str:
         out = TOOL_PARTIAL_RE.sub("", out)
     # …and the same for a native-token call that is still arriving. Without
     # this the operator watches the raw special tokens type themselves out.
+    # A DSML tag still arriving, in any pipe rendering.
+    #
+    # GUARDED ON THE TAIL, NOT ON THE WHOLE BUFFER. The obvious guard is
+    # `_has_dsml(out)`, and it is wrong here: by this point the normaliser has
+    # already stripped the sentinel out of every COMPLETE tag, so a buffer
+    # whose only DSML is the half-arrived `</｜DS` at the end does not contain
+    # the word at all — the guard was false exactly when the pass was needed,
+    # and the operator watched `</｜DS` sit in the reply. The regex is anchored
+    # at end-of-string and its match can reach back at most ~200 characters, so
+    # a fixed-size tail is the correct and cheapest thing to test.
+    _tail = out[-512:]
+    if "<" in _tail and any(_c in _tail for _c in _PIPES):
+        out = _DSML_PARTIAL_RE.sub("", out)
+    if "<" in _tail:
+        out = _WRAPPER_PARTIAL_RE.sub("", out)
     if _DS_PIPE in out:
         out = _DS_PARTIAL_RE.sub("", out)
         out = _DS_TOKEN_RE.sub("", out)

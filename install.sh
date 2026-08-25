@@ -98,6 +98,37 @@ BACKUP_DIR="${INSTALL_DIR}/backups"
 # Old oracle paths (for migration)
 OLD_DATA_DIR="${HOME}/.local/share/oracle"
 OLD_CONFIG_DIR="${HOME}/.config/oracle"
+# ── PRIVILEGE ESCALATION IS DETECTED, NOT ASSUMED ────────────────────
+# Every package step below used a hardcoded `sudo`. That is wrong in three
+# situations this installer actually meets:
+#
+#   · running as root (a Kali root shell, a container, a rescue boot) — sudo
+#     is often not installed there at all, and the whole install died on the
+#     first package step with "sudo: command not found";
+#   · an Arch/CachyOS box set up with `doas` and no sudo;
+#   · sudo-rs, which is a drop-in but is worth naming when it is what ran.
+#
+# $ESC is empty when already root, so `$ESC pacman -S ...` is simply
+# `pacman -S ...` — no quoting games needed at the call sites.
+if [ "$(id -u)" = "0" ]; then
+  ESC=""
+elif command -v sudo >/dev/null 2>&1; then
+  ESC="sudo"
+elif command -v doas >/dev/null 2>&1; then
+  ESC="doas"
+else
+  ESC=""
+  echo "  !  no sudo/doas found and not running as root — package installs will be skipped"
+fi
+
+# Distro flavour, for the two that change what this script should do.
+DISTRO_ID=""
+DISTRO_LIKE=""
+if [ -r /etc/os-release ]; then
+  DISTRO_ID="$(. /etc/os-release 2>/dev/null; printf '%s' "${ID:-}")"
+  DISTRO_LIKE="$(. /etc/os-release 2>/dev/null; printf '%s' "${ID_LIKE:-}")"
+fi
+
 # Legacy "kali" paths from before the rename to Basilisk (cleaned up on install;
 # the app itself copies chats/settings across on first run, so nothing is lost).
 LEGACY_KALI_DATA="${HOME}/.local/share/kali"
@@ -232,6 +263,22 @@ fi
 
 # ── 1. Python ─────────────────────────────────────────────────────
 
+step "host"
+# Name the box. The two flavours below are the ones Basilisk is built and
+# tested against, and each changes what the rest of this script does: CachyOS
+# means pacman with no -Sy, Kali means most offensive tooling is already here.
+case "${DISTRO_ID}${DISTRO_LIKE}" in
+  *cachy*)  ok "CachyOS detected (Arch base) — pacman/paru, BlackArch for tooling" ;;
+  *kali*)   ok "Kali detected — apt; most offensive tooling ships preinstalled" ;;
+  *arch*)   ok "Arch-based distro detected — pacman" ;;
+  *debian*|*ubuntu*) ok "Debian-based distro detected — apt" ;;
+  *fedora*|*rhel*)   ok "Fedora/RHEL-based distro detected — dnf" ;;
+  *) say "distro: ${DISTRO_ID:-unknown} — package manager auto-detected below" ;;
+esac
+if [ -n "$ESC" ]; then say "escalation: $ESC"; else
+  if [ "$(id -u)" = "0" ]; then say "escalation: running as root"; fi
+fi
+
 step "Python"
 command -v python3 >/dev/null || fatal "python3 not installed"
 PYV=$(python3 -c 'import sys; print(f"{sys.version_info[0]}.{sys.version_info[1]}")')
@@ -255,13 +302,20 @@ from gi.repository import Gtk, Adw
 else
   warn "missing — installing (this may take ~30s on slow mirrors)"
   if command -v apt-get >/dev/null; then
-    sudo apt-get update
-    sudo apt-get install -y python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 \
+    $ESC apt-get update
+    $ESC apt-get install -y python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 \
       libgtk-4-1 libadwaita-1-0 || fatal "apt install failed"
   elif command -v pacman >/dev/null; then
-    sudo pacman -Sy --needed --noconfirm python-gobject gtk4 libadwaita
+    # NOT `-Sy`: syncing the database without upgrading is a PARTIAL UPGRADE,
+    # which is the documented way to break an Arch/CachyOS box — the new
+    # package gets linked against libraries the system has not upgraded to
+    # yet. `-S --needed` uses the database the operator already has; if a
+    # package is genuinely missing from it, the fix is a full `-Syu`, which
+    # is his call to make and not this script's.
+    $ESC pacman -S --needed --noconfirm python-gobject gtk4 libadwaita \
+      || fatal "pacman install failed — run '$ESC pacman -Syu' first, then re-run this installer"
   elif command -v dnf >/dev/null; then
-    sudo dnf install -y python3-gobject gtk4 libadwaita
+    $ESC dnf install -y python3-gobject gtk4 libadwaita
   else
     fatal "unknown package manager — install python3-gi, GTK 4, libadwaita manually"
   fi
@@ -290,7 +344,7 @@ if [ $SKIP_GROQ -eq 0 ]; then
       ok "groq installed (pip --user --break-system-packages)"
     elif command -v pipx >/dev/null && pipx install groq 2>/dev/null; then
       ok "groq installed (pipx)"
-    elif command -v apt-get >/dev/null && sudo apt-get install -y python3-pip 2>/dev/null \
+    elif command -v apt-get >/dev/null && $ESC apt-get install -y python3-pip 2>/dev/null \
          && python3 -m pip install --user --break-system-packages --quiet groq 2>/dev/null; then
       ok "groq installed (after pip install)"
     else
@@ -355,7 +409,7 @@ if [ $SKIP_HELPERS -eq 0 ]; then
     [ $_is_kde -eq 1 ] && HELPERS="$HELPERS kde-spectacle"
     say "apt — installing: $HELPERS"
     # shellcheck disable=SC2086
-    if sudo apt-get install -y $HELPERS 2>/dev/null; then
+    if $ESC apt-get install -y $HELPERS 2>/dev/null; then
       ok "desktop helpers installed"
     else
       warn "some helpers unavailable on this mirror — Basilisk still runs;"
@@ -368,7 +422,7 @@ if [ $SKIP_HELPERS -eq 0 ]; then
     [ $_is_kde -eq 1 ] && HELPERS="$HELPERS spectacle"
     say "pacman — installing: $HELPERS"
     # shellcheck disable=SC2086
-    if sudo pacman -S --needed --noconfirm $HELPERS 2>/dev/null; then
+    if $ESC pacman -S --needed --noconfirm $HELPERS 2>/dev/null; then
       ok "desktop helpers installed"
     else
       warn "some helpers aren't in the official repos (wlrctl is AUR-only) —"
@@ -381,7 +435,7 @@ if [ $SKIP_HELPERS -eq 0 ]; then
     [ $_is_kde -eq 1 ] && HELPERS="$HELPERS spectacle"
     say "dnf — installing: $HELPERS"
     # shellcheck disable=SC2086
-    if sudo dnf install -y $HELPERS 2>/dev/null; then
+    if $ESC dnf install -y $HELPERS 2>/dev/null; then
       ok "desktop helpers installed"
     else
       warn "some helpers unavailable — Basilisk still runs;"
@@ -410,17 +464,17 @@ if [ $SKIP_HELPERS -eq 0 ]; then
     # Install each independently so a missing one doesn't drop the others.
     _fok=0
     for _fp in fonts-inter fonts-jetbrains-mono fonts-firacode; do
-      sudo apt-get install -y "$_fp" 2>/dev/null && _fok=$((_fok + 1)) || true
+      $ESC apt-get install -y "$_fp" 2>/dev/null && _fok=$((_fok + 1)) || true
     done
     [ $_fok -gt 0 ] \
       && ok "UI fonts installed (${_fok}/3 — Inter / JetBrains Mono / Fira Code)" \
       || warn "font packages unavailable on this mirror — UI falls back to system fonts"
   elif command -v pacman >/dev/null; then
-    sudo pacman -Sy --needed --noconfirm inter-font ttf-jetbrains-mono ttf-fira-code 2>/dev/null \
+    $ESC pacman -S --needed --noconfirm inter-font ttf-jetbrains-mono ttf-fira-code 2>/dev/null \
       && ok "UI fonts installed" \
       || warn "font packages unavailable — UI falls back to system fonts"
   elif command -v dnf >/dev/null; then
-    sudo dnf install -y rsms-inter-fonts jetbrains-mono-fonts fira-code-fonts 2>/dev/null \
+    $ESC dnf install -y rsms-inter-fonts jetbrains-mono-fonts fira-code-fonts 2>/dev/null \
       && ok "UI fonts installed" \
       || warn "font packages unavailable — UI falls back to system fonts"
   fi
@@ -469,19 +523,19 @@ if [ $SKIP_VOICE -eq 0 ]; then
   step "voice (speech in / speech out)"
 
   if command -v apt-get >/dev/null; then
-    sudo apt-get install -y espeak-ng pulseaudio-utils alsa-utils ffmpeg 2>/dev/null \
+    $ESC apt-get install -y espeak-ng pulseaudio-utils alsa-utils ffmpeg 2>/dev/null \
       && ok "voice packages installed (espeak-ng, recorder, player)" \
       || warn "some voice packages unavailable on this mirror"
   elif command -v pacman >/dev/null; then
-    sudo pacman -Sy --needed --noconfirm espeak-ng libpulse alsa-utils ffmpeg 2>/dev/null \
+    $ESC pacman -S --needed --noconfirm espeak-ng libpulse alsa-utils ffmpeg 2>/dev/null \
       && ok "voice packages installed" || warn "some voice packages unavailable"
   elif command -v dnf >/dev/null; then
-    sudo dnf install -y espeak-ng pulseaudio-utils alsa-utils ffmpeg 2>/dev/null \
+    $ESC dnf install -y espeak-ng pulseaudio-utils alsa-utils ffmpeg 2>/dev/null \
       && ok "voice packages installed" || warn "some voice packages unavailable"
   fi
 
   # PipeWire-native recorder/player (pw-record / pw-play).  On modern
-  # PipeWire-only desktops — including Phosh / NetHunter Pro on the phone —
+  # PipeWire-only desktops —
   # this is the capture path most likely to actually work when parecord
   # can't reach the server.  Installed SEPARATELY from the line above, and
   # always ending in ok/warn, so an unknown package name on one mirror can
@@ -490,15 +544,15 @@ if [ $SKIP_VOICE -eq 0 ]; then
   if command -v pw-record >/dev/null 2>&1; then
     ok "PipeWire recorder already present (pw-record)"
   elif command -v apt-get >/dev/null; then
-    sudo apt-get install -y pipewire-bin 2>/dev/null \
+    $ESC apt-get install -y pipewire-bin 2>/dev/null \
       && ok "PipeWire tools installed (pw-record / pw-play)" \
       || warn "pipewire-bin not on this mirror — parecord/arecord still cover recording"
   elif command -v pacman >/dev/null; then
-    sudo pacman -Sy --needed --noconfirm pipewire 2>/dev/null \
+    $ESC pacman -S --needed --noconfirm pipewire 2>/dev/null \
       && ok "PipeWire tools installed" \
       || warn "pipewire unavailable here — parecord/arecord still cover recording"
   elif command -v dnf >/dev/null; then
-    sudo dnf install -y pipewire-utils 2>/dev/null \
+    $ESC dnf install -y pipewire-utils 2>/dev/null \
       && ok "PipeWire tools installed" \
       || warn "pipewire-utils unavailable here — parecord/arecord still cover recording"
   fi
@@ -616,7 +670,7 @@ if [ $HAVE_LOCAL -eq 1 ]; then
   SRC_DIR="${SCRIPT_DIR}"
 else
   say "fetching from github.com/${GITHUB_REPO}@${GITHUB_BRANCH}"
-  command -v curl >/dev/null || sudo apt-get install -y curl
+  command -v curl >/dev/null || $ESC apt-get install -y curl
   TMP=$(mktemp -d)
   trap "rm -rf ${TMP}" EXIT
   for f in "${REQUIRED_FILES[@]}"; do

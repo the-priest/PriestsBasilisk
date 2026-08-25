@@ -13,7 +13,7 @@ wired.
   1. THE INDEX COULD VETO THE WRITE.  memory.py keeps an FTS5 index for fast
      keyword recall, maintained by two SQL TRIGGERS that live in the database
      file, not in the process.  Recall degrades gracefully without FTS5 — the
-     module's docstring says so, because stock NetHunter python may not have
+     module's docstring says so, because a stripped-down python may not have
      it.  Writes did not.  Open a memory.db created where fts5 exists on a box
      where it doesn't and every `INSERT INTO memories` raises through the still
      -present trigger; remember() propagated it and record_turn() swallowed it
