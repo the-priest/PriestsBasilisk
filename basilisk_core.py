@@ -19,6 +19,7 @@ import os
 import re
 import json
 import time
+import shlex
 import shutil
 import socket
 import sqlite3
@@ -2222,8 +2223,17 @@ def _sudo_ready() -> bool:
 # more leading environment assignments (`FOO=bar sudo ...`), which are
 # still command-position invocations.  `sudo` followed by a word boundary
 # only.
+# `sudo\b` was too loose in one direction that matters: \b matches between
+# "sudo" and "-", so `sudo-rs` -- a real, separate binary, and a plausible one
+# on the Arch/CachyOS boxes detect_priv_esc handles -- was reported as a sudo
+# invocation. It is not one, and treating it as one is not harmless: the
+# rewriter below would splice " -A" into the middle of the program's NAME
+# ("sudo -A-rs pacman -Syu"), turning a working command into one that cannot
+# run. `(?![\w-])` ends the word the way a shell does.
+_SUDO_TERM = r'(?![\w-])'
 _SUDO_RE = re.compile(
-    r'(?:^|[\n;&|(]\s*|\b&&\s*|\b\|\|\s*)(?:\w+=\S*\s+)*sudo\b')
+    r'(?:^|[\n;&|(]\s*|\b&&\s*|\b\|\|\s*)(?:\w+=\S*\s+)*sudo'
+    + _SUDO_TERM)
 
 
 def command_needs_sudo(command: str) -> bool:
@@ -2278,16 +2288,40 @@ from basilisk_scope import enforce as _scope_enforce   # noqa: E402
 # A detector and its rewriter disagreeing about what they match is worth
 # fixing at the root, so the prefix is now written once and shared.
 _SUDO_ENV_PREFIX = r'(?:\w+=\S*\s+)*'
+# THE TERMINATOR HAS TO MATCH TOO, AND IT DID NOT.
+# Sharing the env prefix fixed half the disagreement. _SUDO_RE ends `sudo\b`
+# and this ended `sudo(?=\s|$)`, and `\b` also matches before `-` and `;`:
+#
+#     "sudo-rs pacman -Syu"   needs_sudo=True   inject -> unchanged
+#     "sudo; echo hi"         needs_sudo=True   inject -> unchanged
+#
+# Same consequence as before: the operator is asked for his password, the
+# askpass helper is written, and the sudo that runs has nothing to reach
+# for. `sudo-rs` is a real binary and plausible on the Arch/CachyOS boxes
+# detect_priv_esc already handles.
+#
+# `(?!\s+-A\b)` is what makes the rewrite PER-INVOCATION. The idempotence
+# guard used to be a whole-string test -- `" -A" in command and "sudo -A"
+# in command` -- so ONE already-flagged sudo made the function return early
+# and leave every other sudo on the line bare:
+#
+#     "sudo -A apt update && sudo apt upgrade -y"  -> unchanged
+#
+# and the second sudo blocks on a prompt nobody can answer. That
+# contradicts this function's own docstring: "turn EACH sudo invocation
+# into sudo -A".
 _SUDO_INJECT_RE = re.compile(
-    r'(^|[\n;&|(]\s*|&&\s*|\|\|\s*)(' + _SUDO_ENV_PREFIX + r')sudo(?=\s|$)')
+    r'(^|[\n;&|(]\s*|&&\s*|\|\|\s*)(' + _SUDO_ENV_PREFIX
+    + r')sudo' + _SUDO_TERM + r'(?!\s+-A\b)')
 
 
 def _inject_askpass(command: str) -> str:
     """Turn each `sudo` invocation into `sudo -A` (use SUDO_ASKPASS).
     Safe with any command — unlike `-S`, askpass never reads the
     command's stdin, so `sudo -A tee file` still works correctly."""
-    if " -A" in command and "sudo -A" in command:
-        return command
+    # No whole-string early return: the negative lookahead in the pattern
+    # skips a sudo that already carries -A and rewrites the ones that do not,
+    # so this is idempotent AND complete on a line with several sudos.
     # Group 2 is any environment assignments, which belong BEFORE sudo —
     # `FOO=bar sudo -A ...`, never `sudo -A FOO=bar ...`, which sudo would
     # read as the command to run.
@@ -2979,12 +3013,37 @@ def tool_check_updates() -> Dict[str, Any]:
             if len(cols) >= 3 and cols[0] in ("v", ""):
                 pkgs.append({"name": cols[2], "security": False})
     elif mgr == "apk":
+        # `apk version -l '<'` prints "py3-cryptography-42.0.5-r0 < 42.0.8-r0".
+        # `line.split("-")[0]` truncated at the FIRST hyphen, so that package
+        # was reported as "py3" -- and most apk package names contain a
+        # hyphen. Strip the trailing "-<version>-r<n>" instead, which is the
+        # part that is actually a version.
         for line in out.splitlines():
             line = line.strip()
             if line and "<" in line:
-                pkgs.append({"name": line.split("-")[0], "security": False})
+                _left = line.split("<", 1)[0].strip()
+                _m = re.match(r"^(.*?)-[^-\s]+-r\d+$", _left) or \
+                     re.match(r"^(.*?)-[0-9][^-\s]*$", _left)
+                pkgs.append({"name": _m.group(1) if _m else _left,
+                             "security": False})
+    # ── security_count IS STRUCTURALLY ZERO ON THREE OF THE FIVE MANAGERS ──
+    # Only the apt and dnf branches ever increment sec_count; pacman, zypper
+    # and apk do not tag security updates in their upgradable listings at
+    # all, so there is nothing to count. The function returned
+    # "security_count": 0 anyway, as though it were a measurement, and the
+    # watcher gated its notification on `security_count > 0` -- so on
+    # Arch/CachyOS, the box this whole portability layer was written for, the
+    # watcher ran `pacman -Qu` every four hours and the alert branch was
+    # unreachable. It failed silently, which is the worst way for a
+    # notification feature to fail: it looks wired up.
+    #
+    # Report the distinction instead of hiding it. A caller can now tell
+    # "no security updates" from "this manager cannot say", and the watcher
+    # uses that to notify on plain update count where that is all there is.
     return {"ok": True, "manager": mgr, "count": len(pkgs),
-            "security_count": sec_count, "packages": pkgs,
+            "security_count": sec_count,
+            "security_known": mgr in ("apt", "dnf"),
+            "packages": pkgs,
             "refresh_hint": f"{priv_esc_prefix()}{pm['refresh']}".strip()}
 
 
@@ -3512,6 +3571,22 @@ def reply_is_bare_stall(text: str) -> bool:
     if any(explicit for _txt, explicit in parts):
         return False
     rest = " ".join(txt for txt, _e in parts).strip()
+    # ── A URL IS A POINTER, NOT AN ANSWER ──
+    # "Looking up recent Irish news from credible sources.
+    #  https://html.duckduckgo.com/html/?q=ireland+news+august+2026
+    #  Let's read the top result."
+    #
+    # The preamble and the URL together clear the 80-character substance
+    # bar, so this was graded as a DELIVERY and no nudge fired -- the turn
+    # ended "done" with the operator holding a promise. Observed three
+    # times running on the same question, each time the model saying "you
+    # are right, let me actually do it" and then not doing it.
+    #
+    # Whatever a reply that quotes a link has given the operator, it is not
+    # the thing behind the link. Discount URLs before measuring, so the
+    # sentence that remains has to stand on its own.
+    rest = _BARE_URL_RE.sub(" ", rest)
+    rest = re.sub(r"\s{2,}", " ", rest).strip()
     if len(rest) >= _SUBSTANCE_MIN_CHARS:
         return False
     # -- AND A SHORT ANSWER IS STILL AN ANSWER --
@@ -4176,17 +4251,68 @@ def tool_read_screen(region: str = "") -> Dict[str, Any]:
 # reported so the model/operator can decide.
 # ═════════════════════════════════════════════════════════════════════
 
-def _fs_guard(path: str) -> Optional[str]:
-    """Return an error string if `path` is too dangerous to modify, else
-    None."""
+def _fs_guard(path: str, recursive: bool = True) -> Optional[str]:
+    """Return an error string if `path` is too dangerous to modify, else None.
+
+    ── THIS USED TO BE A THIRD DESTRUCTIVE PRIMITIVE WITH ITS OWN, WEAKER,
+       HAND-WRITTEN FLOOR ──
+
+    gate_command's own docstring says the destructive floor exists because
+    "an inlined block can only ever protect the function it is inlined in ...
+    every primitive calls it". `delete_path` / `move_path` / `copy_path` are
+    primitives, and they called neither gate_command nor
+    is_catastrophic_command -- only an exact-membership set of eleven
+    strings. Anything not literally in that set walked through:
+
+        rm -rf /usr/bin                      -> REFUSED by the shell floor
+        delete_path{"path":"/usr/bin",       -> {"ok": true, ...}
+                    "recursive":true}           and shutil.rmtree runs
+
+    Confirmed with rmtree stubbed: /usr/bin, /home and /var/lib were all
+    reached. /home, /opt, /srv, /etc/ssh, /var/lib and every other critical
+    path outside those eleven strings had the same gap.
+
+    The set was also partly dead. It is compared against `realpath`, and on
+    every usr-merged distro -- Debian 12+, Ubuntu, Arch, CachyOS, Fedora,
+    i.e. all the ones this app targets -- realpath("/bin") is "/usr/bin",
+    which is not in the set. So "/bin", "/lib" and "/sbin" protected nothing;
+    they were the pre-merge names being compared against post-merge values.
+
+    The fix is not a longer list. It is to ask the SAME question the shell
+    floor asks, so a path the operator cannot delete with `rm -rf` is not
+    deletable through a tool call either. The list stays as a cheap
+    fast-path and a floor of its own if that ever regresses.
+    """
     rp = os.path.realpath(os.path.expanduser(path))
     if is_sensitive_path(rp):
         return f"refused: '{path}' is a protected/sensitive path"
     catastrophic = {"/", os.path.realpath(os.path.expanduser("~")),
                     "/etc", "/usr", "/bin", "/boot", "/lib", "/sys",
-                    "/proc", "/dev", "/var"}
+                    "/proc", "/dev", "/var",
+                    # the usr-merged destinations the three above resolve to
+                    "/usr/bin", "/usr/lib", "/usr/sbin", "/usr/local"}
     if rp in catastrophic:
         return f"refused: '{path}' is a critical system path"
+    # THE AUTHORITATIVE CHECK. Phrased as the equivalent shell command so
+    # there is exactly one definition of "catastrophic" in the app, and this
+    # primitive inherits every future improvement to it automatically.
+    #
+    # The verb has to match what the caller will really do, or the guard
+    # answers a question nobody asked. `rm -rf <p>` and `rm <p>` are graded
+    # differently on purpose -- removing one file inside a critical tree is
+    # not the same act as removing the tree -- so a single-file delete is
+    # probed as a single-file delete. Probing everything as `rm -rf` refused
+    # `delete_path("~/loot/notes.txt")` on a root install, which is a false
+    # alarm on ordinary work, and false alarms are how a floor gets disabled.
+    _verb = "rm -rf " if recursive else "rm "
+    try:
+        if is_catastrophic_command(_verb + shlex.quote(rp)):
+            return (f"refused: '{path}' is refused by the same floor that "
+                    f"refuses `{_verb.strip()}` on it -- no override")
+    except Exception as _e:                    # never fail open on a crash
+        log(f"_fs_guard floor check failed for {path!r}: {_e}")
+        return (f"refused: '{path}' could not be checked against the "
+                f"destructive floor")
     return None
 
 
@@ -4210,6 +4336,18 @@ def tool_copy_path(src: str, dst: str) -> Dict[str, Any]:
         return {"ok": False, "error": (
             "copy_path needs BOTH src and dst; got src=%r dst=%r. "
             "Nothing was copied." % (src, dst))}
+    # ── A COPY OVERWRITES, SO IT IS DESTRUCTIVE TOO ──
+    # This called _fs_guard on NEITHER argument. copytree(dirs_exist_ok=True)
+    # and copy2 both clobber, and os.makedirs creates whatever parent is
+    # needed to get there -- so copy_path was a clean write primitive into
+    # ~/.ssh, ~/.gnupg, ~/.aws, /etc/sudoers, anywhere. Verified: a copy onto
+    # ~/.ssh/authorized_keys returned ok:True and the file was replaced.
+    # The source is guarded as well so a copy cannot be used to read a
+    # protected path out to somewhere unprotected.
+    for _p, _what in ((src, "source"), (dst, "destination")):
+        guard = _fs_guard(_p)
+        if guard:
+            return {"ok": False, "error": f"{guard} ({_what})"}
     try:
         rsrc = os.path.expanduser(src)
         rdst = os.path.expanduser(dst)
@@ -4233,9 +4371,17 @@ def tool_move_path(src: str, dst: str) -> Dict[str, Any]:
         return {"ok": False, "error": (
             "move_path needs BOTH src and dst; got src=%r dst=%r. "
             "Nothing was moved." % (src, dst))}
-    guard = _fs_guard(src)
-    if guard:
-        return {"ok": False, "error": guard}
+    # ── THE DESTINATION IS THE DESTRUCTIVE HALF ──
+    # This guarded `src` only, and the section header above claims "every
+    # destructive op (delete, overwrite-on-move) is guarded". A move does not
+    # destroy the source -- it destroys whatever was at the DESTINATION, and
+    # this function reports that in its own `"overwrote"` field, so the risk
+    # was understood and simply not checked. Verified: a move onto
+    # ~/.ssh/authorized_keys returned ok:True and replaced the file.
+    for _p, _what in ((src, "source"), (dst, "destination")):
+        guard = _fs_guard(_p)
+        if guard:
+            return {"ok": False, "error": f"{guard} ({_what})"}
     try:
         rsrc = os.path.expanduser(src)
         rdst = os.path.expanduser(dst)
@@ -4254,7 +4400,7 @@ def tool_delete_path(path: str, recursive: bool = False) -> Dict[str, Any]:
 
     Guarded against sensitive/critical paths.  This is destructive — the
     UI confirmation flow still applies before it runs in confirm mode."""
-    guard = _fs_guard(path)
+    guard = _fs_guard(path, recursive=recursive)
     if guard:
         return {"ok": False, "error": guard}
     try:
@@ -4773,10 +4919,38 @@ def _wr_strip_raw_blocks(src: str) -> str:
             break
         out.append(src[pos:m.start()])
         out.append(" ")
+        # ── A MISSING CLOSER IS NOT A LICENCE TO DROP THE PAGE ──
+        # The first version of this walk did `break` here, on the reasoning
+        # that an unterminated <script> swallows the rest of the document the
+        # way a browser does. That is true of <script> and <style>. It is
+        # false of the other three tags this regex matches, and those are the
+        # ones that actually fire:
+        #
+        #   · </head> is an OPTIONAL end tag in HTML. A page that omits it --
+        #     which is legal and common -- lost its entire body.
+        #   · <svg .../> self-closes legally as foreign content, so there is
+        #     no </svg> to find and everything after the icon was dropped.
+        #
+        # Measured: an advisory page with no </head> came back as "" from
+        # web_read with ok:True and status:200, so the model was told the
+        # fetch SUCCEEDED and the CVE had no detail. Silently returning
+        # nothing is the worst of the three possible outcomes.
+        #
+        # The old regex did the right thing here by accident: with no closer
+        # it simply did not match, the opener survived, and the generic tag
+        # strip removed it. Do that deliberately -- skip the OPENER, keep the
+        # content -- and reserve swallowing-to-end for the raw-text elements
+        # where it is really how parsing works.
+        if m.group(0).rstrip().endswith("/>"):
+            pos = m.end()              # self-closed: nothing to swallow
+            continue
         close = "</" + m.group(1).lower()
         idx = low.find(close, m.end())
         if idx < 0:
-            break                      # unterminated: the rest is that block
+            if m.group(1).lower() in ("script", "style"):
+                break                  # raw-text element: the rest really is it
+            pos = m.end()              # keep the content, drop the tag
+            continue
         gt = src.find(">", idx)
         pos = (gt + 1) if gt >= 0 else len(src)
     return "".join(out)
@@ -7604,18 +7778,47 @@ def run_security_audit(
         except Exception:
             return []
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as ex:
+    # ── THE DEADLINE BOUNDED NOTHING, AND FIRING IT THREW AWAY THE AUDIT ──
+    # This was `with ThreadPoolExecutor(...) as ex:` around
+    # `as_completed(future_to, timeout=90)`, and both halves were wrong.
+    #
+    # (a) When as_completed raises TimeoutError it leaves the `with`, whose
+    #     __exit__ is shutdown(wait=True) -- so the call blocks for the hung
+    #     check anyway. Measured with a 12s check and a 2s deadline: it
+    #     returned after 12.0s. The 90s was decoration.
+    # (b) The exception escaped run_security_audit entirely, discarding every
+    #     finding already collected, and the GUI caller has no try. One slow
+    #     check turned a completed audit into a traceback.
+    #
+    # Same shape as the timeout bug tool_run_command documents and fixes:
+    # a deadline that discards the data it was supposed to bound. Keep what
+    # finished, say what did not, and do not wait on the stragglers.
+    timed_out: List[str] = []
+    ex = concurrent.futures.ThreadPoolExecutor(max_workers=6)
+    try:
         future_to = {ex.submit(_safe, fn): (cid, title)
                      for cid, title, fn in AUDIT_CHECKS}
-        for fut in concurrent.futures.as_completed(future_to, timeout=90):
-            cid, title = future_to[fut]
-            try:
-                all_findings.extend(fut.result())
-            except Exception:
-                pass
-            done += 1
-            if on_progress:
-                on_progress(title, done, total)
+        try:
+            for fut in concurrent.futures.as_completed(future_to, timeout=90):
+                cid, title = future_to[fut]
+                try:
+                    all_findings.extend(fut.result())
+                except Exception:
+                    pass
+                done += 1
+                if on_progress:
+                    on_progress(title, done, total)
+        except concurrent.futures.TimeoutError:
+            for fut, (cid, title) in future_to.items():
+                if not fut.done():
+                    fut.cancel()
+                    timed_out.append(title)
+            log(f"security audit: {len(timed_out)} check(s) exceeded the "
+                f"90s deadline and were dropped: {', '.join(timed_out[:6])}")
+    finally:
+        # wait=False so a check stuck in a syscall cannot hold the audit --
+        # that is the entire point of having a deadline.
+        ex.shutdown(wait=False)
 
     score = sum(SEVERITY_WEIGHTS[f.severity] for f in all_findings)
     if   score == 0:  grade = "A+"
@@ -7624,8 +7827,20 @@ def run_security_audit(
     elif score <= 16: grade = "C"
     elif score <= 30: grade = "D"
     else:             grade = "F"
-    return {"findings": all_findings, "score": score, "grade": grade,
-            "elapsed": time.time() - t0}
+    # An audit that silently skipped checks must not present its grade as if
+    # it had run them all -- a partial sweep reported as an A+ is worse than
+    # no sweep.
+    out = {"findings": all_findings, "score": score, "grade": grade,
+           "checks_run": done, "checks_total": total,
+           "elapsed": time.time() - t0}
+    if timed_out:
+        out["incomplete"] = True
+        out["timed_out"] = timed_out
+        out["note"] = (f"{len(timed_out)} of {total} checks exceeded the 90s "
+                       f"deadline and were dropped ({', '.join(timed_out[:4])})"
+                       f" - this grade covers the {done} that finished, not "
+                       f"the whole system.")
+    return out
 
 
 def format_audit_for_chat(audit: Dict[str, Any]) -> str:
@@ -7635,6 +7850,15 @@ def format_audit_for_chat(audit: Dict[str, Any]) -> str:
                                                 f.check_id))
     lines = [f"## Security audit — grade **{audit['grade']}** "
              f"(score {audit['score']}, {audit['elapsed']:.1f}s)", ""]
+    # A grade computed from a partial sweep must SAY it is partial, at the
+    # top, before the reader takes an A+ to mean the system is clean. The
+    # audit reports this now; presenting it without the caveat would put the
+    # honesty problem back one layer up.
+    if audit.get("incomplete"):
+        lines.append("> **INCOMPLETE** — " + str(audit.get("note") or
+                     "some checks did not finish; this grade does not cover "
+                     "the whole system."))
+        lines.append("")
     counts: Dict[str, int] = {}
     for f in findings:
         counts[f.severity] = counts.get(f.severity, 0) + 1
@@ -8695,6 +8919,55 @@ def parse_tool_calls(text: str) -> List[ToolCall]:
     return calls
 
 
+# ══════════════════════════════════════════════════════════════════════
+# THE MODEL PRINTS THE URL INSTEAD OF READING IT
+# ══════════════════════════════════════════════════════════════════════
+# The exact same drift shell_block_command recovers, on the web tool:
+#
+#     "Looking up recent Irish news from credible sources.
+#      https://html.duckduckgo.com/html/?q=ireland+news+august+2026
+#      Let's read the top result."
+#
+# No tool call. parse_tool_calls finds nothing, the URL renders as a link,
+# the turn ends "done", and the operator gets a promise instead of an answer.
+# Observed three turns running: "why did u stop?" -> "You're right, let me do
+# it properly now" -> the same reply again -> "you didnt do it agasin." The
+# model is not confused about WHAT to do; it is emitting markdown where it
+# should emit a call, which is precisely what the ```bash recovery exists for.
+#
+# Conservative on purpose, because a URL in a reply is usually a CITATION and
+# recovering those would fetch pages nobody asked for:
+#   · the caller only reaches here when the reply's own wording says it is
+#     ACTING (reply_intends_action) or a mission is running -- the same
+#     two-tier gate the shell recovery uses;
+#   · a URL inside a ``` fence is an example, never fetched;
+#   · a markdown link with real link text ("[the advisory](url)") is a
+#     citation, not an intent to read; a bare URL, or one whose link text IS
+#     the URL, is what the drift produces.
+_BARE_URL_RE = re.compile(r"""(?<![\w@])(https?://[^\s<>"'\)\]}]+)""", re.I)
+_MD_LINK_RE = re.compile(r"\[([^\]]{1,200})\]\((https?://[^\s)]+)\)", re.I)
+
+
+def printed_url_target(text: str) -> str:
+    """A URL the model printed instead of calling web_read on, or "".
+
+    Returns the LAST such URL: when the reply names a search page and then
+    says "now the top result", the later one is the one it meant to read.
+    """
+    if not text:
+        return ""
+    body = _mask_fences(text)          # a fenced URL is an example
+    # Drop markdown links that carry real link text -- those are citations.
+    def _keep(m):
+        label, url = m.group(1).strip(), m.group(2)
+        same = label.rstrip("/") == url.rstrip("/")
+        return m.group(0) if same else " " * len(m.group(0))
+    body = _MD_LINK_RE.sub(_keep, body)
+    urls = [u.rstrip(".,;:)\u2019\"'") for u in _BARE_URL_RE.findall(body)]
+    urls = [u for u in urls if len(u) > 12]
+    return urls[-1] if urls else ""
+
+
 def shell_block_command(text: str) -> str:
     """Recover a shell command the model PRINTED in a ``` fence instead of
     emitting a `run` tool call — the "it shows me a command with a copy banner
@@ -8999,12 +9272,29 @@ class Watcher:
             return
         self._last_update_check = now
         r = tool_check_updates()
-        if r.get("ok") and r.get("security_count", 0) > 0:
+        if not r.get("ok"):
+            return
+        _sec = r.get("security_count", 0)
+        _known = r.get("security_known", True)
+        _total = r.get("count", 0)
+        if _sec > 0:
             self.on_event({
                 "kind": "security_updates",
-                "title": f"{r['security_count']} security updates pending",
+                "title": f"{_sec} security updates pending",
                 "detail": "Tell me 'install updates' to apply them",
-                "count": r["security_count"],
+                "count": _sec,
+            })
+        elif not _known and _total > 0:
+            # pacman / zypper / apk do not mark which updates are security
+            # ones. Saying "0 security updates" would be a claim this cannot
+            # support, and saying nothing at all is what the old gate did.
+            self.on_event({
+                "kind": "security_updates",
+                "title": f"{_total} updates pending",
+                "detail": (f"{r.get('manager', 'this package manager')} does "
+                           f"not mark which are security fixes - tell me "
+                           f"'install updates' to apply them"),
+                "count": _total,
             })
 
     def _check_journal(self):

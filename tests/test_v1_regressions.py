@@ -477,5 +477,94 @@ ck("the version is 1.0.0.0",
    is not None)
 
 
+# ══════════════════════════════════════════════════════════════════════
+# 6. THE MODEL PROMISES AND NEVER DOES IT
+# ══════════════════════════════════════════════════════════════════════
+# Reported from a real session, three turns running on one question:
+#
+#   "hi can you give me some recent news from ireland"
+#   -> "Looking up recent Irish news. <url> Let's read the top result."
+#   "why did u stop?"
+#   -> "You're right, I never actually fetched it. Let me do it properly."
+#      ... and the same reply again.
+#   "you didnt do it agasin."
+#
+# No tool ever ran. parse_tool_calls found nothing (the URL is prose, not a
+# tag), looks_like_failed_tool_call found nothing (there is no protocol to
+# see), and reply_is_bare_stall said DELIVERED -- because the preamble plus
+# the URL cleared the 80-character substance bar. So no recovery, no nudge,
+# and the turn ended "done" holding a promise.
+print("\n== a printed URL is recovered into a real web_read call ==")
+
+_PROMISES = [
+    "Looking up recent Irish news from credible sources.\n\n"
+    "https://html.duckduckgo.com/html/?q=ireland+news+august+2026\n\n"
+    "Let's read the top result.",
+    "You're right. Let me actually do it this time.\n\nFetching Irish news "
+    "now:\n\nhttps://html.duckduckgo.com/html/?q=ireland+news\n\n"
+    "Let me pull the top result and give you some actual headlines.",
+    "First, get the search results page:\n\nhttps://duckduckgo.com/?q=x\n\n"
+    "Now reading https://www.rte.ie/news/ from that page.",
+]
+for _t in _PROMISES:
+    ck(f"url recovered: {_t[:34]!r}", bool(C.printed_url_target(_t)),
+       "without this the turn ends having fetched nothing")
+
+# THE COUNTER-PROPERTY, and it is the one that matters: a finished answer
+# that CITES a source must never be re-fetched behind the operator's back.
+for _label, _t in (
+    ("markdown link with text",
+     "The advisory is at [NVD CVE-2024-3094](https://nvd.nist.gov/vuln/"
+     "detail/CVE-2024-3094) and it is patched in 5.6.1."),
+    ("fenced example",
+     'Call it like this:\n\n```\n<tool name="web_read">'
+     '{"url": "https://example.com"}</tool>\n```'),
+    ("fenced command",
+     "Try:\n\n```bash\ncurl https://example.com/api\n```"),
+    ("no url at all", "The answer is 42."),
+):
+    ck(f"not recovered: {_label}", not C.printed_url_target(_t),
+       "a citation is not an intent to read")
+
+print("\n== and a reply that only points at a URL is a stall ==")
+ck("bare url + preamble is a stall",
+   C.reply_is_bare_stall(_PROMISES[0]),
+   "the URL used to count toward the substance bar, so no nudge fired")
+for _label, _t in (
+    ("answer that cites a source",
+     "Ireland's budget passes on 12 September, the main change a EUR 2bn "
+     "housing package. Source: https://www.rte.ie/news/budget"),
+    ("answer with a markdown citation",
+     "Per [the RTE report](https://www.rte.ie/news/) the vote is Tuesday "
+     "and the margin was nine seats in the end."),
+    ("plain answer", "The host is up and ports 22 and 80 are open."),
+):
+    ck(f"still delivered: {_label}", not C.reply_is_bare_stall(_t))
+
+print("\n== the recovery is wired into the turn, behind the same gate ==")
+ck("the printed-URL recovery exists",
+   "printed_url_target(final)" in _SRC
+   and 'name=\\"web_read\\"' in _SRC.replace('\\', '\\\\')
+   or "printed_url_target(final)" in _SRC)
+ck("it shares the shell recovery's two-tier gate",
+   re.search(r"if _recover_fence and not self\._shell_block_command\(final\)",
+             _SRC) is not None,
+   "mission always; a regular turn only when the reply says it is ACTING")
+
+print("\n== the contract tells the model this in one rule ==")
+_PERSONA = open(os.path.join(_ROOT, "basilisk_persona.py"),
+                encoding="utf-8").read()
+import basilisk_persona as _P                          # noqa: E402
+ck("the decision is stated up front",
+   "ANSWER, or CALL A TOOL" in _P.TOOL_CONTRACT)
+ck("...and the emit-the-tag rule with it",
+   "MUST CARRY THE" in _P.TOOL_CONTRACT
+   and "Describing a call is not making one" in _P.TOOL_CONTRACT)
+ck("the narrate-then-stop instruction is gone",
+   "in a SEPARATE reply" not in _P.TOOL_CONTRACT,
+   "the search playbook used to tell it to read the result in a LATER "
+   "reply, which is an invitation to end the turn with a promise")
+
+
 print(f"\nv1.0.0.0 regressions: {_passed} passed, {_failed} failed")
 sys.exit(1 if _failed else 0)

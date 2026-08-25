@@ -56,7 +56,7 @@ from basilisk_core import (
     tool_check_updates, tool_recent_downloads, tool_service_status,
     tool_journal_tail, tool_disk_usage, tool_processes,
     tool_network_status, tool_find_file,
-    run_security_audit, format_audit_for_chat,
+    run_security_audit, format_audit_for_chat, printed_url_target,
     run_network_scan, format_scan_for_chat,
     tool_desktop_info, tool_list_apps, tool_launch_app,
     tool_list_windows, tool_focus_window, tool_close_window,
@@ -10533,6 +10533,29 @@ class MainWindow(Adw.ApplicationWindow):
             elif reply_intends_action(final):
                 # Tier 2: regular turn, but the reply says it is acting.
                 _recover_fence = True
+        # ── SAME RECOVERY, FOR THE WEB TOOL ──
+        # A printed URL is the identical drift to a printed shell block, and
+        # it was the one the operator actually hit: three turns running, the
+        # model said "let's read the top result", printed the search URL, and
+        # never called web_read. The turn ended "done" with a promise in it.
+        # Same two-tier gate, so a finished answer that CITES a source is
+        # never fetched behind the operator's back.
+        if _recover_fence and not self._shell_block_command(final):
+            _url = printed_url_target(final)
+            if _url:
+                synthetic = ('<tool name="web_read">' + json.dumps({
+                    "url": _url}) + "</tool>")
+                recovered = parse_tool_calls(synthetic)
+                if recovered:
+                    executable = recovered
+                    self.terminal_log(
+                        "↩ recovered a printed URL into a web_read call "
+                        "(the model wrote the link instead of reading it)",
+                        "error")
+                    self._activity_note(
+                        "the model printed a URL instead of reading it - "
+                        "fetching %s" % _url[:70], "gate")
+
         if _recover_fence:
             _cmd = self._shell_block_command(final)
             if _cmd and not is_catastrophic_command(_cmd):

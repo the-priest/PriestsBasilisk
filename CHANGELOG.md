@@ -1,3 +1,146 @@
+## v1.0.0.0 — second pass
+
+### "it does not work": the model promised and never did it
+
+Reported from a real session, three turns on one question:
+
+```
+"hi can you give me some recent news from ireland"
+  -> "Looking up recent Irish news. <url> Let's read the top result."
+"why did u stop?"
+  -> "You're right, I never actually fetched it. Let me do it properly."
+     ...and the same reply again.
+"you didnt do it agasin."
+```
+
+No tool ever ran. The URL was prose, not a tag. Three separate things had
+to be wrong at once for that to end quietly, and all three were:
+
+- `parse_tool_calls` found nothing, correctly -- there was no tag.
+- `looks_like_failed_tool_call` found nothing, correctly -- there was no
+  protocol to fail at.
+- `reply_is_bare_stall` said **delivered**, incorrectly -- the preamble plus
+  the URL cleared the 80-character substance bar, so the nudge never fired.
+
+So the turn ended "done" holding a promise, and nothing in the app noticed.
+
+**A URL is a pointer, not an answer.** URLs are now discounted before the
+substance measure, so a reply whose only content is a link has to stand on
+the sentence that remains.
+
+**And the same recovery the app already had for `run`, now for the web.**
+There was already a repair for "the model printed a shell command in a
+```bash fence instead of calling `run`". A printed URL is the identical
+drift on the tool the operator was actually using, and it had no repair.
+It has one now, behind the same two-tier gate -- mission always, a regular
+turn only when the reply's own wording says it is ACTING -- so a finished
+answer that CITES a source is never fetched behind anyone's back. Verified
+in both directions: the three real replies recover; markdown citations,
+fenced examples and fenced commands do not.
+
+### Making the decision simple for the model
+
+The recovery is a net. The cause was that the contract never stated the
+decision plainly, and in one place actively taught the failure: the search
+playbook said to read the result *"in a SEPARATE reply"*, which is an
+invitation to end the turn with a plan in it.
+
+The contract now opens with the whole decision, in twelve lines:
+
+```
+ANSWER, or CALL A TOOL. Decide before you type.
+  ANSWER when you already know it and it cannot have changed.
+  CALL A TOOL for this machine, the present-day world, any page, or
+  anything he asked you to DO. In doubt, call it -- checking is cheap.
+
+IF YOUR REPLY SAYS YOU WILL DO SOMETHING, THAT REPLY MUST CARRY THE
+<tool ...> CALL THAT DOES IT. Describing a call is not making one.
+```
+
+The persona suite refused the first draft of this twice, and was right
+both times: it was 1,955 characters (the prompt ships on every turn, so
+that is a real bill), and it restated the authorization rule the suite
+requires to appear exactly once. Making it *simple* meant making it
+shorter -- 777 characters, then 700 -- and paying for it by compressing
+five passages it now supersedes rather than by weakening the rule.
+
+### Filesystem tools were a third execution primitive with a weaker floor
+
+`gate_command`'s own docstring says the destructive floor exists because
+"an inlined block can only ever protect the function it is inlined in".
+`delete_path`, `move_path` and `copy_path` called neither it nor
+`is_catastrophic_command` -- only a hand-written set of eleven exact
+strings. Anything outside that set walked straight through:
+
+```
+rm -rf /usr/bin                                  -> REFUSED
+delete_path{"path":"/usr/bin","recursive":true}  -> {"ok": true}
+```
+
+Confirmed with `rmtree` stubbed: `/usr/bin`, `/home` and `/var/lib` were
+all reached. The set was also partly dead -- it compares against
+`realpath`, and on every usr-merged distro (Arch, CachyOS, Debian 12+,
+Fedora) `realpath("/bin")` is `/usr/bin`, which was not in it.
+
+All three now ask the same question the shell floor asks, phrased as the
+verb they will really use (`rm -rf` for a recursive delete, `rm` for one
+file) so a single-file delete inside a critical tree is not graded as
+removing the tree. Zero gaps against the shell floor, zero false refusals
+on ordinary work.
+
+`move_path` guarded only its SOURCE and `copy_path` guarded neither, while
+the section header claimed "every destructive op (delete, overwrite-on-move)
+is guarded". A move destroys what was at the DESTINATION -- the function
+reports that in its own `"overwrote"` field, so the risk was understood and
+simply unchecked. Verified: a move onto `~/.ssh/authorized_keys` returned
+`ok: True` and replaced the file. Both ends are guarded now.
+
+### My own regression, found and fixed in the same pass
+
+The linear HTML stripper I wrote earlier in this release dropped the rest
+of the document when a raw-text tag had no closer. That is right for
+`<script>`; it is wrong for the two that actually fire. `</head>` is an
+*optional* end tag, and `<svg .../>` self-closes legally -- so an advisory
+page that omits `</head>` came back from `web_read` as `""` with `ok: True`
+and `status: 200`. The model was told the fetch succeeded and the CVE had
+no detail. An unterminated opener now drops the tag and keeps the content,
+which is what the regex it replaced did by accident; swallowing-to-end is
+reserved for `script` and `style`, where it is really how parsing works.
+
+### Other logic bugs
+
+- **`sudo` detection and askpass injection disagreed twice more.** The
+  idempotence guard was a whole-string test, so one already-flagged `sudo`
+  left every other one on the line bare (`sudo -A apt update && sudo apt
+  upgrade` -- the second blocks on a prompt nobody can answer). And `sudo\b`
+  matched `sudo-rs`, a real and separate binary, which the rewriter then
+  corrupted into `sudo -A-rs`. Both patterns now end the word the way a
+  shell does, and the lookahead makes the rewrite per-invocation.
+- **The watcher's update alert was unreachable on Arch, openSUSE and
+  Alpine.** `security_count` is only ever incremented in the apt and dnf
+  branches -- pacman, zypper and apk do not tag security updates at all --
+  and the watcher gated on `security_count > 0`. So on CachyOS, the box the
+  portability layer was written for, it ran `pacman -Qu` every four hours
+  and could never fire. It now reports whether a security count is even
+  *knowable* and notifies on the plain count where it is not, rather than
+  claiming "0 security updates" it cannot support.
+- **The security audit's 90-second deadline bounded nothing** and threw the
+  audit away when it fired: `as_completed` raising left the `with`, whose
+  `__exit__` is `shutdown(wait=True)`, so it blocked for the hung check
+  anyway -- measured 12.0s against a 2s deadline -- and the exception
+  escaped, discarding every finding already collected. It now keeps what
+  finished, cancels the stragglers, and marks the result `incomplete` so a
+  partial sweep cannot be read as a clean bill of health.
+- **`apk` package names were truncated at the first hyphen**
+  (`py3-cryptography-42.0.5-r0` was reported as `py3`).
+
+### Tests
+
+49 suites. `test_v1_regressions.py` grew to 148 checks and now covers the
+promise-never-delivered failure end to end, including the counter-property
+corpus -- because the recovery's whole risk is fetching pages nobody asked
+for, and a citation must never trip it.
+
 ## v1.0.0.0
 
 ### "it answers twice"
