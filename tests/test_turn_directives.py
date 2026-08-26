@@ -531,6 +531,20 @@ _NOFETCH = [
 ]
 for _q in _NOFETCH:
     ck(f"no fetch: {_q[:40]!r}", not Bk._needs_web_verification(_q), _q)
+# Word-boundary matching: single-word markers ("current", "cost", "news",
+# "score") must NOT fire inside longer words. A raw-substring `in` triggered a
+# needless fetch on ordinary coding questions -- a false-positive class present
+# since v1.0.0.0.
+print("\n== markers do not collide inside longer words ==")
+for _q in ["concurrent processing", "recurrent event handler",
+           "costume ideas", "underscore the point", "newsletter signup form",
+           "restore from backup", "the scoreboard component"]:
+    ck(f"no collision: {_q[:34]!r}", not Bk._needs_web_verification(_q), _q)
+# but the real words still fetch
+for _q in ["what's the current version", "whats the score", "stock price",
+           "how much does it cost"]:
+    ck(f"real word still fetches: {_q[:30]!r}", Bk._needs_web_verification(_q), _q)
+
 
 
 print(f"\nturn_directives: {_p} passed, {_f} failed")

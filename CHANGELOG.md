@@ -1,3 +1,49 @@
+## v1.0.0.9 — deep-scan pass: two real bugs
+
+A deep debugging sweep. Most of what it checked came back clean (details
+below); two genuine bugs surfaced and are fixed.
+
+### News markers collided inside longer words
+
+`_needs_web_verification` matched its single-word markers ("current", "cost",
+"news", "score", ...) as raw substrings, so they fired inside unrelated words:
+"concurrent processing", "recurrent event handler", "costume", "newsletter",
+"underscore", "scoreboard" all triggered a needless web fetch on ordinary
+coding questions. A false-positive class present since v1.0.0.0.
+
+Fixed by splitting the markers: multi-word phrases still match as substrings
+(safe), single-word markers now match on WORD BOUNDARIES via one compiled
+regex. Every real query still fetches ("what's the current version", "whats
+the score", "stock price", "how much does it cost"); the collisions are gone.
+Pinned both directions in test_turn_directives.py, which fails on the old
+build for six collision cases.
+
+### The Aero send-button style was dead CSS
+
+v1.0.0.8's Aero layer styled the primary send button with a `.send-btn`
+selector -- but the widget's actual class is `.send-button`, so the glossy-red
+styling matched nothing and never rendered. Fixed the selector; the send
+button now gets its intended Aero glass. Found by auditing every Aero selector
+against the classes actually applied to widgets.
+
+### Scans that came back clean
+
+Ruff F821/F811/E9/F822/F823: no undefined names, redefinitions, or syntax
+errors. AST sweep: no shadowed except-handlers, no ==/!= against None, no
+return-in-finally (the six `is False`/`is True` hits are correct -- they
+distinguish an explicit False from a missing key). parse_tool_calls and
+strip_tool_calls fuzzed 30k adversarial inputs, zero crashes. The redirect-flag
+scope parser fuzzed 12k, zero crashes and zero real leaks (the well-formed
+forms all refuse; IPv6 endpoints are caught). SQLite access is lock-guarded on
+every runtime path (only the single-threaded __init__ DDL is unlocked, which is
+safe). The one open()-to-variable is the recorder stderr handle, closed on
+every exit path.
+
+### Tests
+
+53 suites, 4,145 assertions. Bubble-fit 140/140 under real GTK; leashed and
+unleashed both verified end to end; guardrail byte-identical.
+
 ## v1.0.0.8 — Windows 7 "Aero" glass look (still red)
 
 A visual pass: the flat near-black surfaces now carry the Windows 7 Aero

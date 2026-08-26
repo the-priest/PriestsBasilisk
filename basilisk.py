@@ -180,7 +180,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.basilisk"
 APP_NAME = "Basilisk"
-VERSION = "1.0.0.8"
+VERSION = "1.0.0.9"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -2389,7 +2389,7 @@ button:active {
 
 /* The primary red actions (send, run) get a deeper glossy-red glass so
    they still read as the accent, now with the Aero sheen. */
-.cmd-run-btn, .send-btn, .primary-action {
+.cmd-run-btn, .send-button, .primary-action {
     background: linear-gradient(180deg,
                 #d3283a 0%, #a81020 46%, #7d0c16 54%, #9a1622 100%);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35),
@@ -2399,7 +2399,7 @@ button:active {
     color: #fff;
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
 }
-.cmd-run-btn:hover, .send-btn:hover, .primary-action:hover {
+.cmd-run-btn:hover, .send-button:hover, .primary-action:hover {
     background: linear-gradient(180deg,
                 #ff3446 0%, #c81428 46%, #920f1c 54%, #b31a28 100%);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45),
@@ -4070,6 +4070,18 @@ _VERIFY_MARKERS = (
     "current events", "top stories", "breaking news",
 )
 
+# Split the markers by shape. A marker with a space is a phrase and is safe to
+# match as a raw substring (" who won ", " in the news "). A single-word marker
+# ("current", "cost", "news", "score") is NOT — as a raw substring it fires
+# inside longer words ("concurrent", "costume", "newsletter", "underscore"),
+# triggering a needless fetch on ordinary coding questions. Those match on word
+# boundaries instead.
+_VERIFY_PHRASE_MARKERS = tuple(m for m in _VERIFY_MARKERS if " " in m)
+_VERIFY_WORD_RE = re.compile(
+    r"\b(?:" + "|".join(
+        re.escape(m.strip()) for m in _VERIFY_MARKERS if " " not in m)
+    + r")\b")
+
 
 def _needs_web_verification(text: str) -> bool:
     """True when a question's answer depends on the present state of the world
@@ -4086,7 +4098,15 @@ def _needs_web_verification(text: str) -> bool:
                              " what are", " whats the", " what's the",
                              " read me", " the top", " top ")):
         return True
-    if any(m in t for m in _VERIFY_MARKERS):
+    if any(m in t for m in _VERIFY_PHRASE_MARKERS):
+        return True
+    # Single-word markers match on WORD BOUNDARIES, not raw substring, so
+    # "current" no longer fires inside "concurrent"/"recurrent", "cost" inside
+    # "costume", "score" inside "underscore", "news" inside "newsletter". A
+    # plain `in` here was a latent false-positive class since v1.0.0.0: a code
+    # question ("concurrent processing", "current directory") triggered a
+    # needless web fetch.
+    if _VERIFY_WORD_RE.search(t):
         return True
     # A year at/after the training era ("in 2025", "2026 roadmap") almost always
     # implies a current-state query.
