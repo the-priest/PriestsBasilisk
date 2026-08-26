@@ -1,3 +1,49 @@
+## v1.0.0.6 — the pentest suite is intact, and a startup crash it could cause
+
+Asked to make sure the full hacking/pentest suite is available when UNLEASHED
+without breaking anything. Audited the whole tool inventory and found the suite
+correctly wired — plus one latent crash that could take the whole app (and the
+suite with it) down.
+
+### The suite is complete and correctly gated
+
+All 161 spec'd tools are reachable — every one has a dispatch handler, no
+orphans. The 97 offensive-group tools appear in the tool directory when UNLEASH
+is ARMED and are withheld from the leashed directory; `load_tools("offensive")`
+while leashed is refused with `unleash_required`. And the hard floors are
+mode-independent by design: every command still passes through `gate_command`,
+so the destructive floor and the fail-closed scope gate apply whether armed or
+not — UNLEASH controls autonomy and tool visibility, not the safety boundary.
+No change needed there.
+
+### But two offensive modules were imported un-guarded — a startup crash
+
+basilisk.py's own import comments state the rule: a missing or import-broken
+sidecar must degrade the tools that use it, never stop the app from starting.
+`recall` followed it. `zdayfind` and `exploits` did not — they were bare
+`from basilisk_ext import …` lines. So a partial install, or a platform import
+error inside either module (the POSIX-only `resource` that once took out the
+whole ext package on Windows is exactly this shape), crashed the GUI at
+startup and took every unrelated tool with it.
+
+Proven: with exploits.py and zdayfind.py deleted, the previous build raised
+`ImportError: cannot import name 'zdayfind'` and never opened a window.
+
+FIX: both imports are now guarded (try/except → None), matching `recall` and
+the module's own rule. A new `_ext_unavailable()` helper returns a uniform
+"module unavailable, reinstall to restore; the rest of Basilisk is unaffected"
+result, and all six offensive tools that use these modules null-check before
+calling — so a broken sidecar disables its own tools cleanly instead of
+crashing startup or raising AttributeError mid-call. Verified: the app now
+starts with both modules deleted and the affected tools report `unavailable`.
+The normal path (modules present) is unchanged.
+
+### Tests
+
+53 suites, 4,119 assertions. New test_ext_optional.py (13) pins the rule both
+at source and behaviourally — it fails on v1.0.0.5, where the app will not
+even import with the modules gone.
+
 ## v1.0.0.5 — closing the destination-redirect leaks
 
 The two open items from v1.0.0.4 are fixed: a scope-authorised hostname could
