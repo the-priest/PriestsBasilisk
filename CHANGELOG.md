@@ -1,3 +1,112 @@
+## v1.0.0.8 — Windows 7 "Aero" glass look (still red)
+
+A visual pass: the flat near-black surfaces now carry the Windows 7 Aero
+treatment -- glossy top-lit gradients, a bright 1px upper-edge bevel, rounded
+glass panes, and soft outer glow. The accent stays RED, not Aero's stock blue:
+buttons glow red on hover, the send/run actions are deep glossy-red glass, the
+user bubble is a red glass pane, and the composer keeps its red focus glow.
+
+Done as a single override layer appended to the END of the CSS block, so it
+wins by cascade order without editing or deleting any base rule -- reverting is
+just removing that block. Surfaces restyled: header bar, sidebar, composer,
+buttons (normal + primary), chat bubbles, selected sidebar row, status pills
+and cards. GTK parses the stylesheet with zero errors; the CSS stays ASCII per
+the invariant; no animations were added (the idle-repaint audit stays clean).
+
+Pairs with the brighter backdrop from v1.0.0.7 -- the glass panes now float
+over a visible ember/castle background instead of near-black.
+
+### Tests
+
+53 suites, 4,134 assertions. Bubble-fit stays 140/140 under real GTK (the new
+box-shadows and borders did not reintroduce the height problem), and the
+animation/CSS audits in test_guiwiring pass.
+
+## v1.0.0.7 — news fetch actually fires, and a brighter backdrop
+
+### The news fetch missed the phrasings people actually use
+
+`_needs_web_verification` decides whether the "check online before you answer"
+directive fires. It keyed off "news"/"latest"/"current" and missed the casual
+ways people ask for news, so those answered from stale training memory instead
+of fetching — "it can't even fetch news":
+
+  what's going on in the world · any headlines · catch me up ·
+  give me the rundown · whats up today · top stories · current events ·
+  fill me in · breaking news
+
+Added those. "headlines" is handled with a context check rather than as a bare
+marker, so a request FOR headlines ("show me the headlines", "any headlines")
+fetches while a plain-noun mention ("headlines aren't showing in my css", "my
+headline font is too big") stays stale. Same for "the rundown": it fetches as a
+news ask but not in "the rundown of how git works". 27 phrasings pinned across
+both directions in test_turn_directives.py.
+
+### Brighter background
+
+The chat backdrop scrim was a black overlay at 0.62 opacity, which buried the
+ember/castle art. Lowered to 0.40 — the background reads clearly and text over
+it stays legible. Pure CSS value change, nothing structural.
+
+### Verified, both modes
+
+Leashed and unleashed both checked end to end: offensive tooling is refused
+when leashed (`unleash_required`) and available when armed, hidden from the
+general tool index, and the hard floors (destructive command + fail-closed
+scope, including the redirect-flag fix from v1.0.0.5) fire regardless of mode.
+
+### Tests
+
+53 suites, 4,134 assertions. The bubble fix (v1.0.0.3), the box-art and
+sidecar-optional guards (v1.0.0.4/6), and the scope redirect fix (v1.0.0.5) all
+still green.
+
+## v1.0.0.6 — the pentest suite is intact, and a startup crash it could cause
+
+Asked to make sure the full hacking/pentest suite is available when UNLEASHED
+without breaking anything. Audited the whole tool inventory and found the suite
+correctly wired — plus one latent crash that could take the whole app (and the
+suite with it) down.
+
+### The suite is complete and correctly gated
+
+All 161 spec'd tools are reachable — every one has a dispatch handler, no
+orphans. The 97 offensive-group tools appear in the tool directory when UNLEASH
+is ARMED and are withheld from the leashed directory; `load_tools("offensive")`
+while leashed is refused with `unleash_required`. And the hard floors are
+mode-independent by design: every command still passes through `gate_command`,
+so the destructive floor and the fail-closed scope gate apply whether armed or
+not — UNLEASH controls autonomy and tool visibility, not the safety boundary.
+No change needed there.
+
+### But two offensive modules were imported un-guarded — a startup crash
+
+basilisk.py's own import comments state the rule: a missing or import-broken
+sidecar must degrade the tools that use it, never stop the app from starting.
+`recall` followed it. `zdayfind` and `exploits` did not — they were bare
+`from basilisk_ext import …` lines. So a partial install, or a platform import
+error inside either module (the POSIX-only `resource` that once took out the
+whole ext package on Windows is exactly this shape), crashed the GUI at
+startup and took every unrelated tool with it.
+
+Proven: with exploits.py and zdayfind.py deleted, the previous build raised
+`ImportError: cannot import name 'zdayfind'` and never opened a window.
+
+FIX: both imports are now guarded (try/except → None), matching `recall` and
+the module's own rule. A new `_ext_unavailable()` helper returns a uniform
+"module unavailable, reinstall to restore; the rest of Basilisk is unaffected"
+result, and all six offensive tools that use these modules null-check before
+calling — so a broken sidecar disables its own tools cleanly instead of
+crashing startup or raising AttributeError mid-call. Verified: the app now
+starts with both modules deleted and the affected tools report `unavailable`.
+The normal path (modules present) is unchanged.
+
+### Tests
+
+53 suites, 4,119 assertions. New test_ext_optional.py (13) pins the rule both
+at source and behaviourally — it fails on v1.0.0.5, where the app will not
+even import with the modules gone.
+
 ## v1.0.0.5 — closing the destination-redirect leaks
 
 The two open items from v1.0.0.4 are fixed: a scope-authorised hostname could

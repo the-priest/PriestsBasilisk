@@ -130,7 +130,15 @@ from basilisk_persona import (
 )
 
 # Variant-analysis / zero-day-class source scanner (read-only, stdlib-only).
-from basilisk_ext import zdayfind as _zdayfind
+# Imported defensively for the SAME reason as _recall below: these are sidecar
+# modules, and a missing or import-broken sidecar (a partial install, or a
+# platform-specific import error like the POSIX-only `resource` that once took
+# out the whole ext package on Windows) must degrade the tools that use it —
+# never stop the app from starting. The offensive builders below null-check it.
+try:
+    from basilisk_ext import zdayfind as _zdayfind
+except Exception:      # pragma: no cover - only on a broken/partial install
+    _zdayfind = None
 # Action recall: the per-run list of what has already been done.  Imported
 # defensively — a missing sidecar file must degrade the anti-repetition help,
 # never stop the app from starting.
@@ -138,8 +146,26 @@ try:
     from basilisk_ext import recall as _recall
 except Exception:      # pragma: no cover - only on a broken/partial install
     _recall = None
-# Direct handle for newer offensive generators wired below.
-from basilisk_ext import exploits as _exploits
+# Direct handle for newer offensive generators wired below. Same defensive
+# import: a broken exploits.py must disable those specific tools with a clean
+# "unavailable" result, not crash startup.
+try:
+    from basilisk_ext import exploits as _exploits
+except Exception:      # pragma: no cover - only on a broken/partial install
+    _exploits = None
+
+
+def _ext_unavailable(tool: str, module: str):
+    """Uniform result for an offensive tool whose sidecar module failed to
+    import. Returns a zero-arg callable so it slots into the builder table
+    exactly like a real handler."""
+    return lambda: {
+        "ok": False,
+        "error": (f"{tool} is unavailable: its module (basilisk_ext.{module}) "
+                  f"is not installed or failed to import on this system. "
+                  f"Reinstall to restore it; the rest of Basilisk is unaffected."),
+        "unavailable": True,
+    }
 
 # Voice (speech in / speech out) is optional.  If basilisk_voice is missing or
 # fails to import, the app runs exactly as before — every voice hook below
@@ -154,7 +180,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.basilisk"
 APP_NAME = "Basilisk"
-VERSION = "1.0.0.5"
+VERSION = "1.0.0.8"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -1095,9 +1121,10 @@ button.suggested-action {
     background: transparent;
 }
 .chat-watermark { background: transparent; }
-/* Darker backdrop behind the dragon watermark -- reduces brightness only
-   (a neutral scrim over the ember gradient), so the brighter dragon pops. */
-.chat-scrim { background-color: rgba(0, 0, 0, 0.62); }
+/* Backdrop behind the dragon watermark -- a neutral scrim over the ember
+   gradient. Lowered from 0.62 to 0.40 so the background image reads brighter
+   while text over it stays legible. */
+.chat-scrim { background-color: rgba(0, 0, 0, 0.40); }
 
 /* Tao Te Ching line under the chat list (sidebar) - quiet, muted, out of the way */
 .tao-quote {
@@ -2280,6 +2307,135 @@ headerbar {
 }
 .msg-assistant *:visited,
 .msg-user *:visited { color: #c4855a; }
+
+/* =====================================================================
+   AERO GLASS LAYER  --  Windows 7 "Aero" styling laid OVER the base
+   theme.  Appended last so these rules win by cascade order without
+   deleting any base rule (revert = delete this block).  The look:
+   glossy top-lit gradients, a bright 1px inner highlight on the upper
+   edge (the Aero bevel), soft rounded corners, and outer glow.  The
+   accent stays RED (#7d121b / #8b0010 / #ff2d3a), not Aero's stock
+   blue -- the "red shine" is kept, just made glassy.
+   ASCII only, per the CSS invariant.
+   ===================================================================== */
+
+/* Header + sidebar + composer: brushed translucent glass with a lit top
+   edge.  A vertical gradient from a lighter top to a darker bottom is the
+   core Aero surface; the inset white-ish highlight is the bevel. */
+headerbar {
+    background: linear-gradient(180deg,
+                rgba(60, 66, 74, 0.55) 0%,
+                rgba(24, 27, 32, 0.65) 48%,
+                rgba(13, 15, 18, 0.85) 100%);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.20),
+                inset 0 -1px 0 rgba(0, 0, 0, 0.55);
+    border-bottom: 1px solid rgba(125, 18, 27, 0.45);
+}
+.sidebar {
+    background: linear-gradient(180deg,
+                rgba(20, 23, 28, 0.72) 0%,
+                rgba(10, 12, 15, 0.88) 100%);
+    box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.05);
+}
+.input-frame {
+    background: linear-gradient(180deg,
+                rgba(38, 43, 50, 0.75) 0%,
+                rgba(16, 18, 22, 0.92) 100%);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18),
+                inset 0 0 0 1px rgba(0, 0, 0, 0.30);
+    border: 1px solid rgba(125, 18, 27, 0.40);
+    border-radius: 18px;
+}
+.input-frame:focus-within {
+    border-color: #ff2d3a;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28),
+                0 0 12px rgba(255, 45, 58, 0.45);
+}
+
+/* Buttons: the signature Aero glass pill -- top-lit gradient, bright
+   upper bevel, rounded, with a red-tinted rim and a soft glow on hover. */
+button {
+    background: linear-gradient(180deg,
+                rgba(72, 78, 86, 0.55) 0%,
+                rgba(40, 44, 51, 0.60) 45%,
+                rgba(20, 23, 28, 0.75) 55%,
+                rgba(30, 33, 39, 0.70) 100%);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22),
+                inset 0 -1px 0 rgba(0, 0, 0, 0.45);
+    border: 1px solid rgba(140, 150, 162, 0.22);
+    border-radius: 9px;
+    color: #e6ebf2;
+    text-shadow: 0 1px 1px rgba(0, 0, 0, 0.6);
+    transition: box-shadow 140ms ease, background 140ms ease;
+}
+button:hover {
+    background: linear-gradient(180deg,
+                rgba(150, 40, 48, 0.60) 0%,
+                rgba(110, 22, 30, 0.66) 48%,
+                rgba(70, 12, 18, 0.80) 55%,
+                rgba(95, 18, 26, 0.72) 100%);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.30),
+                inset 0 -1px 0 rgba(0, 0, 0, 0.50),
+                0 0 12px rgba(255, 45, 58, 0.45);
+    border-color: rgba(255, 85, 102, 0.55);
+}
+button:active {
+    background: linear-gradient(180deg,
+                rgba(40, 44, 51, 0.85) 0%,
+                rgba(20, 23, 28, 0.90) 100%);
+    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.60),
+                inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+/* The primary red actions (send, run) get a deeper glossy-red glass so
+   they still read as the accent, now with the Aero sheen. */
+.cmd-run-btn, .send-btn, .primary-action {
+    background: linear-gradient(180deg,
+                #d3283a 0%, #a81020 46%, #7d0c16 54%, #9a1622 100%);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35),
+                inset 0 -1px 0 rgba(0, 0, 0, 0.40),
+                0 0 10px rgba(229, 40, 58, 0.40);
+    border: 1px solid rgba(255, 90, 106, 0.60);
+    color: #fff;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
+}
+.cmd-run-btn:hover, .send-btn:hover, .primary-action:hover {
+    background: linear-gradient(180deg,
+                #ff3446 0%, #c81428 46%, #920f1c 54%, #b31a28 100%);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45),
+                0 0 16px rgba(255, 45, 58, 0.60);
+}
+
+/* Chat bubbles: a light glass sheen on top, so they look like Aero panes
+   floating over the (now brighter) backdrop.  Base colours are inherited
+   from the theme -- only the gloss + bevel + rounding are added here. */
+.msg-assistant {
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.10),
+                0 2px 8px rgba(0, 0, 0, 0.45);
+    border: 1px solid rgba(160, 170, 182, 0.14);
+}
+.msg-user {
+    background: linear-gradient(180deg,
+                rgba(150, 40, 48, 0.30) 0%,
+                rgba(90, 20, 28, 0.22) 100%);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16),
+                0 2px 8px rgba(0, 0, 0, 0.45);
+    border: 1px solid rgba(255, 85, 102, 0.28);
+}
+
+/* Selected chat row: an Aero-blue-style wash, kept red, with a lit edge. */
+.chat-row.selected, .chat-row:selected {
+    background: linear-gradient(180deg,
+                rgba(150, 40, 48, 0.34) 0%,
+                rgba(90, 18, 26, 0.20) 100%);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14);
+    border-left: 3px solid #ff2d3a;
+}
+
+/* Status pills + cards: glass sheen so chrome matches the new surfaces. */
+.status-pill, .card, .code-block {
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
 """
 
 
@@ -3901,6 +4057,17 @@ _VERIFY_MARKERS = (
     "what's new", "whats new", "what is new", "anything new", "updates on",
     "any update", "latest on", "news on", "happening with", "going on with",
     "in the news",
+    # Casual "give me the news" phrasings that carry no latest/current/news
+    # word but are unmistakably current-state requests. These answered from
+    # stale training memory instead of fetching — the "it can't even fetch
+    # news" complaint. Kept to phrasings that are news-shaped, not bare
+    # "happening" (which fires on code questions).
+    "in the world today", "in the world right now",
+    "going on in the world", "happening in the world", "world news",
+    "catch me up", "fill me in", "give me the rundown", "whats up today",
+    "what's up today", "whats going on today", "what's going on today",
+    "going on lately", "happening lately", "happening today",
+    "current events", "top stories", "breaking news",
 )
 
 
@@ -3910,6 +4077,15 @@ def _needs_web_verification(text: str) -> bool:
     t = " " + (text or "").lower().strip() + " "
     if len(t) < 5:
         return False
+    # "headlines" is news ONLY when it's a request FOR headlines, not a plain
+    # noun in a code/design question ("headlines aren't showing in my css").
+    # Handled here rather than as a bare marker so the css case stays stale.
+    if "headline" in t and any(
+            p in t for p in (" show me", " give me", " get me", " any ",
+                             " some ", " today", " latest", " news",
+                             " what are", " whats the", " what's the",
+                             " read me", " the top", " top ")):
+        return True
     if any(m in t for m in _VERIFY_MARKERS):
         return True
     # A year at/after the training era ("in 2025", "2026 roadmap") almost always
@@ -11409,6 +11585,8 @@ class MainWindow(Adw.ApplicationWindow):
                 a.get("kind", a.get("type", "auto")),
                 a.get("intensity", a.get("depth", "normal")))
         if n == "zday_scan":
+            if _zdayfind is None:
+                return _ext_unavailable("zday_scan", "zdayfind")
             return lambda: _zdayfind.zday_scan(
                 path=_ws_path(a.get("path", a.get("dir", a.get("target", "")))),
                 code=a.get("code", a.get("source", "")),
@@ -11416,25 +11594,37 @@ class MainWindow(Adw.ApplicationWindow):
                 focus=a.get("focus", a.get("classes", "")),
                 filename=a.get("filename", a.get("name", "snippet")))
         if n == "zday_signatures":
+            if _zdayfind is None:
+                return _ext_unavailable("zday_signatures", "zdayfind")
             return lambda: _zdayfind.signature_catalog()
         if n == "saml_attack":
+            if _exploits is None:
+                return _ext_unavailable("saml_attack", "exploits")
             return lambda: _exploits.saml_attack(
                 a.get("mode", a.get("technique", "signature_wrapping")),
                 a.get("assertion", a.get("response", "")))
         if n == "cloud_storage":
+            if _exploits is None:
+                return _ext_unavailable("cloud_storage", "exploits")
             return lambda: _exploits.cloud_storage(
                 a.get("provider", a.get("cloud", "s3")),
                 a.get("bucket", a.get("container", a.get("name", ""))))
         if n == "subdomain_takeover":
+            if _exploits is None:
+                return _ext_unavailable("subdomain_takeover", "exploits")
             return lambda: _exploits.subdomain_takeover(
                 a.get("host", a.get("subdomain", a.get("domain", ""))),
                 a.get("cname", a.get("target", "")))
         if n == "padding_oracle":
+            if _exploits is None:
+                return _ext_unavailable("padding_oracle", "exploits")
             return lambda: _exploits.padding_oracle(
                 a.get("mode", "detect"),
                 a.get("ciphertext", a.get("data", "")),
                 a.get("block_size", a.get("blocksize", 16)))
         if n == "xslt_injection":
+            if _exploits is None:
+                return _ext_unavailable("xslt_injection", "exploits")
             return lambda: _exploits.xslt_injection(
                 a.get("mode", "detect"), a.get("cmd", a.get("command", "id")))
         if n == "parse_scan":
@@ -12265,33 +12455,40 @@ class MainWindow(Adw.ApplicationWindow):
                     a.get("kind", a.get("type", "auto")),
                     a.get("intensity", a.get("depth", "normal")))),
             "zday_scan":          lambda a: self._tool_simple(
-                lambda: _zdayfind.zday_scan(
+                _ext_unavailable("zday_scan", "zdayfind") if _zdayfind is None
+                else lambda: _zdayfind.zday_scan(
                     path=_ws_path(a.get("path", a.get("dir", a.get("target", "")))),
                     code=a.get("code", a.get("source", "")),
                     like=a.get("like", a.get("variant_of", a.get("snippet", ""))),
                     focus=a.get("focus", a.get("classes", "")),
                     filename=a.get("filename", a.get("name", "snippet")))),
             "zday_signatures":    lambda a: self._tool_simple(
-                lambda: _zdayfind.signature_catalog()),
+                _ext_unavailable("zday_signatures", "zdayfind") if _zdayfind is None
+                else lambda: _zdayfind.signature_catalog()),
             "saml_attack":        lambda a: self._tool_simple(
-                lambda: _exploits.saml_attack(
+                _ext_unavailable("saml_attack", "exploits") if _exploits is None
+                else lambda: _exploits.saml_attack(
                     a.get("mode", a.get("technique", "signature_wrapping")),
                     a.get("assertion", a.get("response", "")))),
             "cloud_storage":      lambda a: self._tool_simple(
-                lambda: _exploits.cloud_storage(
+                _ext_unavailable("cloud_storage", "exploits") if _exploits is None
+                else lambda: _exploits.cloud_storage(
                     a.get("provider", a.get("cloud", "s3")),
                     a.get("bucket", a.get("container", a.get("name", ""))))),
             "subdomain_takeover": lambda a: self._tool_simple(
-                lambda: _exploits.subdomain_takeover(
+                _ext_unavailable("subdomain_takeover", "exploits") if _exploits is None
+                else lambda: _exploits.subdomain_takeover(
                     a.get("host", a.get("subdomain", a.get("domain", ""))),
                     a.get("cname", a.get("target", "")))),
             "padding_oracle":     lambda a: self._tool_simple(
-                lambda: _exploits.padding_oracle(
+                _ext_unavailable("padding_oracle", "exploits") if _exploits is None
+                else lambda: _exploits.padding_oracle(
                     a.get("mode", "detect"),
                     a.get("ciphertext", a.get("data", "")),
                     a.get("block_size", a.get("blocksize", 16)))),
             "xslt_injection":     lambda a: self._tool_simple(
-                lambda: _exploits.xslt_injection(
+                _ext_unavailable("xslt_injection", "exploits") if _exploits is None
+                else lambda: _exploits.xslt_injection(
                     a.get("mode", "detect"), a.get("cmd", a.get("command", "id")))),
             "parse_scan":         lambda a: self._tool_simple(
                 lambda: tool_parse_scan(

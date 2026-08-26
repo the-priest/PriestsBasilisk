@@ -497,6 +497,19 @@ _FETCH = [
     "whats new with the linux kernel",
     "any updates on the CVE",
     "what's going on with openssl",
+    # casual "give me the news" phrasings that carried no latest/news word and
+    # were answering from stale memory instead of fetching.
+    "what's going on in the world",
+    "any headlines",
+    "show me the headlines",
+    "what are the headlines",
+    "catch me up",
+    "give me the rundown",
+    "whats up today",
+    "top stories",
+    "any breaking news",
+    "current events",
+    "fill me in",
 ]
 for _q in _FETCH:
     ck(f"fetch: {_q[:40]!r}", Bk._needs_web_verification(_q), _q)
@@ -509,6 +522,12 @@ _NOFETCH = [
     "what does the -sV flag do in nmap",
     "how do i grep recursively",
     "why is my regex not matching",
+    # 'headline'/'rundown' as plain nouns in a code/design question must NOT
+    # fetch -- the false-positive direction of the news-phrasing fix.
+    "headlines aren't showing in my css",
+    "my headline font is too big",
+    "the rundown of how git works",
+    "what's happening in my code",
 ]
 for _q in _NOFETCH:
     ck(f"no fetch: {_q[:40]!r}", not Bk._needs_web_verification(_q), _q)
