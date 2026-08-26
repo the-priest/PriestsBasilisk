@@ -130,15 +130,7 @@ from basilisk_persona import (
 )
 
 # Variant-analysis / zero-day-class source scanner (read-only, stdlib-only).
-# Imported defensively for the SAME reason as _recall below: these are sidecar
-# modules, and a missing or import-broken sidecar (a partial install, or a
-# platform-specific import error like the POSIX-only `resource` that once took
-# out the whole ext package on Windows) must degrade the tools that use it —
-# never stop the app from starting. The offensive builders below null-check it.
-try:
-    from basilisk_ext import zdayfind as _zdayfind
-except Exception:      # pragma: no cover - only on a broken/partial install
-    _zdayfind = None
+from basilisk_ext import zdayfind as _zdayfind
 # Action recall: the per-run list of what has already been done.  Imported
 # defensively — a missing sidecar file must degrade the anti-repetition help,
 # never stop the app from starting.
@@ -146,26 +138,8 @@ try:
     from basilisk_ext import recall as _recall
 except Exception:      # pragma: no cover - only on a broken/partial install
     _recall = None
-# Direct handle for newer offensive generators wired below. Same defensive
-# import: a broken exploits.py must disable those specific tools with a clean
-# "unavailable" result, not crash startup.
-try:
-    from basilisk_ext import exploits as _exploits
-except Exception:      # pragma: no cover - only on a broken/partial install
-    _exploits = None
-
-
-def _ext_unavailable(tool: str, module: str):
-    """Uniform result for an offensive tool whose sidecar module failed to
-    import. Returns a zero-arg callable so it slots into the builder table
-    exactly like a real handler."""
-    return lambda: {
-        "ok": False,
-        "error": (f"{tool} is unavailable: its module (basilisk_ext.{module}) "
-                  f"is not installed or failed to import on this system. "
-                  f"Reinstall to restore it; the rest of Basilisk is unaffected."),
-        "unavailable": True,
-    }
+# Direct handle for newer offensive generators wired below.
+from basilisk_ext import exploits as _exploits
 
 # Voice (speech in / speech out) is optional.  If basilisk_voice is missing or
 # fails to import, the app runs exactly as before — every voice hook below
@@ -180,7 +154,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.basilisk"
 APP_NAME = "Basilisk"
-VERSION = "1.0.0.6"
+VERSION = "1.0.0.5"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -11435,8 +11409,6 @@ class MainWindow(Adw.ApplicationWindow):
                 a.get("kind", a.get("type", "auto")),
                 a.get("intensity", a.get("depth", "normal")))
         if n == "zday_scan":
-            if _zdayfind is None:
-                return _ext_unavailable("zday_scan", "zdayfind")
             return lambda: _zdayfind.zday_scan(
                 path=_ws_path(a.get("path", a.get("dir", a.get("target", "")))),
                 code=a.get("code", a.get("source", "")),
@@ -11444,37 +11416,25 @@ class MainWindow(Adw.ApplicationWindow):
                 focus=a.get("focus", a.get("classes", "")),
                 filename=a.get("filename", a.get("name", "snippet")))
         if n == "zday_signatures":
-            if _zdayfind is None:
-                return _ext_unavailable("zday_signatures", "zdayfind")
             return lambda: _zdayfind.signature_catalog()
         if n == "saml_attack":
-            if _exploits is None:
-                return _ext_unavailable("saml_attack", "exploits")
             return lambda: _exploits.saml_attack(
                 a.get("mode", a.get("technique", "signature_wrapping")),
                 a.get("assertion", a.get("response", "")))
         if n == "cloud_storage":
-            if _exploits is None:
-                return _ext_unavailable("cloud_storage", "exploits")
             return lambda: _exploits.cloud_storage(
                 a.get("provider", a.get("cloud", "s3")),
                 a.get("bucket", a.get("container", a.get("name", ""))))
         if n == "subdomain_takeover":
-            if _exploits is None:
-                return _ext_unavailable("subdomain_takeover", "exploits")
             return lambda: _exploits.subdomain_takeover(
                 a.get("host", a.get("subdomain", a.get("domain", ""))),
                 a.get("cname", a.get("target", "")))
         if n == "padding_oracle":
-            if _exploits is None:
-                return _ext_unavailable("padding_oracle", "exploits")
             return lambda: _exploits.padding_oracle(
                 a.get("mode", "detect"),
                 a.get("ciphertext", a.get("data", "")),
                 a.get("block_size", a.get("blocksize", 16)))
         if n == "xslt_injection":
-            if _exploits is None:
-                return _ext_unavailable("xslt_injection", "exploits")
             return lambda: _exploits.xslt_injection(
                 a.get("mode", "detect"), a.get("cmd", a.get("command", "id")))
         if n == "parse_scan":
@@ -12305,40 +12265,33 @@ class MainWindow(Adw.ApplicationWindow):
                     a.get("kind", a.get("type", "auto")),
                     a.get("intensity", a.get("depth", "normal")))),
             "zday_scan":          lambda a: self._tool_simple(
-                _ext_unavailable("zday_scan", "zdayfind") if _zdayfind is None
-                else lambda: _zdayfind.zday_scan(
+                lambda: _zdayfind.zday_scan(
                     path=_ws_path(a.get("path", a.get("dir", a.get("target", "")))),
                     code=a.get("code", a.get("source", "")),
                     like=a.get("like", a.get("variant_of", a.get("snippet", ""))),
                     focus=a.get("focus", a.get("classes", "")),
                     filename=a.get("filename", a.get("name", "snippet")))),
             "zday_signatures":    lambda a: self._tool_simple(
-                _ext_unavailable("zday_signatures", "zdayfind") if _zdayfind is None
-                else lambda: _zdayfind.signature_catalog()),
+                lambda: _zdayfind.signature_catalog()),
             "saml_attack":        lambda a: self._tool_simple(
-                _ext_unavailable("saml_attack", "exploits") if _exploits is None
-                else lambda: _exploits.saml_attack(
+                lambda: _exploits.saml_attack(
                     a.get("mode", a.get("technique", "signature_wrapping")),
                     a.get("assertion", a.get("response", "")))),
             "cloud_storage":      lambda a: self._tool_simple(
-                _ext_unavailable("cloud_storage", "exploits") if _exploits is None
-                else lambda: _exploits.cloud_storage(
+                lambda: _exploits.cloud_storage(
                     a.get("provider", a.get("cloud", "s3")),
                     a.get("bucket", a.get("container", a.get("name", ""))))),
             "subdomain_takeover": lambda a: self._tool_simple(
-                _ext_unavailable("subdomain_takeover", "exploits") if _exploits is None
-                else lambda: _exploits.subdomain_takeover(
+                lambda: _exploits.subdomain_takeover(
                     a.get("host", a.get("subdomain", a.get("domain", ""))),
                     a.get("cname", a.get("target", "")))),
             "padding_oracle":     lambda a: self._tool_simple(
-                _ext_unavailable("padding_oracle", "exploits") if _exploits is None
-                else lambda: _exploits.padding_oracle(
+                lambda: _exploits.padding_oracle(
                     a.get("mode", "detect"),
                     a.get("ciphertext", a.get("data", "")),
                     a.get("block_size", a.get("blocksize", 16)))),
             "xslt_injection":     lambda a: self._tool_simple(
-                _ext_unavailable("xslt_injection", "exploits") if _exploits is None
-                else lambda: _exploits.xslt_injection(
+                lambda: _exploits.xslt_injection(
                     a.get("mode", "detect"), a.get("cmd", a.get("command", "id")))),
             "parse_scan":         lambda a: self._tool_simple(
                 lambda: tool_parse_scan(
