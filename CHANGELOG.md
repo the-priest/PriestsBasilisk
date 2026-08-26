@@ -1,3 +1,41 @@
+## v1.0.0.10 — "says fetching news, doesn't fetch" fixed at the source
+
+The real cause of the news bug, and it was not the markers.
+
+When answer mode decides a question needs a live source, it sends a strong
+"your FIRST action MUST be web_read" directive -- and that part works. But the
+model often replies with a plain narration ("Fetching the latest news for
+you.", "Getting the latest headlines.", "Searching for the latest news.") and
+NO tool call. There is a stall-recovery nudge for exactly this -- it re-kicks
+the turn when the model says it will do something but calls no tool -- and it
+was not firing, so the turn ended with the words "fetching news" and nothing
+fetched.
+
+Root cause: the stall classifier (`reply_intends_action`) only recognised
+intent PHRASES -- "let me fetch", "I'll check", "fetching now". A reply that
+simply OPENS with a bare action gerund -- "Fetching...", "Getting...",
+"Searching...", "Pulling...", "Gathering..." -- matched nothing, so it was not
+seen as a stall and no nudge fired. Seven of fourteen realistic news
+narrations slipped through.
+
+Fix: a reply that opens with an action gerund and delivers nothing now counts
+as intent-to-act, so the nudge fires and forces the actual web_read. Anchored
+to the FIRST word, so a delivered answer that merely contains a gerund ("found
+3 hosts, still scanning the rest") is untouched; past-tense reports ("I checked
+the news; the top story is...") still read as delivery; and gerund IDIOMS
+("Getting started with X is easy", "Looking at this, the answer is...") are
+excluded so they are not nudged. 16/16 news narrations now nudge, the
+"same answer three times" over-nudge protection still holds (0 false
+positives on complete answers).
+
+Pinned in test_turn_directives.py, which fails on v1.0.0.9 for the bare-gerund
+narrations.
+
+### Tests
+
+53 suites, 4,155 assertions. Full suite green; bubble-fit 140/140 under real
+GTK; guardrail byte-identical.
+
 ## v1.0.0.9 — deep-scan pass: two real bugs
 
 A deep debugging sweep. Most of what it checked came back clean (details

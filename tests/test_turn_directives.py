@@ -459,6 +459,17 @@ _STALLS = [
     "On it -- pulling the release notes.",
     "Sure -- searching now.",
     "Working on it.",
+    # Bare action-gerund OPENERS: the model announces a fetch with no "let me"
+    # / "I'll" / "now", calls no tool, and the turn dies having said "fetching
+    # news" without fetching. These matched no intent phrase before, so no
+    # nudge fired -- the "says it, doesn't do it" bug.
+    "Fetching the latest news for you.",
+    "Getting the latest headlines.",
+    "Searching for the latest news.",
+    "Pulling the latest headlines now.",
+    "Gathering the latest news.",
+    "Finding the latest updates.",
+    "Collecting recent headlines.",
 ]
 for _s in _STALLS:
     ck(f"stall: {_s[:38]!r}", Bc.reply_is_bare_stall(_s), _s)
@@ -472,6 +483,11 @@ _NOT = [
     ("a request for the operator's input", "Give me the target and I'll scan it."),
     ("a bare operator question", "Which target should I scan?"),
     ("a courtesy sign-off", "Let me know if you want me to dig into any of these."),
+    # gerund-opener IDIOMS that are ordinary prose, not action announcements
+    ("a getting-started idiom",
+     "Getting started with Python is easy: install it first."),
+    ("a looking-at idiom", "Looking at this, the answer is 42."),
+    ("running-low idiom", "Running low on time, but the host is up."),
 ]
 for _label, _s in _NOT:
     ck(f"not a stall: {_label}", not Bc.reply_is_bare_stall(_s), _s)

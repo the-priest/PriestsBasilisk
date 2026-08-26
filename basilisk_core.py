@@ -3562,6 +3562,18 @@ def reply_intends_action(text: str) -> bool:
     # An explicit intent-to-act phrase means it's mid-task.
     if _has_intent(t):
         return True
+    # A reply that OPENS with a bare action gerund is announcing an action it
+    # has not performed: "Fetching the latest news for you.", "Getting the
+    # headlines.", "Searching for recent updates." None of these match an
+    # intent phrase (there is no "let me" / "I'll" / "now"), so the stall
+    # nudge never fired and the turn died having said "fetching news" without
+    # fetching anything -- the exact "says it, doesn't do it" bug. Anchored to
+    # the FIRST word so a delivered answer that merely contains a gerund
+    # ("I found 3 hosts, still scanning the rest") is not caught. The past
+    # tense check below still lets a genuine report through.
+    if _ACTION_GERUND_RE.match(t) and not _PAST_DELIVERY_RE.search(t) \
+            and not _GERUND_IDIOM_RE.match(t):
+        return True
     # A trailing ellipsis reads as "more coming".
     ts = t.rstrip()
     if ts.endswith("...") or ts.endswith("…"):
@@ -3599,7 +3611,15 @@ _DELIVERY_SEP = (":", " -- ", " \u2014 ", " \u2013 ", " - ")
 _ACTION_GERUND_RE = re.compile(
     r"^(?:pulling|fetching|grabbing|searching|looking|checking|reading|"
     r"scanning|running|testing|trying|querying|enumerating|digging|"
-    r"gathering|retrieving|loading|downloading|opening)\b", re.I)
+    r"gathering|retrieving|loading|downloading|opening|getting|finding|"
+    r"collecting|compiling|checking up|hunting|surveying)\b", re.I)
+
+# Gerund openers that are IDIOMS, not action announcements. "Getting started
+# with X is easy" and "Looking at this, the answer is Y" open with a gerund but
+# are ordinary prose, not a promise of work. Excluded so they are not nudged.
+_GERUND_IDIOM_RE = re.compile(
+    r"^(?:getting started|getting ready|looking at (?:it|this|that|the)|"
+    r"looking back|running (?:low|out|late)|finding (?:out )?that)\b", re.I)
 
 
 def _delivered_part(sentence: str) -> Tuple[str, bool]:
