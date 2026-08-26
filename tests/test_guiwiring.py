@@ -339,5 +339,25 @@ ck("table cells keep a small minimum too (they scroll horizontally)",
    _TBL_WC is None or int(_TBL_WC.group(1)) <= 8)
 
 
+# ── backdrop brightness setting (Display page) ───────────────────────
+print("\n== the backdrop brightness control is wired ==")
+_CORE = open(os.path.join(_ROOT, "basilisk_core.py"), encoding="utf-8").read()
+ck("backdrop_brightness has a default",
+   '"backdrop_brightness":' in _CORE)
+ck("its default is the mid value (50)",
+   '"backdrop_brightness": 50' in _CORE)
+ck("MainWindow has the live-apply method",
+   "_apply_backdrop_brightness" in _SRC)
+ck("the scrim reference is captured for live re-tint",
+   "self._chat_scrim = scrim" in _SRC)
+ck("the Display page builds a brightness SpinRow",
+   "self.brightness_row" in _SRC and "Background brightness" in _SRC)
+_op = lambda b: 0.78 - (max(0, min(100, b)) / 100.0) * (0.78 - 0.06)
+ck("opacity stays within [0.06, 0.78] across the range",
+   all(0.06 <= _op(b) <= 0.78 for b in (0, 25, 50, 75, 100)))
+ck("50 maps to about the shipped default scrim (~0.42)",
+   abs(_op(50) - 0.42) < 0.02)
+
+
 print(f"\n{_p} passed, {_f} failed")
 sys.exit(1 if _f else 0)

@@ -455,6 +455,7 @@ DEFAULT_SETTINGS = {
 
     # UI
     "ui_scale": 0,  # 0 = auto-detect; manual values 0.3 to 3.0
+    "backdrop_brightness": 50,  # 0 = darkest, 100 = brightest, 50 = default
     "show_token_count": False,
     "show_provider_pill": True,
 

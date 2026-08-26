@@ -180,7 +180,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.basilisk"
 APP_NAME = "Basilisk"
-VERSION = "1.0.0.10"
+VERSION = "1.0.0.11"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -6108,6 +6108,45 @@ class SettingsDialog(Adw.PreferencesDialog):
 
         d_page.add(dg)
 
+        # Backdrop — brightness of the ember/castle image behind the chat.
+        bg_g = Adw.PreferencesGroup()
+        bg_g.set_title("Backdrop")
+        bg_g.set_description(
+            "How bright the background image behind the chat appears. "
+            "Changes apply live.")
+
+        self.brightness_row = Adw.SpinRow.new_with_range(0, 100, 5)
+        self.brightness_row.set_title("Background brightness")
+        self.brightness_row.set_subtitle(
+            "0 = darkest (heaviest dim), 100 = brightest (image shows "
+            "through most). 50 is the default.")
+        self.brightness_row.set_value(
+            float(parent.settings.get("backdrop_brightness", 50)))
+
+        def _on_brightness(row, *_a):
+            self._set("backdrop_brightness", int(row.get_value()))
+            # repaint the live scrim immediately
+            try:
+                self.win._apply_backdrop_brightness()
+            except Exception:
+                pass
+        self.brightness_row.connect("notify::value", _on_brightness)
+        bg_g.add(self.brightness_row)
+
+        # Reset backdrop brightness to the default.
+        b_reset = Adw.ActionRow()
+        b_reset.set_title("Reset brightness")
+        b_reset.set_subtitle("Back to the default (50).")
+        b_reset_btn = Gtk.Button(label="Reset")
+        b_reset_btn.set_valign(Gtk.Align.CENTER)
+        b_reset_btn.add_css_class("icon-button")
+        b_reset_btn.connect(
+            "clicked", lambda _b: self.brightness_row.set_value(50.0))
+        b_reset.add_suffix(b_reset_btn)
+        bg_g.add(b_reset)
+
+        d_page.add(bg_g)
+
         # Interface
         ui_g = Adw.PreferencesGroup()
         ui_g.set_title("Interface")
@@ -7892,6 +7931,10 @@ class MainWindow(Adw.ApplicationWindow):
             scrim.set_hexpand(True)
             scrim.set_vexpand(True)
             scrim.append(wm)
+            # Keep a handle so the Display settings can re-tint it live: the
+            # brightness slider adjusts THIS box's scrim opacity at runtime.
+            self._chat_scrim = scrim
+            self._apply_backdrop_brightness()
             chat_overlay = Gtk.Overlay()
             chat_overlay.set_vexpand(True)
             chat_overlay.set_child(scrim)
@@ -7909,6 +7952,40 @@ class MainWindow(Adw.ApplicationWindow):
         main.append(self.terminal_panel)
 
         return main
+
+    # Backdrop brightness: the scrim is a black box over the ember/castle
+    # background; lowering its opacity lets more of the image through
+    # (brighter), raising it dims the backdrop (darker). Driven by the
+    # `backdrop_brightness` setting (0..100), 50 = the default look. Applied
+    # with a per-widget CSS provider so it overrides the static .chat-scrim
+    # rule live, with no full-stylesheet reload.
+    _BACKDROP_PROVIDER = None
+
+    def _apply_backdrop_brightness(self):
+        scrim = getattr(self, "_chat_scrim", None)
+        if scrim is None:
+            return
+        try:
+            b = int(self.settings.get("backdrop_brightness", 50))
+        except (TypeError, ValueError):
+            b = 50
+        b = max(0, min(100, b))
+        # brightness 0 -> heavy scrim (0.78 opaque, darkest);
+        # brightness 100 -> almost no scrim (0.06, brightest);
+        # 50 -> ~0.40, the shipped default. Linear between the ends.
+        opacity = 0.78 - (b / 100.0) * (0.78 - 0.06)
+        css = (".chat-scrim { background-color: rgba(0, 0, 0, %.3f); }"
+               % opacity).encode("ascii")
+        try:
+            prov = self._BACKDROP_PROVIDER
+            if prov is None:
+                prov = Gtk.CssProvider()
+                self._BACKDROP_PROVIDER = prov
+                scrim.get_style_context().add_provider(
+                    prov, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 10)
+            prov.load_from_data(css)
+        except Exception as e:
+            log(f"backdrop brightness apply failed: {e}")
 
     def _build_chat_watermark(self):
         """A large, faint dragon watermark for behind the chat.  Loads either a

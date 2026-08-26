@@ -1,3 +1,38 @@
+## v1.0.0.11 — backdrop brightness control (+ a self-inflicted bug caught)
+
+### New: adjustable background brightness
+
+The Display settings page now has a Backdrop group with a "Background
+brightness" slider (0-100, default 50) and a reset button. It changes how
+much of the ember/castle image shows through behind the chat, LIVE with no
+restart: 0 is darkest (heaviest dim), 100 is brightest (image shows through
+almost fully), 50 matches the shipped default. Implemented by re-tinting the
+scrim box with a per-widget CSS provider, so it overrides the static
+.chat-scrim opacity without a full stylesheet reload. The value clamps
+safely -- any bad or out-of-range setting falls back into the legible band.
+
+### Bug caught and fixed in the same change
+
+The deep scan (ruff F821) caught that inserting the Backdrop group had
+dropped the two lines that create the "Interface" PreferencesGroup, leaving
+three `ui_g.add(...)` calls referencing an undefined name -- which would have
+crashed the settings dialog the moment the Display page was opened. Restored
+the group creation; the dialog now builds cleanly under real GTK (verified by
+constructing it and exercising the brightness row end to end).
+
+### Deep scan — otherwise clean
+
+ruff F821/F811/E9 clean after the fix. AST sweep: no mutable defaults, bare
+excepts, prod asserts, duplicate dict keys, or return-in-finally. The stall
+classifier and news detector (changed in v1.0.0.10 / .9) fuzzed 40k inputs
+with zero crashes. The word-boundary marker regex escapes special characters
+correctly ("up-to-date" matches, "eol" does not fire inside "eolian").
+
+### Tests
+
+53 suites, 4,162 assertions. New brightness wiring pinned in test_guiwiring;
+full suite green, bubble-fit 140/140 under real GTK, guardrail byte-identical.
+
 ## v1.0.0.10 — "says fetching news, doesn't fetch" fixed at the source
 
 The real cause of the news bug, and it was not the markers.
