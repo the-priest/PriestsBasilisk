@@ -14,9 +14,9 @@
 
 <br/>
 
-<img src="https://img.shields.io/badge/version-1.0.0.2-e11d2b?style=for-the-badge&labelColor=08090b&logo=gnubash&logoColor=e11d2b" alt="version 1.0.0.2">
+<img src="https://img.shields.io/badge/version-1.0.0.5-e11d2b?style=for-the-badge&labelColor=08090b&logo=gnubash&logoColor=e11d2b" alt="version 1.0.0.5">
 <img src="https://img.shields.io/badge/license-MIT-7d121b?style=for-the-badge&labelColor=08090b&logo=opensourceinitiative&logoColor=7d121b" alt="MIT license">
-<img src="https://img.shields.io/badge/tests-4035%20assertions-2ea043?style=for-the-badge&labelColor=08090b&logo=pytest&logoColor=2ea043" alt="4035 assertions">
+<img src="https://img.shields.io/badge/tests-4106%20assertions-2ea043?style=for-the-badge&labelColor=08090b&logo=pytest&logoColor=2ea043" alt="4106 assertions">
 <img src="https://img.shields.io/badge/telemetry-none-6d7680?style=for-the-badge&labelColor=08090b&logo=ghostery&logoColor=6d7680" alt="no telemetry">
 
 <br/>
@@ -379,7 +379,7 @@ The import path is hardened against hostile archives: **Zip slip**, **Zip bombs*
 for f in tests/test_*.py; do python3 "$f" || echo "RED $f"; done
 ```
 
-Stdlib only. No pytest, no network, no fixtures, no account. **4,035 assertions across 51 suites**, done in under a minute.
+Stdlib only. No pytest, no network, no fixtures, no account. **4,106 assertions across 52 suites**, done in under a minute.
 
 <table>
 <tr valign="top"><td width="50%">

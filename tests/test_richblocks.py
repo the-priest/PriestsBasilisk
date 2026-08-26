@@ -271,13 +271,20 @@ ck("the table's scroller cannot expand vertically",
    "sw.set_vexpand(False)" in _SRC,
    "a ScrolledWindow fills by default, which left a screenful of empty "
    "bubble under the grid")
-# The exact number is tuned against BOTH failure directions and is pinned in
-# tests/test_guiwiring.py; here we only require that a floor exists at all.
-_LWC = re.search(r"body\.set_width_chars\((\d+)\)", _SRC)
-ck("list text carries a real minimum width",
-   _LWC is not None and int(_LWC.group(1)) >= 4,
-   "inside a Grid a wrapping label's one-word minimum drove a 2479px "
-   "minimum height")
+# The list used to be a Gtk.Grid, and a Grid reports a cramped natural WIDTH
+# for a wrapping cell — which dragged the whole chat bubble narrow, so GTK
+# computed the list's HEIGHT at that narrow width and every bullet wrapped
+# into a tall ribbon: the "bubble is five screens tall" report. The list is
+# now a vertical box of horizontal rows, which settles each row's width first
+# and measures height at the width the text is actually shown at. Pin that:
+# it must NOT be a Grid, and it must NOT re-introduce the set_width_chars pin
+# (fixing natural width was what made the bubble hug narrow).
+ck("the list is a box of rows, not a Grid",
+   "class ListWidget(Gtk.Box)" in _SRC,
+   "a Gtk.Grid reports a cramped natural width and towers the bubble")
+ck("the list body does not pin its width (that forced the narrow hug)",
+   "body.set_width_chars(" not in _SRC,
+   "set_width_chars fixes the NATURAL width too, hugging the bubble narrow")
 # Bound the slice by the NEXT top-level class, never by a guessed byte count.
 # A fixed [:3000] window reported this missing on code that was correct — the
 # call sits at offset 5072 — which is a probe failing for a reason unrelated

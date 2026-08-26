@@ -125,7 +125,13 @@ def _run_scale(scale: float) -> None:
     import importlib
     import basilisk as Bk
     importlib.reload(Bk) if "basilisk" in sys.modules else None
-    Bk._default_window_size = lambda: (810, 719)
+    # A WIDE window on purpose. The towering bug is width-dependent: it only
+    # appears when the viewport is wide enough that the bubble's natural
+    # (narrow) width diverges sharply from the width it is allocated. At the
+    # old 810px the list reply did not tower in the harness even on the broken
+    # build; at a real desktop width it drew 240px of empty bubble. Measure
+    # where the bug actually lives.
+    Bk._default_window_size = lambda: (1280, 860)
     app = Bk.BasiliskApp()
 
     out = {"scale": scale, "rows": [], "viewport": 0, "error": None}
@@ -165,20 +171,35 @@ def _run_scale(scale: float) -> None:
                                 bb = ri.origin.y + ri.size.height
                                 br = ri.origin.x + ri.size.width
                                 over = 0.0
-                                ch = b.get_first_child()
-                                while ch is not None:
-                                    ok2, rc = ch.compute_bounds(sw)
-                                    if ok2:
-                                        over = max(
-                                            over,
-                                            (rc.origin.y + rc.size.height) - bb,
-                                            (rc.origin.x + rc.size.width) - br)
-                                    ch = ch.get_next_sibling()
+                                deepest = ri.origin.y
+
+                                def _walk(w):
+                                    nonlocal over, deepest
+                                    cc = w.get_first_child()
+                                    while cc is not None:
+                                        ok3, r3 = cc.compute_bounds(sw)
+                                        if ok3 and cc.get_visible():
+                                            over = max(
+                                                over,
+                                                (r3.origin.y + r3.size.height) - bb,
+                                                (r3.origin.x + r3.size.width) - br)
+                                            deepest = max(
+                                                deepest,
+                                                r3.origin.y + r3.size.height)
+                                        _walk(cc)
+                                        cc = cc.get_next_sibling()
+                                _walk(b)
+                                # Slack = bubble background drawn BELOW the last
+                                # child. This is the "five screens tall" bug and
+                                # the overflow check above is blind to it: there
+                                # the children fit, the BUBBLE is too big.
+                                slack = bb - deepest
                                 if role == "assistant":
                                     out["rows"].append({
                                         "label": CASES[idx][0] if idx < len(CASES) else "?",
                                         "w": ri.size.width, "h": ri.size.height,
-                                        "over": max(0.0, over)})
+                                        "over": max(0.0, over),
+                                        "slack": max(0.0, slack)})
                                     idx += 1
                     c = c.get_next_sibling()
             except Exception as e:
@@ -253,6 +274,14 @@ for res in _results:
         ck(f"scale {res['scale']}: {row['label']} fits the viewport",
            row["w"] <= res["viewport"] + 2,
            f"bubble {row['w']:.0f} > viewport {res['viewport']}")
+        # THE TOWERING CHECK. The overflow check above is blind to a bubble
+        # that is TALLER than its text -- children fit, background runs on for
+        # screens. A list-bearing reply did exactly that (240px of empty
+        # bubble). Allow only the bubble's own bottom padding.
+        ck(f"scale {res['scale']}: {row['label']} has no empty tail",
+           row.get("slack", 0) <= 40,
+           f"{row.get('slack', 0):.0f}px of empty bubble below the last line "
+           f"-- the 'five screens tall' bug")
 
     # THE COUNTER-PROPERTY. The construction this replaced existed to stop a
     # two-word reply drawing a full-width bubble, and that must still hold --
@@ -267,12 +296,16 @@ for res in _results:
 
 print("\n== the wiring that guarantees it ==")
 _SRC = open(os.path.join(_ROOT, "basilisk.py"), encoding="utf-8").read()
-ck("the bubble is not halign=START inside a vertical box",
-   "inner.set_halign(Gtk.Align.START)" not in _SRC,
-   "that is the construction that sized the bubble from the wrong width")
-ck("hugging moved to a horizontal row with a trailing spacer",
+ck("the bubble hugs inside a HORIZONTAL row (width settles before height)",
    "_hug = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)" in _SRC
-   and "_hug_spacer" in _SRC)
+   and "_hug_spacer" in _SRC,
+   "a horizontal hug row is what makes the measured width the drawn width")
+ck("the list is a box of rows, not a Gtk.Grid",
+   "class ListWidget(Gtk.Box)" in _SRC,
+   "a Grid reports a cramped natural width and towers the bubble")
+ck("the list body does not pin its width",
+   "body.set_width_chars(" not in _SRC,
+   "set_width_chars fixed the natural width and hugged the bubble narrow")
 # Assert on the RULE BODIES, not on the file: the comment above them quotes
 # the old one-sided values on purpose, and a test that trips over its own
 # explanation is a bad test (this one did, first time out).

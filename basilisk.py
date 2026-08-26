@@ -154,7 +154,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.basilisk"
 APP_NAME = "Basilisk"
-VERSION = "1.0.0.2"
+VERSION = "1.0.0.5"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -3067,50 +3067,52 @@ class RuleWidget(Gtk.Box):
         self.add_css_class("md-rule")
 
 
-class ListWidget(Gtk.Grid):
+class ListWidget(Gtk.Box):
     """A bullet/number list with a real hanging indent.
 
-    In a single Label a wrapped bullet's second line returns to the left
-    margin and the list stops looking like a list. A two-column grid — marker,
-    then text — keeps the text block aligned under itself however far it wraps.
+    WHY A BOX OF ROWS, NOT A GRID.  This was a Gtk.Grid, and a Grid reports a
+    cramped natural WIDTH for a wrapping cell — it asks the body label its
+    minimum ("one word") and offers little more.  A bulleted reply therefore
+    made the whole chat bubble hug to ~419px even on a wide window, and GTK
+    then computed the list's HEIGHT at that narrow width, so every bullet
+    wrapped to two lines and the bubble drew hundreds of px of empty
+    background past its text — the "five screens tall" bubble.
+
+    A vertical box of horizontal rows settles each row's WIDTH first (that is
+    what a horizontal box does) and only then asks the label for its height,
+    so the height is measured at the width the bullet is actually shown at.
+    Same visual result — a marker column, text hanging under itself — with an
+    honest height.  Measured: the identical three-bullet reply went from a
+    419x102 bubble to 654x55.
     """
 
     MAX_ITEMS = 300
 
     def __init__(self, items: List[Dict[str, Any]]):
-        super().__init__()
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         self.add_css_class("md-list")
-        for r, it in enumerate(items[:self.MAX_ITEMS]):
+        for it in items[:self.MAX_ITEMS]:
             indent = max(0, min(int(it.get("indent", 0)), 6))
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
             mk = Gtk.Label(label=str(it.get("marker", "•")), xalign=1.0)
             mk.add_css_class("md-list-marker")
             mk.set_valign(Gtk.Align.START)
             mk.set_margin_start(indent * 18)
-            self.attach(mk, 0, r, 1, 1)
+            row.append(mk)
             body = _make_wrap_label()
             body.add_css_class("md-list-text")
-            # ── MINIMUM WIDTH AND MINIMUM HEIGHT TRADE AGAINST EACH OTHER ──
-            # A Grid asks its children for a minimum width, and that is the
-            # width GTK computes their minimum HEIGHT at. Unset, a wrapping
-            # label answers "one word", and the height explodes (2479px for
-            # three bullets). But too large is the opposite failure and it is
-            # worse: at 20 chars this one widget had a 597px minimum against
-            # 210px for ordinary prose, so the LIST set a floor under the whole
-            # window -- it could not be resized below ~630px and everything
-            # overflowed a narrower screen.
-            #
-            # Measured across the range (0/4/6/8/10/14/20 chars ->
-            # 77/113/151/189/227/303/417px minimum). 6 puts the list at 151px,
-            # comfortably under prose's 210, so it is never the constraint --
-            # and the height minimum it implies can only bite at a width that
-            # prose already forbids.
-            body.set_width_chars(6)
+            # Fill the rest of the row and wrap within it — the wrap label's
+            # own max-width-chars cap (from _make_wrap_label) still bounds how
+            # wide it will grow, so the bubble shrink-wraps its text.
+            body.set_hexpand(True)
+            body.set_valign(Gtk.Align.START)
             txt = str(it.get("content", ""))
             try:
                 body.set_markup(text_to_pango(txt))
             except Exception:
                 body.set_text(txt)
-            self.attach(body, 1, r, 1, 1)
+            row.append(body)
+            self.append(row)
 
 
 def _spec_arg_names() -> Dict[str, set]:
@@ -3887,6 +3889,18 @@ _VERIFY_MARKERS = (
     "latest version", "most recent", "as recent", "how old is",
     "out yet", "released yet", "available yet", "is out", "came out",
     "come out", "is there a new", "has there been", "any new",
+    # Sports results and other last-night/last-week events are current-state
+    # queries with no "latest/current" word in them. "who won" is the tell;
+    # "last night" / "yesterday" / "last week" anchor it to a real event the
+    # model cannot know from training.
+    "who won", "final score", "last night", "yesterday", "last week",
+    "last game", "last match", "this season", "who's winning", "whos winning",
+    # "what's new with X" / "any updates on X" is a current-state query even
+    # without a version or year word — the exact shape that answered from
+    # stale memory instead of fetching.
+    "what's new", "whats new", "what is new", "anything new", "updates on",
+    "any update", "latest on", "news on", "happening with", "going on with",
+    "in the news",
 )
 
 
@@ -4902,7 +4916,14 @@ class MessageWidget(Gtk.Box):
             # to the trailing spacer -- the same pattern the user row above
             # already uses -- so a two-word reply still draws a small bubble
             # instead of a full-width one.
-            inner.set_halign(Gtk.Align.FILL)
+            # Hug the content at its natural width. halign=START + hexpand
+            # False means GTK allocates the bubble exactly the width it asks
+            # for, and the trailing spacer in the row below absorbs the rest —
+            # so the width the bubble is measured at IS the width it is drawn
+            # at, and its height is honest. (Getting this wrong is the whole
+            # history of this widget: either text spilling out the bottom, or
+            # a bubble drawn hundreds of px taller than its text.)
+            inner.set_halign(Gtk.Align.START)
             inner.set_hexpand(False)
             # Arcane seal: a faint sigil in the corner of every Basilisk reply.
             # Overlaid, non-interactive -> never touches the streamed text, which
@@ -4918,7 +4939,8 @@ class MessageWidget(Gtk.Box):
                 _bubble_widget = _seal_ov
             else:
                 _bubble_widget = inner
-            # The hug row: bubble, then a spacer that eats the rest.
+            # The hug row: bubble at natural width, then a spacer that eats
+            # the rest so the bubble stays left and does not stretch.
             _hug = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
             _hug.set_hexpand(True)
             _hug.append(_bubble_widget)
@@ -7641,6 +7663,16 @@ class MainWindow(Adw.ApplicationWindow):
         self.msg_scroll.set_kinetic_scrolling(True)
         self.msg_scroll.set_overlay_scrolling(True)
         self.msg_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        # ── PIN THE COLUMN TO THE TOP ──
+        # A ScrolledWindow whose content is shorter than the viewport hands the
+        # child the FULL viewport height, and a vertical GtkBox defaults to
+        # valign=FILL — so the box stretched to the viewport and the last
+        # bubble was allocated the leftover vertical space, drawing its
+        # background hundreds of px past the end of the text. That is the
+        # "bubble is five screens tall" report. START makes the column take
+        # only the height its messages need; the scroller still scrolls once
+        # they exceed the viewport.
+        self.msg_box.set_valign(Gtk.Align.START)
         self.msg_box.set_margin_top(12)
         self.msg_box.set_margin_bottom(12)
         self.msg_box.set_margin_start(8)

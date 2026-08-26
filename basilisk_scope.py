@@ -146,6 +146,29 @@ _TOOL_NON_TARGET_FLAGS: Dict[str, Set[str]] = {
      "impacket-psexec", "impacket-secretsdump", "medusa", "ncrack", "patator")
 }
 
+# Flags that are BOOLEAN for a specific tool even though they are value-taking
+# elsewhere. Flag arity is per-tool, and a flag mis-classed as value-taking is
+# a BYPASS: it swallows the token after it, so an out-of-scope target sitting
+# in that position is silently dropped and the command sails through on the
+# in-scope operand beside it.
+#
+#   curl -i evil.com acme.com
+#
+# `-i` is --include (a boolean: show response headers) on curl and wget, but
+# --identity (a keyfile, value-taking) on ssh/scp/sftp — so it lives in
+# _VALUE_FLAGS_NOT_TARGET for the ssh case and ate `evil.com` on curl, exactly
+# the laundering the bare-hostname note downstream fixed for positionals,
+# reached through a flag. Resolve it by TOOL rather than by widening the set.
+_TOOL_BOOLEAN_FLAGS: Dict[str, Set[str]] = {
+    "curl": {"-i", "--include"},
+    "wget": {"-i"},   # wget -i is actually an input-file flag; see note below
+}
+# NB wget's real `-i` IS a targets FILE (--input-file), which is 'uncertain',
+# not boolean — but treating it as boolean here would UNDER-collect. wget is
+# excluded from the boolean override and handled by the target-file path; only
+# curl's -i is a true boolean. Keep the map honest:
+_TOOL_BOOLEAN_FLAGS.pop("wget", None)
+
 # Flags that take NO value. This set exists because flag arity cannot be
 # guessed: `curl -s https://evil.com` and `nmap -p 80 host` look identical to a
 # parser that does not know `-s` is boolean and `-p` is not. Getting it wrong in
@@ -575,6 +598,112 @@ _HOST_ONLY_POSITIONALS: Set[str] = {
 _BARE_LABEL_RE = re.compile(r"^(?![-_])[A-Za-z0-9_-]{1,63}(?<![-_])$")
 
 
+# ── DESTINATION-REDIRECT FLAGS ──
+# Some flags override where a command ACTUALLY connects, independent of the
+# hostname the operator typed. The gate keyed off the visible hostname, so
+#
+#     curl --resolve acme.com:443:8.8.8.8 https://acme.com
+#     curl --connect-to acme.com:443:8.8.8.8:443 https://acme.com
+#     ssh -o ProxyCommand='nc 8.8.8.8 22' acme.com
+#     ssh -o ProxyJump=8.8.8.8 acme.com
+#
+# all sailed through on the in-scope `acme.com` while the packets went to
+# 8.8.8.8. The redirect endpoint is the real target and MUST be scoped. Each
+# flag's value carries the endpoint in a known position, so it is extractable.
+_REDIRECT_FLAGS: Set[str] = {
+    "--resolve", "--connect-to",     # curl
+    "-o",                            # ssh -o ProxyCommand=/ProxyJump=
+    "-J", "--proxy-jump",            # ssh short/long ProxyJump
+    "--proxy",                       # curl --proxy host:port
+    "-x",                            # curl -x proxy (also sqlmap; host-shaped only)
+}
+
+
+def _redirect_targets(flag: str, value: str) -> List[str]:
+    """Pull the real destination host(s) out of a redirect flag's value.
+
+    Fails toward EXTRACTING: an endpoint we cannot confidently parse is still
+    surfaced when it is host-shaped, because a missed redirect is a scope
+    bypass while a spurious one is only a fixable false refusal.
+    """
+    v = (value or "").strip().strip("'\"")
+    if not v:
+        return []
+    out: List[str] = []
+
+    if flag in ("--resolve", "--connect-to"):
+        # host:port:ADDR  (--resolve)  or  host:port:ADDR:port (--connect-to)
+        # The endpoint is the 3rd colon-field; a bracketed IPv6 may hold colons.
+        parts = _split_hostport_triplet(v)
+        # field 0 is the requested host (already scoped as the visible target),
+        # the connect address is what actually gets dialed.
+        for p in parts[2:]:
+            if p and _looks_like_target(p):
+                out.append(_strip_to_host(p))
+
+    elif flag in ("-o",):
+        # ssh -o KEY=VALUE. Only the destination-bearing keys matter.
+        m = re.match(r"(?i)\s*(ProxyJump|ProxyCommand)\s*=?\s*(.*)$", v)
+        if m:
+            body = m.group(2).strip().strip("'\"")
+            # ProxyJump: [user@]host[:port][,...]; ProxyCommand: a shell line
+            # whose host tokens we harvest conservatively.
+            for tok in re.split(r"[\s,]+", body):
+                host = _redirect_host_token(tok)
+                if host and _looks_like_target(host):
+                    out.append(_strip_to_host(host))
+
+    elif flag in ("-J", "--proxy-jump"):
+        for tok in re.split(r"[\s,]+", v):
+            host = _redirect_host_token(tok)
+            if host and _looks_like_target(host):
+                out.append(_strip_to_host(host))
+
+    elif flag in ("--proxy", "-x"):
+        host = _redirect_host_token(v)
+        if host and _looks_like_target(host):
+            out.append(_strip_to_host(host))
+
+    return out
+
+
+def _split_hostport_triplet(v: str) -> List[str]:
+    """Split a curl --resolve/--connect-to value on ':' but keep a bracketed
+    [IPv6] address whole."""
+    parts: List[str] = []
+    buf = ""
+    depth = 0
+    for ch in v:
+        if ch == "[":
+            depth += 1
+            buf += ch
+        elif ch == "]":
+            depth = max(0, depth - 1)
+            buf += ch
+        elif ch == ":" and depth == 0:
+            parts.append(buf)
+            buf = ""
+        else:
+            buf += ch
+    parts.append(buf)
+    return parts
+
+
+def _redirect_host_token(tok: str) -> str:
+    """Reduce a proxy/jump token ([user@]host[:port]) to its host."""
+    t = (tok or "").strip().strip("'\"")
+    if not t or t.startswith("-"):
+        return ""
+    if "@" in t:
+        t = t.rsplit("@", 1)[1]
+    # strip a trailing :port, but not the colons inside a bracketed IPv6
+    if t.startswith("[") and "]" in t:
+        return t[1:t.index("]")]
+    if t.count(":") == 1:
+        t = t.split(":", 1)[0]
+    return t
+
+
 def _extract_from_argv(argv: List[str], out: Extraction) -> None:
     if not argv:
         return
@@ -598,6 +727,17 @@ def _extract_from_argv(argv: List[str], out: Extraction) -> None:
         if tok.startswith("-"):
             flag, inline = (tok.split("=", 1) + [None])[:2]
 
+            # DESTINATION-REDIRECT: harvest the real endpoint, then consume the
+            # value like any other value-flag. This runs FIRST so the redirect
+            # target is captured whether or not the flag also appears elsewhere.
+            if flag in _REDIRECT_FLAGS:
+                val = inline if inline is not None else (
+                    rest[i + 1] if i + 1 < len(rest) else "")
+                for host in _redirect_targets(flag, val):
+                    out.targets.append(host)
+                i += 1 if inline is not None else 2
+                continue
+
             if flag in _TARGET_FILE_FLAGS and flag not in target_flags:
                 out.uncertain.append(inline if inline else
                                      (rest[i + 1] if i + 1 < len(rest) else flag))
@@ -620,6 +760,12 @@ def _extract_from_argv(argv: List[str], out: Extraction) -> None:
                 continue
 
             if flag in _BOOLEAN_FLAGS:
+                i += 1
+                continue
+
+            # Per-tool boolean override: a flag that takes a value elsewhere but
+            # is boolean for THIS tool (curl -i) must not swallow the next token.
+            if flag in _TOOL_BOOLEAN_FLAGS.get(tool, set()):
                 i += 1
                 continue
 

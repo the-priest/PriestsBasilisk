@@ -325,15 +325,14 @@ ck("a forced scroll re-arms the stick",
 
 print("\n== no block may set a floor under the window width ==")
 
-# The list once carried a 597px minimum width against 210px for prose, which
-# put a floor under the whole window. Pinned as a RATIO to the prose label's
-# own cap so it cannot silently drift back.
-_LIST_WC = re.search(r"body\.set_width_chars\((\d+)\)", _SRC)
-ck("the list body declares a minimum width", _LIST_WC is not None)
-ck("and it is small enough not to be the widest thing in the app",
-   _LIST_WC and int(_LIST_WC.group(1)) <= 8,
-   (_LIST_WC.group(1) if _LIST_WC else "?") +
-   " chars; 20 measured 597px min vs 210px for prose")
+# The list once carried a set_width_chars floor to keep a Gtk.Grid's minimum
+# width down. But that ALSO fixed the natural width, so a bulleted reply hugged
+# the whole bubble narrow and the list towered. The list is a box of rows now
+# (see test_richblocks) and needs no such floor — pin that it is gone, so it
+# cannot drift back and re-tower the bubble.
+ck("the list body no longer pins its width",
+   re.search(r"body\.set_width_chars\(", _SRC) is None,
+   "set_width_chars fixed natural width too and hugged the bubble narrow")
 _tblsrc = _SRC.split("class TableWidget")[1].split("\nclass ")[0]
 _TBL_WC = re.search(r"lbl\.set_width_chars\((\d+)\)", _tblsrc)
 ck("table cells keep a small minimum too (they scroll horizontally)",

@@ -439,5 +439,57 @@ for _c in ("nmap -sS -p- acme.com",
           str(_v.get("failure")) + " " + str(_v.get("reason"))[:60])
 
 
+# ── per-tool flag arity: a boolean flag must not eat the next target ──
+# curl -i is --include (boolean); it lived in the value-taking set for ssh's
+# --identity and silently swallowed the token after it, dropping an
+# out-of-scope target that sat there. `curl -i evil.com acme.com` fetches
+# BOTH; the gate must see both.
+print("\n== a per-tool boolean flag does not swallow a target ==")
+for cmd in ["curl -i evil.com https://acme.com",
+            "curl -I evil.com https://acme.com",
+            "curl --include evil.com https://acme.com"]:
+    v = S.check_command(cmd, SCOPE)
+    check(f"curl boolean flag: {cmd[:34]}", not v["allowed"],
+          "evil.com was eaten by the flag and the command was allowed")
+# curl -i on an in-scope target is of course fine.
+check("curl -i in-scope is allowed",
+      S.check_command("curl -i https://acme.com/x", SCOPE)["allowed"])
+# COUNTER-PROPERTY: ssh/scp -i really IS a keyfile value and must stay so, or
+# the keyfile path would be read as a target.
+check("ssh -i keeps its keyfile value (acme in scope -> allowed)",
+      S.check_command("ssh -i ~/.ssh/id_rsa acme.com", SCOPE)["allowed"])
+check("ssh -i keyfile to an out-of-scope host is refused",
+      not S.check_command("ssh -i ~/.ssh/id_rsa evil.com", SCOPE)["allowed"])
+
+
+# ── destination-redirect flags: the endpoint is the real target ──────
+# --resolve / --connect-to / ssh -o ProxyCommand|ProxyJump / --proxy all send
+# the traffic somewhere OTHER than the hostname typed. The gate keyed off the
+# visible host and let an in-scope name carry traffic to an out-of-scope IP.
+print("\n== a redirect flag cannot launder an out-of-scope endpoint ==")
+for cmd in [
+        "curl --resolve acme.com:443:8.8.8.8 https://acme.com",
+        "curl --connect-to acme.com:443:8.8.8.8:443 https://acme.com",
+        "ssh -o ProxyCommand='nc 8.8.8.8 22' acme.com",
+        "ssh -o ProxyJump=8.8.8.8 acme.com",
+        "ssh -J 8.8.8.8 acme.com",
+        "curl --proxy 8.8.8.8:8080 https://acme.com",
+        "curl --resolve acme.com:443:[2001:db8::1] https://acme.com"]:
+    v = S.check_command(cmd, SCOPE)
+    check(f"redirect refused: {cmd[:40]}", not v["allowed"],
+          "the redirect endpoint was not scoped -> traffic laundered")
+# COUNTER-PROPERTIES: a redirect to an IN-scope IP is fine, and a harmless
+# non-destination -o option is not treated as a redirect.
+check("redirect to an in-scope IP is allowed",
+      S.check_command("curl --resolve acme.com:80:10.0.0.5 acme.com",
+                      SCOPE)["allowed"])
+check("a non-destination ssh -o option is not a redirect",
+      S.check_command("ssh -o StrictHostKeyChecking=no acme.com",
+                      SCOPE)["allowed"])
+check("an unparseable --resolve falls back to the visible target",
+      S.check_command("curl --resolve garbage https://acme.com",
+                      SCOPE)["allowed"])
+
+
 print(f"\nscope boundary: {_passed} passed, {_failed} failed")
 sys.exit(1 if _failed else 0)

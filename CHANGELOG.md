@@ -1,3 +1,142 @@
+## v1.0.0.5 — closing the destination-redirect leaks
+
+The two open items from v1.0.0.4 are fixed: a scope-authorised hostname could
+still carry traffic to an out-of-scope endpoint through a redirect flag.
+
+```
+curl --resolve acme.com:443:8.8.8.8 https://acme.com   -> was ALLOWED
+curl --connect-to acme.com:443:8.8.8.8:443 https://... -> was ALLOWED
+ssh -o ProxyCommand='nc 8.8.8.8 22' acme.com           -> was ALLOWED
+ssh -o ProxyJump=8.8.8.8 acme.com  /  ssh -J 8.8.8.8    -> was ALLOWED
+curl --proxy 8.8.8.8:8080 https://acme.com             -> was ALLOWED
+```
+
+Every one connects somewhere OTHER than the hostname typed, and the gate keyed
+off the visible host — so the in-scope name laundered an out-of-scope
+destination. New `_REDIRECT_FLAGS` + `_redirect_targets()` pull the real
+endpoint out of each flag's value (the 3rd colon-field of --resolve/--connect-to,
+the host of a ProxyJump/-J, the host tokens of a ProxyCommand, the --proxy/-x
+host) and add it to the scoped targets. The endpoint is now checked like any
+other target.
+
+Fails toward extracting: an endpoint that cannot be parsed confidently still
+surfaces when host-shaped, because a missed redirect is a bypass while a
+spurious one is a fixable false refusal. Counter-properties hold: a redirect to
+an IN-scope IP is allowed, a harmless non-destination `ssh -o` option
+(StrictHostKeyChecking, Port) is not treated as a redirect, and a malformed
+value falls back to the visible target without crashing. IPv6 endpoints,
+`user@host:port` jump specs, and bracketed addresses all parse.
+
+basilisk_ext.engage does NOT need the mirror: it checks one host at a time and
+never parses a command line, so it never sees these flags. The scope/engage
+host-for-host parity is unchanged (90/0).
+
+### Tests
+
+52 suites, 4,106 assertions. test_scope grew the redirect-flag regression
+(catches 5 shapes that leaked on v1.0.0.4) plus its counter-properties.
+
+## v1.0.0.4 — deep-scan pass: a scope leak and the untested art module
+
+### `curl -i` swallowed an out-of-scope target
+
+Found by re-probing the scope gate against the historically-leaky shapes.
+`-i` is `--identity` (a keyfile, value-taking) on ssh/scp but `--include`
+(a boolean) on curl, and it lived in the value-taking set — so on curl it
+consumed the token after it:
+
+```
+curl -i evil.com acme.com   ->  gate saw only acme.com  ->  ALLOWED
+```
+
+curl fetches BOTH urls; the gate saw only the in-scope one and let an
+out-of-scope fetch through. Same laundering the bare-hostname note fixed for
+positional operands, reached through a flag. Fixed with a per-tool boolean
+override (`_TOOL_BOOLEAN_FLAGS`): `-i`/`--include` are boolean for curl, while
+ssh/scp `-i` keeps its keyfile value. Verified both directions and pinned in
+test_scope.py, which fails on v1.0.0.3. (`-I` and `--include` were already
+caught; only lowercase `-i` leaked.)
+
+Left as reported, not fixed: `curl --resolve host:port:ip` and
+`ssh -o ProxyCommand` redirect the destination and are still not modelled —
+a documented open item, unchanged this pass.
+
+### The embedded button art had no test
+
+`basilisk_btn_art.py` is 11k lines of base64 button art embedded in a required
+module precisely so it can never go missing on an update — but nothing
+validated it, so a corrupted paste or a renamed key would leave the buttons
+silently falling back to symbolic icons, the exact failure the embedding was
+meant to end. New test_btn_art.py pins: every blob decodes to a real PNG (magic
+bytes, non-trivial size), every button the app requests has a matching blob,
+and no blob is left unrequested (a stray key is a typo). All 11 clean, 1:1 with
+the app's `_BTN_*` constants.
+
+### Scans that came back clean
+
+Ruff F/E9/PLE: no undefined names, no redefinitions, no syntax errors. AST
+sweep: zero mutable defaults, bare excepts, prod asserts, duplicate dict keys,
+subprocess-without-timeout, open-without-encoding. The destructive-command
+floor still catches all 26 known-dangerous shapes with zero false positives on
+11 benign ones. The structural write-recovery from v1.0.0.1 fuzzed at 20k
+well-formed (all round-trip) + 15k malformed (zero silent-wrong) bodies.
+
+### Tests
+
+52 suites, 4,096 assertions. New: test_btn_art.py (36), test_scope grew the
+per-tool-flag regression.
+
+## v1.0.0.3 — the five-screens-tall bubble
+
+### The list was a Gtk.Grid, and a Grid towers the bubble
+
+Reported with five full-screen screenshots to capture ONE reply: a news
+answer whose bubble background ran on for four empty screens below the last
+line. Reproduced in the real app under GTK at the reported window size — the
+assistant bubble measured **582px tall with its content ending at ~340px**,
+so ~240px of empty bubble, and it compounded with every section of a longer
+reply into the tower in the screenshots.
+
+ROOT CAUSE, and it is the same height-for-width disagreement as the earlier
+bubble bug, relocated: `ListWidget` was a `Gtk.Grid`, and a Grid reports a
+cramped natural WIDTH for a wrapping cell — it asks the body label its
+minimum, which for a wrap label is about one word. So a bulleted reply made
+the whole chat bubble hug narrow (~419px even on a wide window), and GTK then
+computed the bubble's HEIGHT at that narrow width: every bullet wrapped into a
+tall ribbon, and the bubble drew hundreds of px of background past its text.
+The `set_width_chars(6)` on the body — added to keep the Grid's minimum width
+down — made it worse, because it also fixes the NATURAL width, pinning the
+bubble narrow.
+
+FIX: `ListWidget` is now a vertical box of horizontal rows (marker + wrap
+label per item) instead of a Grid. A horizontal box settles each row's WIDTH
+first and only then asks the label its height, so the height is measured at
+the width the bullet is actually shown at. Same hanging-indent look, honest
+height. Measured: the identical three-bullet reply went from a 419x102
+cramped bubble to 654x55, and the full news reply from 582px (240px slack) to
+554px (12px slack — just the bubble's own bottom padding). The `set_width_chars`
+pin is gone.
+
+### The bubble-fit suite was blind to it
+
+It only measured content overflowing PAST the bubble — the earlier bug, text
+spilling out the bottom. It never checked the opposite: a bubble taller than
+its content. So it stayed green through the towering. Added a SLACK
+measurement (bubble bottom minus the deepest visible descendant) and wiring
+assertions pinning the box-rows structure and the absence of the width pin;
+those fail on the previous build and pass on this one. The harness window was
+widened from 810 to 1280px, because the tower is width-dependent and did not
+appear at the narrow default.
+
+Two source-level suites (test_richblocks, test_guiwiring) were asserting the
+`set_width_chars` floor — i.e. pinning the very construction that caused the
+bug. Rewritten to pin the box-rows fix instead.
+
+### Tests
+
+51 suites, 4,054 assertions. Bubble-fit passes 140 checks under real GTK
+across scales 0.5/0.7/0.85/1.0. Guardrail byte-identical.
+
 ## v1.0.0.2 — the fetch dead-end
 
 ### "it can do one thing and stops — can't even fetch news"

@@ -477,5 +477,42 @@ for _label, _s in _NOT:
     ck(f"not a stall: {_label}", not Bc.reply_is_bare_stall(_s), _s)
 
 
+# ── the fetch trigger covers the questions people actually ask ──────
+# _needs_web_verification decides whether the "read a source before you
+# answer" directive fires. A MISS here is the "makes something up instead of
+# checking" failure: the model answers a current-state question from stale
+# training. These were untested, and two real phrasings slipped through.
+print("\n== current-state questions trigger a fetch ==")
+_FETCH = [
+    "give me some recent news from ireland",
+    "what's happening in the world right now",
+    "any news today",
+    "whats the latest on the situation",
+    "who won the match last night",
+    "final score of the game yesterday",
+    "is python 3.13 out yet",
+    "what's the newest nmap",
+    "current bitcoin price",
+    "what happened this week in tech",
+    "whats new with the linux kernel",
+    "any updates on the CVE",
+    "what's going on with openssl",
+]
+for _q in _FETCH:
+    ck(f"fetch: {_q[:40]!r}", Bk._needs_web_verification(_q), _q)
+
+print("\n== timeless questions do NOT waste a fetch ==")
+_NOFETCH = [
+    "explain how tcp works",
+    "what is a buffer overflow",
+    "write a python function to reverse a string",
+    "what does the -sV flag do in nmap",
+    "how do i grep recursively",
+    "why is my regex not matching",
+]
+for _q in _NOFETCH:
+    ck(f"no fetch: {_q[:40]!r}", not Bk._needs_web_verification(_q), _q)
+
+
 print(f"\nturn_directives: {_p} passed, {_f} failed")
 sys.exit(1 if _f else 0)

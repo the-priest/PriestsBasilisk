@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 <title>Basilisk — Autonomous AI Penetration-Testing Agent (open source, runs locally)</title>
-<meta name="description" content="Basilisk is an open-source autonomous AI penetration-testing agent: a native Linux desktop app that turns any LLM into a working pentester. Fully autonomous and black-box, it solves 87/113 on OWASP Juice Shop and 22/22 on the Duck Store API benchmark, verifying every exploit before it counts. It also repairs your own code: hand it a zip of your repo and it edits, runs your tests, and returns a fixed zip. Runs locally, MIT-licensed, verified by 4,035 assertions.">
+<meta name="description" content="Basilisk is an open-source autonomous AI penetration-testing agent: a native Linux desktop app that turns any LLM into a working pentester. Fully autonomous and black-box, it solves 87/113 on OWASP Juice Shop and 22/22 on the Duck Store API benchmark, verifying every exploit before it counts. It also repairs your own code: hand it a zip of your repo and it edits, runs your tests, and returns a fixed zip. Runs locally, MIT-licensed, verified by 4,106 assertions.">
 <meta name="keywords" content="AI penetration testing agent, autonomous pentest agent, LLM red team tool, open source security tool, automated exploitation, offensive security AI, OWASP Juice Shop benchmark, Kali Linux AI, DeepSeek pentest, Basilisk, AI hacking tool, autonomous security agent, AI code repair agent, autonomous bug fixing, AI coding assistant Linux">
 <meta name="author" content="the-priest">
 <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1">
@@ -17,7 +17,7 @@
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Basilisk">
 <meta property="og:title" content="Basilisk — Autonomous AI Penetration-Testing Agent">
-<meta property="og:description" content="An open-source AI pentester that runs on your machine and proves every exploit — and repairs your own repo the same way. 87/113 OWASP Juice Shop black-box · 22/22 Duck Store API · 4,035 assertions. MIT-licensed.">
+<meta property="og:description" content="An open-source AI pentester that runs on your machine and proves every exploit — and repairs your own repo the same way. 87/113 OWASP Juice Shop black-box · 22/22 Duck Store API · 4,106 assertions. MIT-licensed.">
 <meta property="og:url" content="https://the-priest.github.io/PriestsBasilisk/">
 <meta property="og:image" content="https://the-priest.github.io/PriestsBasilisk/assets/brand/banner.png">
 <meta property="og:image:alt" content="Basilisk — autonomous AI penetration-testing agent">
@@ -73,7 +73,7 @@
     "Baseline-before-edit: records which of your tests were already failing, so pre-existing failures are never misreported as agent damage",
     "Export gate: refuses to hand back a change set it has not verified, or one whose last verification reported a regression",
     "Contained extraction: zip slip, symlink entries and zip bombs refused before anything is written, and refusals are reported rather than silently dropped",
-    "Verified by 4,035 assertions across 51 stdlib-only test suites, runnable offline before you trust it"
+    "Verified by 4,106 assertions across 52 stdlib-only test suites, runnable offline before you trust it"
   ]
 }
 </script>
@@ -125,7 +125,7 @@
     {
       "@type": "Question",
       "name": "How do I know the safety guarantees are real and not marketing?",
-      "acceptedAnswer": { "@type": "Answer", "text": "Run the suite: for f in tests/test_*.py; do python3 \"$f\"; done. It's stdlib-only \u2014 no pytest, no network, no account \u2014 4,035 assertions across 51 suites, done in under a minute. Three things make it worth more than a green tick: every fixed bug gets a test written to fail against the previous release, so regressions can't quietly return; performance is asserted as a scaling exponent rather than a millisecond ceiling, so it fails the same on a fast box and a slow one; and every safety check is paired with a corpus of ordinary work it must stay silent on, so over-blocking fails the suite too." }
+      "acceptedAnswer": { "@type": "Answer", "text": "Run the suite: for f in tests/test_*.py; do python3 \"$f\"; done. It's stdlib-only \u2014 no pytest, no network, no account \u2014 4,106 assertions across 52 suites, done in under a minute. Three things make it worth more than a green tick: every fixed bug gets a test written to fail against the previous release, so regressions can't quietly return; performance is asserted as a scaling exponent rather than a millisecond ceiling, so it fails the same on a fast box and a slow one; and every safety check is paired with a corpus of ordinary work it must stay silent on, so over-blocking fails the suite too." }
     },
     {
       "@type": "Question",
@@ -497,7 +497,7 @@
         <div class="stat"><div class="n">87<span class="slash">/</span>113</div><div class="l">Juice Shop · black-box</div></div>
         <div class="stat"><div class="n">22<span class="slash">/</span>22</div><div class="l">Duck Store API · black-box</div></div>
         <div class="stat"><div class="n">14<span class="slash">/</span>14</div><div class="l">OWASP classes · F1 0.95</div></div>
-        <div class="stat"><div class="n">4,035</div><div class="l">Assertions · 51 suites</div></div>
+        <div class="stat"><div class="n">4,106</div><div class="l">Assertions · 52 suites</div></div>
         <div class="stat"><div class="n">MIT</div><div class="l">Licensed · no account</div></div>
       </div>
 
@@ -538,7 +538,7 @@
         <div class="truth"><b>Black-box</b><span>No target source needed. It reads behaviour, not code — the way an attacker actually has to.</span></div>
         <div class="truth"><b>A receipt for everything</b><span>Every command it runs is hashed into a tamper-evident ledger as it goes. Findings you can hand to a client.</span></div>
         <div class="truth"><b>A floor it can't cross</b><span>The irreversible command class is blocked in two places, below the model. There is no "Run anyway."</span></div>
-        <div class="truth"><b>Verified, not asserted</b><span>4,035 stdlib-only assertions across 51 suites. Run them yourself before you trust it with a shell.</span></div>
+        <div class="truth"><b>Verified, not asserted</b><span>4,106 stdlib-only assertions across 52 suites. Run them yourself before you trust it with a shell.</span></div>
       </div>
     </div>
   </section>
@@ -958,7 +958,7 @@ less install.sh          <span class="c"># read it first</span>
         <details><summary>What vulnerabilities can Basilisk exploit? <span class="pl">+</span></summary><div class="a">Every major web-vulnerability class via general-purpose exploit builders: SQL injection (5 DBMS plus sqlmap), JWT attacks, NoSQL, XXE, SSTi, SSRF, insecure deserialization to RCE, prototype pollution, path traversal, cross-site scripting, OS command injection, IDOR / broken access control, race conditions, file-upload bypass, GraphQL abuse, open redirect and CORS misconfiguration — plus API-first classes such as BOLA, BFLA and mass assignment.</div></details>
         <details><summary>Is Basilisk safe to run? What stops it doing damage? <span class="pl">+</span></summary><div class="a">The irreversible command class (disk wipes, fork bombs, raw block-device writes) is hard-blocked in two independent places with no "Run anyway" option. Untrusted input is quarantined as data rather than instructions, self-written code runs in a bubblewrap jail, and Basilisk will not produce standalone weaponized malware. Use it only on systems you're authorized to test.</div></details>
         <details><summary>Can Basilisk fix my code, not just attack things? <span class="pl">+</span></summary><div class="a">Yes — it's half the product. Hand it a <span class="inline-code">.zip</span> of your repository and it searches, reads and edits the whole tree, runs <strong>your</strong> test suite, and hands back a fixed zip. It records which tests were already failing before it touched anything, so pre-existing failures are never misreported as its own damage, and it refuses to export a change set it hasn't verified. It will not edit your tests to make them pass.</div></details>
-        <details><summary>How do I know the safety guarantees are real and not marketing? <span class="pl">+</span></summary><div class="a">Run the suite: <span class="inline-code">for f in tests/test_*.py; do python3 "$f"; done</span>. It's stdlib-only — no pytest, no network, no account — 4,035 assertions across 51 suites, done in under a minute. Three things make it worth more than a green tick: every fixed bug gets a test written to <strong>fail against the previous release</strong>, so regressions can't quietly return; performance is asserted as a scaling exponent rather than a millisecond ceiling, so it fails the same on a fast box and a slow one; and every safety check is paired with a corpus of ordinary work it must stay silent on, so over-blocking fails the suite too.</div></details>
+        <details><summary>How do I know the safety guarantees are real and not marketing? <span class="pl">+</span></summary><div class="a">Run the suite: <span class="inline-code">for f in tests/test_*.py; do python3 "$f"; done</span>. It's stdlib-only — no pytest, no network, no account — 4,106 assertions across 52 suites, done in under a minute. Three things make it worth more than a green tick: every fixed bug gets a test written to <strong>fail against the previous release</strong>, so regressions can't quietly return; performance is asserted as a scaling exponent rather than a millisecond ceiling, so it fails the same on a fast box and a slow one; and every safety check is paired with a corpus of ordinary work it must stay silent on, so over-blocking fails the suite too.</div></details>
         <details><summary>Has Basilisk ever had a security hole of its own? <span class="pl">+</span></summary><div class="a">Yes, and they get published. In v9.7.0 the hard block on irreversible commands was fuzzed against a <strong>live shell</strong> — each candidate bypass re-run in real bash with the destructive verb swapped for a harmless marker, counting only shapes the shell actually executed. Twenty-one that had been getting through were found and closed, including <span class="inline-code">timeout 5 rm -rf /</span> and <span class="inline-code">( rm -rf ~ )</span>. They're now pinned by a test suite that fails against the previous release. The honest claim isn't that Basilisk has never had a hole — it's that the holes get hunted, published and pinned. Find a twenty-second and open an issue.</div></details>
         <details><summary>What are the requirements? <span class="pl">+</span></summary><div class="a">Python 3.10+ and Linux with GTK4 / libadwaita (X11 or Wayland). It is built and tested on Kali and CachyOS, and runs on any Arch-, Debian- or Fedora-based distro — package manager, escalation tool and wordlist paths are auto-detected.</div></details>
       </div>
