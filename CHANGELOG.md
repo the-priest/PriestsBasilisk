@@ -1,3 +1,59 @@
+## v1.0.0.13 — Aero frame around the whole window (+ deep scan)
+
+### The window itself now reads as glass
+
+Extended the Aero treatment to the window frame: rounded corners, a bright
+inner bevel ring so the whole window looks like a pane of glass, an outer red
+glow, a frosted top-lit sheen under the header, and lit inner edges so the
+sidebar / chat / header read as separate sheets of glass rather than one flat
+wall. The rounded corners and outer glow need a compositor, so they show on the
+real desktop (CachyOS) rather than the headless test renderer; the bevels and
+sheen render everywhere. Pairs with the glass buttons (v1.0.0.12), glass panels
+(v1.0.0.8) and brighter backdrop (v1.0.0.7).
+
+Pure CSS, appended to the Aero layer. Caught and removed one dead selector
+while adding it (`window .main-content` matched no widget -- the sibling
+`window > contents > box` rule covers that surface); the shipped CSS has no
+dead rules.
+
+### Deep scan -- clean
+
+ruff F821/F811/E9/F822/F823/F501/F502/F506: no undefined names, syntax errors,
+or format-string bugs. AST sweep: no mutable defaults, bare excepts, prod
+asserts, duplicate dict keys, return-in-finally, or ==/!= against None. All 8
+high-risk parsers and gates (parse/strip_tool_calls, reply_is_bare_stall,
+_needs_web_verification, gate_command, is_catastrophic_command, check_command,
+extract_targets) fuzzed ~85k inputs total with zero crashes. Every safety gate
+and every fix from this session re-verified (14/14): destructive floor, scope
+fail-closed, redirect + flag-eat leaks, mode gating, news fetch, stall
+detection, ext degradation, big-write recovery. The app launches, the settings
+dialog builds, and brightness applies -- all confirmed under real GTK.
+
+### Tests
+
+53 suites, 4,162 assertions. Full suite green, bubble-fit 140/140 under real
+GTK, guardrail byte-identical, CSS ASCII, assets untouched.
+
+## v1.0.0.12 — glass buttons
+
+The button frames now match the Aero glass look. The `.art-button` frame (top
+bar, bottom toolbar, and the menubutton twins for settings/notifications) was a
+flat opaque dark-red "carved stone" panel; it is now translucent frosted glass:
+a see-through fill that lets the ember backdrop show through, a glossy top-lit
+gradient, a bright 1px bevel on the upper edge, and the red glow kept for hover
+and press. The send button and primary actions already carried the Aero sheen
+from v1.0.0.8/9, so the whole control set now reads as one pane-of-red-glass
+family.
+
+Pure CSS -- the button PNG art is unchanged, only the frame around it. GTK
+parses the stylesheet with zero errors, the CSS stays ASCII, and the edited
+selectors all still map to real widgets (no dead rules).
+
+### Tests
+
+53 suites, 4,162 assertions. Full suite green, bubble-fit 140/140 under real
+GTK, guardrail byte-identical.
+
 ## v1.0.0.11 — backdrop brightness control (+ a self-inflicted bug caught)
 
 ### New: adjustable background brightness

@@ -14,7 +14,7 @@
 
 <br/>
 
-<img src="https://img.shields.io/badge/version-1.0.0.11-e11d2b?style=for-the-badge&labelColor=08090b&logo=gnubash&logoColor=e11d2b" alt="version 1.0.0.11">
+<img src="https://img.shields.io/badge/version-1.0.0.13-e11d2b?style=for-the-badge&labelColor=08090b&logo=gnubash&logoColor=e11d2b" alt="version 1.0.0.13">
 <img src="https://img.shields.io/badge/license-MIT-7d121b?style=for-the-badge&labelColor=08090b&logo=opensourceinitiative&logoColor=7d121b" alt="MIT license">
 <img src="https://img.shields.io/badge/tests-4162%20assertions-2ea043?style=for-the-badge&labelColor=08090b&logo=pytest&logoColor=2ea043" alt="4162 assertions">
 <img src="https://img.shields.io/badge/telemetry-none-6d7680?style=for-the-badge&labelColor=08090b&logo=ghostery&logoColor=6d7680" alt="no telemetry">

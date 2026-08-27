@@ -180,7 +180,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.basilisk"
 APP_NAME = "Basilisk"
-VERSION = "1.0.0.11"
+VERSION = "1.0.0.13"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -1293,21 +1293,40 @@ link, button.link, *:link { color: #7d121b; }
    the emblem art carries its own carved-stone frame, so the button is
    transparent -- just a soft ember glow on hover, to match the rest. */
 .art-button {
-    background-color: rgba(12, 8, 9, 0.66);
-    background-image: linear-gradient(180deg, rgba(70, 24, 18, 0.24), rgba(9, 5, 6, 0) 66%);
-    border: 1px solid rgba(140, 26, 32, 0.50);
-    box-shadow: inset 0 1px 0 rgba(210, 90, 48, 0.07), 0 0 6px rgba(125, 18, 27, 0.20);
+    /* Frosted Aero glass: a see-through fill with a glossy top-lit sheen and a
+       bright bevel on the upper edge, so the button reads as a pane of red
+       glass rather than carved stone. Kept translucent (low alphas) so the
+       ember backdrop shows through. */
+    background-color: rgba(30, 16, 18, 0.28);
+    background-image: linear-gradient(180deg,
+                      rgba(255, 210, 200, 0.16) 0%,
+                      rgba(150, 40, 46, 0.12) 46%,
+                      rgba(20, 10, 12, 0.10) 54%,
+                      rgba(70, 20, 24, 0.14) 100%);
+    border: 1px solid rgba(255, 120, 120, 0.28);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.30),
+                inset 0 -1px 0 rgba(0, 0, 0, 0.30),
+                0 0 8px rgba(125, 18, 27, 0.22);
     padding: 3px;
     border-radius: 12px;
     transition: all 150ms ease;
 }
 .art-button:hover {
-    background-color: rgba(125, 18, 27, 0.14);
-    box-shadow: 0 0 14px rgba(205, 54, 28, 0.45);
+    background-color: rgba(150, 40, 46, 0.30);
+    background-image: linear-gradient(180deg,
+                      rgba(255, 220, 210, 0.24) 0%,
+                      rgba(190, 50, 56, 0.18) 46%,
+                      rgba(60, 16, 20, 0.14) 54%,
+                      rgba(120, 26, 32, 0.20) 100%);
+    border-color: rgba(255, 130, 130, 0.55);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.40),
+                0 0 16px rgba(230, 60, 40, 0.55);
 }
 .art-button:active {
-    background-color: rgba(125, 18, 27, 0.22);
-    box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.40), 0 0 8px rgba(205, 54, 28, 0.40);
+    background-color: rgba(90, 20, 24, 0.40);
+    box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.45),
+                inset 0 1px 0 rgba(255, 255, 255, 0.10),
+                0 0 8px rgba(205, 54, 28, 0.40);
 }
 /* UNLEASH -- the big red dragon. A quiet ember when idle, a hot red glow when
    armed so it's unmistakable that Basilisk is off the leash. */
@@ -1334,22 +1353,32 @@ link, button.link, *:link { color: #7d121b; }
    inner button too: fully transparent, no border/shadow, ember glow on hover to
    match the plain art buttons. */
 menubutton.art-button > button {
-    background-color: rgba(12, 8, 9, 0.66);
-    background-image: linear-gradient(180deg, rgba(70, 24, 18, 0.24), rgba(9, 5, 6, 0) 66%);
-    border: 1px solid rgba(140, 26, 32, 0.50);
-    box-shadow: inset 0 1px 0 rgba(210, 90, 48, 0.07), 0 0 6px rgba(125, 18, 27, 0.20);
+    background-color: rgba(30, 16, 18, 0.28);
+    background-image: linear-gradient(180deg,
+                      rgba(255, 210, 200, 0.16) 0%,
+                      rgba(150, 40, 46, 0.12) 46%,
+                      rgba(20, 10, 12, 0.10) 54%,
+                      rgba(70, 20, 24, 0.14) 100%);
+    border: 1px solid rgba(255, 120, 120, 0.28);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.30),
+                inset 0 -1px 0 rgba(0, 0, 0, 0.30),
+                0 0 8px rgba(125, 18, 27, 0.22);
     padding: 3px;
     min-width: 0;
     min-height: 0;
     border-radius: 12px;
 }
 menubutton.art-button > button:hover {
-    background-color: rgba(125, 18, 27, 0.14);
-    box-shadow: 0 0 14px rgba(205, 54, 28, 0.45);
+    background-color: rgba(150, 40, 46, 0.30);
+    border-color: rgba(255, 130, 130, 0.55);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.40),
+                0 0 16px rgba(230, 60, 40, 0.55);
 }
 menubutton.art-button > button:active {
-    background-color: rgba(125, 18, 27, 0.22);
-    box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.40), 0 0 8px rgba(205, 54, 28, 0.40);
+    background-color: rgba(90, 20, 24, 0.40);
+    box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.45),
+                inset 0 1px 0 rgba(255, 255, 255, 0.10),
+                0 0 8px rgba(205, 54, 28, 0.40);
 }
 /* Startup splash window -- dark backdrop behind the igniting-dragon animation
    (the DrawingArea paints over this; it just avoids a white flash on the very
@@ -2435,6 +2464,50 @@ button:active {
 /* Status pills + cards: glass sheen so chrome matches the new surfaces. */
 .status-pill, .card, .code-block {
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+/* ---- The WINDOW itself: an Aero glass frame all around the edge. ----
+   Rounded corners, a bright inner bevel ring so the whole window looks like a
+   pane of glass, an outer red glow, and a faint top-lit sheen bleeding down
+   from the title area. The window keeps its ember background underneath; this
+   only adds the frame + edge lighting. Applied to the toplevel and the adw
+   window content so both the client-side-decoration corners and the inner
+   surface pick it up. */
+window {
+    border-radius: 14px;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14),
+                inset 0 0 0 1px rgba(255, 120, 120, 0.10),
+                0 0 22px rgba(125, 18, 27, 0.30);
+}
+window > contents,
+window.csd,
+.background {
+    border-radius: 14px;
+}
+/* A frosted highlight strip along the very top of the window, the classic
+   Aero "light source above" cue, sitting under the header. */
+window > contents > box {
+    background-image: linear-gradient(180deg,
+                      rgba(255, 235, 230, 0.05) 0%,
+                      rgba(255, 235, 230, 0.0) 90px);
+}
+/* The header's bottom edge gets a thin lit line so the glass panels below it
+   read as separate sheets of glass, not one flat wall. */
+headerbar {
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22),
+                inset 0 -1px 0 rgba(0, 0, 0, 0.55),
+                0 2px 6px rgba(0, 0, 0, 0.35);
+}
+/* The message scroller floats on the backdrop; give its viewport a faint
+   inner top highlight so the chat area reads as another glass sheet. */
+.chat-scroll {
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+/* Sidebar gets a matching lit inner edge on the right so it looks beveled
+   against the chat, completing the "panes of glass" framing. */
+.sidebar {
+    box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.06),
+                inset 1px 0 0 rgba(255, 255, 255, 0.04);
 }
 """
 
