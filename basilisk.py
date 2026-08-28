@@ -180,7 +180,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.basilisk"
 APP_NAME = "Basilisk"
-VERSION = "1.0.0.15"
+VERSION = "1.0.0.14"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -2509,58 +2509,6 @@ headerbar {
     box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.06),
                 inset 1px 0 0 rgba(255, 255, 255, 0.04);
 }
-
-/* ---- Image-free "hacker" glyph buttons (attach, sound, terminal). A
-   monospace mark on the same frosted glass frame as the art-buttons, so the
-   toolbar/header reads as one glass set without any PNG plaques. Red ember
-   text with a faint glow; brighter on hover; lit when toggled/active. ---- */
-.glyph-btn {
-    background-color: rgba(30, 16, 18, 0.30);
-    background-image: linear-gradient(180deg,
-                      rgba(255, 210, 200, 0.14) 0%,
-                      rgba(150, 40, 46, 0.10) 46%,
-                      rgba(20, 10, 12, 0.08) 54%,
-                      rgba(70, 20, 24, 0.12) 100%);
-    border: 1px solid rgba(255, 120, 120, 0.26);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.26),
-                inset 0 -1px 0 rgba(0, 0, 0, 0.28),
-                0 0 7px rgba(125, 18, 27, 0.20);
-    border-radius: 10px;
-    min-width: 34px;
-    min-height: 30px;
-    padding: 2px 8px;
-    transition: all 140ms ease;
-}
-.glyph-btn-label {
-    font-family: 'JetBrains Mono', 'Fira Code', 'DejaVu Sans Mono', monospace;
-    font-size: 15px;
-    font-weight: 700;
-    color: #ff6b5a;
-    text-shadow: 0 0 6px rgba(229, 40, 58, 0.45), 0 1px 1px rgba(0,0,0,0.7);
-}
-.glyph-btn:hover {
-    background-color: rgba(150, 40, 46, 0.32);
-    border-color: rgba(255, 130, 130, 0.55);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.36),
-                0 0 14px rgba(230, 60, 40, 0.50);
-}
-.glyph-btn:active {
-    background-color: rgba(90, 20, 24, 0.42);
-    box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.45),
-                inset 0 1px 0 rgba(255, 255, 255, 0.10);
-}
-.glyph-btn.toggled, .glyph-btn.active {
-    background-color: rgba(170, 30, 38, 0.45);
-    border-color: rgba(255, 90, 100, 0.70);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.30),
-                0 0 14px rgba(255, 45, 58, 0.55);
-}
-.glyph-btn.toggled .glyph-btn-label,
-.glyph-btn.active .glyph-btn-label {
-    color: #ffd0c8;
-    text-shadow: 0 0 9px rgba(255, 80, 90, 0.75);
-}
-.term-glyph .glyph-btn-label { font-size: 16px; letter-spacing: 1px; }
 """
 
 
@@ -4048,24 +3996,6 @@ def _btn_art(name_or_path, px: int = 26):
     pic.set_valign(Gtk.Align.CENTER)
     pic.set_size_request(pb.get_width(), px)
     return pic
-
-
-def _glyph_button(glyph: str, tooltip: str, css_extra: str = "",
-                  toggle: bool = False):
-    """A clean, image-free toolbar/header button: a monospace 'hacker' glyph
-    on the Aero glass frame. Used instead of the PNG-art plaques. `glyph` is a
-    short unicode/ASCII mark (e.g. '>_' for the terminal, a bell, a gear). The
-    caller connects the signal and appends it. Returns the button."""
-    btn = Gtk.ToggleButton() if toggle else Gtk.Button()
-    lbl = Gtk.Label(label=glyph)
-    lbl.add_css_class("glyph-btn-label")
-    btn.set_child(lbl)
-    btn.add_css_class("glyph-btn")
-    if css_extra:
-        btn.add_css_class(css_extra)
-    btn.set_tooltip_text(tooltip)
-    btn.set_valign(Gtk.Align.CENTER)
-    return btn
 
 
 def _find_avatar_png() -> Optional[str]:
@@ -8003,15 +7933,6 @@ class MainWindow(Adw.ApplicationWindow):
         self.notif_badge_lbl.set_visible(False)
         _bell_overlay.add_overlay(self.notif_badge_lbl)
         hb.pack_end(_bell_overlay)
-
-        # Terminal/log toggle — moved up here from the composer toolbar. A clean
-        # '>_' prompt glyph on the glass frame, the most hacker-legible mark for
-        # "show the live shell log". Same handler and CSS-state classes as before
-        # (_toggle_terminal_panel toggles .active), so nothing downstream changes.
-        self.terminal_toggle_btn = _glyph_button(
-            ">_", "Show/hide live terminal log", css_extra="term-glyph")
-        self.terminal_toggle_btn.connect("clicked", self._toggle_terminal_panel)
-        hb.pack_end(self.terminal_toggle_btn)
         # initial paint of badge/list
         GLib.idle_add(self._refresh_notifications)
 
@@ -8496,23 +8417,56 @@ class MainWindow(Adw.ApplicationWindow):
         self.unleash_toggle.connect("toggled", self._on_unleash_toggled)
         actions.append(self.unleash_toggle)
 
-        # Attach — a clean paperclip glyph on the glass frame (no PNG plaque).
-        attach_btn = _glyph_button("\U0001F4CE", "Attach file")
-        attach_btn.connect("clicked", lambda *_: self._pick_attachment())
-        actions.append(attach_btn)
+        for icon, tip, cb, art in [
+            ("mail-attachment-symbolic", "Attach file",
+             self._pick_attachment, _BTN_ATTACH),
+            ("camera-photo-symbolic", "Take a photo (Basilisk can see it)",
+             self._user_action_camera, _BTN_CAMERA),
+        ]:
+            btn = Gtk.Button()
+            _bart = _btn_art(art, px=_COMPOSER_BTN_PX)
+            if _bart is not None:
+                btn.set_child(_bart)
+                btn.add_css_class("art-button")
+            else:
+                btn.set_child(Gtk.Image.new_from_icon_name(icon))
+                btn.add_css_class("icon-button")
+            btn.set_tooltip_text(tip)
+            btn.connect("clicked", lambda *_, c=cb: c())
+            actions.append(btn)
 
-        # (The Suggestion button was removed — while Basilisk is working, just
-        # type your nudge and press Enter and it's sent as a mid-run suggestion
-        # without stopping. The mouse Stop control is unchanged. The Camera
-        # button was removed too. The Terminal toggle moved UP to the header.)
+        # Suggestion button — send a nudge to Basilisk mid-run WITHOUT stopping
+        # it. Type your suggestion and tap this: while it's working the note is
+        # queued into the conversation and picked up on its next step; when idle
+        # it just sends. A lightbulb glyph (icon themes don't all ship one).
+        self.suggest_btn = Gtk.Button()
+        _sgart = _btn_art(_BTN_SUGGEST, px=_COMPOSER_BTN_PX)
+        if _sgart is not None:
+            self.suggest_btn.set_child(_sgart)
+            self.suggest_btn.add_css_class("art-button")
+        else:
+            _sg = Gtk.Label(label="\U0001F4A1")   # lightbulb
+            self.suggest_btn.set_child(_sg)
+            self.suggest_btn.add_css_class("icon-button")
+        self.suggest_btn.set_tooltip_text(
+            "Send a suggestion without stopping Basilisk")
+        self.suggest_btn.connect("clicked", lambda *_: self._send_suggestion())
+        actions.append(self.suggest_btn)
 
         # Speaker toggle — read assistant replies aloud.  Only shown when
-        # a TTS engine is actually available on the box. Clean speaker glyph.
+        # a TTS engine is actually available on the box.
         self.tts_toggle = None
         if self.tts is not None and self.tts.available():
-            self.tts_toggle = _glyph_button(
-                "\U0001F509", f"Read replies aloud — {self.tts.engine_name()}",
-                toggle=True)
+            self.tts_toggle = Gtk.ToggleButton()
+            _sndart = _btn_art(_BTN_SOUND, px=_COMPOSER_BTN_PX)
+            if _sndart is not None:
+                self.tts_toggle.set_child(_sndart)
+                self.tts_toggle.add_css_class("art-button")
+            else:
+                self.tts_toggle.set_icon_name("audio-volume-high-symbolic")
+                self.tts_toggle.add_css_class("icon-button")
+            self.tts_toggle.set_tooltip_text(
+                f"Read replies aloud — {self.tts.engine_name()}")
             on = bool(self.settings.get("tts_enabled"))
             self.tts_toggle.set_active(on)
             if on:
@@ -8520,8 +8474,19 @@ class MainWindow(Adw.ApplicationWindow):
             self.tts_toggle.connect("toggled", self._on_tts_toggled)
             actions.append(self.tts_toggle)
 
-        # (The Terminal/log toggle moved UP to the header bar — built there as
-        # a clean glyph button, next to Settings and Notifications.)
+        # Log toggle sits right alongside the other toolbar buttons.
+        self.terminal_toggle_btn = Gtk.Button()
+        _termart = _btn_art(_BTN_TERMINAL, px=_COMPOSER_BTN_PX)
+        if _termart is not None:
+            self.terminal_toggle_btn.set_child(_termart)
+            self.terminal_toggle_btn.add_css_class("art-button")
+        else:
+            self.terminal_toggle_btn.set_child(
+                Gtk.Image.new_from_icon_name("utilities-terminal-symbolic"))
+            self.terminal_toggle_btn.add_css_class("icon-button")
+        self.terminal_toggle_btn.set_tooltip_text("Show/hide live terminal log")
+        self.terminal_toggle_btn.connect("clicked", self._toggle_terminal_panel)
+        actions.append(self.terminal_toggle_btn)
 
         # The chips live in a horizontal scroller so a phone too narrow to fit
         # them all can't be forced wider than the screen — they scroll instead.
@@ -9215,16 +9180,7 @@ class MainWindow(Adw.ApplicationWindow):
         if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
             shift = bool(state & Gdk.ModifierType.SHIFT_MASK)
             if not shift:
-                # While Basilisk is working, Enter sends the typed text as a
-                # mid-run SUGGESTION (nudge without stopping) instead of being
-                # refused. Idle, it's a normal send. The Stop control is the
-                # send/stop button (mouse) and Escape — Enter never stops, so
-                # the operator can steer a running mission by just typing and
-                # hitting Enter.
-                if self._is_busy():
-                    self._send_suggestion()
-                else:
-                    self._send_user_message()
+                self._send_user_message()
                 return True
         # Escape stops Basilisk mid-reply.
         if keyval == Gdk.KEY_Escape and self._is_busy():
