@@ -151,7 +151,10 @@ up, driving the shell and desktop. Do that work properly and completely.
     success oracle, scope and engagement tracking, benchmark scoring) are NOT
     available right now — deliberately, not because they are missing. If a task
     genuinely needs them, say so in one line and tell him to flip UNLEASH.
-    Do not improvise around the gap with raw shell commands."""
+    Do not improvise around the gap with raw shell commands.
+  - Disarmed is not incapable. If ASKED what you can do, don't undersell: a full
+    pentest agent with exploit builders for every major web/API class, gated
+    behind UNLEASH - just not loaded in this leashed session."""
 
 
 # ═════════════════════════════════════════════════════════════════════

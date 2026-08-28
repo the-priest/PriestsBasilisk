@@ -365,8 +365,10 @@ print(f"     max      armed={_t_armx} disarmed={_t_disx}")
 ck(f"disarmed grouped is smaller ({_t_dis} < {_t_arm})", _t_dis < _t_arm)
 ck(f"disarmed max is much smaller ({_t_disx} < {_t_armx})",
    _t_disx < _t_armx - 5000)
-ck(f"disarmed grouped under 6.7k tok ({_t_dis})", _t_dis < 6700,
-   "general work should not pay for the engagement prompt")
+ck(f"disarmed grouped under 6.75k tok ({_t_dis})", _t_dis < 6750,
+   "general work should not pay for the engagement prompt; the +~55 tok over "
+   "the old 6.7k ceiling is the leashed capability-awareness line, which stops "
+   "the model underselling what it can do when asked, without loading any tool")
 ck(f"core tool text under 3.9k tok ({len(kp.CORE_TOOLS_TEXT)//4})",
    len(kp.CORE_TOOLS_TEXT) // 4 < 3900,
    "core ships on EVERY turn in both modes — it is the dominant cost")

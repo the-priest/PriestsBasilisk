@@ -30,7 +30,7 @@ name = "priestsbasilisk"
 # derived with [tool.setuptools.dynamic] on purpose: reading it that way
 # imports basilisk.py, which imports gi at module scope, so the BUILD would
 # need GTK installed just to learn a version string.
-version = "1.0.0.13"
+version = "1.0.0.14"
 description = "Autonomous AI penetration-testing agent — a native Linux desktop app that turns any LLM into a working pentester, and repairs your own repos the same way."
 readme = "README.md"
 requires-python = ">=3.10"

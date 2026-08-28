@@ -10,13 +10,13 @@
 
 <br/>
 
-**You bring the model. Basilisk gives it hands, a memory, a methodology — and a leash you hold.**
+**You bring the model. Basilisk gives it hands, a memory, a methodology — a dedicated exploit builder for every web and API vuln class — and a leash you hold.**
 
 <br/>
 
-<img src="https://img.shields.io/badge/version-1.0.0.13-e11d2b?style=for-the-badge&labelColor=08090b&logo=gnubash&logoColor=e11d2b" alt="version 1.0.0.13">
+<img src="https://img.shields.io/badge/version-1.0.0.14-e11d2b?style=for-the-badge&labelColor=08090b&logo=gnubash&logoColor=e11d2b" alt="version 1.0.0.14">
 <img src="https://img.shields.io/badge/license-MIT-7d121b?style=for-the-badge&labelColor=08090b&logo=opensourceinitiative&logoColor=7d121b" alt="MIT license">
-<img src="https://img.shields.io/badge/tests-4162%20assertions-2ea043?style=for-the-badge&labelColor=08090b&logo=pytest&logoColor=2ea043" alt="4162 assertions">
+<img src="https://img.shields.io/badge/tests-4181%20assertions-2ea043?style=for-the-badge&labelColor=08090b&logo=pytest&logoColor=2ea043" alt="4181 assertions">
 <img src="https://img.shields.io/badge/telemetry-none-6d7680?style=for-the-badge&labelColor=08090b&logo=ghostery&logoColor=6d7680" alt="no telemetry">
 
 <br/>
@@ -56,9 +56,34 @@
 
 <img src="https://capsule-render.vercel.app/api?type=rect&color=0:08090b,50:e11d2b,100:08090b&height=3" width="100%" alt="">
 
+<div align="center">
+
+### ⚔️ A dedicated exploit builder for every class — not a prompt and a prayer
+
+Most "AI pentesters" hand the model a shell and hope it improvises `curl`. Basilisk ships **real, parameterized exploit builders** for the whole web/API attack surface, each one constructing the payload and letting the verified-exploitation oracle prove the hit. Nothing counts until a marker lands.
+
+</div>
+
+| | | | |
+|---|---|---|---|
+| 🐚 **Deserialization RCE**<br/>node · yaml · python · java · php · .NET · ruby | 💉 **SQLi**<br/>auth-bypass · union · error · blind | 🍃 **NoSQL**<br/>bypass · manipulation · DoS · blind exfil | 📄 **XXE**<br/>file read · SSRF · billion-laughs |
+| 🖼️ **SSTI**<br/>engine-detect → RCE | ⚡ **XSS**<br/>html · attr · js · DOM | 🖥️ **Command injection**<br/>inline · blind · OOB | 🎫 **JWT forgery**<br/>alg:none · RS256→HS256 |
+| 🔐 **SAML / OAuth**<br/>sig-wrapping · flow abuse | 🧮 **Padding oracle**<br/>decrypt · encrypt | 🧬 **Prototype pollution**<br/>+ gadget hints | 🌐 **SSRF**<br/>internal · cloud-metadata |
+| 🆔 **IDOR / mass-assignment**<br/>+ authz sweeps | 🏁 **Race conditions**<br/>TOCTOU | 🕸️ **GraphQL**<br/>introspect · abuse | 🚚 **Request smuggling**<br/>HTTP desync |
+| 📤 **Upload bypass**<br/>+ path traversal | 🎯 **Subdomain / cloud takeover** | 🧾 **LDAP · XPath · XSLT · CRLF · SSI · CSV** | 🤖 **CAPTCHA solve**<br/>+ business-logic engine |
+
+<div align="center">
+
+**…plus** recon planning · CVE → KEV → EPSS enrichment · `zday_scan` source variant analysis · scope that fails closed · an asset graph · a hashed evidence ledger · and a repo-repair mode that fixes your code and verifies the fix.
+**Every builder is armed-only** — it loads behind **Unleash**, and disarmed it's *refused at the loader*, not just hidden.
+
+</div>
+
+<img src="https://capsule-render.vercel.app/api?type=rect&color=0:08090b,50:e11d2b,100:08090b&height=3" width="100%" alt="">
+
 ## 🎯 What it does
 
-Two jobs, one loop, and the loop is the same both times: **do the thing, then prove it worked.**
+Two jobs, one loop, and the loop is the same both times: **do the thing, then prove it worked.** No confidence scores. No "looks exploitable." A dumped row or it didn't happen.
 
 <table>
 <tr>
@@ -350,9 +375,33 @@ Tool specs load **on demand**, so the base prompt stays small no matter how many
 | 📦 **workspace** | always | Import a repo zip, search and read it whole, surgical edits, baseline → verify → export with a gate that refuses unverified changes |
 | 🖱️ **desktop** | always | Launch apps, manage windows, type, click, screenshot, OCR, notify |
 | 🖼️ **media** | always | Show images inline, and actually *look* at one with a vision model |
-| ⚔️ **offensive** | **armed only** | Recon planning, scanner parsing, CVE → KEV → EPSS, nuclei templates, sqlmap builder, `zday_scan`, the verified-exploitation oracle + out-of-band canary |
+| ⚔️ **offensive** | **armed only** | Recon planning, scanner parsing, CVE → KEV → EPSS enrichment, nuclei templates, `zday_scan` source variant analysis, the verified-exploitation oracle + out-of-band canary — and the **class exploit builders** below |
 | 🎯 **engagement** | **armed only** | Authorised scope (fails closed), asset graph, loot, in-scope credential-reuse leads |
 | 📊 **benchmark** | **armed only** | Score a run against known-vulnerable practice targets |
+
+### ⚔️ The arsenal (armed only)
+
+Every builder **constructs** the exploit for an authorized, in-scope target and hands it back; the loop fires it through the safety gate and the oracle proves the hit. Pure builders — they send nothing themselves.
+
+| Class | Builder | What it produces |
+|---|---|---|
+| **Deserialization RCE** | `deserialization_payload` | node (`_$$ND_FUNC$$_`), js-yaml, python pickle, java (ysoserial), php (phpggc), .NET, ruby marshal — 7 platforms |
+| **NoSQL** | `nosql_injection` | Mongo operator bodies: auth-bypass (`$ne`/`$gt`/`$regex`), manipulation (update pipeline), DoS (`$where` spin), blind exfiltration (`$regex` oracle + charset walk) |
+| **SQLi** | `sqli_payload` | auth-bypass, union, error, blind — DBMS-parameterized |
+| **XXE** | `xxe_payload` | external-entity file read / SSRF, billion-laughs DoS |
+| **SSTI** | `ssti_payload` | engine detection + RCE per template engine |
+| **XSS** | `xss_payload` | html/attr/js/DOM contexts, filter-evasion variants |
+| **Command injection** | `command_injection` | unix/windows, inline/blind/OOB |
+| **JWT** | `jwt_forge` | `alg:none`, RS256→HS256 key confusion, claim override |
+| **Auth/identity** | `saml_attack`, `auth_bypass_headers`, `oauth_probe` | SAML signature-wrapping, trusted-header spoof, OAuth flow abuse |
+| **Crypto** | `padding_oracle`, `coupon_forge` | padding-oracle decrypt/encrypt, coupon/price forgery (z85/base64/…) |
+| **Injection (other)** | `xslt_injection`, `ldap_injection`, `xpath_injection`, `crlf_injection`, `ssi_injection`, `csv_injection` | the long tail, each parameterized |
+| **Logic & access** | `idor_probe`, `mass_assignment`, `race_condition`, `business_logic` | IDOR sweeps, mass-assignment, TOCTOU races, and the systematic business-logic methodology for novel app-specific flaws |
+| **Modern web** | `graphql_probe`, `request_smuggling`, `websocket_probe`, `prototype_pollution`, `ssrf_payload`, `open_redirect`, `host_header_injection` | GraphQL introspection/abuse, HTTP desync, WS, proto-pollution, SSRF, redirect + host-header |
+| **Files & recon** | `upload_bypass`, `path_traversal`, `subdomain_takeover`, `cloud_storage`, `webapp_recon`, `tech_fingerprint`, `waf_detect` | upload filter bypass, traversal, takeover, cloud-bucket, high-signal path sweep, fingerprinting, WAF detection |
+| **Anti-automation** | `captcha_solve` | text/arithmetic CAPTCHA from any app (non-eval parser) |
+
+Every hit is **proved, not assumed** — a dumped row, a forged token that validates, a measurable timing delta, an out-of-band callback — and the oracle never re-runs a solved bug.
 
 ### 🔧 Repo repair, tool by tool
 
@@ -379,7 +428,7 @@ The import path is hardened against hostile archives: **Zip slip**, **Zip bombs*
 for f in tests/test_*.py; do python3 "$f" || echo "RED $f"; done
 ```
 
-Stdlib only. No pytest, no network, no fixtures, no account. **4,162 assertions across 53 suites**, done in under a minute.
+Stdlib only. No pytest, no network, no fixtures, no account. **4,181 assertions across 53 suites**, done in under a minute.
 
 <table>
 <tr valign="top"><td width="50%">
@@ -510,7 +559,7 @@ If it earns its place in your kit, star the repo and tell someone who runs engag
 
 <br/>
 
-### Built by one person. Verified by 3,756 assertions. Priced at nothing.
+### Built by one person. Verified by 4,181 assertions. Priced at nothing.
 
 <sub>Clone it, read it, run the suite, then point it at something you own.</sub>
 

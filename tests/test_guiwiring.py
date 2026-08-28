@@ -359,5 +359,26 @@ ck("50 maps to about the shipped default scrim (~0.42)",
    abs(_op(50) - 0.42) < 0.02)
 
 
+# ── Unleash arms and waits; it does not auto-fire a turn ─────────────
+print("\n== pressing Unleash arms and waits (no auto-kickoff) ==")
+# The handler must NOT call _kick_assistant_turn and must NOT latch a mission
+# from stale history. Pressing Unleash arms the suite + mode and then waits for
+# the operator's objective, exactly like leashed waits. The operator reported
+# it "just goes off" the instant the button was pressed.
+_uh = _SRC[_SRC.index("def _on_unleash_toggled"):
+           _SRC.index("def _open_settings")]
+ck("unleash handler does not kick a turn",
+   "_kick_assistant_turn()" not in _uh,
+   "arming must not auto-fire a turn - it arms and waits for the objective")
+ck("unleash handler does not latch a mission from history",
+   "_mission_active = True" not in _uh,
+   "arming must not latch a mission onto stale history the operator did not "
+   "re-issue")
+ck("arming still forces agent mode on",
+   "agent_toggle.set_active(True)" in _uh)
+ck("arming still opens a chat if none exists",
+   "_new_chat()" in _uh)
+
+
 print(f"\n{_p} passed, {_f} failed")
 sys.exit(1 if _f else 0)

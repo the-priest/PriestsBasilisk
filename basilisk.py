@@ -180,7 +180,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.basilisk"
 APP_NAME = "Basilisk"
-VERSION = "1.0.0.13"
+VERSION = "1.0.0.14"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -10283,20 +10283,10 @@ class MainWindow(Adw.ApplicationWindow):
                 self._activity_note(
                     "UNLEASHED - mission active: running until complete",
                     "note")
-        # Unleash kickoff (one-shot, fired the turn right after arming): confirm
-        # the target and go, or ask for it once if none is set yet.
-        if self._unleash_kickoff_pending:
-            self._unleash_kickoff_pending = False
-            addendum = (addendum + "\n\n[UNLEASH TRIGGERED — the operator just "
-                "armed Unleash. FIRST lock the target: if the conversation "
-                "already names a target or objective, restate it in ONE line to "
-                "confirm ('Target confirmed: <X> — going now.') and then "
-                "immediately begin and do NOT stop until it is fully complete and "
-                "verified. If NO target is set yet, ask the operator in ONE short "
-                "line what the target is, then STOP and wait — the moment they "
-                "reply, you go full send. Seek no approval beyond confirming the "
-                "target.]").strip()
-            self.terminal_log("🎯 unleash: confirming target", "dim")
+        # (Unleash no longer fires a kickoff turn on arming — it arms and waits
+        # for the operator's objective, which latches the mission via _submit.
+        # The old one-shot "confirm the target / ask once" addendum lived here
+        # and is gone with the auto-kick that set its flag.)
         # ANSWER MODE (leashed) is a research-and-confirm SINGLE answer, not a
         # one-shot memory dump: it may chain web_search / web_read / github as
         # many times as it needs to actually find and verify the answer, then
@@ -14864,42 +14854,28 @@ class MainWindow(Adw.ApplicationWindow):
         if self._unleashed:
             btn.add_css_class("toggled")
             btn.set_tooltip_text(
-                "UNLEASHED — full autonomous, will not stop until the mission is "
-                "complete. Click to stand down.")
+                "UNLEASHED — offensive suite armed and full autonomous. Send an "
+                "objective and it runs until complete. Click to stand down.")
             # Unleash needs the tools and the mission loop → force agent mode on.
             if not self.current_agent_mode:
                 self.agent_toggle.set_active(True)   # fires _on_agent_toggled
             self.terminal_log(
-                "🔥 UNLEASHED — confirming target, going full autonomous", "ok")
+                "🔥 UNLEASHED — offensive suite armed, waiting for your objective",
+                "ok")
             self._show_toast(
-                "Unleashed. Confirming target, going full send.", timeout=4)
-            self._unleash_kickoff_pending = True
+                "Unleashed. Send an objective when you're ready.", timeout=4)
             self._stop_requested = False
             if self.current_chat_id is None:
                 self._new_chat()
-            # If an objective already exists in this chat, latch a mission on it
-            # so the kickoff turn runs relentless; otherwise the kickoff turn just
-            # asks for the target and waits (the reply latches the mission).
-            last = ""
-            if self.current_chat_id is not None:
-                for m in reversed(self.store.list_messages(self.current_chat_id)):
-                    if m.role == "user" and "<tool_result>" not in (m.content or "") \
-                            and m.meta.get("kind") != "tool_result":
-                        last = m.content or ""
-                        break
-            if last.strip() and not conversational_turn(last):
-                self._mission_active = True
-                self._mission_objective = last
-                self._mission_kicks = 0
-                self._recent_commands = []
-                self._reset_action_log()
-                self._mission_verify_pending = False
-                self._mission_no_action_streak = 0
-                self._mission_directive = ""
-                self._error_retries = 0
-                self._mission_ever_acted = False
-            if self.streaming_chat_id is None:
-                self._kick_assistant_turn()
+            # ARM ONLY — do NOT kick a turn or latch a mission here. Pressing
+            # Unleash arms the offensive suite and the mission loop and then
+            # WAITS, exactly like leashed mode waits: nothing runs until the
+            # operator actually sends an objective. The message they send next
+            # latches the mission (see _submit → "Mission latch") and kicks the
+            # turn. Auto-firing on arm — the old behaviour — made Basilisk "go
+            # off on its own" the instant the button was pressed, and made it
+            # latch a mission onto stale history the operator never re-issued.
+            self._unleash_kickoff_pending = False
         else:
             btn.remove_css_class("toggled")
             btn.set_tooltip_text(

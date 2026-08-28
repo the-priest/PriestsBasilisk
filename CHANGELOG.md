@@ -1,3 +1,57 @@
+## v1.0.0.14 — Unleash arms and waits; it knows when it's done; and it stops underselling
+
+Three behavioural fixes plus the README showing the full arsenal.
+
+### Unleash no longer "just goes off" on its own
+
+Pressing Unleash fired a turn immediately and latched a mission onto whatever
+was last in the chat, so it started working the instant the button was pressed
+with no objective from the operator. Now Unleash ARMS and WAITS: it loads the
+offensive suite and the mission loop, then does nothing until you send an
+objective (which latches the mission via the normal submit path) - exactly like
+leashed mode waits. Verified under real GTK: arming fires zero turns and latches
+no mission.
+
+### It knows when it's done (like leashed does)
+
+In a mission, the loop only stopped on the [[MISSION_COMPLETE]] token or a
+narrow set of formal phrases. When the model finished and said so plainly - "The
+task is complete", "Everything you asked for is done", "All done here", "the
+target is fully tested" - none matched, so the mission kept re-kicking and the
+model rambled or repeated. Broadened the strong-conclusion detector to catch
+natural whole-task completion phrasings, scoped so PARTIAL progress ("completed
+the recon phase", "solved the first challenge", "step 1 of 5") never false-stops
+mid-work. 0 false-stops across the partial-work set.
+
+### It stops underselling its own capability
+
+When ASKED what it can do while leashed, the model didn't have its arsenal in
+front of it and undersold. Added a tight capability-awareness line to the
+leashed role: it now describes the real exploitation suite accurately and with
+confidence, while still stating the tools aren't loaded until Unleash - the
+arming boundary is unchanged.
+
+### README: the full arsenal, up front
+
+Added an "arsenal at a glance" showcase near the top - a dedicated exploit
+builder for every web/API class (deserialization RCE across 7 platforms, SQLi,
+NoSQL, XXE, SSTI, XSS, command injection, JWT/SAML forgery, padding-oracle,
+prototype pollution, SSRF, IDOR, race conditions, GraphQL, request smuggling,
+and the long tail). Every one of the 30 claims was checked against a real
+builder in exploits.py - accurate, not hype. Also fixed a stale assertion count
+in the footer (said 3,756; now 4,181 everywhere).
+
+### Safety unchanged
+
+Leashed still refuses the offensive loader; armed still loads it; the
+destructive floor and fail-closed scope gate fire regardless of mode; the
+guardrail is byte-identical.
+
+### Tests
+
+53 suites, 4,181 assertions. New regressions pin the arm-and-wait behaviour and
+the broadened completion detection (both directions).
+
 ## v1.0.0.13 — Aero frame around the whole window (+ deep scan)
 
 ### The window itself now reads as glass

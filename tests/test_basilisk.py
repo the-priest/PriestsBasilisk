@@ -1089,6 +1089,18 @@ class TestMissionStopSignals(unittest.TestCase):
             "Nothing further to test on this target.",
             "The objective has been achieved and verified.",
             "That completes the engagement.",
+            # natural whole-task completion phrasings — a model that finishes and
+            # says it plainly must stop, not keep re-kicking (the "doesn't know
+            # when it's done in unleashed mode" bug).
+            "The task is complete.",
+            "Everything you asked for is done.",
+            "All done here.",
+            "The work is finished.",
+            "That wraps up the engagement.",
+            "The target is fully tested.",
+            "All 113 challenges are now solved.",
+            "Done. All findings verified.",
+            "I've addressed all the requirements.",
         ]:
             self.assertTrue(basilisk_core.reply_is_strong_conclusion(t),
                             f"should be a strong conclusion: {t!r}")
@@ -1100,6 +1112,14 @@ class TestMissionStopSignals(unittest.TestCase):
             "Here are the findings:",
             "Let me check the admin routes next.",
             "",
+            # PARTIAL completion must NOT fast-stop the mission mid-work — the
+            # false-positive direction of the broadened markers.
+            "I've completed the recon phase, moving to exploitation.",
+            "Finished scanning the first subnet; continuing with the next.",
+            "That completes step 1 of 5.",
+            "I solved the first challenge, on to the next.",
+            "Done with enumeration - starting the attack.",
+            "I verified the first finding; testing the rest now.",
         ]:
             self.assertFalse(basilisk_core.reply_is_strong_conclusion(t),
                              f"should NOT be a strong conclusion: {t!r}")

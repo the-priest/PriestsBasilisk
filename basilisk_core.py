@@ -3748,6 +3748,23 @@ _STRONG_CONCLUSION_MARKERS = (
     "no further steps", "no further testing", "nothing left to test",
     "nothing more to do", "we are done here", "we're done here",
     "that completes the", "this concludes the", "[[mission_complete]]",
+    # Natural whole-task completion phrasings a model emits when it finishes.
+    # These are scoped to "the WHOLE thing is done" — a partial "completed the
+    # recon phase" does NOT contain any of these (it says "phase"/"step", not
+    # "the task/objective/work is (complete|finished|done)"). Without these the
+    # mission kept re-kicking after the model had plainly finished, and it
+    # rambled or repeated instead of stopping — the "doesn't know when it's
+    # done" bug.
+    "the task is complete", "the task is finished", "the task is done",
+    "task complete", "task finished", "the work is complete",
+    "the work is finished", "the work is done", "everything is done",
+    "everything is complete", "everything you asked", "all done",
+    "the full board is solved", "all challenges are solved",
+    "all challenges solved", "fully tested", "completed the objective",
+    "completed the assessment", "completed the engagement",
+    "finished testing", "finished the task", "that wraps up",
+    "addressed all the", "all the requirements", "the target is fully",
+    "are now solved", "all findings verified", "all findings confirmed",
 )
 
 
