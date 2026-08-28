@@ -180,7 +180,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.basilisk"
 APP_NAME = "Basilisk"
-VERSION = "1.0.0.15"
+VERSION = "1.0.0.16"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -2514,7 +2514,7 @@ headerbar {
    monospace mark on the same frosted glass frame as the art-buttons, so the
    toolbar/header reads as one glass set without any PNG plaques. Red ember
    text with a faint glow; brighter on hover; lit when toggled/active. ---- */
-.glyph-btn {
+.glyph-btn, menubutton.glyph-btn > button {
     background-color: rgba(30, 16, 18, 0.30);
     background-image: linear-gradient(180deg,
                       rgba(255, 210, 200, 0.14) 0%,
@@ -2525,26 +2525,28 @@ headerbar {
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.26),
                 inset 0 -1px 0 rgba(0, 0, 0, 0.28),
                 0 0 7px rgba(125, 18, 27, 0.20);
-    border-radius: 10px;
-    min-width: 34px;
-    min-height: 30px;
-    padding: 2px 8px;
+    border-radius: 11px;
+    min-width: 42px;
+    min-height: 38px;
+    padding: 3px 11px;
     transition: all 140ms ease;
 }
+menubutton.glyph-btn { padding: 0; min-width: 0; min-height: 0; }
+menubutton.glyph-btn > button { min-width: 42px; min-height: 38px; }
 .glyph-btn-label {
     font-family: 'JetBrains Mono', 'Fira Code', 'DejaVu Sans Mono', monospace;
-    font-size: 15px;
+    font-size: 19px;
     font-weight: 700;
     color: #ff6b5a;
     text-shadow: 0 0 6px rgba(229, 40, 58, 0.45), 0 1px 1px rgba(0,0,0,0.7);
 }
-.glyph-btn:hover {
+.glyph-btn:hover, menubutton.glyph-btn > button:hover {
     background-color: rgba(150, 40, 46, 0.32);
     border-color: rgba(255, 130, 130, 0.55);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.36),
                 0 0 14px rgba(230, 60, 40, 0.50);
 }
-.glyph-btn:active {
+.glyph-btn:active, menubutton.glyph-btn > button:active {
     background-color: rgba(90, 20, 24, 0.42);
     box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.45),
                 inset 0 1px 0 rgba(255, 255, 255, 0.10);
@@ -2560,7 +2562,10 @@ headerbar {
     color: #ffd0c8;
     text-shadow: 0 0 9px rgba(255, 80, 90, 0.75);
 }
-.term-glyph .glyph-btn-label { font-size: 16px; letter-spacing: 1px; }
+.term-glyph .glyph-btn-label { font-size: 20px; letter-spacing: 1px; }
+/* close button leans red on hover; minimise/expand stay neutral-red */
+.winctl-close:hover { border-color: rgba(255, 80, 80, 0.85); }
+.winctl-close:hover .glyph-btn-label { color: #ff8a7a; }
 """
 
 
@@ -4723,10 +4728,15 @@ class ActivityFeedWidget(Gtk.Box):
             Gtk.RevealerTransitionType.SLIDE_DOWN)
         self._revealer.set_transition_duration(180)
         self._revealer.set_child(self._body)
-        # Live by default: the whole point is that the operator can watch.
-        self._revealer.set_reveal_child(True)
+        # Collapsed by default — the operator opens it with a click when they
+        # want to watch. It no longer springs open on its own each turn; the
+        # header still shows the live one-line status, and clicking expands the
+        # step list (and pins that choice).
+        self._revealer.set_reveal_child(False)
         self.append(self._revealer)
         self.add_css_class("live")
+        self.add_css_class("collapsed")
+        self._chevron.set_text("\u203a")
 
     def dispose_widget(self):
         """Release references and stop the clock.  Same contract as
@@ -7840,38 +7850,22 @@ class MainWindow(Adw.ApplicationWindow):
         # Only our own dragon toggle belongs at the top-left — suppress the
         # compositor's start-side title button so there aren't two icons there.
         hb.set_show_start_title_buttons(False)
-        # Custom dragon-forged window controls (minimise / close). Only take over
-        # from the compositor's buttons when the art is actually present, so we
-        # never leave the window with no way to close.
-        _close_art = _btn_art(_BTN_CLOSE, px=_COMPOSER_BTN_PX)
-        _min_art = _btn_art(_BTN_MINIMISE, px=_COMPOSER_BTN_PX)
-        if _close_art is not None and _min_art is not None:
-            hb.set_show_end_title_buttons(False)
-            _close_btn = Gtk.Button()
-            _close_btn.set_child(_close_art)
-            _close_btn.add_css_class("art-button")
-            _close_btn.set_tooltip_text("Close")
-            _close_btn.connect("clicked", lambda *_: self.close())
-            hb.pack_end(_close_btn)            # first packed_end = far right
-            # Expand / restore (maximise toggle) — sits between minimise and
-            # close.  Optional: shown only when its art is present.
-            _exp_art = _btn_art(_BTN_EXPAND, px=_COMPOSER_BTN_PX)
-            if _exp_art is not None:
-                _exp_btn = Gtk.Button()
-                _exp_btn.set_child(_exp_art)
-                _exp_btn.add_css_class("art-button")
-                _exp_btn.set_tooltip_text("Expand / restore")
-                _exp_btn.connect(
-                    "clicked",
-                    lambda *_: (self.unmaximize() if self.is_maximized()
-                                else self.maximize()))
-                hb.pack_end(_exp_btn)          # sits left of close
-            _min_btn = Gtk.Button()
-            _min_btn.set_child(_min_art)
-            _min_btn.add_css_class("art-button")
-            _min_btn.set_tooltip_text("Minimise")
-            _min_btn.connect("clicked", lambda *_: self.minimize())
-            hb.pack_end(_min_btn)              # leftmost of the three
+        # Custom window controls as clean glyph buttons (no PNG art). Always
+        # shown — glyphs are always available, so we take over the compositor
+        # buttons and never leave the window unclosable.
+        hb.set_show_end_title_buttons(False)
+        _close_btn = _glyph_button("\u2715", "Close", css_extra="winctl-close")
+        _close_btn.connect("clicked", lambda *_: self.close())
+        hb.pack_end(_close_btn)                # far right
+        _exp_btn = _glyph_button("\u2750", "Expand / restore", css_extra="winctl")
+        _exp_btn.connect(
+            "clicked",
+            lambda *_: (self.unmaximize() if self.is_maximized()
+                        else self.maximize()))
+        hb.pack_end(_exp_btn)                  # left of close
+        _min_btn = _glyph_button("\u2500", "Minimise", css_extra="winctl")
+        _min_btn.connect("clicked", lambda *_: self.minimize())
+        hb.pack_end(_min_btn)                  # leftmost of the three
         # The sidebar toggle IS the dragon logo now — tap the emblem to show/hide
         # the sidebar (one branded button instead of a plain toggle + a logo).
         sb_toggle = Gtk.Button()
@@ -7929,13 +7923,11 @@ class MainWindow(Adw.ApplicationWindow):
         # green/red dot next to BASILISK in the sidebar header.)
 
         menu_btn = Gtk.MenuButton()
-        _mset = _btn_art(_BTN_SETTINGS, px=_COMPOSER_BTN_PX)
-        if _mset is not None:
-            menu_btn.set_child(_mset)
-            menu_btn.add_css_class("art-button")
-        else:
-            menu_btn.set_icon_name("open-menu-symbolic")
-            menu_btn.add_css_class("icon-button")
+        _gear = Gtk.Label(label="\u2699")   # gear
+        _gear.add_css_class("glyph-btn-label")
+        menu_btn.set_child(_gear)
+        menu_btn.add_css_class("glyph-btn")
+        menu_btn.set_valign(Gtk.Align.CENTER)
         menu = Gio.Menu()
         menu.append("Pin chat", "win.pin-chat")
         menu.append("Rename chat", "win.rename-chat")
@@ -7951,15 +7943,10 @@ class MainWindow(Adw.ApplicationWindow):
         # symbolic icon, so set_icon_name rendered a blank button. A bell glyph
         # renders in any font.
         self.notif_btn = Gtk.MenuButton()
-        _bellart = _btn_art(_BTN_BELL, px=_COMPOSER_BTN_PX)
-        if _bellart is not None:
-            self.notif_btn.set_child(_bellart)
-            self.notif_btn.add_css_class("art-button")
-        else:
-            _bell = Gtk.Label(label="\U0001F514")   # bell
-            _bell.add_css_class("bell-glyph")
-            self.notif_btn.set_child(_bell)
-            self.notif_btn.add_css_class("icon-button")
+        _bell = Gtk.Label(label="\U0001F514")   # bell
+        _bell.add_css_class("glyph-btn-label")
+        self.notif_btn.set_child(_bell)
+        self.notif_btn.add_css_class("glyph-btn")
         self.notif_btn.set_valign(Gtk.Align.CENTER)
         self.notif_btn.set_tooltip_text("Notifications from Basilisk")
         notif_pop = Gtk.Popover()

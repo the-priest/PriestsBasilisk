@@ -1,3 +1,18 @@
+## v1.0.0.16 — all-glyph header, bigger buttons, feed opens on click only
+
+Every window-control button is now a clean image-free glyph on the Aero glass
+frame — settings (gear), notifications (bell), minimise, expand/restore, close
+— matching the attach/sound/terminal glyphs. No PNG plaques anywhere in the
+toolbar or header. Buttons are bigger too (42x38, 19px glyphs) so they're easy
+to hit. Close leans red on hover.
+
+The live activity feed no longer springs open on its own each turn. It starts
+COLLAPSED — the header still shows the live one-line status — and expands only
+when you click it (which pins your choice, same as before). Verified under GTK:
+starts collapsed, stays collapsed while steps run, opens on click.
+
+Pure CSS + wiring; GTK parses it with zero errors, CSS stays ASCII, guardrail
+untouched, assets untouched.
 ## v1.0.0.15 — composer cleanup, header terminal, glyph buttons, dragon sigil
 
 ### Steer without stopping; fewer buttons
