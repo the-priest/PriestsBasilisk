@@ -14,9 +14,9 @@
 
 <br/>
 
-<img src="https://img.shields.io/badge/version-1.0.0.14-e11d2b?style=for-the-badge&labelColor=08090b&logo=gnubash&logoColor=e11d2b" alt="version 1.0.0.14">
+<img src="https://img.shields.io/badge/version-1.0.0.15-e11d2b?style=for-the-badge&labelColor=08090b&logo=gnubash&logoColor=e11d2b" alt="version 1.0.0.15">
 <img src="https://img.shields.io/badge/license-MIT-7d121b?style=for-the-badge&labelColor=08090b&logo=opensourceinitiative&logoColor=7d121b" alt="MIT license">
-<img src="https://img.shields.io/badge/tests-4181%20assertions-2ea043?style=for-the-badge&labelColor=08090b&logo=pytest&logoColor=2ea043" alt="4181 assertions">
+<img src="https://img.shields.io/badge/tests-4188%20assertions-2ea043?style=for-the-badge&labelColor=08090b&logo=pytest&logoColor=2ea043" alt="4188 assertions">
 <img src="https://img.shields.io/badge/telemetry-none-6d7680?style=for-the-badge&labelColor=08090b&logo=ghostery&logoColor=6d7680" alt="no telemetry">
 
 <br/>
@@ -47,7 +47,7 @@
 > [!CAUTION]
 > **Authorized targets only. This is a live weapon, not a demo.**
 >
-> Basilisk runs real exploits and real shell commands against whatever you point it at, autonomously, with your privileges. Arm **Unleash** and it confirms the target, then runs with no per-command approval until the objective is verifiably met or you stand it down. Aimed at the wrong host it will keep working that host until you pull it off.
+> Basilisk runs real exploits and real shell commands against whatever you point it at, autonomously, with your privileges. Arm **Unleash** and it loads the offensive suite and waits; send it an objective and it runs with no per-command approval until that objective is verifiably met or you stand it down. Aimed at the wrong host it will keep working that host until you pull it off.
 >
 > Use it only on systems you own or have explicit written authorization to test. Unauthorized testing is a crime in most jurisdictions.
 
@@ -147,8 +147,8 @@ Scored on **OWASP Juice Shop**, which marks a challenge solved only when the exp
 
 | Agent | Licence | Black-box | White-box *(source provided)* |
 |---|---|---:|---:|
-| **🐍 Priest's Basilisk** *(v7.6.0)* | **MIT · free** | **87 / 113** | — |
-| Priest's Basilisk *(v7.1.0)* | MIT · free | 73 / 113 | — |
+| **🐍 Priest's Basilisk** *(2026-07-20 run)* | **MIT · free** | **87 / 113** | — |
+| Priest's Basilisk *(earlier run)* | MIT · free | 73 / 113 | — |
 | Cascade *(Windsurf / Escape)* | commercial | **36 / 113** | 49 / 113 |
 | Claude Opus 4.8 *(bare model)* | metered API | **23 / 113** | 24 / 113 |
 
@@ -193,7 +193,7 @@ docker run -d -p 3000:3000 -e NODE_ENV=unsafe --name juiceshop bkimminich/juice-
 
 Point Basilisk at the board and call `juiceshop_report` — it reads the live scoreboard (`/api/Challenges`) and reports solved/available by difficulty. Score any other tool against the same container and compare.
 
-*Full board: `NODE_ENV=unsafe`, v7.6.0, model DeepSeek-V4-Flash. Solved through the exploit builders + `run` only — no web reader, no source. Scorecard: [`benchmarks/juice-shop-scoreboard-2026-07-20.txt`](benchmarks/juice-shop-scoreboard-2026-07-20.txt).*
+*Full board: `NODE_ENV=unsafe`, model DeepSeek-V4-Flash. Solved through the exploit builders + `run` only — no web reader, no source. Scorecard: [`benchmarks/juice-shop-scoreboard-2026-07-20.txt`](benchmarks/juice-shop-scoreboard-2026-07-20.txt).*
 
 </details>
 
@@ -287,8 +287,9 @@ A native **GTK4 / libadwaita** desktop app — not a terminal wrapper and not El
 | 📎 **Attachments as chips** | Staged above the composer with kind, name and size — not pasted into the box you are typing in |
 | 🗣️ **Voice in and out** | Whisper/SenseVoice speech-to-text, Piper text-to-speech, per-message read-aloud |
 | 🖼️ **Vision** | Show images inline and actually *look* at one with a vision model |
-| 🐉 **Unleash** | One tap. Confirms the target, then runs off the leash until the objective is verifiably done |
-| 📜 **Live terminal panel** | Every command and its raw output, as it runs |
+| 🐉 **Unleash** | One tap arms the offensive suite and the mission loop — then it **waits**. Send an objective and it runs off the leash until that objective is verifiably done, or you stand it down |
+| ↩️ **Steer without stopping** | While it's working, type a nudge and press **Enter** — it lands as a mid-run suggestion the loop folds in on its next step, no interruption. The Stop control (click the send button, or Escape) is separate and always stops |
+| 📜 **Live terminal panel** | Every command and its raw output, as it runs — toggled from the header |
 
 <img src="https://capsule-render.vercel.app/api?type=rect&color=0:08090b,50:e11d2b,100:08090b&height=3" width="100%" alt="">
 
@@ -428,7 +429,7 @@ The import path is hardened against hostile archives: **Zip slip**, **Zip bombs*
 for f in tests/test_*.py; do python3 "$f" || echo "RED $f"; done
 ```
 
-Stdlib only. No pytest, no network, no fixtures, no account. **4,181 assertions across 53 suites**, done in under a minute.
+Stdlib only. No pytest, no network, no fixtures, no account. **4,188 assertions across 53 suites**, done in under a minute.
 
 <table>
 <tr valign="top"><td width="50%">
@@ -559,7 +560,7 @@ If it earns its place in your kit, star the repo and tell someone who runs engag
 
 <br/>
 
-### Built by one person. Verified by 4,181 assertions. Priced at nothing.
+### Built by one person. Verified by 4,188 assertions. Priced at nothing.
 
 <sub>Clone it, read it, run the suite, then point it at something you own.</sub>
 

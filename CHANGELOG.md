@@ -1,3 +1,48 @@
+## v1.0.0.15 — composer cleanup, header terminal, glyph buttons, dragon sigil
+
+### Steer without stopping; fewer buttons
+
+The Suggestion button is gone. While Basilisk is working, just type your nudge
+and press Enter - it's sent as a mid-run suggestion the loop folds in on its
+next step, without interrupting. The Stop control is unchanged: clicking the
+send button (or Escape) still stops. Verified all four paths under real GTK -
+idle Enter sends, working Enter suggests, mouse-click stops, Escape stops. The
+Camera button was removed too.
+
+### Terminal toggle moved to the header
+
+The live-terminal toggle moved up from the composer to the header bar, next to
+Settings and Notifications, as a clean ">_" prompt glyph. Same handler and
+.active lit-state, verified toggling the panel open/closed.
+
+### Image-free "hacker" glyph buttons
+
+Attach, sound and terminal are no longer PNG-art plaques - they're monospace
+glyphs (paperclip, speaker, ">_") on the same frosted Aero glass frame, ember-
+red with a glow, brighter on hover, lit red when toggled/active. Pure CSS,
+ASCII, GTK parses it with zero errors.
+
+### The uploaded dragon, as a sigil
+
+Rebuilt basilisk-sigil.svg placing the Kali low-poly dragon inside the mystical
+ember ring (concentric circles, interlocked triangles, cardinal nodes) in the
+existing sigil style. Valid SVG; the asset test resolves it.
+
+### README - airtight pass
+
+Fixed stale Unleash copy (it arms-and-waits now, doesn't "confirm the target
+then run"), added the steer-with-Enter feature to the interface table, and
+removed orphaned "v7.6.0 / v7.1.0" benchmark tags that pointed at no changelog
+entry - the 87/113 run is now cited by its scorecard date (2026-07-20), which
+the linked file confirms exactly. Every internal nav link and load-bearing fact
+re-verified.
+
+### Tests
+
+53 suites, 4,188 assertions. New guiwiring regressions pin Enter-suggests-while-
+working, mouse-still-stops, the removed buttons, the header terminal, and the
+glyph-button CSS. Bubble-fit 140/140 under real GTK, guardrail byte-identical.
+
 ## v1.0.0.14 — Unleash arms and waits; it knows when it's done; and it stops underselling
 
 Three behavioural fixes plus the README showing the full arsenal.

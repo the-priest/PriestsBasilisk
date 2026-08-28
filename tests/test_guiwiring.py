@@ -380,5 +380,30 @@ ck("arming still opens a chat if none exists",
    "_new_chat()" in _uh)
 
 
+# ── composer buttons: camera & suggestion gone, terminal moved to header ──
+print("\n== composer button changes ==")
+# Enter while working sends a suggestion (nudge without stopping); the mouse
+# Stop control is untouched. Camera and the Suggestion button are removed.
+_key = _SRC[_SRC.index("def _on_input_key"):_SRC.index("def _on_send_or_stop")]
+ck("Enter while busy sends a suggestion, not a stop",
+   "_send_suggestion()" in _key and "if self._is_busy():" in _key,
+   "typing + Enter mid-run must nudge without stopping")
+ck("send/stop button still stops on click (unchanged)",
+   "_request_stop()" in _SRC[_SRC.index("def _on_send_or_stop"):
+                             _SRC.index("def _set_send_mode")])
+ck("Suggestion button is gone",
+   "self.suggest_btn" not in _SRC,
+   "removed - Enter replaces it")
+ck("Camera button is gone from the composer loop",
+   "_user_action_camera, _BTN_CAMERA" not in _SRC)
+ck("Terminal toggle is built in the header (moved up)",
+   "hb.pack_end(self.terminal_toggle_btn)" in _SRC)
+ck("Terminal toggle is a glyph button, not PNG art",
+   '_glyph_button(\n            ">_"' in _SRC or '_glyph_button(">_"' in _SRC
+   or ('_glyph_button(' in _SRC and '">_"' in _SRC))
+ck("glyph-btn CSS exists for the image-free buttons",
+   ".glyph-btn {" in _SRC and ".glyph-btn.active" in _SRC)
+
+
 print(f"\n{_p} passed, {_f} failed")
 sys.exit(1 if _f else 0)
