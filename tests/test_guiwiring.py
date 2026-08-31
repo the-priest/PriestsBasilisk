@@ -405,5 +405,28 @@ ck("glyph-btn CSS exists for the image-free buttons",
    ".glyph-btn {" in _SRC and ".glyph-btn.active" in _SRC)
 
 
+# ── the streaming bubble is deferred until the first real text token ──
+print("\n== streaming bubble defers past tool-only activity ==")
+# The empty assistant bubble used to appear the instant a turn started, then
+# sit blank through a web-search/tool call and flicker back out. Now it's built
+# detached and only attached to the chat on the first TEXT token (or at finish
+# if it ended up with content). A pure tool-only turn attaches nothing.
+_kick = _SRC[_SRC.index("_streaming_attached = False"):
+             _SRC.index("self.streaming_msg_db_id = self.store.add_message")]
+ck("turn start builds the bubble detached (no immediate append)",
+   "_streaming_attached = False" in _kick
+   and "_append_message_widget(\n" not in _kick,
+   "bubble must not be appended at turn start")
+ck("first text token attaches the bubble",
+   "_attach_streaming_bubble()" in _SRC[_SRC.index("def _on_stream_token"):
+                                        _SRC.index("def _on_stream_reasoning")])
+ck("attach helper is idempotent and guards content",
+   "_attach_streaming_bubble" in _SRC
+   and "if getattr(self, \"_streaming_attached\", True):" in _SRC)
+ck("teardown attaches a deferred bubble only if it has content",
+   "_attach_streaming_bubble()" in _SRC[_SRC.index("def _finish_turn_cleanup"):
+                                        _SRC.index("def _mission_continue")])
+
+
 print(f"\n{_p} passed, {_f} failed")
 sys.exit(1 if _f else 0)

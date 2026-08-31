@@ -180,7 +180,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.basilisk"
 APP_NAME = "Basilisk"
-VERSION = "1.0.0.16"
+VERSION = "1.0.0.17"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -8997,6 +8997,27 @@ class MainWindow(Adw.ApplicationWindow):
             GLib.idle_add(self._scroll_to_bottom)
         return w
 
+    def _attach_streaming_bubble(self):
+        """Attach the deferred streaming bubble to the chat the first time real
+        text arrives. Before this, the turn may run tool calls (web search,
+        recon) with no visible text — and we keep the bubble out of the chat so
+        it doesn't flicker in and back out. Idempotent: only the first call
+        attaches; the rest are no-ops."""
+        if getattr(self, "_streaming_attached", True):
+            return
+        w = self.streaming_msg_widget
+        if w is None:
+            return
+        # Same empty-state clear as _append_message_widget: drop a non-message
+        # first child (the empty-state placeholder), but never the activity feed.
+        first = self.msg_box.get_first_child()
+        if first is not None and not isinstance(
+                first, (MessageWidget, ActivityFeedWidget)):
+            self.msg_box.remove(first)
+        self.msg_box.append(w)
+        self._streaming_attached = True
+        GLib.idle_add(self._force_scroll_to_bottom)
+
     _HIST_CALL_RE = re.compile(r"tool:\s*([a-zA-Z_0-9]+)\s*\((.*)\)\s*$", re.S)
 
     def _append_history_feed(self, rows):
@@ -9279,6 +9300,20 @@ class MainWindow(Adw.ApplicationWindow):
                 pass
             if self.streaming_msg_db_id:
                 self.store.update_message(self.streaming_msg_db_id, final_text)
+        # If the turn produced visible text but the bubble was never attached
+        # (e.g. text arrived only at finish, or a card was rendered), attach it
+        # now so the reply isn't lost. If it's still empty — a pure tool-only
+        # turn (web search then a tool chain, no text) — leave it detached; it
+        # gets nulled below and never flickered into view.
+        if (not getattr(self, "_streaming_attached", True)
+                and self.streaming_msg_widget is not None):
+            try:
+                body = (self.streaming_msg_widget.canonical_content()
+                        or "").strip()
+            except Exception:
+                body = ""
+            if body:
+                self._attach_streaming_bubble()
         self.streaming_msg_widget = None
         self.streaming_msg_db_id = None
         self.streaming_chat_id = None
@@ -10696,20 +10731,25 @@ class MainWindow(Adw.ApplicationWindow):
         self._tts_suspended = False
         self._turn_active = True
 
-        # Only show the streaming widget if user is looking at this chat
-        if chat_id == self.current_chat_id:
-            self.streaming_msg_widget = self._append_message_widget(
-                "assistant", "")
-            self.streaming_msg_widget.start_streaming()
-        else:
-            # User has navigated away.  We still need a widget to buffer
-            # tokens for finish_streaming, but don't attach it to msg_box.
-            self.streaming_msg_widget = MessageWidget(
-                "assistant", "", on_run_command=self._run_proposed_command,
-                on_apply_edit=self._run_proposed_edit,
-                on_speak=self._on_message_speak,
-                show_thoughts=self.settings.get("show_thoughts", True))
-            self.streaming_msg_widget.start_streaming()
+        # Build the streaming widget but DO NOT show it in the chat yet. An
+        # empty bubble that appears the instant a turn starts — then sits blank
+        # while the model's first move is a web-search / tool call that emits no
+        # text — reads as a bug: it pops in, the feed shows a scan running, then
+        # it vanishes. So the bubble is deferred: it's created here (detached)
+        # to buffer tokens, and only attached to the chat on the first real TEXT
+        # token (see _attach_streaming_bubble, called from _on_stream_token).
+        # Tool activity shows in the activity feed in the meantime; the bubble
+        # appears exactly when Basilisk starts saying something.
+        self._streaming_attached = False
+        self.streaming_msg_widget = MessageWidget(
+            "assistant", "", on_run_command=self._run_proposed_command,
+            on_apply_edit=self._run_proposed_edit,
+            on_speak=self._on_message_speak,
+            show_thoughts=self.settings.get("show_thoughts", True))
+        self.streaming_msg_widget.start_streaming()
+        if chat_id != self.current_chat_id:
+            # User navigated away — never attach; it just buffers for finish.
+            self._streaming_attached = True   # suppress lazy attach entirely
 
         self.streaming_msg_db_id = self.store.add_message(
             chat_id, "assistant", "")
@@ -10800,6 +10840,11 @@ class MainWindow(Adw.ApplicationWindow):
             return False
         self._mark_turn_progress()
         if self.streaming_msg_widget:
+            # First real text token → bring the bubble into the chat now. Until
+            # this point the turn may have only run tool calls (web search etc.)
+            # with no text, and the bubble stayed out of view so it wouldn't
+            # flicker in and back out.
+            self._attach_streaming_bubble()
             self.streaming_msg_widget.append_streaming(tok)
             # Only scroll if user is on the chat that owns this stream
             if self.streaming_chat_id == self.current_chat_id:

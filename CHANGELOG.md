@@ -1,3 +1,34 @@
+## v1.0.0.17 — no more phantom bubble; README rewritten from scratch
+
+### The empty bubble that popped in and back out — fixed
+
+When you asked for news, an empty assistant bubble appeared the instant the turn
+started, sat blank while the model's first move was a web-search tool call (no
+text), then vanished as the turn continued — a flicker that read like a bug. The
+streaming bubble is now DEFERRED: it's built detached and only attached to the
+chat on the first real TEXT token, or at finish if it ended up with content. A
+pure tool-only turn attaches nothing. So the bubble appears exactly when
+Basilisk starts saying something to you; the web search shows in the activity
+feed in the meantime. Verified under real GTK across all cases: tool-only turn
+(0 bubbles, no flicker), first text token (bubble appears), stopped-with-text
+(bubble attaches, text preserved), tool-only cleanup (no lingering empty bubble).
+
+### README rewritten end to end
+
+Rebuilt from scratch: install is now at the very top, the writing is more
+technical, and it leads with the real differentiators — the 56-builder exploit
+engine, the source-level zero-day variant hunter (zday_scan / find_variants /
+CVE-2007-4559 signature), the verified-hit oracle with out-of-band proof, and
+the honest solo-dev-around-a-day-job story. Every load-bearing fact and safety
+claim preserved (86/86 README checks green): the $IFS/sh -c catastrophic-command
+coverage with the rm -rf ~/loot non-false-positive, the tiered web_read model
+with exploit-db on the approval side, workspace_replace's unique-match refusal,
+skills kept only if the test passes, and the leash/loader gate.
+
+### Tests
+
+53 suites, 4,190 assertions. New guiwiring regression pins the deferred-bubble
+behaviour. Guardrail byte-identical, CSS ASCII.
 ## v1.0.0.16 — all-glyph header, bigger buttons, feed opens on click only
 
 Every window-control button is now a clean image-free glyph on the Aero glass
