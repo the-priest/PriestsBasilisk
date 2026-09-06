@@ -196,9 +196,9 @@ class ModelInfo:
 SILICONFLOW_CATALOGUE: List[ModelInfo] = [
     # ── Flagship: reach for these when the target is genuinely hard ──
     ModelInfo("zai-org/GLM-5.3-Flash", "GLM-5.3-Flash", 1049, 0.15, 0.50,
-              "PINNED DEFAULT. Tops this provider's intelligence board. "
-              "320B/18B MoE, native multimodal, built for efficient coding "
-              "+ long-horizon agents. Flagship quality at workhorse money.",
+              "Tops this provider's intelligence board. 320B/18B MoE, native "
+              "multimodal, built for efficient coding + long-horizon agents. "
+              "Flagship quality at workhorse money.",
               vision=True, tier="flagship",
               cached_in_usd=0.03),
               # think_off is deliberately None: GLM-5.3-Flash's reasoning is
@@ -244,9 +244,9 @@ SILICONFLOW_CATALOGUE: List[ModelInfo] = [
     ModelInfo("deepseek-ai/DeepSeek-V4-Flash", "DeepSeek-V4-Flash",
               1049,
               0.13, 0.28,
-              "284B/13B, 1M ctx. Every benchmark in the README was "
-              "produced on this — the scaffolding scores, not the price "
-              "tag. First fallback behind the pinned default.",
+              "PINNED DEFAULT. 284B/13B, 1M ctx. Every benchmark in the "
+              "README was produced on this — the scaffolding scores, not "
+              "the price tag.",
               tier="workhorse",
               cached_in_usd=0.028,
               think_off={"enable_thinking": False}),
@@ -301,17 +301,10 @@ SILICONFLOW_CATALOGUE: List[ModelInfo] = [
 # retry storm wearing a helpful hat.
 #
 # chain[0] is the PINNED DEFAULT and is locked by tests — do not reorder.
-#
-# The pin moved to GLM-5.3-Flash. It is the top of this provider's board at
-# workhorse money (0.15/0.50 against V4-Flash's 0.13/0.28), natively
-# multimodal, and 1M context. DeepSeek-V4-Flash stays SECOND so a GLM outage
-# lands on the model every README benchmark was produced with, and stays in
-# the catalogue unchanged — the benchmark rows and their v7.6.0 labels record
-# which build produced which score and are NOT restated as GLM numbers.
 SILICONFLOW_CHAIN = [
-    "zai-org/GLM-5.3-Flash",
     "deepseek-ai/DeepSeek-V4-Flash",
     "deepseek-ai/DeepSeek-V4-Pro",
+    "zai-org/GLM-5.2",
     "tencent/Hy3",
 ]
 
@@ -360,7 +353,7 @@ class ProviderSpec:
 
 
 # UI display order only.  Groq is listed first for historical familiarity,
-# but the DEFAULT active provider is SiliconFlow/GLM-5.3-Flash — set in
+# but the DEFAULT active provider is SiliconFlow/DeepSeek-V4-Flash — set in
 # DEFAULT_SETTINGS["active_provider"] and locked by tests.  Groq is the
 # fallback chain, not the default.
 PROVIDERS: List[ProviderSpec] = [
@@ -432,7 +425,7 @@ def log(msg: str) -> None:
 DEFAULT_SETTINGS = {
     # ── Provider routing ──
     # Which cloud provider to use.  Cloud-only build — no local model.
-    # SiliconFlow/GLM-5.3-Flash is the primary; the rest of the chain backs it.
+    # SiliconFlow/DeepSeek is the primary; Groq is the fallback chain.
     "active_provider": "siliconflow",
 
     # Per-provider API key + selected model.  One pair per registered
@@ -679,99 +672,43 @@ _MODEL_SAMPLING: Dict[str, Dict[str, float]] = {
 
 _REASONING_EFFORT_LEVELS = ("low", "medium", "high")
 
-# `thinking_budget` — SiliconFlow's OWN documented lever (a hard cap on
-# chain-of-thought tokens, 128..32768, "applies to all Reasoning models"), and
-# max_tokens does not include the CoT, so a small budget buys speed and cost
-# without starving the answer. The pill's three rungs map to three budgets.
+# The lever that ACTUALLY makes GLM faster/cheaper on SiliconFlow.
+# From SiliconFlow's API reference: the reasoning_effort enum only offers
+# high|max for these models — low and medium are silently mapped UP to high —
+# so effort alone can never dial GLM DOWN. `thinking_budget` (a hard cap on
+# chain-of-thought tokens, 128..32768, honoured by most reasoning models) is
+# what bounds the reasoning, and max_tokens does NOT include the CoT, so a small
+# budget buys speed and cost without starving the answer. The pill's three rungs
+# map to three budgets; High additionally asks for max-depth effort.
 _EFFORT_TO_BUDGET = {"low": 1024, "medium": 4096, "high": 20480}
-
-# ── THE MODEL'S OWN reasoning_effort ENUM, WHICH CHANGED UNDER US ────
-# GLM-5.2 shipped a TWO-value enum, high|max: low and medium were mapped UP to
-# high, so the dial could never reduce anything and thinking_budget above was
-# the only lever that worked. That is exactly what the previous comment here
-# said, and it was true when it was written.
-#
-# GLM-5.3-Flash CHANGED IT. Its model card states three levels — low | high |
-# max — and, in the sentence that matters, that it "defaults to `max` if not
-# passed (OR IF SET TO ANY OTHER VALUE)". Both halves of that bite:
-#
-#   * NOT PASSING the field is not neutral. It selects `max`, the deepest and
-#     slowest mode. The old mapping sent reasoning_effort ONLY on High, so the
-#     Low rung — which is the SHIPPED DEFAULT, and whose tooltip promises
-#     "Low is fastest and cheapest" — sent no effort field at all and ran the
-#     model at maximum depth. Two of the pill's three rungs did the OPPOSITE of
-#     what they say, and the one an operator never touches was the worst.
-#   * "medium" is NOT in the enum, so sending it verbatim would also fall back
-#     to max. The pill's rungs are a UI vocabulary and must be TRANSLATED to
-#     whatever the model actually accepts, never forwarded raw.
-#
-# So the mapping is per family, and both are sent: reasoning_effort is what
-# GLM's own runtime reads, thinking_budget is what SiliconFlow's layer reads,
-# and they agree in direction. A provider that rejects either 400s once, and
-# the backend strips-and-retries and remembers (see _extras_rejected).
-_GLM_EFFORT_3 = {"low": "low", "medium": "high", "high": "max"}   # 5.3+
-_GLM_EFFORT_2 = {"low": "high", "medium": "high", "high": "max"}  # 5.0-5.2
-
-
-def reasoning_effort_enum(model_id: str) -> Dict[str, str]:
-    """The pill rung -> the value THIS model's enum actually accepts.
-
-    Split by family rather than by a version comparison because the id is a
-    free-text string an operator can type: an unrecognised glm-5.x is given
-    the two-value map, which is the conservative choice — asking for "high"
-    where "low" existed costs depth, whereas asking for "low" where it does
-    not exist silently falls back to `max` and costs the whole feature.
-    """
-    mid = (model_id or "").lower()
-    for tag in ("glm-5.3", "glm-5.4", "glm-5.5", "glm-6"):
-        if tag in mid:
-            return _GLM_EFFORT_3
-    return _GLM_EFFORT_2
-
-
-def _model_family(model_id: str) -> str:
-    """A coarse family key for two model ids — "are these the same kind of
-    model". Used to refuse an 'escalation' that is really a cross-vendor swap.
-
-    The vendor prefix (`zai-org/`, `deepseek-ai/`) is the honest signal and is
-    what the provider itself organises ids by; the bare name is the fallback
-    for a hand-typed id with no prefix.
-    """
-    mid = (model_id or "").strip().lower()
-    if "/" in mid:
-        return mid.split("/", 1)[0]
-    for fam in ("glm", "deepseek", "kimi", "qwen", "minimax", "longcat", "hy"):
-        if mid.startswith(fam):
-            return fam
-    return mid
 
 
 def supports_reasoning_effort(model_id: str) -> bool:
     """True for models whose reasoning DEPTH is a dial, not an on/off toggle.
 
-    GLM-5.x defaults to its DEEPEST reasoning, which is slow and token-hungry
-    on ordinary turns — so Basilisk sends the operator's chosen level on every
-    supporting turn instead of eating that default. DeepSeek uses
-    enable_thinking (a toggle), not this dial, so it is deliberately excluded.
+    GLM-5.x ships a three-level reasoning_effort and defaults to the deepest,
+    which is slow and token-hungry on ordinary turns — so Basilisk sends the
+    operator's chosen level on every supporting turn instead of eating that
+    default. DeepSeek uses enable_thinking (a toggle), not this dial, so it is
+    deliberately excluded.
     """
-    mid = (model_id or "").lower()
-    return "glm-5" in mid or "glm-6" in mid
+    return "glm-5" in (model_id or "").lower()
 
 
 def reasoning_extra(model_id: str, level: str) -> Dict[str, Any]:
     """The extra_body reasoning fields for one turn, or {} if the model has no
-    dial. Pure + deterministic so it can be unit-tested without a live
-    request."""
+    dial. thinking_budget bounds the chain-of-thought (the lever that works on
+    SiliconFlow); High also requests max-depth effort. Pure + deterministic so
+    it can be unit-tested without a live request."""
     lvl = (level or "").strip().lower()
     if lvl not in _REASONING_EFFORT_LEVELS:
         lvl = "low"
     if not supports_reasoning_effort(model_id):
         return {}
-    return {
-        "thinking_budget": _EFFORT_TO_BUDGET[lvl],
-        # ALWAYS sent, on every rung. Omitting it IS a choice — see above.
-        "reasoning_effort": reasoning_effort_enum(model_id)[lvl],
-    }
+    out: Dict[str, Any] = {"thinking_budget": _EFFORT_TO_BUDGET[lvl]}
+    if lvl == "high":
+        out["reasoning_effort"] = "max"
+    return out
 
 
 def recommended_sampling(model_id: str) -> Dict[str, float]:
@@ -845,7 +782,7 @@ def _migrate_settings(merged: Dict[str, Any], raw: Dict[str, Any]) -> None:
     # Older builds may carry prefer_groq / prefer_cloud / local-model keys;
     # they're harmless leftovers now (cloud-only) and simply ignored.
     # If active_provider is missing entirely, default to the LOCKED PRIMARY —
-    # SiliconFlow / GLM-5.3-Flash — the same default a fresh install gets.
+    # SiliconFlow / DeepSeek-V4-Flash — the same default a fresh install gets.
     # (Older builds put a Groq-only install on Groq here; that is gone. Groq is
     # the fallback, never the automatic default. A genuine Groq user still
     # selects it in the model switcher, which persists their choice below.)
@@ -1074,13 +1011,9 @@ class GroqBackend:
                     timeout=STREAM_IDLE_TIMEOUT_S,
                 )
                 parts: List[str] = []
-                _wall_cut = False
                 _wall_start = time.time()
                 for chunk in resp:
                     if time.time() - _wall_start > STREAM_MAX_WALL_S:
-                        # Reported, not swallowed — same reason as the
-                        # OpenAI-compatible backend below.
-                        _wall_cut = True
                         log(f"groq {attempt_model} hit the {STREAM_MAX_WALL_S}s "
                             f"wall-clock cap — cutting the turn")
                         break
@@ -1105,9 +1038,6 @@ class GroqBackend:
                     "backend": "groq",
                     "model": attempt_model,
                     "cancelled": False,
-                    "finish_reason": "time" if _wall_cut else "",
-                    "truncated": _wall_cut,
-                    "cut_by": "time" if _wall_cut else "",
                 })
                 return
             except Exception as e:
@@ -1316,25 +1246,10 @@ class OpenAICompatBackend:
                     url, data=data, headers=self._headers())
                 parts: List[str] = []
                 _finish_reason = ""
-                _wall_cut = False
                 _wall_start = time.time()
                 with urllib.request.urlopen(req, timeout=STREAM_IDLE_TIMEOUT_S) as r:
                     for raw in r:
                         if time.time() - _wall_start > STREAM_MAX_WALL_S:
-                            # ── THE SAME FACT THE finish_reason BLOCK BELOW
-                            #    EXISTS TO STOP THROWING AWAY ──
-                            # Cutting here leaves _finish_reason empty, so the
-                            # `truncated` flag came out False and the whole
-                            # turn looked FINISHED to everything downstream:
-                            # the reply stopped mid-sentence, the unfinished
-                            # text was stored as a complete answer, and the
-                            # recovery path that exists for exactly this — ask
-                            # the model to continue instead of accusing its
-                            # JSON — never fired. A deep-reasoning model is
-                            # what reaches this cap (GLM-5.x at High is the
-                            # obvious one), which is precisely when the reply
-                            # matters most.
-                            _wall_cut = True
                             log(f"{self.name} {attempt_model} hit the "
                                 f"{STREAM_MAX_WALL_S}s wall-clock cap — cutting "
                                 f"the turn with what streamed so far")
@@ -1386,18 +1301,10 @@ class OpenAICompatBackend:
                     "backend": self.name,
                     "model": attempt_model,
                     "cancelled": False,
-                    "finish_reason": _finish_reason or ("time" if _wall_cut
-                                                        else ""),
+                    "finish_reason": _finish_reason,
                     # The one fact the caller needs: the model did not choose
-                    # to stop, it ran out of room -- of TOKENS at the
-                    # max_tokens cap, or of TIME at STREAM_MAX_WALL_S. Both
-                    # mean "this reply is unfinished"; `cut_by` says which, so
-                    # the correction sent back to the model can be true. They
-                    # need different advice: "write it in sections" is right
-                    # for a token cap and actively wrong for a time cap.
-                    "truncated": _finish_reason == "length" or _wall_cut,
-                    "cut_by": "length" if _finish_reason == "length"
-                              else ("time" if _wall_cut else ""),
+                    # to stop, it ran out of room.
+                    "truncated": _finish_reason == "length",
                 })
                 return
             except urllib.error.HTTPError as e:
@@ -1567,8 +1474,7 @@ class BackendRouter:
                     cancel_event=None, on_reasoning=None,
                     effort: str = "standard",
                     max_tokens_override: Optional[int] = None,
-                    single_model: bool = False,
-                    reasoning_override: Optional[str] = None) -> Tuple[str, str]:
+                    single_model: bool = False) -> Tuple[str, str]:
         """Route one streamed completion to the active provider.
 
         max_tokens_override / single_model exist for the SIDECAR completions
@@ -1585,7 +1491,6 @@ class BackendRouter:
         if max_tokens_override:
             max_tokens = int(max_tokens_override)
         _extra: Dict[str, Any] = {}
-        _heavy_reasoning = False
         # ── Effort ladder: match capability + budget to the turn.  Light on
         #    plain chat (snappier, cheaper); heavy several tool-steps deep in a
         #    live engagement (escalate to the heavier sibling in the provider's
@@ -1641,58 +1546,25 @@ class BackendRouter:
                 _ok = (_spec.knows(heavy) if _spec is not None
                        else heavy in (getattr(backend, "fallback_chain", None)
                                       or []))
-                # ── AN ESCALATION MUST NOT BE A DOWNGRADE ──
-                # hard_engagement_model ships as DeepSeek-V4-Pro, which was the
-                # right heavier sibling when the pin was DeepSeek-V4-Flash. With
-                # GLM-5.3-Flash selected it is neither heavier (the catalogue
-                # calls GLM the top of this provider's board) nor cheaper —
-                # 1.50/3.14 against 0.15/0.50, a 10x jump — and it swaps model
-                # FAMILY silently, mid-run, taking the prompt tuning and the
-                # tool dialect with it. So a cross-family swap is refused; on a
-                # model that has a reasoning dial, "heavy" means the bigger
-                # token budget above plus the deepest reasoning, which is the
-                # same escalation expressed in the knob the model actually has.
-                _same_family = _model_family(heavy) == _model_family(model)
-                if heavy and heavy != model and _ok and _same_family:
+                if heavy and heavy != model and _ok:
                     log(f"effort: escalating {model} -> {heavy} "
                         f"(deep engagement)")
                     model = heavy
-                elif heavy and heavy != model and _ok and not _same_family:
-                    if supports_reasoning_effort(model):
-                        _heavy_reasoning = True
-                        log(f"effort: heavy turn stays on {model} "
-                            f"(hard_engagement_model {heavy} is another "
-                            f"family) — raising reasoning depth instead")
-                    else:
-                        log(f"effort: escalating {model} -> {heavy} "
-                            f"(deep engagement, no reasoning dial to raise)")
-                        model = heavy
         if max_tokens_override:
             # An explicit ask wins over the effort ladder's clamps — the ladder
             # tunes a CHAT turn, and this is not one.
             max_tokens = int(max_tokens_override)
         # ── Reasoning depth. GLM-5.x defaults to its DEEPEST reasoning — the lag
-        #    and token burn the operator sees — and on GLM-5.3-Flash OMITTING
-        #    reasoning_effort selects that default, so the field is sent on
-        #    EVERY rung, translated to the value that model's own enum accepts
-        #    (see reasoning_effort_enum), alongside SiliconFlow's own
-        #    thinking_budget. Rides extra_body, so a model that rejects either
+        #    and token burn the operator sees. On SiliconFlow the reasoning_effort
+        #    enum only offers high|max (low/medium map up to high), so the knob
+        #    that genuinely dials GLM DOWN is thinking_budget: a hard cap on
+        #    chain-of-thought tokens. Map the pill's rung to a budget (default
+        #    low = 1024, i.e. fast + cheap), and only for High also ask for
+        #    max-depth effort. Rides extra_body, so a model that rejects either
         #    field strips-and-retries once and remembers.
-        # reasoning_override is the RECOVERY lever: when a turn came back with
-        # a full chain of thought and an EMPTY answer, repeating it unchanged
-        # can only reproduce it. The caller shortens the thinking for that one
-        # retry. It is per-turn and never written to settings — the operator's
-        # pill choice is not edited behind his back.
-        _re = (reasoning_override
-               or self.settings.get("reasoning_effort", "")
-               or "").strip().lower()
+        _re = (self.settings.get("reasoning_effort", "") or "").strip().lower()
         if _re not in _REASONING_EFFORT_LEVELS:
             _re = "low"
-        # A heavy turn that stayed on the operator's model escalates the dial
-        # instead of the model id. An explicit override still wins: it is the
-        # recovery path, and recovery means LESS thinking, not more.
-        if _heavy_reasoning and not reasoning_override:
-            _re = "high"
         if supports_reasoning_effort(model):
             _extra.update(reasoning_extra(model, _re))
         opts = {
@@ -5699,17 +5571,6 @@ def tool_analyze_image(image_path: str, question: str = "",
         "max_tokens": 1024,
         "stream": False,
     }
-    # ── AN ALWAYS-THINKING VISION MODEL WILL SPEND THIS BUDGET ON ITSELF ──
-    # GLM-5.3-Flash is natively multimodal and is the first entry in
-    # VISION_MODELS, so it is a likely pick here — and its thinking cannot be
-    # turned off and DEFAULTS TO MAXIMUM DEPTH when reasoning_effort is
-    # omitted. "Describe this image" is not a reasoning problem; left at the
-    # default the model can spend the whole 1024-token budget deliberating and
-    # return an EMPTY content field, which the branch below then reported as
-    # "the model may not support images" — a wrong diagnosis that sends the
-    # operator to change a setting that was correct.
-    if supports_reasoning_effort(model):
-        payload.update(reasoning_extra(model, "low"))
     try:
         req = urllib.request.Request(
             _join_url(base_url, "chat/completions"),
@@ -5719,23 +5580,9 @@ def tool_analyze_image(image_path: str, question: str = "",
             method="POST")
         with urllib.request.urlopen(req, timeout=90) as r:
             data = _json.loads(r.read())
-        _choice = (data.get("choices") or [{}])[0]
-        _msg = _choice.get("message") or {}
-        desc = _msg.get("content", "")
+        desc = (data.get("choices") or [{}])[0].get("message", {}).get(
+            "content", "")
         if not desc:
-            # Say WHICH of the three things happened rather than guessing at
-            # the least likely one. A reply that spent its budget reasoning,
-            # or was cut off at the cap, is a budget problem with a real fix;
-            # only a reply that is empty for neither reason is evidence the
-            # model cannot see images at all.
-            _reasoned = bool(_msg.get("reasoning_content")
-                             or _msg.get("reasoning"))
-            if _choice.get("finish_reason") == "length" or _reasoned:
-                return {"ok": False, "error":
-                        "the vision model used its whole response budget on "
-                        "reasoning and returned no description. Pick a "
-                        "non-reasoning vision model in Settings -> Display -> "
-                        "Images & vision, or lower the reasoning-depth pill."}
             return {"ok": False, "error": "vision model returned no description "
                     "(the model may not support images)"}
         return {"ok": True, "image": p,
@@ -8997,134 +8844,6 @@ _GLM_ARG_RE = re.compile(
     r"<arg_key>\s*(.*?)\s*</arg_key>\s*<arg_value>(.*?)</arg_value>", re.S | re.I)
 _GLM_NAME_RE = re.compile(r"^[A-Za-z_][\w.-]*$")
 
-# ── THE SECOND GLM BODY SHAPE: JSON, NOT <arg_key> PAIRS ─────────────
-# The arg_key/arg_value form above is what GLM's chat template emits when it is
-# behaving.  Under a forced or `tool_choice: required` call — and, per vLLM's
-# own tracker (#48095), intermittently in ordinary agentic use — GLM 5.x
-# instead writes an OpenAI-shaped JSON body inside the SAME wrapper, sometimes
-# as a bare object, sometimes as an ARRAY of them, and sometimes with no
-# closing tag at all:
-#
-#     <tool_call>[{"name": "run", "parameters": {"command": "git status"}}]
-#     <tool_call>{"name": "run", "arguments": {"command": "id"}}</tool_call>
-#     <tool_call>run
-#     {"command": "id"}</tool_call>
-#
-# The name-before-<arg_key> rule cannot see any of these: the token before the
-# first <arg_key> is the whole JSON blob, which is not an identifier, so the
-# block was left exactly as it arrived.  That is the WORST of the two failure
-# modes this file's DSML comment warns about — the call neither RAN nor got
-# STRIPPED, so raw JSON was printed into the chat, written to chats.db and
-# replayed as history every later turn, and the turn ended having done nothing.
-#
-# Arguments arrive under "arguments" (OpenAI's spelling) or "parameters" (the
-# spelling in GLM's own emissions); a server that JSON-encodes the argument
-# object as a STRING is also normal.  Anything that does not decode to
-# {name, dict} is left untouched, because a false rewrite EXECUTES prose.
-_GLM_ARG_CONTAINER_KEYS = ("arguments", "parameters", "args")
-
-
-def _glm_one_json_call(item: Any) -> Optional[str]:
-    """`{"name": …, "arguments"|"parameters": {…}}` -> canonical markup.
-
-    None for anything that is not unambiguously ONE tool call — the caller then
-    leaves the original text exactly as it was rather than guessing.
-    """
-    if not isinstance(item, dict):
-        return None
-    name = item.get("name")
-    if not isinstance(name, str) or not _GLM_NAME_RE.match(name.strip()):
-        return None
-    args: Any = None
-    for k in _GLM_ARG_CONTAINER_KEYS:
-        if k in item:
-            args = item[k]
-            break
-    if args is None:
-        args = {}
-    if isinstance(args, str):
-        # Some servers hand the argument object back as a JSON STRING, exactly
-        # as OpenAI's function-call schema does.  An empty string means "no
-        # arguments", not "malformed".
-        s = args.strip()
-        if not s:
-            args = {}
-        else:
-            try:
-                args = json.loads(s)
-            except Exception:
-                return None
-    if not isinstance(args, dict):
-        return None
-    try:
-        return f'<tool name="{name.strip()}">{json.dumps(args)}</tool>'
-    except Exception:
-        return None
-
-
-def _glm_json_body(inner: str) -> Optional[str]:
-    """Decode a GLM <tool_call> body that is JSON rather than arg_key pairs.
-
-    Accepts one object or an ARRAY of them (GLM batches parallel calls that
-    way).  Returns canonical markup, or None when the body is not that shape.
-    """
-    body = (inner or "").strip()
-    if not body or body[0] not in "[{":
-        return None
-    try:
-        obj = json.loads(body)
-    except Exception:
-        # A complete value followed by trailing prose is common.  Take the
-        # first value, and refuse if anything after it starts new markup —
-        # that would mean we are guessing at where the call ended.
-        try:
-            obj, _end = json.JSONDecoder().raw_decode(body)
-        except Exception:
-            return None
-        if "<" in body[_end:]:
-            return None
-    items = obj if isinstance(obj, list) else [obj]
-    if not items:
-        return None
-    out = []
-    for it in items:
-        one = _glm_one_json_call(it)
-        if one is None:
-            return None          # all or nothing — never half-run a batch
-        out.append(one)
-    return "\n".join(out)
-
-
-def _glm_name_then_json(inner: str) -> Optional[str]:
-    """`<tool_call>run\\n{"command": "id"}` — the name as a bare token followed
-    by a JSON argument object.  Neither decoder above sees this one: there are
-    no <arg_key> pairs, and the body does not START with a brace."""
-    b = inner.find("{")
-    if b <= 0:
-        return None
-    name = inner[:b].strip().strip(_DS_PIPE).strip()
-    if not _GLM_NAME_RE.match(name):
-        return None
-    tail = inner[b:].strip()
-    try:
-        args = json.loads(tail)
-    except Exception:
-        try:
-            args, _end = json.JSONDecoder().raw_decode(tail)
-        except Exception:
-            return None
-    if not isinstance(args, dict):
-        return None
-    try:
-        return f'<tool name="{name}">{json.dumps(args)}</tool>'
-    except Exception:
-        return None
-
-
-def _glm_decode_body(inner: str) -> Optional[str]:
-    """Every non-<arg_key> GLM body shape, tried in order of certainty."""
-    return _glm_json_body(inner) or _glm_name_then_json(inner)
-
 
 def _glm_calls_to_canonical(text: str) -> str:
     """Rewrite GLM <tool_call>name…</tool_call> blocks to `<tool name=...>`.
@@ -9137,14 +8856,6 @@ def _glm_calls_to_canonical(text: str) -> str:
     """
     def _sub(m):
         inner = m.group(1) or ""
-        # JSON-bodied shapes first, and ONLY when there are no <arg_key> pairs
-        # to decode — a real arg_key body is the well-behaved form and must
-        # keep going through _coerce_param / _CONTENT_PARAM_NAMES below, which
-        # a json.loads would undo (a file body is text, whatever it looks like).
-        if "<arg_key>" not in inner:
-            _js = _glm_decode_body(inner)
-            if _js is not None:
-                return _js
         name = inner.split("<arg_key>", 1)[0].strip().strip(_DS_PIPE).strip()
         if not _GLM_NAME_RE.match(name):
             return m.group(0)
@@ -9168,43 +8879,6 @@ def _glm_calls_to_canonical(text: str) -> str:
             body = "{}"
         return f'<tool name="{name}">{body}</tool>'
     return _GLM_TOOLCALL_RE.sub(_sub, text)
-
-
-# A `<tool_call>` with NO closing tag — the shape vLLM #48095 records verbatim
-# ("<tool_call>[{\"name\": \"bash\", …}]" landing in `content`).
-_GLM_OPEN_LIT = "<tool_call>"
-
-
-def _glm_unclosed_to_canonical(text: str) -> str:
-    """Decode a trailing, UNCLOSED GLM <tool_call> whose body is complete JSON.
-
-    Safe mid-stream by construction: it fires only when the body parses as a
-    COMPLETE JSON value, and a body that is still arriving cannot.  A partial
-    one therefore falls through untouched to the display-side `_cut_unclosed`,
-    exactly as before.  Without this the call is invisible to the parser (no
-    closer, so the paired sub cannot match) and the turn ends having done
-    nothing but ask the model to try again.
-
-    PERFORMANCE, NOT STYLE: `rfind` rather than a `(?!…<tool_call>)` lookahead,
-    and an <arg_key> bail-out before any json.loads.  This runs on EVERY
-    streamed frame over the whole buffer, so a lookahead that rescans to
-    end-of-string per candidate — or a json.loads over a growing file body —
-    is quadratic in reply length.  That is the same shape as the 25-second
-    `_ALT_PARTIAL_RE` freeze, and it is not worth re-learning.
-    """
-    i = text.rfind(_GLM_OPEN_LIT)
-    if i < 0:
-        return text
-    tail = text[i + len(_GLM_OPEN_LIT):]
-    # The <arg_key> dialect is decoded by the PAIRED pass and genuinely needs
-    # its closer; attempting JSON on it can only fail, and on a long file body
-    # it fails expensively, once per frame.
-    if "<arg_key>" in tail:
-        return text
-    decoded = _glm_decode_body(tail)
-    if decoded is None:
-        return text
-    return text[:i] + decoded
 
 
 # ── DSML: DeepSeek-V4's tag dialect ──────────────────────────────────
@@ -9608,17 +9282,8 @@ def _normalise_tool_syntax(text: str) -> str:
     #     Gate on the literal pair being present: the paired sub is quadratic on
     #     a stream of unclosed openers, and if there is no closing tag it can
     #     match nothing anyway — same discipline as the alt-tag pass below.
-    if "<tool_call>" in out:
-        if "</tool_call>" in out:
-            out = _glm_calls_to_canonical(out)
-        # …and a LAST opener that never closed. GLM drops the closer often
-        # enough that vLLM has an open issue for it, and without this the call
-        # is invisible to the parser: the paired sub above needs a closer, so
-        # nothing runs and the operator is asked to re-send a call that was
-        # perfectly readable. Only fires on a COMPLETE JSON body, so a
-        # half-arrived one mid-stream is left to the display-side cut.
-        if "</tool_call>" not in out:
-            out = _glm_unclosed_to_canonical(out)
+    if "<tool_call>" in out and "</tool_call>" in out:
+        out = _glm_calls_to_canonical(out)
 
     # 2. Other tag dialects.
     # GUARD: a paired `<open …>(.*?)</close>` sub is quadratic when openers
@@ -10178,60 +9843,6 @@ THINK_PARTIAL_RE = re.compile(
     r'<think\b[^>]*>(.*)$', re.DOTALL | re.IGNORECASE)
 # Cheap linear probe used to skip the quadratic paired sub above.
 _THINK_CLOSE_RE = re.compile(r'</think\s*>', re.IGNORECASE)
-# The OPENER on its own — needed to tell a real block from an orphaned closer.
-_THINK_OPEN_RE = re.compile(r'<think\b[^>]*>', re.IGNORECASE)
-
-
-def _implicit_think_split(text: str) -> Tuple[Optional[str], str]:
-    """Handle a `</think>` whose OPENER was never in the model's output.
-
-    GLM-5.x's chat template opens the `<think>` block in the GENERATION PROMPT
-    and thinking cannot be turned off, so the model's own output begins INSIDE
-    the reasoning and emits only the closer:
-
-        The operator wants the host details, so uname is …</think>
-
-        Running that now.
-
-    Every consumer downstream of here is paired-tag based, so with no opener
-    NOTHING matched: the entire chain of thought was shown as the reply, the
-    literal `</think>` was rendered, TTS READ THE REASONING ALOUD, and the
-    whole lot was written to chats.db and replayed as history on every later
-    turn.  This is the same disease as the DSML speech bug — reasoning
-    escaping into a channel meant for the operator — arriving through a
-    different door.  Providers that run a reasoning parser split this into
-    `reasoning_content` and it never reaches here; this is for the ones that
-    do not.
-
-    CONDITIONS, deliberately narrow — the counter-property here is a reply
-    that merely MENTIONS the tag, and swallowing that reply's opening
-    sentences into the reasoning panel would be a worse bug than the one being
-    fixed.  So all three must hold:
-
-      1. the closer is the FIRST think-tag event in the text (an opener before
-         it means an ordinary paired block, already handled below);
-      2. it sits OUTSIDE a ``` fence — a fenced example is the model showing
-         the operator what the tag looks like;
-      3. it is not written INLINE.  A chat template emits `</think>` at the end
-         of the reasoning and then a newline (or nothing); prose writes
-         "the tag </think> closes a block", with an ordinary space after it.
-         So a following space/tab that is not a newline means prose, and the
-         split is refused.
-
-    Returns (reasoning_or_None, remaining_text).
-    """
-    if not text or "</think" not in text.lower():
-        return None, text
-    cm = _THINK_CLOSE_RE.search(_mask_fences(text))
-    if cm is None:
-        return None, text
-    om = _THINK_OPEN_RE.search(text)
-    if om is not None and om.start() < cm.start():
-        return None, text
-    after = text[cm.end():]
-    if after[:1] in (" ", "\t"):
-        return None, text
-    return text[:cm.start()].strip(), after
 
 
 def extract_think_blocks(text: str) -> Tuple[str, str]:
@@ -10240,13 +9851,6 @@ def extract_think_blocks(text: str) -> Tuple[str, str]:
     reasoning; an unclosed trailing <think>… (mid-stream) is also moved to
     reasoning so it never flashes in the reply."""
     thoughts: List[str] = []
-
-    # An implicit block opened by the chat template, not by the model — see
-    # _implicit_think_split.  Done FIRST so the paired pass below then sees
-    # ordinary, well-formed text.
-    _implicit, text = _implicit_think_split(text or "")
-    if _implicit:
-        thoughts.append(_implicit)
 
     def _grab(m: "re.Match[str]") -> str:
         thoughts.append((m.group(1) or "").strip())

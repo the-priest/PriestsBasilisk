@@ -54,7 +54,7 @@ SF = C.PROVIDERS_BY_KEY["siliconflow"]
 
 # ── 1. the pinned default ────────────────────────────────────────────
 print("\n== pinned default ==")
-PINNED = "zai-org/GLM-5.3-Flash"
+PINNED = "deepseek-ai/DeepSeek-V4-Flash"
 ck("chain[0] is the pinned default", SF.chain[0] == PINNED, SF.chain[0])
 ck("default_model agrees", SF.default_model == PINNED)
 ck("pinned default is also pickable", PINNED in SF.pick_ids)
@@ -185,19 +185,8 @@ ck("GLM-5.2 keeps its think toggle (hybrid)",
 # Natively multimodal, so it must be offered as a vision model too.
 ck("GLM-5.3-Flash is a pickable vision model",
    "zai-org/GLM-5.3-Flash" in C.VISION_MODELS.get("siliconflow", []))
-ck("the pin is GLM-5.3-Flash and the chain head agrees",
-   SF.chain[0] == PINNED and PINNED == "zai-org/GLM-5.3-Flash")
-# THE BENCHMARK ROWS DO NOT MOVE WITH THE PIN. Every README score was produced
-# driving DeepSeek-V4-Flash; that model stays in the catalogue, stays FIRST in
-# the fallback walk behind the pin, and its blurb keeps saying so. Restating
-# those numbers as GLM numbers would be a fabricated benchmark.
-ck("DeepSeek-V4-Flash is still catalogued", SF.info(
-    "deepseek-ai/DeepSeek-V4-Flash") is not None)
-ck("…and is the FIRST fallback behind the pin",
-   SF.chain[1] == "deepseek-ai/DeepSeek-V4-Flash", str(SF.chain))
-ck("…and still carries the benchmark provenance in its blurb",
-   "benchmark" in (SF.info("deepseek-ai/DeepSeek-V4-Flash").note or "").lower(),
-   SF.info("deepseek-ai/DeepSeek-V4-Flash").note)
+ck("adding GLM-5.3-Flash did not change the pinned default",
+   SF.chain[0] == PINNED and PINNED == "deepseek-ai/DeepSeek-V4-Flash")
 
 # ── reasoning-effort dial (GLM-5.x is deep-by-default; we bound it) ──
 print("\n== reasoning effort ==")
@@ -209,8 +198,8 @@ ck("default reasoning_effort is low (fast + cheap)",
    C.DEFAULT_SETTINGS.get("reasoning_effort") == "low")
 ck("low/medium/high are the offered levels",
    C._REASONING_EFFORT_LEVELS == ("low", "medium", "high"))
-# thinking_budget is SiliconFlow's own documented lever — assert Low genuinely
-# bounds the reasoning small, and the rungs increase monotonically.
+# The lever that actually works on SiliconFlow is thinking_budget — assert Low
+# genuinely bounds the reasoning small, and the rungs increase monotonically.
 _bud = C._EFFORT_TO_BUDGET
 ck("budget rises low < medium < high",
    _bud["low"] < _bud["medium"] < _bud["high"])
@@ -218,55 +207,19 @@ ck("Low is a small budget (actually fast/cheap, not mapped up to high)",
    _bud["low"] <= 2048, str(_bud["low"]))
 ck("every budget is within SiliconFlow's 128..32768 range",
    all(128 <= v <= 32768 for v in _bud.values()))
-
-# ── THE OTHER HALF OF THE DIAL, AND THE BUG THIS BLOCK USED TO DEFEND ──
-# GLM-5.3-Flash's model card: reasoning_effort is low|high|max and "defaults to
-# max if not passed (or if set to any other value)". So OMITTING the field is
-# not neutral -- it selects the deepest, slowest, priciest mode. The previous
-# version of this block asserted that Low sent NO reasoning_effort, which
-# pinned exactly that: the SHIPPED DEFAULT rung, whose tooltip promises
-# "fastest and cheapest", ran the model at maximum depth. The field must ride
-# EVERY rung, translated to the value that model's own enum accepts.
-_GLM53 = "zai-org/GLM-5.3-Flash"
-_enum53 = C.reasoning_effort_enum(_GLM53)
-ck("GLM-5.3 gets the three-value enum (low genuinely exists there)",
-   _enum53["low"] == "low" and _enum53["high"] == "max", str(_enum53))
-ck("GLM-5.3 'medium' is TRANSLATED, never forwarded raw "
-   "(medium is out-of-enum and would fall back to max)",
-   _enum53["medium"] == "high" and "medium" not in set(_enum53.values()),
-   str(_enum53))
-_enum52 = C.reasoning_effort_enum("zai-org/GLM-5.2")
-ck("GLM-5.2 keeps the two-value enum: its Low maps up to high",
-   _enum52["low"] == "high" and _enum52["high"] == "max", str(_enum52))
-ck("an unrecognised glm-5 id gets the conservative two-value map",
-   C.reasoning_effort_enum("zai-org/GLM-5.9-Experimental") == _enum52)
-_ORDER = ("low", "high", "max")
-for _lvl in ("low", "medium", "high"):
-    _ex = C.reasoning_extra(_GLM53, _lvl)
-    ck(f"GLM {_lvl}: reasoning_effort is ALWAYS sent (omitting it picks max)",
-       "reasoning_effort" in _ex, str(_ex))
-    ck(f"GLM {_lvl}: the value is in the model's real enum",
-       _ex["reasoning_effort"] in _ORDER, str(_ex))
-    ck(f"GLM {_lvl}: thinking_budget matches the rung",
-       _ex.get("thinking_budget") == _bud[_lvl], str(_ex))
-_lo = C.reasoning_extra(_GLM53, "low")
-_md = C.reasoning_extra(_GLM53, "medium")
-_hi = C.reasoning_extra(_GLM53, "high")
-ck("GLM Low actually asks for LOW depth, not the default max",
-   _lo["reasoning_effort"] == "low", str(_lo))
-ck("GLM High asks for max depth and the big budget",
-   _hi["reasoning_effort"] == "max" and _hi["thinking_budget"] == _bud["high"],
+# The per-turn extra_body a GLM request will carry.
+_lo = C.reasoning_extra("zai-org/GLM-5.3-Flash", "low")
+ck("GLM Low sends a small thinking_budget and no max effort",
+   _lo.get("thinking_budget") == _bud["low"] and "reasoning_effort" not in _lo,
+   str(_lo))
+_hi = C.reasoning_extra("zai-org/GLM-5.3-Flash", "high")
+ck("GLM High sends the big budget AND asks for max depth",
+   _hi.get("thinking_budget") == _bud["high"] and _hi.get("reasoning_effort") == "max",
    str(_hi))
-ck("depth is monotonic across the pill",
-   _ORDER.index(_lo["reasoning_effort"])
-   < _ORDER.index(_md["reasoning_effort"])
-   < _ORDER.index(_hi["reasoning_effort"]))
 ck("a model without the dial gets no reasoning fields",
    C.reasoning_extra("deepseek-ai/DeepSeek-V4-Flash", "low") == {})
 ck("an unknown level falls back to low, never crashes",
-   C.reasoning_extra(_GLM53, "bogus").get("thinking_budget") == _bud["low"])
-ck("an unknown level also gets a valid enum value, never a bare passthrough",
-   C.reasoning_extra(_GLM53, "bogus").get("reasoning_effort") == "low")
+   C.reasoning_extra("zai-org/GLM-5.3-Flash", "bogus").get("thinking_budget") == _bud["low"])
 
 # THE REGRESSION THIS FIELD ALMOST CAUSED. Catalogue entries are built with
 # POSITIONAL arguments, so a new dataclass field inserted anywhere but the END
@@ -293,9 +246,8 @@ _inst = open(os.path.join(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))), "install.sh"), encoding="utf-8").read()
 ck("installer names no removed provider",
    '"groq":' not in _inst and '"google":' not in _inst)
-# Pinned to PINNED, not to a literal, so this cannot silently keep passing
-# against a stale id the next time the default moves.
-ck("installer names the current default model", PINNED in _inst, PINNED)
+ck("installer names the current default model",
+   "deepseek-ai/DeepSeek-V4-Flash" in _inst)
 ck("installer lists no provider outside the registry",
    all(f'"{k}":' not in _inst
        for k in ("novita", "github", "openai", "anthropic")),

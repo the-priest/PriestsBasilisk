@@ -181,7 +181,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.basilisk"
 APP_NAME = "Basilisk"
-VERSION = "1.0.0.18"
+VERSION = "1.0.0.17"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -5579,17 +5579,13 @@ class MessageWidget(Gtk.Box):
                         if "_raw" in call.args or not epath or econtent is None:
                             if "_raw" in call.args:
                                 why = (
-                                    "the reply hit the per-turn time limit "
-                                    "part-way through the file, so the call "
-                                    "arrived unfinished (ask it to re-send "
-                                    "with less preamble)"
-                                    if self._last_stream_cut_by == "time"
-                                    else "the reply hit the response-token cap "
+                                    "the reply hit the response-token cap "
                                     "part-way through the file, so the call "
                                     "arrived unfinished (raise Max response "
                                     "tokens in Settings, or have it write the "
                                     "file in sections)"
-                                    if self._last_stream_truncated
+                                    if getattr(self, "_last_stream_truncated",
+                                               False)
                                     else "the file contents couldn't be "
                                          "parsed — most likely an unescaped "
                                          "\" or a stray control character in "
@@ -7287,19 +7283,6 @@ class SettingsDialog(Adw.PreferencesDialog):
 # ═════════════════════════════════════════════════════════════════════
 
 class MainWindow(Adw.ApplicationWindow):
-
-    # ── PER-TURN STREAM STATE, DECLARED ON THE CLASS ON PURPOSE ──────
-    # These are read on paths that can run before __init__ has set them (and
-    # by the test harnesses, which build the window with __new__). Declaring
-    # them here rather than reading them with getattr(..., default) makes the
-    # default a REAL attribute lookup: a base class with a catch-all
-    # __getattr__ — which the GTK test stub has — hands back a TRUTHY object
-    # for any missing name, so a flag whose entire job is to be false would
-    # arm its recovery path on every single turn. Caught by
-    # tests/test_turn_directives.py the first time it happened.
-    _recover_silent_reasoner: bool = False   # last turn reasoned, said nothing
-    _last_stream_cut_by: str = ""            # "" | "length" | "time"
-    _last_stream_truncated: bool = False
 
     def __init__(self, app: "BasiliskApp"):
         super().__init__(application=app)
@@ -10748,25 +10731,6 @@ class MainWindow(Adw.ApplicationWindow):
         else:
             _effort = "standard"
 
-        # ── RECOVERING FROM A TURN THAT THOUGHT AND SAID NOTHING ──────
-        # Set by the degraded branch in _on_stream_done_body when the model
-        # streamed reasoning and no content (or was cut at the time limit).
-        # Repeating that request unchanged reproduces it, so this ONE turn
-        # gets a shorter leash on the thinking and a bigger room for the
-        # answer. Consumed here, so it applies to exactly one retry and the
-        # operator's own reasoning-depth pill is never edited.
-        _re_override = None
-        _mt_override = None
-        if self._recover_silent_reasoner:
-            self._recover_silent_reasoner = False
-            _re_override = "low"
-            _mt_override = max(
-                int(self.settings.get("max_tokens", 2048) or 2048),
-                int(self.settings.get("effort_heavy_max_tokens", 4096) or 4096))
-            self.terminal_log(
-                f"↻ retrying with the thinking dialled down and room for "
-                f"{_mt_override} answer tokens", "dim")
-
         # ── STUCK PIVOT (coded, not left to the model) ────────────────
         # If the model has gone DEEP (20+ tool-steps into one turn) and its
         # recent results are mostly failures / no-progress, it's grinding the
@@ -10944,9 +10908,7 @@ class MainWindow(Adw.ApplicationWindow):
                 self.router.stream_chat(full, _on_tok, _on_done, _on_err,
                                         self.streaming_cancel,
                                         on_reasoning=_on_reason,
-                                        effort=_effort,
-                                        max_tokens_override=_mt_override,
-                                        reasoning_override=_re_override)
+                                        effort=_effort)
             except Exception as e:
                 log(f"stream worker died: {traceback.format_exc()}")
                 _on_err(f"internal error starting the reply: "
@@ -11081,11 +11043,6 @@ class MainWindow(Adw.ApplicationWindow):
         # Without it, a write cut off mid-file was reported as bad JSON
         # escaping, and the model "fixed" the escaping and hit the same cap.
         self._last_stream_truncated = bool(meta.get("truncated"))
-        # WHICH cap. A turn cut at STREAM_MAX_WALL_S is also unfinished, but the
-        # advice differs: telling a model that ran out of TIME to "write the
-        # file in sections" is the wrong correction, and it will hit the clock
-        # again doing exactly what it was told.
-        self._last_stream_cut_by = str(meta.get("cut_by") or "")
         # ── CANONICALISE ONCE, AT THE BOUNDARY ──
         # Everything downstream — parsing, stripping, the stored message, the
         # history re-sent on every later turn, the widget the operator reads —
@@ -11416,36 +11373,8 @@ class MainWindow(Adw.ApplicationWindow):
             # has a key so the NEXT turn retries elsewhere.
             if (not cancelled and not executable
                     and looks_degraded(final)):
-                # ── WHY IT WAS EMPTY, NOT JUST THAT IT WAS ──
-                # The reported symptom: "stream start / stream done / response
-                # looked degraded" three times, force-answer, three more, for
-                # ever — on a model whose thinking cannot be turned off. The
-                # host already HELD the answer and threw it away: the turn had
-                # streamed a full chain of thought into the Thoughts panel and
-                # emitted zero content tokens. That is not junk output, it is
-                # the response budget being spent on reasoning — and a retry
-                # that changes NOTHING is guaranteed to reproduce it, which is
-                # exactly the stable loop in the log.
-                _thoughts = ""
-                try:
-                    if self.streaming_msg_widget is not None:
-                        _thoughts = self.streaming_msg_widget.get_thoughts()
-                except Exception:
-                    _thoughts = ""
-                _cut = self._last_stream_cut_by
-                _reasoned_silent = bool(_thoughts) and not (final or "").strip()
-                if _reasoned_silent:
-                    self.terminal_log(
-                        f"⚠ the model thought for {len(_thoughts)} characters "
-                        f"and said nothing — the response budget went on "
-                        f"reasoning, not on the answer", "error")
-                elif _cut == "time":
-                    self.terminal_log(
-                        "⚠ the turn was cut at the per-turn time limit before "
-                        "the answer started", "error")
-                else:
-                    self.terminal_log("⚠ response looked degraded (empty/"
-                                      "repetitive)", "error")
+                self.terminal_log("⚠ response looked degraded (empty/"
+                                  "repetitive)", "error")
                 # Never just stop on a degraded reply — retry automatically,
                 # bounded so it can't loop forever. Hop to another provider
                 # (if one has a key) and re-kick the SAME turn so the work
@@ -11454,30 +11383,9 @@ class MainWindow(Adw.ApplicationWindow):
                 if (self.settings.get("auto_fallback_on_degraded", True)
                         and _dret < 3 and not self._stop_requested):
                     self._degraded_retries = _dret + 1
-                    # CHANGE SOMETHING BEFORE RETRYING. A deterministic budget
-                    # failure does not care how many times it is asked again.
-                    if _reasoned_silent or _cut == "time":
-                        self._recover_silent_reasoner = True
-                        try:
-                            _fc = self.streaming_chat_id or self.current_chat_id
-                            self.store.add_message(
-                                _fc, "user",
-                                "<tool_result>\n[system] your last turn "
-                                "produced REASONING ONLY and no answer — the "
-                                "operator saw an empty message. Nothing you "
-                                "worked out is lost, it is in this "
-                                "conversation. Answer NOW, directly, in the "
-                                "reply itself. Think briefly and write the "
-                                "answer; if the job is long, deliver the first "
-                                "complete, usable part of it in this turn "
-                                "rather than planning the whole thing.\n"
-                                "</tool_result>",
-                                meta={"kind": "tool_result"})
-                        except Exception:
-                            pass
                     # PINNED PROVIDER: never hop clouds behind the operator's
                     # back. Whatever provider is selected (default
-                    # SiliconFlow · GLM-5.3-Flash) STAYS selected — a
+                    # SiliconFlow · DeepSeek-V4-Flash) STAYS selected — a
                     # degraded reply just re-kicks the SAME provider. The backend
                     # already walks its own model chain for rate-limits /
                     # unavailability; a junk-content reply gets one more shot on
@@ -11570,19 +11478,8 @@ class MainWindow(Adw.ApplicationWindow):
                 if _locked_drop:
                     _why = ("your tool call was NOT run — the tool budget for "
                             "this question is spent")
-                elif _bad_call and self._last_stream_cut_by == "time":
-                    # Cut by the CLOCK, not the token cap. "Write it in
-                    # sections" is the wrong instruction here — more, shorter
-                    # round-trips is exactly what runs the clock down again.
-                    _why = (
-                        "your last reply was CUT OFF at the per-turn TIME "
-                        "limit, mid-tool-call — nothing ran. The format was "
-                        "fine and the reply was not too long; it took too "
-                        "long to produce. Re-send the SAME call, but get to "
-                        "it immediately: no preamble, no restating the plan, "
-                        "and keep the reasoning short. If the step is genuinely "
-                        "big, do the smallest useful part of it first")
-                elif _bad_call and self._last_stream_truncated:
+                elif _bad_call and getattr(self, "_last_stream_truncated",
+                                            False):
                     # NOT a syntax problem. Sending the re-send-in-this-format
                     # lecture here is worse than useless: the format was right
                     # and the reply was cut off, so the model re-sends the same
