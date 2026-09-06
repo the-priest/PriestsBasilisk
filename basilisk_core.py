@@ -397,6 +397,14 @@ SENSITIVE_PATHS = (
     str(HOME / ".gnupg"),
     str(HOME / ".aws"), str(HOME / ".config" / "gh"),
     str(HOME / ".password-store"),
+    # Basilisk's OWN secret store. Without these the autonomous agent could
+    # read its own API keys straight out of settings.json with read_file — an
+    # AI must never be able to read the key it is running on. Covers the config
+    # dir (settings.json + keys), the legacy dir, and the private data dir
+    # (chats, memory, skills) which the agent reaches through its tools, never
+    # by raw file read.
+    str(CONFIG_DIR), str(SETTINGS_JSON), str(_LEGACY_CONFIG_DIR),
+    str(DATA_DIR),
     "/proc/kcore", "/proc/kmem",
 )
 
@@ -404,7 +412,8 @@ SENSITIVE_PATHS = (
 def log(msg: str) -> None:
     try:
         with open(LOG_FILE, "a", encoding="utf-8") as f:
-            f.write(f"[{datetime.datetime.now().isoformat(timespec='seconds')}] {msg}\n")
+            f.write(f"[{datetime.datetime.now().isoformat(timespec='seconds')}] "
+                    f"{redact_secrets(msg)}\n")
     except Exception:
         pass
 
@@ -663,6 +672,16 @@ _MODEL_SAMPLING: Dict[str, Dict[str, float]] = {
 
 _REASONING_EFFORT_LEVELS = ("low", "medium", "high")
 
+# The lever that ACTUALLY makes GLM faster/cheaper on SiliconFlow.
+# From SiliconFlow's API reference: the reasoning_effort enum only offers
+# high|max for these models — low and medium are silently mapped UP to high —
+# so effort alone can never dial GLM DOWN. `thinking_budget` (a hard cap on
+# chain-of-thought tokens, 128..32768, honoured by most reasoning models) is
+# what bounds the reasoning, and max_tokens does NOT include the CoT, so a small
+# budget buys speed and cost without starving the answer. The pill's three rungs
+# map to three budgets; High additionally asks for max-depth effort.
+_EFFORT_TO_BUDGET = {"low": 1024, "medium": 4096, "high": 20480}
+
 
 def supports_reasoning_effort(model_id: str) -> bool:
     """True for models whose reasoning DEPTH is a dial, not an on/off toggle.
@@ -674,6 +693,22 @@ def supports_reasoning_effort(model_id: str) -> bool:
     deliberately excluded.
     """
     return "glm-5" in (model_id or "").lower()
+
+
+def reasoning_extra(model_id: str, level: str) -> Dict[str, Any]:
+    """The extra_body reasoning fields for one turn, or {} if the model has no
+    dial. thinking_budget bounds the chain-of-thought (the lever that works on
+    SiliconFlow); High also requests max-depth effort. Pure + deterministic so
+    it can be unit-tested without a live request."""
+    lvl = (level or "").strip().lower()
+    if lvl not in _REASONING_EFFORT_LEVELS:
+        lvl = "low"
+    if not supports_reasoning_effort(model_id):
+        return {}
+    out: Dict[str, Any] = {"thinking_budget": _EFFORT_TO_BUDGET[lvl]}
+    if lvl == "high":
+        out["reasoning_effort"] = "max"
+    return out
 
 
 def recommended_sampling(model_id: str) -> Dict[str, float]:
@@ -699,6 +734,30 @@ def sampling_for(opts: Dict[str, Any], model_id: str) -> Tuple[float, float]:
     return temp, topp
 
 
+_ENV_SOURCED_KEYS: set = set()
+
+
+def _apply_key_env_and_register(merged: Dict[str, Any]) -> None:
+    """Prefer an API key from the environment over the on-disk copy, and record
+    every live key so redact_secrets can scrub it from any output.
+
+    A key in `<PROVIDER>_API_KEY` (e.g. SILICONFLOW_API_KEY) is used at runtime
+    and, because it is env-sourced, is NOT written back to settings.json — so a
+    security-conscious operator can keep the key entirely off disk. This is also
+    the natural way to inject a key in CI / a container without committing it.
+    """
+    _ENV_SOURCED_KEYS.clear()
+    for k in list(merged):
+        if not k.endswith("_api_key"):
+            continue
+        env_name = k[:-len("_api_key")].upper().replace("-", "_") + "_API_KEY"
+        env_val = (os.environ.get(env_name) or "").strip()
+        if env_val:
+            merged[k] = env_val
+            _ENV_SOURCED_KEYS.add(k)
+        register_secret(merged.get(k))
+
+
 def load_settings() -> Dict[str, Any]:
     if SETTINGS_JSON.exists():
         try:
@@ -707,10 +766,13 @@ def load_settings() -> Dict[str, Any]:
             merged = dict(DEFAULT_SETTINGS)
             merged.update(data)
             _migrate_settings(merged, data)
+            _apply_key_env_and_register(merged)
             return merged
         except Exception:
             pass
-    return dict(DEFAULT_SETTINGS)
+    merged = dict(DEFAULT_SETTINGS)
+    _apply_key_env_and_register(merged)
+    return merged
 
 
 def _migrate_settings(merged: Dict[str, Any], raw: Dict[str, Any]) -> None:
@@ -780,8 +842,17 @@ def save_settings(settings: Dict[str, Any]) -> None:
     # operator's API keys, model selection, etc.
     try:
         tmp = SETTINGS_JSON.with_suffix(".json.tmp")
+        # Never persist a key that was supplied by the environment — it lives in
+        # the env for exactly this reason. Register every key value first so it
+        # is scrubbed from logs/output regardless.
+        to_write = dict(settings)
+        for k, v in settings.items():
+            if k.endswith("_api_key"):
+                register_secret(v)
+                if k in _ENV_SOURCED_KEYS:
+                    to_write[k] = ""
         with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(settings, f, indent=2)
+            json.dump(to_write, f, indent=2)
             f.flush()
             try:
                 os.fsync(f.fileno())
@@ -890,6 +961,7 @@ class GroqBackend:
 
     def set_api_key(self, key: str) -> None:
         self.api_key = (key or "").strip()
+        register_secret(self.api_key)
         self._build_client()
 
     def is_available(self) -> bool:
@@ -1033,6 +1105,7 @@ class OpenAICompatBackend:
         # Authorization header and makes the provider reject a key that
         # looks correct in the Settings field.
         self.api_key = (key or "").strip()
+        register_secret(self.api_key)
 
     def is_available(self) -> bool:
         return bool(self.api_key) and is_online()
@@ -1481,15 +1554,19 @@ class BackendRouter:
             # An explicit ask wins over the effort ladder's clamps — the ladder
             # tunes a CHAT turn, and this is not one.
             max_tokens = int(max_tokens_override)
-        # ── Reasoning effort. GLM-5.x defaults to its DEEPEST reasoning, which
-        #    is the lag + token burn the operator sees. Send the chosen level
-        #    (default "low") to any model that has the dial, on every turn.
-        #    Rides extra_body, so a model that rejects it strips-and-retries
-        #    once and remembers; gated by supports_reasoning_effort so we never
-        #    spend that round-trip on a model that will never take it.
+        # ── Reasoning depth. GLM-5.x defaults to its DEEPEST reasoning — the lag
+        #    and token burn the operator sees. On SiliconFlow the reasoning_effort
+        #    enum only offers high|max (low/medium map up to high), so the knob
+        #    that genuinely dials GLM DOWN is thinking_budget: a hard cap on
+        #    chain-of-thought tokens. Map the pill's rung to a budget (default
+        #    low = 1024, i.e. fast + cheap), and only for High also ask for
+        #    max-depth effort. Rides extra_body, so a model that rejects either
+        #    field strips-and-retries once and remembers.
         _re = (self.settings.get("reasoning_effort", "") or "").strip().lower()
-        if _re in _REASONING_EFFORT_LEVELS and supports_reasoning_effort(model):
-            _extra["reasoning_effort"] = _re
+        if _re not in _REASONING_EFFORT_LEVELS:
+            _re = "low"
+        if supports_reasoning_effort(model):
+            _extra.update(reasoning_extra(model, _re))
         opts = {
             "temperature": self.settings.get("temperature", 0.7),
             "top_p": self.settings.get("top_p", 0.9),
@@ -1734,6 +1811,50 @@ def is_sensitive_path(path: str) -> bool:
     return False
 
 
+_SENSITIVE_REFUSAL = (
+    "refused: that path holds credentials or private keys — Basilisk's own "
+    "settings/API keys, or ssh/gnupg/aws material. It is off-limits to tools "
+    "by design, including to me. Ask the operator if you need it.")
+
+
+# ── Secret redaction ─────────────────────────────────────────────────
+# Defence in depth for the one path a read-guard can't cover: the shell. The
+# agent can `cat ~/.config/basilisk/settings.json` or `env` through the run
+# tool, so command output (and every log line) is scrubbed of known key values
+# and key-shaped tokens before it is ever shown to the model, stored, or logged.
+_SECRET_REGISTRY: set = set()
+
+
+def register_secret(value: Any) -> None:
+    """Remember a live secret so it can be scrubbed wherever it later appears."""
+    v = (value or "")
+    v = v.strip() if isinstance(v, str) else ""
+    if len(v) >= 8:                       # ignore blanks / trivially short
+        _SECRET_REGISTRY.add(v)
+
+
+_SECRET_PATTERNS = (
+    (re.compile(r"sk-[A-Za-z0-9._\-]{12,}"), "sk-****REDACTED****"),
+    (re.compile(r"(?i)\b(bearer)\s+[A-Za-z0-9._\-]{12,}"), r"\1 ****REDACTED****"),
+    (re.compile(r'(?i)("?(?:api[_-]?key|token|secret|password|passwd)"?\s*[:=]\s*"?)'
+                r'([A-Za-z0-9._\-]{12,})'), r"\1****REDACTED****"),
+)
+
+
+def redact_secrets(text: Any) -> Any:
+    """Replace every known key value and key-shaped token with a marker. Cheap
+    and idempotent; safe to run on any string that might reach the model."""
+    if not isinstance(text, str) or not text:
+        return text
+    out = text
+    for s in _SECRET_REGISTRY:
+        if s and s in out:
+            out = out.replace(s, "****REDACTED****")
+    for rx, repl in _SECRET_PATTERNS:
+        out = rx.sub(repl, out)
+    return out
+
+
 def _ro(argv: List[str], timeout: int = 12) -> Tuple[int, str, str]:
     try:
         # Preserve the subset of env vars that systemctl --user /
@@ -1788,6 +1909,8 @@ def _human_bytes(n: int) -> str:
 def tool_read_file(path: str, max_bytes: int = 80_000) -> Dict[str, Any]:
     try:
         rp = os.path.expanduser(path)
+        if is_sensitive_path(rp):
+            return {"ok": False, "error": _SENSITIVE_REFUSAL}
         if not os.path.exists(rp):
             return {"ok": False, "error": f"no such file: {path}"}
         if os.path.isdir(rp):
@@ -2097,6 +2220,8 @@ def tool_write_file(path: str, content: str,
 def tool_list_dir(path: str = ".") -> Dict[str, Any]:
     try:
         rp = os.path.expanduser(path)
+        if is_sensitive_path(rp):
+            return {"ok": False, "error": _SENSITIVE_REFUSAL}
         if not os.path.isdir(rp):
             return {"ok": False, "error": f"not a directory: {path}"}
         entries = []
@@ -2497,6 +2622,11 @@ def _clean_capture(s: str) -> Tuple[str, int]:
 def _format_run_result(command: str, p, needs_sudo: bool) -> Dict[str, Any]:
     stderr, _se_n = _clean_capture(p.stderr or "")
     stdout, _so_n = _clean_capture(p.stdout or "")
+    # Defence in depth: a read-guard can't stop `cat settings.json` or `env`
+    # through the shell, so scrub any key that surfaced in the output before the
+    # model, the history or the log can ever see it.
+    stdout = redact_secrets(stdout)
+    stderr = redact_secrets(stderr)
     result = {
         "ok": True, "command": command, "rc": p.returncode,
         "stdout": stdout[:80_000],
@@ -3326,6 +3456,8 @@ def tool_find_file(pattern: str,
     if not _have("find"):
         return {"ok": False, "error": "find not available"}
     rp = os.path.expanduser(search_path)
+    if is_sensitive_path(rp):
+        return {"ok": False, "error": _SENSITIVE_REFUSAL}
     if not os.path.isdir(rp):
         return {"ok": False, "error": f"not a directory: {search_path}"}
     cmd = ["find", rp, "-type", "f", "-name", pattern]

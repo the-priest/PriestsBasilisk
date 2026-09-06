@@ -188,9 +188,9 @@ ck("GLM-5.3-Flash is a pickable vision model",
 ck("adding GLM-5.3-Flash did not change the pinned default",
    SF.chain[0] == PINNED and PINNED == "deepseek-ai/DeepSeek-V4-Flash")
 
-# ── reasoning-effort dial (GLM-5.x is deep-by-default; we send a level) ──
+# ── reasoning-effort dial (GLM-5.x is deep-by-default; we bound it) ──
 print("\n== reasoning effort ==")
-ck("GLM-5.x exposes the reasoning_effort dial",
+ck("GLM-5.x exposes the reasoning dial",
    C.supports_reasoning_effort("zai-org/GLM-5.3-Flash"))
 ck("DeepSeek does NOT (it uses enable_thinking, a toggle)",
    not C.supports_reasoning_effort("deepseek-ai/DeepSeek-V4-Flash"))
@@ -198,6 +198,28 @@ ck("default reasoning_effort is low (fast + cheap)",
    C.DEFAULT_SETTINGS.get("reasoning_effort") == "low")
 ck("low/medium/high are the offered levels",
    C._REASONING_EFFORT_LEVELS == ("low", "medium", "high"))
+# The lever that actually works on SiliconFlow is thinking_budget — assert Low
+# genuinely bounds the reasoning small, and the rungs increase monotonically.
+_bud = C._EFFORT_TO_BUDGET
+ck("budget rises low < medium < high",
+   _bud["low"] < _bud["medium"] < _bud["high"])
+ck("Low is a small budget (actually fast/cheap, not mapped up to high)",
+   _bud["low"] <= 2048, str(_bud["low"]))
+ck("every budget is within SiliconFlow's 128..32768 range",
+   all(128 <= v <= 32768 for v in _bud.values()))
+# The per-turn extra_body a GLM request will carry.
+_lo = C.reasoning_extra("zai-org/GLM-5.3-Flash", "low")
+ck("GLM Low sends a small thinking_budget and no max effort",
+   _lo.get("thinking_budget") == _bud["low"] and "reasoning_effort" not in _lo,
+   str(_lo))
+_hi = C.reasoning_extra("zai-org/GLM-5.3-Flash", "high")
+ck("GLM High sends the big budget AND asks for max depth",
+   _hi.get("thinking_budget") == _bud["high"] and _hi.get("reasoning_effort") == "max",
+   str(_hi))
+ck("a model without the dial gets no reasoning fields",
+   C.reasoning_extra("deepseek-ai/DeepSeek-V4-Flash", "low") == {})
+ck("an unknown level falls back to low, never crashes",
+   C.reasoning_extra("zai-org/GLM-5.3-Flash", "bogus").get("thinking_budget") == _bud["low"])
 
 # THE REGRESSION THIS FIELD ALMOST CAUSED. Catalogue entries are built with
 # POSITIONAL arguments, so a new dataclass field inserted anywhere but the END
