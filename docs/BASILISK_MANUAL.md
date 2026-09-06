@@ -75,10 +75,12 @@ Paths and a few behaviours can be overridden by environment variables for non-st
 
 ## 2.5 Choosing a provider and getting a key
 
-Basilisk is **cloud-model-driven** — there is no bundled local model. It ships with two backends:
+Basilisk is **cloud-model-driven** — there is no bundled local model. It runs on one chat provider:
 
-- **SiliconFlow** — the **default primary**, running **DeepSeek-V4-Flash** (fast) and **DeepSeek-V4-Pro** (the heavier reasoning sibling). Get a key from SiliconFlow, paste it in **Settings → Backends**.
-- **Groq** — the **fallback**. Never swapped in over SiliconFlow unless you enable auto-fallback or pick it explicitly.
+- **SiliconFlow** — the wired provider. The default model is **GLM-5.3-Flash** (320B/18B MoE, natively multimodal, 1M context, flagship quality at workhorse money); **DeepSeek-V4-Flash** is the first fallback and is the model every published benchmark was produced on, with **DeepSeek-V4-Pro** behind it. Get a key from SiliconFlow, paste it in **Settings → Backends**.
+- **Groq** is no longer a chat provider. Its key is still used for speech-to-text.
+
+GLM-5.3-Flash's thinking cannot be switched off, so the composer's **reasoning-depth pill** (Low / Med / High) is how you trade speed against depth on it: Low is the shipped default and is genuinely the cheap, fast end.
 
 The underlying OpenAI-compatible backend can also drive other OpenAI-style endpoints if you configure them. Whichever provider is active, its key is stored locally and sent only to that provider.
 
