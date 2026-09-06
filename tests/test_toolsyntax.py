@@ -705,6 +705,31 @@ ck("GLM tool call is scrubbed from speech",
 ck("partial GLM call is detected as tool markup",
    looks_like_failed_tool_call("<tool_call>run\n<arg_key>command</arg_key>"))
 
+# A FILE BODY IS TEXT, WHATEVER IT LOOKS LIKE — the GLM path must not coerce a
+# content arg the way it (correctly) coerces a scalar arg, or writing a JSON
+# file or a file that is just "42" comes back "write failed".
+_wj = ('<tool_call>write<arg_key>path</arg_key><arg_value>/tmp/c.json</arg_value>'
+       '<arg_key>content</arg_key><arg_value>{"a": 1}</arg_value></tool_call>')
+_cj = parse_tool_calls(_wj)[0]
+ck("GLM: JSON-looking file content stays a string",
+   isinstance(_cj.args.get("content"), str) and _cj.args["content"] == '{"a": 1}',
+   repr(_cj.args.get("content")))
+_wn = ('<tool_call>write<arg_key>path</arg_key><arg_value>/tmp/n</arg_value>'
+       '<arg_key>content</arg_key><arg_value>42</arg_value></tool_call>')
+ck("GLM: numeric file content stays a string, not an int",
+   parse_tool_calls(_wn)[0].args.get("content") == "42")
+# …but a NON-content scalar arg still coerces (a port stays an int).
+ck("GLM: non-content scalar arg is still coerced",
+   parse_tool_calls("<tool_call>scan<arg_key>port</arg_key>"
+                    "<arg_value>443</arg_value></tool_call>")[0].args.get("port") == 443)
+# Two GLM calls in one reply both parse.
+_bat = ("<tool_call>a<arg_key>x</arg_key><arg_value>1</arg_value></tool_call>"
+        " and then <tool_call>b<arg_key>y</arg_key><arg_value>2</arg_value></tool_call>")
+_bc = parse_tool_calls(_bat)
+ck("two GLM calls in one reply both parse",
+   len(_bc) == 2 and _bc[0].name == "a" and _bc[1].name == "b",
+   str([(x.name, x.args) for x in _bc]))
+
 
 print(f"\ntoolsyntax: {_p} passed, {_f} failed")
 sys.exit(1 if _f else 0)

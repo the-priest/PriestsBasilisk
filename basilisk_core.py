@@ -428,6 +428,13 @@ DEFAULT_SETTINGS = {
     "top_p": 0.9,
     "max_tokens": 2048,
 
+    # Reasoning depth for models that expose a reasoning_effort dial (GLM-5.x).
+    # These default to their DEEPEST setting, which is slow and token-hungry on
+    # ordinary turns, so we default the operator to "low" and let the composer
+    # pill bump it to "medium"/"high" for a genuinely hard target. Ignored by
+    # models that don't have the knob (rides extra_body, strips on 400).
+    "reasoning_effort": "low",
+
     # Adaptive effort: fast on plain chat, harder in deep engagements.
     # Set adaptive_effort False to restore one flat model + token budget.
     "adaptive_effort": True,
@@ -652,6 +659,21 @@ _MODEL_SAMPLING: Dict[str, Dict[str, float]] = {
     # later point releases. Applied ONLY when the operator hasn't chosen.
     "glm-5": {"temperature": 1.0, "top_p": 0.95},
 }
+
+
+_REASONING_EFFORT_LEVELS = ("low", "medium", "high")
+
+
+def supports_reasoning_effort(model_id: str) -> bool:
+    """True for models whose reasoning DEPTH is a dial, not an on/off toggle.
+
+    GLM-5.x ships a three-level reasoning_effort and defaults to the deepest,
+    which is slow and token-hungry on ordinary turns — so Basilisk sends the
+    operator's chosen level on every supporting turn instead of eating that
+    default. DeepSeek uses enable_thinking (a toggle), not this dial, so it is
+    deliberately excluded.
+    """
+    return "glm-5" in (model_id or "").lower()
 
 
 def recommended_sampling(model_id: str) -> Dict[str, float]:
@@ -1459,6 +1481,15 @@ class BackendRouter:
             # An explicit ask wins over the effort ladder's clamps — the ladder
             # tunes a CHAT turn, and this is not one.
             max_tokens = int(max_tokens_override)
+        # ── Reasoning effort. GLM-5.x defaults to its DEEPEST reasoning, which
+        #    is the lag + token burn the operator sees. Send the chosen level
+        #    (default "low") to any model that has the dial, on every turn.
+        #    Rides extra_body, so a model that rejects it strips-and-retries
+        #    once and remembers; gated by supports_reasoning_effort so we never
+        #    spend that round-trip on a model that will never take it.
+        _re = (self.settings.get("reasoning_effort", "") or "").strip().lower()
+        if _re in _REASONING_EFFORT_LEVELS and supports_reasoning_effort(model):
+            _extra["reasoning_effort"] = _re
         opts = {
             "temperature": self.settings.get("temperature", 0.7),
             "top_p": self.settings.get("top_p", 0.9),
@@ -5187,6 +5218,51 @@ def _wr_html_to_text(html_src: str) -> str:
     return s.strip()
 
 
+def _ascii_safe_url(url: str) -> str:
+    """Return a URL the HTTP stack can actually send, or "" if unsalvageable.
+
+    urllib encodes the request line as ASCII, so ONE non-ASCII character raises
+    UnicodeEncodeError deep in the socket write and kills the turn. Model drift
+    and tokeniser artifacts routinely staple such a character onto a URL. The
+    argument sanitiser already drops the known protocol glyphs; this is the sink
+    backstop that guarantees it regardless of how the URL arrived: percent-encode
+    a genuinely non-ASCII path/query (a real unicode or IDN URL still works), and
+    if that can't be done, cut the URL at the first non-ASCII character rather
+    than raise.
+    """
+    import urllib.parse
+    url = (url or "").strip().strip("<>\"'\u201c\u201d\u2018\u2019")
+    if not url:
+        return ""
+    if url.isascii():
+        return url
+    try:
+        sp = urllib.parse.urlsplit(url if "://" in url else "https://" + url)
+        host = sp.hostname or ""
+        try:
+            host = host.encode("idna").decode("ascii")
+        except Exception:
+            host = host.encode("ascii", "ignore").decode("ascii")
+        netloc = host + (f":{sp.port}" if sp.port else "")
+        if sp.username:
+            netloc = sp.username + (f":{sp.password}" if sp.password else "") + "@" + netloc
+        path = urllib.parse.quote(sp.path, safe="/%:@!$&'()*+,;=~-._")
+        query = urllib.parse.quote(sp.query, safe="=&%:@/?~-._*+,;$!()'")
+        rebuilt = urllib.parse.urlunsplit((sp.scheme, netloc, path, query, ""))
+        if rebuilt.isascii() and host:
+            return rebuilt
+    except Exception:
+        pass
+    # Last resort: keep the leading ASCII run so we still try the real host.
+    out = []
+    for ch in url:
+        if ch.isascii():
+            out.append(ch)
+        else:
+            break
+    return "".join(out).rstrip("/?#&=")
+
+
 def tool_web_read(url: str, max_chars: int = 6000) -> Dict[str, Any]:
     """Fetch and read a web page as shielded, readable text (with the final URL
     so you can cite it).
@@ -5215,6 +5291,10 @@ def tool_web_read(url: str, max_chars: int = 6000) -> Dict[str, Any]:
     url = (url or "").strip()
     if not url:
         return {"ok": False, "error": "no url"}
+    url = _ascii_safe_url(url)
+    if not url:
+        return {"ok": False,
+                "error": "url had no usable ASCII characters after cleaning"}
     if "://" not in url:
         url = "https://" + url
     parsed = urllib.parse.urlparse(url)
@@ -8650,7 +8730,16 @@ def _glm_calls_to_canonical(text: str) -> str:
         args: Dict[str, Any] = {}
         for k, v in _GLM_ARG_RE.findall(inner):
             key = k.strip()
-            if key:
+            if not key:
+                continue
+            # A FILE BODY IS TEXT, WHATEVER IT LOOKS LIKE — the same rule the
+            # DSML <parameter> path learned the hard way. content / file_text /
+            # etc. keep their exact bytes (only the tag's own leading newline is
+            # dropped); coercing them turned `42` into an int and a JSON file
+            # into a dict, so a perfectly good write came back "write failed".
+            if key.lower() in _CONTENT_PARAM_NAMES:
+                args[key] = _trim_tag_layout(v)
+            else:
                 args[key] = _coerce_param(v.strip())
         try:
             body = json.dumps(args)
@@ -8860,6 +8949,57 @@ def _coerce_param(val: str) -> Any:
 _CONTENT_PARAM_NAMES = frozenset(
     ("content", "text", "body", "contents", "file_text", "file_content",
      "filecontent", "data"))
+
+
+# ── Sanitise EVERY model-supplied tool argument at one boundary ──────────────
+# A model can staple a tokeniser / protocol artifact onto an argument: a
+# trailing ⟧ on a URL, a fullwidth pipe from a DeepSeek special token, a stray
+# control byte. Handed on to a socket, a shell, sqlite or a file path these
+# raise deep in the stdlib (the ⟧ URL that killed a turn with
+# `UnicodeEncodeError: 'ascii' codec can't encode '\u27e7'` is the canonical
+# case) — and every one of those failures is unrecoverable mid-turn. They are
+# NEVER legitimate data, so they are stripped here, once, for every tool. No
+# individual tool has to remember; a new tool inherits the defence for free.
+_PROTOCOL_GLYPHS = (
+    "\uff5c"          # ｜ fullwidth vertical line (DeepSeek special-token frame)
+    "\u2581"          # ▁ lower one-eighth block (DeepSeek)
+    "\u27e6\u27e7"    # ⟦ ⟧ mathematical white square brackets (token framing)
+    "\u2983\u2984"    # ⦃ ⦄
+    "\u2e24\u2e25"    # ⸤ ⸥ bottom half brackets, seen framing tokens
+    "\ufffd"          # replacement char — a decode already failed upstream
+)
+_GLYPH_TRANS = {ord(c): None for c in _PROTOCOL_GLYPHS}
+# C0 controls except tab / newline / carriage-return, plus the C1 range and the
+# raw NUL. NUL is the dangerous one — it raises ValueError("embedded null byte")
+# in open()/subprocess and silently truncates in sqlite.
+_CTRL_TRANS = {c: None for c in range(0x20) if c not in (0x09, 0x0a, 0x0d)}
+_CTRL_TRANS.update({c: None for c in range(0x7f, 0xa0)})
+_ALL_TRANS = dict(_CTRL_TRANS); _ALL_TRANS.update(_GLYPH_TRANS)
+
+
+def _sanitise_arg_value(v: Any, is_content: bool = False) -> Any:
+    """Strip protocol glyphs + control chars from a string (recursively through
+    lists/dicts). Content-type args (a file body) keep their glyphs — a file may
+    legitimately contain any character — but still lose NUL and C0/C1 controls,
+    which no text file needs and which break the write outright."""
+    if isinstance(v, str):
+        return v.translate(_CTRL_TRANS if is_content else _ALL_TRANS)
+    if isinstance(v, list):
+        return [_sanitise_arg_value(x, is_content) for x in v]
+    if isinstance(v, dict):
+        return {k: _sanitise_arg_value(x, is_content) for k, x in v.items()}
+    return v
+
+
+def sanitise_tool_args(args: Any) -> Any:
+    """Clean an entire parsed tool-args dict. The one call every tool argument
+    passes through (parse_tool_calls) so the whole tool surface — web_read,
+    run, write, skills, memory, everything — is defended at once."""
+    if not isinstance(args, dict):
+        return args
+    return {k: _sanitise_arg_value(
+                v, is_content=str(k).lower() in _CONTENT_PARAM_NAMES)
+            for k, v in args.items()}
 
 
 def _trim_tag_layout(raw: str) -> str:
@@ -9362,7 +9502,8 @@ def parse_tool_calls(text: str) -> List[ToolCall]:
                 and (_ORPHAN_TAG_RE.search(args["_raw"])
                      or _DS_PIPE in args["_raw"])):
             continue
-        calls.append(ToolCall(name=name, args=args, raw=m.group(0)))
+        calls.append(ToolCall(name=name, args=sanitise_tool_args(args),
+                              raw=m.group(0)))
     return calls
 
 

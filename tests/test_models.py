@@ -188,6 +188,17 @@ ck("GLM-5.3-Flash is a pickable vision model",
 ck("adding GLM-5.3-Flash did not change the pinned default",
    SF.chain[0] == PINNED and PINNED == "deepseek-ai/DeepSeek-V4-Flash")
 
+# ── reasoning-effort dial (GLM-5.x is deep-by-default; we send a level) ──
+print("\n== reasoning effort ==")
+ck("GLM-5.x exposes the reasoning_effort dial",
+   C.supports_reasoning_effort("zai-org/GLM-5.3-Flash"))
+ck("DeepSeek does NOT (it uses enable_thinking, a toggle)",
+   not C.supports_reasoning_effort("deepseek-ai/DeepSeek-V4-Flash"))
+ck("default reasoning_effort is low (fast + cheap)",
+   C.DEFAULT_SETTINGS.get("reasoning_effort") == "low")
+ck("low/medium/high are the offered levels",
+   C._REASONING_EFFORT_LEVELS == ("low", "medium", "high"))
+
 # THE REGRESSION THIS FIELD ALMOST CAUSED. Catalogue entries are built with
 # POSITIONAL arguments, so a new dataclass field inserted anywhere but the END
 # silently re-maps every one of them — first attempt put cached_in_usd right

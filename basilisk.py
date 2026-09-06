@@ -121,6 +121,7 @@ from basilisk_core import (
     command_tampers_self, Watcher,
     PROVIDERS, PROVIDERS_BY_KEY,
     VISION_MODELS,
+    supports_reasoning_effort, _REASONING_EFFORT_LEVELS,
     get_ledger,
 )
 from basilisk_persona import (
@@ -1346,6 +1347,33 @@ link, button.link, *:link { color: #7d121b; }
 }
 .unleash-button.toggled:hover {
     box-shadow: 0 0 30px rgba(255, 60, 40, 1.0), inset 0 0 11px rgba(255, 120, 80, 0.65);
+}
+
+/* Reasoning-effort pill: a compact Low/Med/High segmented control. Ember
+   tint on the active segment, no animation (the guiwiring audit forbids an
+   always-on one). ASCII bytes only. */
+.effort-pill {
+    border-radius: 999px;
+    margin: 0 2px;
+}
+.effort-seg {
+    background: transparent;
+    background-image: none;
+    color: rgba(228, 210, 196, 0.75);
+    padding: 2px 9px;
+    min-height: 22px;
+    font-size: 12px;
+    font-weight: 600;
+    border: 1px solid rgba(205, 120, 60, 0.28);
+}
+.effort-seg:hover {
+    color: rgba(255, 236, 220, 0.95);
+    background-color: rgba(205, 90, 40, 0.14);
+}
+.effort-seg:checked {
+    color: #1a1108;
+    background-image: linear-gradient(160deg, rgba(240, 170, 70, 0.95), rgba(200, 90, 30, 0.95));
+    border-color: rgba(240, 150, 60, 0.7);
 }
 /* A Gtk.MenuButton (settings, notifications) wraps its child in an inner
    > button that keeps GTK's default flat-grey styling -- that's the grey box
@@ -8255,6 +8283,36 @@ class MainWindow(Adw.ApplicationWindow):
         btn = getattr(self, "model_btn", None)
         if btn is not None:
             btn.set_label(self._model_button_label())
+        self._refresh_effort_pill()
+
+    def _active_model_id(self):
+        """The model id the next turn will actually use."""
+        key = self.settings.get("active_provider", "siliconflow")
+        return (self.settings.get(f"{key}_model", "") or "").strip()
+
+    def _refresh_effort_pill(self):
+        """Show the reasoning-effort pill only when the active model has the
+        dial (GLM-5.x), and keep its selected segment in sync with settings —
+        so switching to a model without the knob hides a control that would do
+        nothing, and switching back restores the operator's last choice."""
+        pill = getattr(self, "effort_pill", None)
+        if pill is None:
+            return
+        pill.set_visible(supports_reasoning_effort(self._active_model_id()))
+        cur = (self.settings.get("reasoning_effort", "low") or "low").strip().lower()
+        if cur not in _REASONING_EFFORT_LEVELS:
+            cur = "low"
+        for lvl, b in getattr(self, "_effort_btns", {}).items():
+            if b.get_active() != (lvl == cur):
+                b.set_active(lvl == cur)
+
+    def _on_effort_pick(self, btn, level):
+        # Grouped toggles fire for both the button switched off and the one
+        # switched on; only act on the activation.
+        if not btn.get_active():
+            return
+        self.settings["reasoning_effort"] = level
+        save_settings(self.settings)
 
     def _provider_has_key(self, key: str) -> bool:
         return bool((self.settings.get(f"{key}_api_key", "") or "").strip())
@@ -8483,6 +8541,39 @@ class MainWindow(Adw.ApplicationWindow):
         self.unleash_toggle.connect("toggled", self._on_unleash_toggled)
         actions.append(self.unleash_toggle)
 
+        # ── Reasoning-effort pill (Low | Med | High) ──
+        # GLM-5.x defaults to its DEEPEST reasoning, which is the lag and token
+        # burn on ordinary turns. This lets the operator dial it down for speed
+        # and cost, or up for a genuinely hard target, without opening Settings.
+        # A grouped (radio) segmented control; only shown when the active model
+        # actually exposes the dial (see _refresh_effort_pill).
+        self.effort_pill = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
+                                   spacing=0)
+        self.effort_pill.add_css_class("linked")
+        self.effort_pill.add_css_class("effort-pill")
+        self.effort_pill.set_valign(Gtk.Align.CENTER)
+        self._effort_btns = {}
+        _cur_effort = (self.settings.get("reasoning_effort", "low")
+                       or "low").strip().lower()
+        if _cur_effort not in _REASONING_EFFORT_LEVELS:
+            _cur_effort = "low"
+        _grp = None
+        for _lvl, _lbl in (("low", "Low"), ("medium", "Med"), ("high", "High")):
+            _b = Gtk.ToggleButton(label=_lbl)
+            _b.add_css_class("effort-seg")
+            if _grp is None:
+                _grp = _b
+            else:
+                _b.set_group(_grp)      # radio behaviour: one active at a time
+            _b.set_active(_lvl == _cur_effort)
+            _b.connect("toggled", self._on_effort_pick, _lvl)
+            self._effort_btns[_lvl] = _b
+            self.effort_pill.append(_b)
+        self.effort_pill.set_tooltip_text(
+            "Reasoning depth (GLM-5.x): Low is fastest and cheapest, High "
+            "thinks hardest. Takes effect on your next message.")
+        actions.append(self.effort_pill)
+
         # Attach — a clean paperclip glyph on the glass frame (no PNG plaque).
         attach_btn = _glyph_button("\U0001F4CE", "Attach file")
         attach_btn.connect("clicked", lambda *_: self._pick_attachment())
@@ -8619,6 +8710,9 @@ class MainWindow(Adw.ApplicationWindow):
         # Burning status bar sits directly above the composer / Send button.
         area.append(self.working_row)
         area.append(ibox)
+        # Now that the pill exists, set its initial visibility from the active
+        # model (the earlier _update_model_button ran before it was built).
+        self._refresh_effort_pill()
         return area
 
     # ── actions ────────────────────────────────────────────────
