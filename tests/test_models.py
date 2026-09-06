@@ -161,6 +161,21 @@ for _mid, _want in _CACHED.items():
         ck(f"{_mid} cached is cheaper than uncached",
            _info.cached_in_usd < _info.in_usd)
 
+# ── GLM-5.3-Flash: added to the catalogue as a pickable flagship ──────
+print("\n== GLM-5.3-Flash ==")
+_glm = SF.info("zai-org/GLM-5.3-Flash")
+ck("GLM-5.3-Flash is in the catalogue", _glm is not None)
+ck("provider knows GLM-5.3-Flash", SF.knows("zai-org/GLM-5.3-Flash"))
+ck("GLM-5.3-Flash is pickable", "zai-org/GLM-5.3-Flash" in SF.pick_ids)
+if _glm:
+    ck("GLM-5.3-Flash is multimodal", _glm.vision is True)
+    ck("GLM-5.3-Flash has a cached rate cheaper than uncached",
+       _glm.cached_in_usd > 0 and _glm.cached_in_usd < _glm.in_usd)
+ck("GLM family gets its agentic sampling recommendation",
+   C.recommended_sampling("zai-org/GLM-5.3-Flash").get("temperature") == 1.0)
+ck("adding GLM-5.3-Flash did not change the pinned default",
+   SF.chain[0] == PINNED and PINNED == "deepseek-ai/DeepSeek-V4-Flash")
+
 # THE REGRESSION THIS FIELD ALMOST CAUSED. Catalogue entries are built with
 # POSITIONAL arguments, so a new dataclass field inserted anywhere but the END
 # silently re-maps every one of them — first attempt put cached_in_usd right

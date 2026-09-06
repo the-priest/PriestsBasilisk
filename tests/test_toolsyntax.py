@@ -618,5 +618,64 @@ ck("empty input is safe",
    _cut_unclosed("", _ALT_OPEN_RE, _ALT_CLOSE_RE) == "")
 
 
+# ── GLM (Z.ai) native <tool_call> dialect — added when GLM-5.3-Flash joined
+#    the catalogue. GLM names the function as a bare token after <tool_call>
+#    and passes args as <arg_key>/<arg_value> pairs, so it hit the exact
+#    silent-no-args trap the DSML <parameter> path closed: opener matched (or
+#    didn't) but the generic pass found no name= attribute and ran empty.
+print("\n== GLM <tool_call> dialect ==")
+
+_glm45 = ("<tool_call>run\n<arg_key>command</arg_key>\n"
+          "<arg_value>curl -s https://x</arg_value>\n</tool_call>")
+_c = parse_tool_calls(_glm45)
+ck("GLM-4.5 form: one call parses", len(_c) == 1, str(len(_c)))
+ck("GLM-4.5 form: name is right", _c and _c[0].name == "run")
+ck("GLM-4.5 form: arg decoded, not empty",
+   _c and _c[0].args.get("command") == "curl -s https://x",
+   str(_c[0].args if _c else None))
+ck("GLM-4.5 form: fully stripped from display",
+   strip_tool_calls(_glm45).strip() == "")
+
+# GLM-4.7: name glued to the first tag, no separators; & in the value survives.
+_glm47 = ("<tool_call>web_read<arg_key>url</arg_key>"
+          "<arg_value>https://a.b/c?x=1&y=2</arg_value></tool_call>")
+_c = parse_tool_calls(_glm47)
+ck("GLM-4.7 glued form: name+arg parse",
+   len(_c) == 1 and _c[0].name == "web_read"
+   and _c[0].args.get("url") == "https://a.b/c?x=1&y=2",
+   str([(x.name, x.args) for x in _c]))
+
+# Zero-argument call is legal in GLM-4.7.
+_c = parse_tool_calls("<tool_call>list_tools</tool_call>")
+ck("GLM zero-arg call parses with empty args",
+   len(_c) == 1 and _c[0].name == "list_tools" and _c[0].args == {},
+   str([(x.name, x.args) for x in _c]))
+
+# Multiple args, and the whole thing normalises to canonical <tool>.
+_c = parse_tool_calls("<tool_call>write<arg_key>path</arg_key><arg_value>/tmp/f"
+                      "</arg_value><arg_key>content</arg_key><arg_value>hello"
+                      "</arg_value></tool_call>")
+ck("GLM multi-arg call keeps both args",
+   len(_c) == 1 and _c[0].args == {"path": "/tmp/f", "content": "hello"},
+   str(_c[0].args if _c else None))
+
+# COUNTER-PROPERTY: prose that merely mentions the words must not be rewritten
+# or eaten. No closing tag -> the gate never fires.
+_prose = "if depth < tool_call_limit and n > 0: pass"
+ck("prose mentioning tool_call is left alone",
+   parse_tool_calls(_prose) == [] and strip_tool_calls(_prose) == _prose)
+
+# A block whose 'name' isn't a real identifier is NOT a GLM call — leave it,
+# never fabricate a call out of a JSON blob.
+_bad = ('<tool_call>{"not":"a name"}<arg_key>a</arg_key>'
+        '<arg_value>b</arg_value></tool_call>')
+ck("non-identifier name is not executed", parse_tool_calls(_bad) == [])
+
+# Idempotent, like the rest of the normaliser (locked elsewhere too).
+ck("GLM normalisation is idempotent",
+   _normalise_tool_syntax(_normalise_tool_syntax(_glm47))
+   == _normalise_tool_syntax(_glm47))
+
+
 print(f"\ntoolsyntax: {_p} passed, {_f} failed")
 sys.exit(1 if _f else 0)

@@ -195,6 +195,13 @@ class ModelInfo:
 
 SILICONFLOW_CATALOGUE: List[ModelInfo] = [
     # ── Flagship: reach for these when the target is genuinely hard ──
+    ModelInfo("zai-org/GLM-5.3-Flash", "GLM-5.3-Flash", 1049, 0.15, 0.50,
+              "Tops this provider's intelligence board. 320B/18B MoE, native "
+              "multimodal, built for efficient coding + long-horizon agents. "
+              "Flagship quality at workhorse money.",
+              vision=True, tier="flagship",
+              cached_in_usd=0.03,
+              think_off={"enable_thinking": False}),
     ModelInfo("moonshotai/Kimi-K3", "Kimi-K3", 1049, 3.0, 15.0,
               "2.8T params, biggest open model. Deep reasoning + vision.",
               vision=True, tier="flagship"),
@@ -205,8 +212,8 @@ SILICONFLOW_CATALOGUE: List[ModelInfo] = [
               tier="flagship",
               think_off={"enable_thinking": False}),
     ModelInfo("zai-org/GLM-5.2", "GLM-5.2", 1049, 1.30, 4.09,
-              "Highest measured intelligence on this provider. Long-horizon "
-              "agentic engineering; holds project state across a long run.",
+              "Long-horizon agentic engineering; holds project state across a "
+              "long run. Heavier, pricier sibling of the 5.3-Flash default.",
               tier="flagship",
               think_off={"enable_thinking": False}),
     ModelInfo("meituan-longcat/LongCat-2.0", "LongCat-2.0", 1049, 0.75, 2.95,
@@ -634,6 +641,10 @@ _MODEL_SAMPLING: Dict[str, Dict[str, float]] = {
     # deepseek-ai/DeepSeek-V4-Flash, -Flash-0731, -Pro and any later point
     # release without a new entry.
     "deepseek-v4": {"temperature": 1.0, "top_p": 0.95},
+    # Z.ai's GLM-4.5/5 cards ask for temperature 1.0 on agentic / tool-calling
+    # use (same shape as DeepSeek). Substring covers glm-5.2, glm-5.3-flash and
+    # later point releases. Applied ONLY when the operator hasn't chosen.
+    "glm-5": {"temperature": 1.0, "top_p": 0.95},
 }
 
 
@@ -8589,6 +8600,60 @@ _ALT_TAG_RES = [
 _FENCE_JSON_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.S)
 
 
+# ── GLM: Z.ai's <tool_call> dialect (GLM-4.5 / 4.6 / 5.x) ─────────────
+# Distinct from every dialect above and, left alone, it hits the SAME silent
+# trap the DSML <parameter> path was built to close. GLM writes:
+#
+#     <tool_call>run
+#     <arg_key>command</arg_key>
+#     <arg_value>curl -s https://x</arg_value>
+#     </tool_call>
+#
+# The function NAME is a bare token right after <tool_call> — no `name=`
+# attribute — and the arguments are <arg_key>/<arg_value> PAIRS, not a JSON
+# body and not <parameter> children. So TOOL_TAG_RE (`<tool` + word boundary)
+# never matches (`tool_call` continues with `_`); the block was neither run NOR
+# stripped and printed raw. And the generic alt-tag "attrs" pass needs a
+# name= attribute GLM never sends, so even where an opener DID match, the tool
+# ran with EMPTY args and logged ✓ done. GLM-4.7 also allows the name on the
+# same line as the first tag and zero-argument calls; both are covered because
+# we split on the first <arg_key>. Format verified against vLLM's glm4_moe /
+# glm47_moe tool parsers and the zai-org/GLM-4.5 TIR guide. Rewritten to the
+# canonical <tool name="x">{json}</tool> HERE, in the one normalisation
+# boundary, so parse, strip and speech all inherit it in agreement.
+_GLM_TOOLCALL_RE = re.compile(r"<tool_call>(.*?)</tool_call>", re.S | re.I)
+_GLM_ARG_RE = re.compile(
+    r"<arg_key>\s*(.*?)\s*</arg_key>\s*<arg_value>(.*?)</arg_value>", re.S | re.I)
+_GLM_NAME_RE = re.compile(r"^[A-Za-z_][\w.-]*$")
+
+
+def _glm_calls_to_canonical(text: str) -> str:
+    """Rewrite GLM <tool_call>name…</tool_call> blocks to `<tool name=...>`.
+
+    Conservative: the token before the first <arg_key> must look like a real
+    function name, otherwise the block is left exactly as it was — it was not a
+    GLM tool call and must not be executed. Values go through _coerce_param, the
+    same conservative decoder the DSML <parameter> path uses, so a bare
+    `command` string stays a string.
+    """
+    def _sub(m):
+        inner = m.group(1) or ""
+        name = inner.split("<arg_key>", 1)[0].strip().strip(_DS_PIPE).strip()
+        if not _GLM_NAME_RE.match(name):
+            return m.group(0)
+        args: Dict[str, Any] = {}
+        for k, v in _GLM_ARG_RE.findall(inner):
+            key = k.strip()
+            if key:
+                args[key] = _coerce_param(v.strip())
+        try:
+            body = json.dumps(args)
+        except Exception:
+            body = "{}"
+        return f'<tool name="{name}">{body}</tool>'
+    return _GLM_TOOLCALL_RE.sub(_sub, text)
+
+
 # ── DSML: DeepSeek-V4's tag dialect ──────────────────────────────────
 # The v9.1.0 normaliser knew DeepSeek's OLD token format (<｜tool▁call▁begin｜>
 # … <｜tool▁sep｜>name … ```json …```).  V4 emits a DIFFERENT, XML-shaped
@@ -8934,6 +8999,13 @@ def _normalise_tool_syntax(text: str) -> str:
             return f'<tool name="{name}">{body}</tool>'
         out = _DEEPSEEK_CALL_RE.sub(_ds, out)
         out = _DS_TOKEN_RE.sub("", out)
+
+    # 1b. GLM's <tool_call>name<arg_key>…</arg_key><arg_value>…</tool_call>.
+    #     Gate on the literal pair being present: the paired sub is quadratic on
+    #     a stream of unclosed openers, and if there is no closing tag it can
+    #     match nothing anyway — same discipline as the alt-tag pass below.
+    if "<tool_call>" in out and "</tool_call>" in out:
+        out = _glm_calls_to_canonical(out)
 
     # 2. Other tag dialects.
     # GUARD: a paired `<open …>(.*?)</close>` sub is quadratic when openers
