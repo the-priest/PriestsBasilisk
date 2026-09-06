@@ -40,7 +40,7 @@ sys.path.insert(0, _ROOT)
 
 from basilisk_core import (                                    # noqa: E402
     parse_tool_calls, strip_tool_calls, looks_like_failed_tool_call,
-    scrub_tool_debris, _normalise_tool_syntax)
+    scrub_tool_debris, _normalise_tool_syntax, speakable_text)
 
 _p = _f = 0
 
@@ -675,6 +675,35 @@ ck("non-identifier name is not executed", parse_tool_calls(_bad) == [])
 ck("GLM normalisation is idempotent",
    _normalise_tool_syntax(_normalise_tool_syntax(_glm47))
    == _normalise_tool_syntax(_glm47))
+
+# STREAMING REPLAY — a completed-text test is not enough for a streaming
+# renderer (see the <tool_calls> leak that a whole-message probe called clean).
+# Replay a realistic GLM reply char by char and assert the DISPLAY transform
+# never shows tool protocol at any prefix. <think> partials are a separate,
+# pre-existing concern handled by stream coalescing, so they are excluded here.
+_glm_reply = ("Checking the feed now.\n"
+              "<tool_call>run\n<arg_key>command</arg_key>\n"
+              "<arg_value>curl -s https://x</arg_value>\n</tool_call>")
+_leaks = 0
+for _i in range(1, len(_glm_reply) + 1):
+    _shown = scrub_tool_debris(strip_tool_calls(_glm_reply[:_i]))
+    if any(_t in _shown for _t in ("<tool_call", "arg_key", "arg_value",
+                                   "</tool", "<tool ")):
+        _leaks += 1
+ck("GLM tool protocol never leaks to the screen mid-stream", _leaks == 0,
+   f"{_leaks} leaking frames")
+
+# SPEECH — Piper must never read a GLM tool call aloud (the DSML-said-aloud bug
+# in a new dialect). speakable_text mirrors the display chain.
+_spoken = speakable_text(_glm_reply)
+ck("GLM tool call is scrubbed from speech",
+   not any(_t in _spoken for _t in ("tool_call", "arg_key", "arg_value")),
+   repr(_spoken))
+
+# FAIL-OPEN — a GLM call still arriving (no close yet) is DETECTED so the host
+# re-asks instead of ending the turn silently.
+ck("partial GLM call is detected as tool markup",
+   looks_like_failed_tool_call("<tool_call>run\n<arg_key>command</arg_key>"))
 
 
 print(f"\ntoolsyntax: {_p} passed, {_f} failed")

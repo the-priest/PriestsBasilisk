@@ -173,6 +173,18 @@ if _glm:
        _glm.cached_in_usd > 0 and _glm.cached_in_usd < _glm.in_usd)
 ck("GLM family gets its agentic sampling recommendation",
    C.recommended_sampling("zai-org/GLM-5.3-Flash").get("temperature") == 1.0)
+# Deep-pass finding: 5.3-Flash reasoning is ARCHITECTURAL — no enable_thinking
+# toggle — so think_off must be None, or a light turn ships a param the model
+# rejects/ignores for a wasted round-trip. (The 5.2 hybrid keeps its toggle.)
+if _glm:
+    ck("GLM-5.3-Flash has no think toggle (architectural reasoning)",
+       _glm.think_off is None, str(_glm.think_off))
+_glm52 = SF.info("zai-org/GLM-5.2")
+ck("GLM-5.2 keeps its think toggle (hybrid)",
+   _glm52 is not None and _glm52.think_off is not None)
+# Natively multimodal, so it must be offered as a vision model too.
+ck("GLM-5.3-Flash is a pickable vision model",
+   "zai-org/GLM-5.3-Flash" in C.VISION_MODELS.get("siliconflow", []))
 ck("adding GLM-5.3-Flash did not change the pinned default",
    SF.chain[0] == PINNED and PINNED == "deepseek-ai/DeepSeek-V4-Flash")
 

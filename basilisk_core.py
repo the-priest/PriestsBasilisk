@@ -200,8 +200,13 @@ SILICONFLOW_CATALOGUE: List[ModelInfo] = [
               "multimodal, built for efficient coding + long-horizon agents. "
               "Flagship quality at workhorse money.",
               vision=True, tier="flagship",
-              cached_in_usd=0.03,
-              think_off={"enable_thinking": False}),
+              cached_in_usd=0.03),
+              # think_off is deliberately None: GLM-5.3-Flash's reasoning is
+              # ARCHITECTURAL, not a mode — there is no enable_thinking switch,
+              # its cost lever is reasoning_effort. Sending enable_thinking:False
+              # on a light turn (as the 5.2 hybrid entry does) would be a param
+              # the model ignores at best and 400s at worst, buying one wasted
+              # round-trip per session for nothing.
     ModelInfo("moonshotai/Kimi-K3", "Kimi-K3", 1049, 3.0, 15.0,
               "2.8T params, biggest open model. Deep reasoning + vision.",
               vision=True, tier="flagship"),
@@ -375,6 +380,7 @@ PROVIDERS_BY_KEY: Dict[str, ProviderSpec] = {p.key: p for p in PROVIDERS}
 # the chat picker can be the same model and save an API key round-trip.
 VISION_MODELS: Dict[str, List[str]] = {
     "siliconflow": [
+        "zai-org/GLM-5.3-Flash",
         "moonshotai/Kimi-K2.6",
         "Qwen/Qwen3-VL-32B-Instruct",
         "Qwen/Qwen3-VL-30B-A3B-Instruct",
