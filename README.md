@@ -6,7 +6,7 @@
 
 <br/>
 
-<img src="https://img.shields.io/badge/version-1.0.0.19-e11d2b?style=for-the-badge&labelColor=08090b" alt="version 1.0.0.19">
+<img src="https://img.shields.io/badge/version-1.0.0.20-e11d2b?style=for-the-badge&labelColor=08090b" alt="version 1.0.0.20">
 <img src="https://img.shields.io/badge/tests-4505%20assertions-2ea043?style=for-the-badge&labelColor=08090b&logo=pytest&logoColor=2ea043" alt="4505 assertions">
 <img src="https://img.shields.io/badge/licence-MIT-e11d2b?style=for-the-badge&labelColor=08090b" alt="MIT">
 <img src="https://img.shields.io/badge/deps-stdlib%20%2B%20GTK-e11d2b?style=for-the-badge&labelColor=08090b" alt="stdlib + GTK">

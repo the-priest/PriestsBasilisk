@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 <title>Basilisk — Autonomous AI Penetration-Testing Agent (open source, runs locally)</title>
-<meta name="description" content="Basilisk is an open-source autonomous AI penetration-testing agent: a native Linux desktop app that turns any LLM into a working pentester. Fully autonomous and black-box, it solves 87/113 on OWASP Juice Shop and 22/22 on the Duck Store API benchmark, verifying every exploit before it counts. It also repairs your own code: hand it a zip of your repo and it edits, runs your tests, and returns a fixed zip. Runs locally, MIT-licensed, verified by 4,188 assertions.">
+<meta name="description" content="Basilisk is an open-source autonomous AI penetration-testing agent: a native Linux desktop app that turns any LLM into a working pentester. Fully autonomous and black-box, it solves 87/113 on OWASP Juice Shop and 22/22 on the Duck Store API benchmark, verifying every exploit before it counts. It also repairs your own code: hand it a zip of your repo and it edits, runs your tests, and returns a fixed zip. Runs locally, MIT-licensed, verified by 4,505 assertions.">
 <meta name="keywords" content="AI penetration testing agent, autonomous pentest agent, LLM red team tool, open source security tool, automated exploitation, offensive security AI, OWASP Juice Shop benchmark, Kali Linux AI, DeepSeek pentest, Basilisk, AI hacking tool, autonomous security agent, AI code repair agent, autonomous bug fixing, AI coding assistant Linux">
 <meta name="author" content="the-priest">
 <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1">
@@ -17,7 +17,7 @@
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Basilisk">
 <meta property="og:title" content="Basilisk — Autonomous AI Penetration-Testing Agent">
-<meta property="og:description" content="An open-source AI pentester that runs on your machine and proves every exploit — and repairs your own repo the same way. 87/113 OWASP Juice Shop black-box · 22/22 Duck Store API · 4,188 assertions. MIT-licensed.">
+<meta property="og:description" content="An open-source AI pentester that runs on your machine and proves every exploit — and repairs your own repo the same way. 87/113 OWASP Juice Shop black-box · 22/22 Duck Store API · 4,505 assertions. MIT-licensed.">
 <meta property="og:url" content="https://the-priest.github.io/PriestsBasilisk/">
 <meta property="og:image" content="https://the-priest.github.io/PriestsBasilisk/assets/brand/banner.png">
 <meta property="og:image:alt" content="Basilisk — autonomous AI penetration-testing agent">
@@ -73,7 +73,7 @@
     "Baseline-before-edit: records which of your tests were already failing, so pre-existing failures are never misreported as agent damage",
     "Export gate: refuses to hand back a change set it has not verified, or one whose last verification reported a regression",
     "Contained extraction: zip slip, symlink entries and zip bombs refused before anything is written, and refusals are reported rather than silently dropped",
-    "Verified by 4,188 assertions across 53 stdlib-only test suites, runnable offline before you trust it"
+    "Verified by 4,505 assertions across 53 stdlib-only test suites, runnable offline before you trust it"
   ]
 }
 </script>
@@ -125,12 +125,12 @@
     {
       "@type": "Question",
       "name": "How do I know the safety guarantees are real and not marketing?",
-      "acceptedAnswer": { "@type": "Answer", "text": "Run the suite: for f in tests/test_*.py; do python3 \"$f\"; done. It's stdlib-only \u2014 no pytest, no network, no account \u2014 4,188 assertions across 53 suites, done in under a minute. Three things make it worth more than a green tick: every fixed bug gets a test written to fail against the previous release, so regressions can't quietly return; performance is asserted as a scaling exponent rather than a millisecond ceiling, so it fails the same on a fast box and a slow one; and every safety check is paired with a corpus of ordinary work it must stay silent on, so over-blocking fails the suite too." }
+      "acceptedAnswer": { "@type": "Answer", "text": "Run the suite: for f in tests/test_*.py; do python3 \"$f\"; done. It's stdlib-only \u2014 no pytest, no network, no account \u2014 4,505 assertions across 58 suites, done in under a minute. Three things make it worth more than a green tick: every fixed bug gets a test written to fail against the previous release, so regressions can't quietly return; performance is asserted as a scaling exponent rather than a millisecond ceiling, so it fails the same on a fast box and a slow one; and every safety check is paired with a corpus of ordinary work it must stay silent on, so over-blocking fails the suite too." }
     },
     {
       "@type": "Question",
       "name": "Has Basilisk ever had a security hole of its own?",
-      "acceptedAnswer": { "@type": "Answer", "text": "Yes, and they get published. In v9.7.0 the hard block on irreversible commands was fuzzed against a live shell \u2014 each candidate bypass re-run in real bash with the destructive verb swapped for a harmless marker, counting only shapes the shell actually executed. Twenty-one that had been getting through were found and closed, including timeout 5 rm -rf / and ( rm -rf ~ ). They're now pinned by a test suite that fails against the previous release. The honest claim isn't that Basilisk has never had a hole \u2014 it's that the holes get hunted, published and pinned. Find a twenty-second and open an issue." }
+      "acceptedAnswer": { "@type": "Answer", "text": "Yes, and they get published. The hard block on irreversible commands is fuzzed against a live shell every release \u2014 each candidate bypass re-run in real bash, the newest harness shimming the binary itself so a bypass means the shell truly invoked rm with the destructive argument. v9.7.0 found and closed twenty-one shapes including timeout 5 rm -rf / and ( rm -rf ~ ). v1.0.0.20 found sixteen more: a raw block device was not treated as a critical file, so truncate -s 0 /dev/sda was refused by nothing, and a target hidden behind a shell variable (X=/; rm -rf \"$X\") never put the literal next to the verb. The same release also caught the model fabricating its own tool results \u2014 inventing a fetch, a status code and a page body \u2014 which is now detected and deleted before it can be shown, stored or replayed. The honest claim isn't that Basilisk has never had a hole \u2014 it's that the holes get hunted, published and pinned. Find another and open an issue." }
     },
     {
       "@type": "Question",
@@ -205,7 +205,7 @@
 
   .eyebrow{font-family:var(--font-mono);font-size:.74rem;letter-spacing:.24em;text-transform:uppercase;
     color:var(--neon-soft);display:inline-flex;align-items:center;gap:.6em;text-shadow:0 0 14px var(--glow-soft)}
-  .eyebrow::before{content:"//";color:var(--steel);text-shadow:none}
+  .eyebrow::before{content:"// ";color:var(--steel);text-shadow:none;letter-spacing:.1em;margin-right:.35em}
   h1,h2,h3{font-family:var(--font-display);line-height:1.04;letter-spacing:-.012em}
   h2{font-size:clamp(1.85rem,3.6vw,2.85rem);font-weight:600}
   h3{font-size:1.12rem;font-weight:600;letter-spacing:0}
@@ -226,12 +226,29 @@
   @media(max-width:860px){.nav-links a:not(.nav-cta){display:none}}
 
   /* hero */
-  .hero{padding:clamp(56px,10vw,104px) 0 clamp(30px,5vw,52px)}
-  .hero-grid{display:grid;grid-template-columns:1.05fr .95fr;gap:clamp(28px,5vw,64px);align-items:center}
+  .hero{padding:clamp(44px,7vw,80px) 0 clamp(30px,5vw,52px)}
+  /* ── THE FOLD WAS SELLING NOTHING ────────────────────────────────
+     The headline set at 4.9rem inside a 15ch measure in the LEFT half of
+     a two-column grid, so it broke over five lines against an empty right
+     half, and the proof — the scores, the buttons — started below the
+     fold. The type is a shade smaller, the measure is wider than the
+     column so it breaks where it should, and the art column is narrower:
+     the first screen now carries headline, claim, buttons and numbers. */
+  .hero-grid{display:grid;grid-template-columns:minmax(0,1.28fr) minmax(0,.72fr);
+             gap:clamp(24px,4vw,56px);align-items:center}
   @media(max-width:900px){.hero-grid{grid-template-columns:1fr;text-align:left}}
-  .hero h1{font-size:clamp(2.7rem,7vw,4.9rem);font-weight:700;max-width:15ch;margin-top:1.1rem}
-  .hero .sub{margin-top:1.4rem;font-size:clamp(1.04rem,1.6vw,1.2rem);color:var(--bone-dim);max-width:60ch}
+  .hero h1{font-size:clamp(2.5rem,5.4vw,4.1rem);font-weight:700;max-width:19ch;
+           margin-top:.9rem;letter-spacing:-.022em;line-height:1.02;text-wrap:balance}
+  .hero .sub{margin-top:1.15rem;font-size:clamp(1rem,1.35vw,1.11rem);color:var(--bone-dim);max-width:62ch}
   .hero .sub strong{color:var(--bone);font-weight:600}
+  /* The eyebrow wrapped mid-phrase onto a second line and read as a typo. */
+  .hero .eyebrow{display:block;max-width:none;white-space:normal;line-height:1.5}
+  @media(min-width:1040px){.hero .eyebrow{white-space:nowrap}}
+  /* Four stacked paragraphs of equal weight is not a hero, it is a page of
+     prose. The lead paragraph carries the claim; the rest step down. */
+  .hero .sub.lead{font-size:clamp(1.06rem,1.5vw,1.22rem);color:var(--bone)}
+  .hero .sub.minor{font-size:.98rem;color:var(--steel);max-width:58ch}
+  .hero .sub.minor strong,.hero .sub.minor b{color:var(--bone-dim)}
   .cta-row{display:flex;flex-wrap:wrap;gap:.9rem;margin-top:2rem;align-items:center}
   .btn{display:inline-flex;align-items:center;gap:.6rem;font-family:var(--font-mono);font-size:.92rem;font-weight:500;
     padding:.85rem 1.35rem;border-radius:10px;border:1px solid transparent;transition:.2s;cursor:pointer}
@@ -334,6 +351,13 @@
   .diff-row .val b{color:var(--bone)}.diff-row.peak .val b{color:var(--neon-soft)}
   @media(max-width:560px){.diff-row{grid-template-columns:92px 1fr 70px;gap:.6rem}.diff-row .stars{font-size:.8rem}}
   .note{margin-top:1.7rem;color:var(--bone-dim);font-size:.98rem;max-width:74ch}.note b{color:var(--bone)}
+  .provenance{
+    margin-top:1.5rem;padding:1.05rem 1.25rem;border-left:2px solid var(--line-2);
+    background:rgba(255,255,255,.018);border-radius:0 8px 8px 0;
+    font-size:.95rem;color:var(--bone-dim);max-width:78ch;
+  }
+  .provenance b{color:var(--bone);font-weight:600}
+  .provenance b.hl{color:var(--neon-soft)}
   .cmp{margin-top:2.4rem;border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
   .cmp table{width:100%;border-collapse:collapse;font-size:.94rem}
   .cmp th,.cmp td{text-align:left;padding:.85rem 1.1rem;border-bottom:1px solid var(--line)}
@@ -343,6 +367,50 @@
   .cmp .me{background:rgba(255,43,61,.10)}
   .cmp .me td{color:var(--bone);font-weight:600}.cmp .me td:first-child{color:var(--neon-soft)}
   .cmp .muted td{color:var(--steel)}.cmp small{color:var(--steel);font-family:var(--font-body)}
+  .cmp caption{text-align:left;color:var(--steel);font-size:.78rem;padding:.7rem 1.1rem;
+               background:var(--ink);border-bottom:1px solid var(--line)}
+  .cmp small.ver,.cmp small.who{color:var(--steel)}
+  /* ── SCORE BARS ──────────────────────────────────────────────────
+     The whole argument of this table is a RATIO — 87 against 36, blind —
+     and six bare fractions made the reader compute it. The bar is the
+     comparison; the number stays because a bar you cannot read a value
+     off is decoration. Length = share of the 113-challenge board, one
+     scale for every row, so the columns compare directly.
+     Basilisk carries the accent, every other agent recedes to steel:
+     an emphasis encoding, not two peer categories — and each bar is
+     labelled, so identity is never colour alone. */
+  th.sc,td.sc{width:27%}
+  .cmp td:first-child{white-space:nowrap}
+  .cmp td:nth-child(2){white-space:nowrap}
+  @media (max-width:860px){ th.sc,td.sc{width:auto} }
+  .scorebar{
+    --w:0%;
+    display:grid; grid-template-columns:1fr auto auto; align-items:center;
+    gap:0 .5rem; width:100%; position:relative; line-height:1;
+  }
+  .scorebar i{
+    grid-column:1; height:8px; border-radius:0 3px 3px 0; display:block;
+    width:var(--w); min-width:2px; background:var(--sb,#7f8fa6);
+    box-shadow:none; justify-self:start;
+  }
+  .scorebar b{grid-column:2; font-weight:600; color:var(--bone); font-variant-numeric:tabular-nums}
+  .scorebar em{grid-column:3; font-style:normal; color:var(--steel); font-size:.82em}
+  .scorebar.mine{--sb:var(--neon)}
+  .scorebar.mine i{box-shadow:0 0 14px var(--glow-soft)}
+  .scorebar.mine.dim{--sb:rgba(255,43,61,.42)}
+  .scorebar.mine.dim i{box-shadow:none}
+  .scorebar.mine.dim b{color:var(--bone-dim);font-weight:500}
+  .scorebar.them{--sb:#7f8fa6}
+  .scorebar.them b{color:var(--bone-dim);font-weight:500}
+  .sc .na{color:var(--line-2)}
+  .cmp-key{
+    margin:0; padding:.7rem 1.1rem; font-size:.74rem; color:var(--steel);
+    background:var(--ink); border-top:1px solid var(--line);
+    display:flex; flex-wrap:wrap; gap:.35rem .5rem; align-items:center;
+  }
+  .cmp-key .k{width:12px;height:8px;border-radius:2px;display:inline-block}
+  .cmp-key .k.mine{background:var(--neon)}
+  .cmp-key .k.them{background:#7f8fa6}
   .progress-chips{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin-top:1.6rem;font-family:var(--font-mono);font-size:.86rem;color:var(--bone-dim)}
   .chip{border:1px solid var(--line-2);border-radius:20px;padding:.3rem .8rem;background:var(--panel)}
   .chip.now{border-color:var(--neon);color:var(--bone);background:rgba(255,43,61,.14);box-shadow:0 0 18px -6px var(--glow)}
@@ -471,12 +539,12 @@
   <section class="hero">
     <div class="wrap hero-grid">
       <div>
-        <span class="eyebrow">Basilisk · autonomous offensive security · open source · v9.7.0</span>
+        <span class="eyebrow">Autonomous offensive security · open source · v1.0.0.20</span>
         <h1>The autonomous AI pentester that <span class="neon-text">proves</span> every exploit.</h1>
         <p class="sub">Basilisk is an <strong>open-source autonomous penetration-testing agent</strong> — a native Linux desktop app that hands a language model a real shell and a real methodology, then gets out of the way.</p>
-        <p class="sub"><strong>87 of 113 on OWASP Juice Shop.</strong> Black-box, fully autonomous, no source on the machine. The leading commercial agent scores <strong>49</strong> on that board <em>with your source code in its hands</em> — and 36 without. Basilisk beats its white-box run <strong>blind, by 38 challenges</strong>, on one of the cheapest models on the market. Then <strong>22 of 22</strong> on Escape's Duck Store API, a target no model has memorised. <b class="ok">MIT — free to own, free to run.</b></p>
-        <p class="sub">It did all of that driving <strong>DeepSeek-V4-Flash</strong>, one of the cheapest models on the market. Read that twice: the scaffolding scores, not the price tag.</p>
-        <p class="sub">Your machine. Your key. Your data. MIT-licensed, no account, nothing phoning home. <em>It doesn't guess. It confirms.</em></p>
+        <p class="sub lead"><strong>87 of 113 on OWASP Juice Shop.</strong> Black-box, fully autonomous, no source on the machine. The leading commercial agent scores <strong>49</strong> on that board <em>with your source code in its hands</em> — and 36 without. Basilisk beats its white-box run <strong>blind, by 38 challenges</strong>, on one of the cheapest models on the market. Then <strong>22 of 22</strong> on Escape's Duck Store API, a target no model has memorised. <b class="ok">MIT — free to own, free to run.</b></p>
+        <p class="sub minor">It did all of that driving <strong>DeepSeek-V4-Flash</strong>, one of the cheapest models on the market. Read that twice: the scaffolding scores, not the price tag.</p>
+        <p class="sub minor">Your machine. Your key. Your data. MIT-licensed, no account, nothing phoning home. <em>It doesn't guess. It confirms.</em></p>
         <div class="cta-row">
           <a class="btn btn-primary" href="https://github.com/the-priest/PriestsBasilisk">
             <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
@@ -497,7 +565,7 @@
         <div class="stat"><div class="n">87<span class="slash">/</span>113</div><div class="l">Juice Shop · black-box</div></div>
         <div class="stat"><div class="n">22<span class="slash">/</span>22</div><div class="l">Duck Store API · black-box</div></div>
         <div class="stat"><div class="n">14<span class="slash">/</span>14</div><div class="l">OWASP classes · F1 0.95</div></div>
-        <div class="stat"><div class="n">4,188</div><div class="l">Assertions · 53 suites</div></div>
+        <div class="stat"><div class="n">4,505</div><div class="l">Assertions · 58 suites</div></div>
         <div class="stat"><div class="n">MIT</div><div class="l">Licensed · no account</div></div>
       </div>
 
@@ -538,7 +606,7 @@
         <div class="truth"><b>Black-box</b><span>No target source needed. It reads behaviour, not code — the way an attacker actually has to.</span></div>
         <div class="truth"><b>A receipt for everything</b><span>Every command it runs is hashed into a tamper-evident ledger as it goes. Findings you can hand to a client.</span></div>
         <div class="truth"><b>A floor it can't cross</b><span>The irreversible command class is blocked in two places, below the model. There is no "Run anyway."</span></div>
-        <div class="truth"><b>Verified, not asserted</b><span>4,188 stdlib-only assertions across 53 suites. Run them yourself before you trust it with a shell.</span></div>
+        <div class="truth"><b>Verified, not asserted</b><span>4,505 stdlib-only assertions across 58 suites. Run them yourself before you trust it with a shell.</span></div>
       </div>
     </div>
   </section>
@@ -550,6 +618,16 @@
         <span class="eyebrow">Benchmarks</span>
         <h2>The claim is only worth the number you can regenerate.</h2>
         <p>Scored against <b style="color:var(--bone)">OWASP Juice Shop</b>, which marks a challenge solved only when the exploit actually fires. No partial credit. No checklist to recall. Graded one to six stars by difficulty — and it's the board the security community already argues over, which is exactly why it's the one worth posting.</p>
+        <p class="provenance">
+          <b>Where these numbers come from.</b> Every score on this page was produced by
+          <b class="hl">v7.6.0 driving DeepSeek-V4-Flash</b>, and the rows say so. They are
+          not restated for each release: a benchmark you did not re-run is not a result you
+          get to claim. The current build, <b class="hl">v1.0.0.20</b>, ships the same
+          exploitation loop, the same oracle and the same scoring harness with
+          <b class="hl">58 suites and 4,505 assertions green</b> — nothing since has touched
+          how a solve is counted. The board regenerates in one command below, which is the
+          only claim worth anything.
+        </p>
       </div>
 
       <div class="reveal">
@@ -573,17 +651,45 @@
 
         <div class="cmp">
           <table>
-            <caption class="mono" style="text-align:left;color:var(--steel);font-size:.78rem;padding:.7rem 1.1rem;background:var(--ink);border-bottom:1px solid var(--line)">Same board, same scoring — Basilisk ran this on DeepSeek-V4-Flash, a budget model</caption>
-            <thead><tr><th>Agent</th><th>Licence</th><th>Black-box</th><th>White-box <small>(source given)</small></th></tr></thead>
+            <caption class="mono">Same board, same scoring &mdash; Basilisk ran this on DeepSeek-V4-Flash, a budget model</caption>
+            <thead><tr><th>Agent</th><th>Licence</th><th class="sc">Black-box</th><th class="sc">White-box <small>(source given)</small></th></tr></thead>
             <tbody>
-              <tr class="me"><td>Priest's Basilisk <small style="color:var(--steel)">v7.6.0</small></td><td><b class="ok">MIT · free</b></td><td>87 / 113</td><td>—</td></tr>
-              <tr class="muted"><td>Priest's Basilisk <small>v7.5.3</small></td><td>MIT · free</td><td>81 / 113</td><td>—</td></tr>
-              <tr class="muted"><td>Priest's Basilisk <small>v7.1.0</small></td><td>MIT · free</td><td>73 / 113</td><td>—</td></tr>
-              <tr class="muted"><td>Priest's Basilisk <small>v6.0.0</small></td><td>MIT · free</td><td>58 / 113</td><td>—</td></tr>
-              <tr><td>Cascade <small style="color:var(--steel)">(Windsurf / Escape)</small></td><td><small style="color:var(--steel)">commercial · quote-only</small></td><td>36 / 113</td><td><b>49 / 113</b></td></tr>
-              <tr><td>Claude Opus 4.8 <small style="color:var(--steel)">(bare model)</small></td><td><small style="color:var(--steel)">metered API</small></td><td>23 / 113</td><td>24 / 113</td></tr>
+              <tr class="me">
+                <td>Priest's Basilisk <small class="ver">v7.6.0</small></td>
+                <td><b class="ok">MIT &middot; free</b></td>
+                <td class="sc"><span class="scorebar mine" style="--w:77%"><i></i><b>87</b><em>/113</em></span></td>
+                <td class="sc"><span class="na">&mdash;</span></td>
+              </tr>
+              <tr class="muted">
+                <td>Priest's Basilisk <small class="ver">v7.5.3</small></td><td>MIT &middot; free</td>
+                <td class="sc"><span class="scorebar mine dim" style="--w:72%"><i></i><b>81</b><em>/113</em></span></td>
+                <td class="sc"><span class="na">&mdash;</span></td>
+              </tr>
+              <tr class="muted">
+                <td>Priest's Basilisk <small class="ver">v7.1.0</small></td><td>MIT &middot; free</td>
+                <td class="sc"><span class="scorebar mine dim" style="--w:65%"><i></i><b>73</b><em>/113</em></span></td>
+                <td class="sc"><span class="na">&mdash;</span></td>
+              </tr>
+              <tr class="muted">
+                <td>Priest's Basilisk <small class="ver">v6.0.0</small></td><td>MIT &middot; free</td>
+                <td class="sc"><span class="scorebar mine dim" style="--w:51%"><i></i><b>58</b><em>/113</em></span></td>
+                <td class="sc"><span class="na">&mdash;</span></td>
+              </tr>
+              <tr>
+                <td>Cascade <small class="who">(Windsurf / Escape)</small></td>
+                <td><small class="who">commercial &middot; quote-only</small></td>
+                <td class="sc"><span class="scorebar them" style="--w:32%"><i></i><b>36</b><em>/113</em></span></td>
+                <td class="sc"><span class="scorebar them" style="--w:43%"><i></i><b>49</b><em>/113</em></span></td>
+              </tr>
+              <tr>
+                <td>Claude Opus 4.8 <small class="who">(bare model)</small></td>
+                <td><small class="who">metered API</small></td>
+                <td class="sc"><span class="scorebar them" style="--w:20%"><i></i><b>23</b><em>/113</em></span></td>
+                <td class="sc"><span class="scorebar them" style="--w:21%"><i></i><b>24</b><em>/113</em></span></td>
+              </tr>
             </tbody>
           </table>
+          <p class="cmp-key mono">bar length = share of the 113-challenge board solved &middot; <i class="k mine"></i> Basilisk &middot; <i class="k them"></i> other agents</p>
         </div>
         <div class="progress-chips">
           <span style="color:var(--steel)">progression, same scoring:</span>
@@ -843,12 +949,12 @@ docker run -d -p 3000:3000 -e NODE_ENV=unsafe \
 
       <div class="grid g2 reveal">
         <div class="card">
-          <h3>v9.7.0 · twenty-one shapes closed</h3>
-          <p>The gate was fuzzed against a <b>live shell</b> — every candidate bypass re-run in real <span class="inline-code">bash</span> with the destructive verb swapped for a harmless marker, counting only the shapes where the shell actually did the thing. Twenty-one that had been getting through were found and closed, among them <span class="inline-code">timeout 5 rm -rf /</span>, <span class="inline-code">( rm -rf ~ )</span> and <span class="inline-code">$(rm -rf /)</span>.</p>
+          <h3>v1.0.0.20 · the floor, fuzzed again</h3>
+          <p>The floor gets fuzzed every release, and every candidate bypass is re-run in real <span class="inline-code">bash</span> before it counts &mdash; the newest harness shims the binary itself, so a &ldquo;bypass&rdquo; means the shell really invoked <span class="inline-code">rm</span> with the destructive argument, not that a regex looked wrong. <b>v9.7.0</b> closed twenty-one shapes, among them <span class="inline-code">timeout 5 rm -rf /</span> and <span class="inline-code">( rm -rf ~ )</span>. <b>v1.0.0.20</b> closed sixteen more in two classes nothing had covered: a raw block device was not a &ldquo;critical file&rdquo;, so <span class="inline-code">truncate -s 0 /dev/sda</span> was refused by nothing; and a target hidden behind a variable &mdash; <span class="inline-code">X=/; rm -rf "$X"</span> &mdash; never puts the literal next to the verb.</p>
         </div>
         <div class="card">
           <h3>The method mattered more than the fixes</h3>
-          <p>A blind fuzz reported <b>18,856</b> "bypasses" — nearly all of them shell <em>syntax errors</em> that never execute and never mattered. Filtering down to what a real shell genuinely runs is what made the twenty-one findable at all. They are now pinned by a suite that fails against the previous release.</p>
+          <p>A blind fuzz reported <b>18,856</b> &ldquo;bypasses&rdquo; &mdash; nearly all of them shell <em>syntax errors</em> that never execute and never mattered. Filtering down to what a real shell genuinely runs is what made the real ones findable at all. The counter-property is checked as hard as the property: not one of these refusals blocks ordinary work, because a floor that refuses <span class="inline-code">rm -rf ./build</span> gets switched off &mdash; and then it protects nothing. All of it is pinned by suites that fail against the previous release.</p>
         </div>
       </div>
 
@@ -958,8 +1064,8 @@ less install.sh          <span class="c"># read it first</span>
         <details><summary>What vulnerabilities can Basilisk exploit? <span class="pl">+</span></summary><div class="a">Every major web-vulnerability class via general-purpose exploit builders: SQL injection (5 DBMS plus sqlmap), JWT attacks, NoSQL, XXE, SSTi, SSRF, insecure deserialization to RCE, prototype pollution, path traversal, cross-site scripting, OS command injection, IDOR / broken access control, race conditions, file-upload bypass, GraphQL abuse, open redirect and CORS misconfiguration — plus API-first classes such as BOLA, BFLA and mass assignment.</div></details>
         <details><summary>Is Basilisk safe to run? What stops it doing damage? <span class="pl">+</span></summary><div class="a">The irreversible command class (disk wipes, fork bombs, raw block-device writes) is hard-blocked in two independent places with no "Run anyway" option. Untrusted input is quarantined as data rather than instructions, self-written code runs in a bubblewrap jail, and Basilisk will not produce standalone weaponized malware. Use it only on systems you're authorized to test.</div></details>
         <details><summary>Can Basilisk fix my code, not just attack things? <span class="pl">+</span></summary><div class="a">Yes — it's half the product. Hand it a <span class="inline-code">.zip</span> of your repository and it searches, reads and edits the whole tree, runs <strong>your</strong> test suite, and hands back a fixed zip. It records which tests were already failing before it touched anything, so pre-existing failures are never misreported as its own damage, and it refuses to export a change set it hasn't verified. It will not edit your tests to make them pass.</div></details>
-        <details><summary>How do I know the safety guarantees are real and not marketing? <span class="pl">+</span></summary><div class="a">Run the suite: <span class="inline-code">for f in tests/test_*.py; do python3 "$f"; done</span>. It's stdlib-only — no pytest, no network, no account — 4,188 assertions across 53 suites, done in under a minute. Three things make it worth more than a green tick: every fixed bug gets a test written to <strong>fail against the previous release</strong>, so regressions can't quietly return; performance is asserted as a scaling exponent rather than a millisecond ceiling, so it fails the same on a fast box and a slow one; and every safety check is paired with a corpus of ordinary work it must stay silent on, so over-blocking fails the suite too.</div></details>
-        <details><summary>Has Basilisk ever had a security hole of its own? <span class="pl">+</span></summary><div class="a">Yes, and they get published. In v9.7.0 the hard block on irreversible commands was fuzzed against a <strong>live shell</strong> — each candidate bypass re-run in real bash with the destructive verb swapped for a harmless marker, counting only shapes the shell actually executed. Twenty-one that had been getting through were found and closed, including <span class="inline-code">timeout 5 rm -rf /</span> and <span class="inline-code">( rm -rf ~ )</span>. They're now pinned by a test suite that fails against the previous release. The honest claim isn't that Basilisk has never had a hole — it's that the holes get hunted, published and pinned. Find a twenty-second and open an issue.</div></details>
+        <details><summary>How do I know the safety guarantees are real and not marketing? <span class="pl">+</span></summary><div class="a">Run the suite: <span class="inline-code">for f in tests/test_*.py; do python3 "$f"; done</span>. It's stdlib-only — no pytest, no network, no account — 4,505 assertions across 58 suites, done in under a minute. Three things make it worth more than a green tick: every fixed bug gets a test written to <strong>fail against the previous release</strong>, so regressions can't quietly return; performance is asserted as a scaling exponent rather than a millisecond ceiling, so it fails the same on a fast box and a slow one; and every safety check is paired with a corpus of ordinary work it must stay silent on, so over-blocking fails the suite too.</div></details>
+        <details><summary>Has Basilisk ever had a security hole of its own? <span class="pl">+</span></summary><div class="a">Yes, and they get published. The hard block on irreversible commands is fuzzed against a <strong>live shell</strong> every release &mdash; each candidate bypass re-run in real bash, the newest harness shimming the binary itself so a bypass means the shell truly invoked <span class="inline-code">rm</span> with the destructive argument. <b>v9.7.0</b> closed twenty-one shapes including <span class="inline-code">timeout 5 rm -rf /</span>. <b>v1.0.0.20</b> closed sixteen more: a raw block device was not treated as a critical file, so <span class="inline-code">truncate -s 0 /dev/sda</span> was refused by nothing, and a target hidden behind a shell variable never put the literal next to the verb. The same release caught the <em>model</em> fabricating its own tool results &mdash; inventing a fetch, a status code and a page body &mdash; now detected and deleted before it can be shown, stored or replayed to itself as history. The honest claim isn't that Basilisk has never had a hole &mdash; it's that the holes get hunted, published and pinned. Find another and open an issue.</div></details>
         <details><summary>What are the requirements? <span class="pl">+</span></summary><div class="a">Python 3.10+ and Linux with GTK4 / libadwaita (X11 or Wayland). It is built and tested on Kali and CachyOS, and runs on any Arch-, Debian- or Fedora-based distro — package manager, escalation tool and wordlist paths are auto-detected.</div></details>
       </div>
     </div>

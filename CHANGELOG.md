@@ -1,3 +1,40 @@
+## v1.0.0.20 — the site catches up, and the benchmark table finally shows the gap
+
+### index.html
+
+The page was two version families behind: it said v9.7.0 and 4,188 assertions
+across 53 suites. It now says v1.0.0.19, 4,505 across 58, and the security
+section covers the two bypass classes closed since — a raw block device not
+being treated as a critical file (`truncate -s 0 /dev/sda` was refused by
+nothing), and a target hidden behind a shell variable — plus the model
+fabricating its own tool results.
+
+**The comparison table shows the argument instead of stating it.** The whole
+thesis of that section is a ratio — 87 black-box against Cascade's 36, and
+against its 49 *with the source code in hand* — and the reader was being asked
+to do that arithmetic from six bare fractions. Every score now carries a bar on
+one shared scale (share of the 113-challenge board), Basilisk in the accent and
+every other agent receding to steel, with the number kept beside it because a
+bar you cannot read a value off is decoration. The gap now lands in the first
+second of looking at it.
+
+**The hero was selling nothing above the fold.** The headline set at 4.9rem
+inside a 15-character measure in the left half of a two-column grid, so it broke
+over five lines against an empty right half and pushed the scores, the buttons
+and the proof below the fold. Retuned: three lines, the eyebrow no longer wraps
+mid-phrase, the four equal-weight paragraphs now step down in emphasis, and the
+first screen carries the claim, the buttons and the numbers.
+
+### The benchmark numbers did NOT change, and the page now says why
+
+Every score on the site was produced by **v7.6.0 driving DeepSeek-V4-Flash**,
+and the rows still say exactly that. They are not restated for each release: a
+benchmark you did not re-run is not a result you get to claim. What the page now
+states plainly is what is actually true of the current build — same exploitation
+loop, same oracle, same scoring harness, 58 suites and 4,505 assertions green,
+nothing since has touched how a solve is counted — and it points at the one
+command that regenerates the board.
+
 ## v1.0.0.19 — the model was inventing its own tool results, and four ways the app could be broken from outside
 
 ### It was fabricating evidence
