@@ -1,3 +1,117 @@
+## v1.0.0.23 — the leash gets a second mode, and a promise it can keep
+
+Leashed had exactly one instruction, and a turn that promised a fetch could
+still end without one. Both are structural now.
+
+### A leashed turn is either a QUESTION or a JOB, and they are not the same
+
+The leashed addendum said, in full: *"research it, verify it, deliver ONE
+complete answer, then STOP."* That is right for "what changed in nmap 7.99"
+and wrong for "fix the auth bug in my repo" — read literally it tells the
+model to write an answer *about* the fix instead of landing it, and "answer
+once then stop" fights every multi-file edit that needs read → edit → test →
+repeat.
+
+`leashed_intent(text) -> "question" | "task"` is a pure, total classifier in
+`basilisk_core.py` with a hard default of `"question"`, so anything it is
+unsure about behaves exactly as it did before. A job now gets WORK MODE: act
+with tools instead of describing, read before you write, write COMPLETE files
+(never `# ... rest unchanged ...`, which deletes the omitted code), run
+something that proves it, iterate until the tests actually pass, then report
+what changed — and say plainly what is still broken rather than claiming done.
+
+The tool budget follows the intent. A question converges in a handful of
+reads; a ten-file refactor is past 40 round-trips before it starts iterating,
+and 40 was not a safety limit there, it was a wall the coding assistant hit
+mid-job and then had to "answer" from.
+
+### The output budget was the reason big writes came back scrambled
+
+`max_tokens` ships at 2048 and the heavy rung of the effort ladder tops out at
+4096. A 400-line source file is 6–8k tokens, so a model told to write one had
+its reply CUT at the cap, mid-string, inside the write call's own JSON. What
+arrives is a `<tool …>` with no closing brace: the args land in `{"_raw": …}`
+and the model is told its JSON was malformed, so it re-sends the same
+too-long call and hits the same wall. No amount of prompt hardening fixes
+that — the tokens were never granted.
+
+A work turn now gets `code_write_max_tokens` (16k by default). `max_tokens` is
+a ceiling, not a spend, and a model that cannot accept that much says so once
+and is retried at half — `_max_tokens_cap`, learned per model, in both
+backends. Before this, a too-large `max_tokens` looked like a stale model id,
+sent the client hunting through the whole fallback chain, and ended as
+"exhausted all models" on a request that would have worked at half the size.
+
+`STREAM_MAX_WALL_S = 150` was the second truncation point on exactly those
+turns: 16k tokens at a realistic 40–60 tok/s is several minutes of legitimate
+streaming, and a flat cap cut it off mid-file and reported it as a *time* cut,
+so nobody looked at the budget. The wall cap now scales with the budget
+granted (`wall_cap_for`), bounded at 600s. The idle timeout is what actually
+catches a hang, and it is unchanged.
+
+### A ranged read could not read past the first 200 KB
+
+`workspace_read` sliced its line range out of the first `max_bytes` of the
+file. On anything larger, asking for lines 5000-5100 returned NOTHING and
+`total_lines` was counted from the truncated text, so the file also looked
+shorter than it is. That is the exact move the truncated-read note *tells* the
+model to make ("read the remainder with start/end") — the advice was sound and
+the tool could not honour it. A range now walks the whole file line by line,
+with the byte budget applied to the selected lines, and says so if the range
+itself had to be clipped. Line numbers are coerced at entry, so `start=None`
+no longer raises out of a comparison.
+
+### "Okay, fetching the news now." — and the turn ends
+
+Reported four times. Every previous fix made the app a better READER OF THE
+REPLY: a stall-phrase list, a printed-URL recovery, a bare-participle clause.
+Each caught the sentence in the screenshot and missed the next phrasing.
+
+The promise gate does not read the reply at all. At the end of a turn it reads
+two facts the app owns: the operator's question needs a live source
+(`_needs_web_verification`), and NO web tool ran during the entire request. If
+both hold, the app runs the search ITSELF — a real `web_read` of a real
+results page for his question — and hands it back with "these are real
+results; read the best links and answer from what you read." Wording cannot
+defeat it because wording is not consulted. It fires at most once per request,
+and after it fires a web tool HAS run, so it cannot re-arm.
+`tests/test_promise_gate.py` pins it in both directions: every news phrasing
+forces a fetch, and "explain how tcp works" / "fix the auth bug in my repo"
+never do.
+
+### The repo you want fixed is a folder, not a zip
+
+`workspace_import` took a `.zip` and nothing else, so "fix my repo" started
+with "go and zip your repo" — and a model handed a directory got "not a zip
+archive" back, as if the repo were broken. It now takes either, dispatching on
+what the path IS rather than which keyword it arrived under. A directory is
+COPIED, so the operator's own tree is never edited in place, revert always has
+something to revert to, and export stays the one moment work leaves the
+sandbox. Symlinks are not followed; build and VCS noise is skipped.
+
+### unittest output was parsed into a phantom test
+
+`_RX_FAILNAME` matched unittest's own summary line — `FAILED (failures=2,
+errors=1)` — and read `(failures=2,` as a failing test name. That fake name
+went into the baseline and came out the other side as a test that had been
+"fixed". unittest's counts were not parsed at all, so a repo running
+`python -m unittest` reported `passed: 0` next to a list of named failures.
+Both fixed; the verify verdict is the one report the operator is meant to
+trust.
+
+### Verified end-to-end, not layer by layer
+
+`tests/test_repo_e2e.py` opens a deliberately broken repo as a FOLDER,
+baselines it red, then does the work through four different tool-call dialects
+in turn — canonical, GLM `<tool_call>`, DSML fullwidth, GLM JSON body —
+whole-file write, surgical replace, verify green against the baseline, page a
+6,000-line file with start/end, rewrite 300 KB in one call, diff, and export
+through the gate. It asserts the state of the FILES and the TEST RUN, not the
+shape of a return value. 31 checks. The operator's own directory is asserted
+untouched at the end.
+
+61 suites, 4,170 assertions, all green.
+
 ## v1.0.0.22 — big writes, and repo repair that the tool was blocking
 
 Four faults behind "it can't write big code at once, and when it fixes a repo

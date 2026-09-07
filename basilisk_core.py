@@ -149,6 +149,34 @@ STREAM_IDLE_TIMEOUT_S = 60
 # came through. Generous enough that normal long answers finish; only runaway
 # turns hit it. Autonomous mode stays on the fast model, so it rarely gets here.
 STREAM_MAX_WALL_S = 150
+# ...but the cap has to SCALE WITH WHAT WAS ASKED FOR, or it silently becomes
+# a second truncation point on exactly the turns that matter. A whole-file
+# write is granted a large max_tokens; at a realistic 40-60 tokens/second,
+# 16k tokens is several minutes of legitimate streaming, and a flat 150s cut
+# it off mid-file — the same mangled write as the token cap, from a different
+# cause, and reported as "time" so no one looked at the budget. The idle
+# timeout above is what actually protects against a hang (dead air on the
+# socket); this one only bounds a model that keeps talking, so it can safely
+# grow in proportion to the room it was given.
+STREAM_WALL_HARD_MAX_S = 600
+
+
+def wall_cap_for(max_tokens: Any) -> float:
+    """Wall-clock cap for a turn that was granted `max_tokens` of output.
+
+    Baseline budget keeps the historical 150s; a budget N times larger gets N
+    times longer, bounded at STREAM_WALL_HARD_MAX_S so nothing runs forever.
+    Total and defensive: any junk in, baseline out."""
+    try:
+        mt = int(max_tokens)
+    except Exception:
+        return float(STREAM_MAX_WALL_S)
+    if mt <= 2048:
+        return float(STREAM_MAX_WALL_S)
+    scaled = STREAM_MAX_WALL_S * (mt / 2048.0)
+    return float(min(STREAM_WALL_HARD_MAX_S, scaled))
+
+
 HEALTH_TIMEOUT_S  = 1.5
 
 @dataclass(frozen=True)
@@ -472,6 +500,14 @@ DEFAULT_SETTINGS = {
     "adaptive_effort": True,
     "effort_light_max_tokens": 1536,     # cap for lean/conversational turns
     "effort_heavy_max_tokens": 4096,     # budget once deep in a tool chain
+    # Output budget for a turn that is DOING WORK — a leashed coding task or a
+    # live mission — where one reply may be an entire source file. The chat
+    # budgets above are sized for prose and cut a 400-line write in half,
+    # which is what "the code comes back scrambled" actually was. max_tokens
+    # is a ceiling, not a spend: a short reply on a work turn still costs a
+    # short reply. A model that cannot accept this much says so once and is
+    # retried at half (see _max_tokens_cap in the backends).
+    "code_write_max_tokens": 16384,
     # Depth at which a run becomes ELIGIBLE for effort escalation. Depth
     # alone no longer escalates — the recent results must also show it is
     # struggling. Depth is a proxy for time spent, not for difficulty, and
@@ -888,7 +924,8 @@ def _coerce_settings_types(merged: Dict[str, Any]) -> None:
         else:
             merged[k] = max(lo, min(hi, float(v)))
     for k in ("max_tokens", "effort_light_max_tokens",
-              "effort_heavy_max_tokens", "hard_effort_step"):
+              "effort_heavy_max_tokens", "hard_effort_step",
+              "code_write_max_tokens"):
         if k in DEFAULT_SETTINGS:
             v = _as_int(merged.get(k), int(DEFAULT_SETTINGS[k]))
             merged[k] = v if v > 0 else int(DEFAULT_SETTINGS[k])
@@ -1131,29 +1168,45 @@ class GroqBackend:
         last_err = None
         any_tokens_emitted = False  # see below
 
-        for attempt_model in order:
+        # Same learned output ceiling as the OpenAI-compatible backend: a
+        # whole-file write asks for a big budget, Groq's models cap lower than
+        # the 1M-context ones, and the only way to find a model's real limit
+        # is to be refused once. Halve, retry the same model, remember.
+        if not hasattr(self, "_max_tokens_cap"):
+            self._max_tokens_cap = {}
+        idx = 0
+        while idx < len(order):
+            attempt_model = order[idx]
+            idx += 1
             if cancel_event and cancel_event.is_set():
                 on_done({"cancelled": True, "text": "", "backend": "groq"})
                 return
+            _mt = int(max_tokens or 2048)
+            _cap = self._max_tokens_cap.get(attempt_model)
+            if _cap:
+                _mt = min(_mt, int(_cap))
             try:
                 resp = self._client.chat.completions.create(
                     model=attempt_model,
                     messages=messages,
                     temperature=temperature,
                     top_p=top_p,
-                    max_tokens=max_tokens,
+                    max_tokens=_mt,
                     stream=True,
                     timeout=STREAM_IDLE_TIMEOUT_S,
                 )
                 parts: List[str] = []
                 _wall_cut = False
                 _wall_start = time.time()
+                # Scales with the output budget this turn was granted; see
+                # wall_cap_for. A flat cap truncates a legitimate big write.
+                _wall_limit = wall_cap_for(_mt)
                 for chunk in resp:
-                    if time.time() - _wall_start > STREAM_MAX_WALL_S:
+                    if time.time() - _wall_start > _wall_limit:
                         # Reported, not swallowed — same reason as the
                         # OpenAI-compatible backend below.
                         _wall_cut = True
-                        log(f"groq {attempt_model} hit the {STREAM_MAX_WALL_S}s "
+                        log(f"groq {attempt_model} hit the {_wall_limit:.0f}s "
                             f"wall-clock cap — cutting the turn")
                         break
                     if cancel_event and cancel_event.is_set():
@@ -1195,6 +1248,21 @@ class GroqBackend:
                              f"{str(e)[:200]}")
                     return
 
+                # Output budget too large for THIS model: halve and retry it,
+                # rather than blaming the model id and walking the chain.
+                # Checked before the rate-limit branch because Groq words this
+                # rejection with "limit" in it, which that branch would eat.
+                if (_mt > 1024
+                        and any(s in msg for s in (
+                            "max_tokens", "max tokens", "max_completion_tokens",
+                            "max_new_tokens", "output token", "too large",
+                            "exceeds"))):
+                    _new_mt = max(1024, _mt // 2)
+                    self._max_tokens_cap[attempt_model] = _new_mt
+                    log(f"groq {attempt_model} rejected max_tokens={_mt} -> "
+                        f"retrying at {_new_mt} (remembered this session)")
+                    idx -= 1            # retry this same model
+                    continue
                 if any(s in msg for s in ("rate", "429", "quota", "limit")):
                     log(f"groq {attempt_model} rate-limited, trying next")
                     continue
@@ -1240,6 +1308,15 @@ class OpenAICompatBackend:
         # losing one model's rejection memo and costing a wasted round-trip.
         # set.add is atomic under the GIL, so no lock is needed once it exists.
         self._extras_rejected: set = set()
+        # Largest max_tokens a given model has been proven to ACCEPT, learned
+        # the only way a client can learn it: by being told no. Asking for a
+        # whole-file write needs a big output budget, but "big" is per-model
+        # and no provider publishes it in a field we can read, so a value that
+        # is right for GLM-5.3-Flash (128K out) is a 400 on a model that caps
+        # at 8K. Rather than pick a timid number that truncates every large
+        # file, ask high, and on a rejection halve and retry the SAME model —
+        # then remember, so the session pays that probe once.
+        self._max_tokens_cap: Dict[str, int] = {}
 
     def set_api_key(self, key: str) -> None:
         # Strip whitespace/newlines — pasting a key on mobile often appends
@@ -1377,6 +1454,10 @@ class OpenAICompatBackend:
                 return
             payload = dict(body_base)
             payload["model"] = attempt_model
+            _cap = getattr(self, "_max_tokens_cap", {}).get(attempt_model)
+            if _cap:
+                payload["max_tokens"] = min(
+                    int(payload.get("max_tokens") or 2048), int(_cap))
             sent_extras = bool(
                 extra_body
                 and attempt_model not in getattr(self, "_extras_rejected", ()))
@@ -1390,9 +1471,12 @@ class OpenAICompatBackend:
                 _finish_reason = ""
                 _wall_cut = False
                 _wall_start = time.time()
+                # Scales with the output budget this turn was granted; see
+                # wall_cap_for. A flat cap truncates a legitimate big write.
+                _wall_limit = wall_cap_for(payload.get("max_tokens"))
                 with urllib.request.urlopen(req, timeout=STREAM_IDLE_TIMEOUT_S) as r:
                     for raw in r:
-                        if time.time() - _wall_start > STREAM_MAX_WALL_S:
+                        if time.time() - _wall_start > _wall_limit:
                             # ── THE SAME FACT THE finish_reason BLOCK BELOW
                             #    EXISTS TO STOP THROWING AWAY ──
                             # Cutting here leaves _finish_reason empty, so the
@@ -1408,7 +1492,7 @@ class OpenAICompatBackend:
                             # matters most.
                             _wall_cut = True
                             log(f"{self.name} {attempt_model} hit the "
-                                f"{STREAM_MAX_WALL_S}s wall-clock cap — cutting "
+                                f"{_wall_limit:.0f}s wall-clock cap — cutting "
                                 f"the turn with what streamed so far")
                             break
                         if cancel_event and cancel_event.is_set():
@@ -1511,6 +1595,27 @@ class OpenAICompatBackend:
                     log(f"{self.name} {attempt_model} rejected "
                         f"{sorted(extra_body)} -> retrying without it "
                         f"(and not sending it again this session)")
+                    idx -= 1            # retry this same model
+                    continue
+
+                # ── WE ASKED FOR MORE OUTPUT THAN THIS MODEL ALLOWS ──
+                # Also our own fault, and also fixable without changing model:
+                # halve the budget and retry the same one. Without this, a
+                # too-large max_tokens looked like a stale model id, sent the
+                # client hunting through the whole fallback chain, and ended
+                # as "exhausted all models" — on a request that would have
+                # worked at half the size.
+                _mt_words = ("max_tokens", "max tokens", "max_new_tokens",
+                             "max_completion_tokens", "output token",
+                             "maximum context", "too large", "exceeds")
+                _cur_mt = int(payload.get("max_tokens") or 2048)
+                if (e.code == 400 and _cur_mt > 1024
+                        and any(w in low for w in _mt_words)):
+                    _new_mt = max(1024, _cur_mt // 2)
+                    self._max_tokens_cap[attempt_model] = _new_mt
+                    log(f"{self.name} {attempt_model} rejected "
+                        f"max_tokens={_cur_mt} -> retrying at {_new_mt} "
+                        f"(remembered for this session)")
                     idx -= 1            # retry this same model
                     continue
 
@@ -4387,6 +4492,260 @@ def reply_is_strong_conclusion(text: str) -> bool:
     return any(m in t for m in _STRONG_CONCLUSION_MARKERS)
 
 
+# ── LEASHED INTENT: is this turn a QUESTION, or is it WORK? ──────────
+#
+# Leashed mode had exactly ONE shape of instruction: "research, verify,
+# deliver ONE complete answer, then STOP."  That is the right contract for
+# "what's the latest nmap release" and the WRONG one for "fix the auth bug in
+# my repo" — read literally it tells the model to answer *about* the code
+# instead of changing it, and "answer once then stop" actively fights a
+# multi-file edit that needs read → edit → test → iterate.  That is why the
+# leashed coding assistant could describe a fix but not land one.
+#
+# So the leashed addendum has to branch, and the branch has to be a pure,
+# testable function rather than another pile of `if "fix" in text` inline in a
+# 15k-line UI file.
+#
+# DESIGN RULE: this defaults to "question", which is the historical behaviour.
+# A miss costs the old (working) prompt; a false "task" would put workspace /
+# iterate-until-green instructions on a plain question.  So "task" is only
+# returned on a positive signal, never on absence of a question signal.
+
+# Politeness and filler that can precede the real imperative.  Stripped
+# repeatedly from the front so "ok now please can you fix …" reduces to
+# "fix …".
+_LEASH_FILLER_RE = re.compile(
+    r"^(?:"
+    r"ok(?:ay)?|so|now|also|and|then|next|hey|hi|yo|hello|"
+    r"please|pls|plz|kindly|just|quickly|quick|"
+    r"basilisk|bro|dude|man|mate|"
+    r"i\s+(?:want|need|would\s+like)\s+(?:you\s+)?to|"
+    r"i\s+(?:want|need)\s+you\s+to|"
+    r"(?:can|could|would|will)\s+(?:you|u)(?:\s+please)?|"
+    r"lets|let'?s|we\s+should|you\s+should|"
+    r"go\s+ahead\s+and|help\s+me|"
+    r"for\s+me"
+    r")\b[\s,:\-]*"
+)
+
+# Verbs that are WORK on their own, with no object needed.  "refactor",
+# "debug", "patch" are not things you ask about in passing — you ask for them.
+_WORK_VERBS_STRONG = frozenset("""
+refactor refactored refactoring debug patch repatch reimplement
+implement migrate port backport rewrite rework
+lint reformat unfuck
+""".split())
+
+# Verbs that are work ONLY when they act on something code-shaped.  "write"
+# is a task in "write a python script" and prose in "write a poem"; "make" is
+# a task in "make the tests pass" and a request in "make a case for X".
+_WORK_VERBS_WEAK = frozenset("""
+write rewrite make create build generate scaffold
+add remove delete drop strip
+update change modify edit alter adjust amend tweak
+fix repair mend correct resolve
+clean tidy simplify split extract merge move rename
+optimise optimize improve harden speed
+wire hook connect integrate
+install setup configure convert modernise modernize upgrade
+finish complete land ship
+run execute
+""".split())
+
+# A weak verb whose object is the OPERATOR is not work — "run me through the
+# parser", "walk me through it", "take me through the diff" are all requests
+# for an explanation that happen to start with a work-shaped verb.
+_VERB_AT_OPERATOR_RE = re.compile(
+    r"^(?:run|walk|take|talk|step)\s+(?:me|us)\b")
+
+# Multi-word imperatives that are unmistakably work, object or not.  These are
+# checked as PREFIXES of a clause, so "sort it out" at the end of "the tests
+# are failing, sort it out" is caught.
+_WORK_PHRASES = (
+    "sort it out", "sort this out", "sort that out", "sort them out",
+    "figure it out", "work it out",
+    "fix it", "fix this", "fix that", "fix them", "fix everything",
+    "make it work", "make this work", "make that work",
+    "get it working", "get them working", "get this working",
+    "get it to work", "get the tests passing", "get tests passing",
+    "make the tests pass", "make tests pass", "make them pass",
+    "clean it up", "clean this up", "clean that up",
+    "tidy it up", "tidy this up",
+    "take a look and fix", "have a go", "give it a go",
+    "do it", "do the work", "handle it", "deal with it",
+    "carry on", "keep going", "continue",
+)
+
+# Things a WEAK verb has to be acting on for the turn to be work.  A single
+# flat vocabulary, matched on word boundaries anywhere in the request.
+_CODE_OBJECT_RE = re.compile(
+    r"\b(?:"
+    r"repo|repos|repository|repositories|codebase|code|codes|"
+    r"workspace|project|projects|"
+    r"file|files|dir|directory|folder|"
+    r"script|scripts|program|programs|app|apps|application|"
+    r"module|modules|package|packages|library|libraries|"
+    r"function|functions|func|method|methods|class|classes|"
+    r"test|tests|testsuite|suite|unittest|pytest|"
+    r"bug|bugs|crash|crashes|traceback|stacktrace|exception|"
+    r"error|errors|failure|failures|regression|"
+    r"build|builds|compile|compiles|ci|pipeline|"
+    r"api|apis|endpoint|endpoints|route|routes|handler|handlers|"
+    r"cli|flag|flags|arg|args|argument|arguments|option|options|"
+    r"parser|parsers|server|servers|client|clients|daemon|service|"
+    r"database|db|schema|migration|migrations|query|queries|"
+    r"component|components|widget|widgets|ui|frontend|backend|"
+    r"config|configs|settings|makefile|dockerfile|"
+    r"import|imports|dependency|dependencies|requirements|"
+    r"python|py|javascript|js|typescript|ts|rust|golang|java|"
+    r"c\+\+|cpp|bash|shell|sql|html|css|json|yaml|toml|csv|"
+    r"branch|commit|diff|patch|pr|merge"
+    r")\b"
+    r"|\.(?:py|js|ts|jsx|tsx|rs|go|java|c|h|cpp|hpp|sh|rb|php|css|html|"
+    r"json|yaml|yml|toml|md|txt|csv|sql|ini|cfg)\b"
+)
+
+# Openers that make the whole turn a question no matter what verbs appear
+# later in it.  "how do I add a flag and run the tests?" is a question about
+# adding a flag, not an instruction to go add one.
+_QUESTION_OPENER_RE = re.compile(
+    r"^(?:"
+    r"wh(?:at|y|en|ere|o|ich|ose)|what'?s|why'?s|where'?s|who'?s|"
+    r"how|how'?s|"
+    r"is|are|was|were|do|does|did|should|shall|would|could|can|may|might|"
+    r"have|has|had|will|"
+    r"explain|describe|summar(?:ise|ize)|compare|define|"
+    r"tell\s+me|show\s+me|teach\s+me|walk\s+me|remind\s+me|"
+    r"any\s+idea|thoughts|opinion"
+    r")\b"
+)
+
+# Complaint shapes that mean "this is broken, deal with it" with no imperative
+# verb at all: "my repo won't build", "the tests are failing".
+_BREAKAGE_RE = re.compile(
+    r"\b(?:"
+    r"broken|breaking|broke|failing|fails|failed|crashing|crashes|crashed|"
+    r"erroring|throwing|hanging|hangs|stuck|"
+    r"(?:does\s?n[o']?t|do\s?n[o']?t|wo\s?n[o']?t|can\s?not|ca\s?n[o']?t|"
+    r"is\s?n[o']?t|are\s?n[o']?t)\s+"
+    r"(?:work|working|build|building|compile|compiling|run|running|pass|"
+    r"passing|start|starting|load|loading)"
+    r")\b"
+)
+
+# Clause boundaries an imperative can start after.
+_CLAUSE_SPLIT_RE = re.compile(r"(?:[.;,!?\n]|\band\b|\bthen\b|\bso\b|\bbut\b)+")
+
+# An interrogative ANYWHERE disqualifies the bare-complaint rule below.
+# "is there anything not working so i can fix bugs" is a question that happens
+# to contain both a breakage word and a code noun; without this it classified
+# as work and got handed workspace instructions for a turn that just needed an
+# answer. Deliberately narrow: it wants question CONSTRUCTIONS ("is there",
+# "can you", "what/why/how"), not the bare verb "is", so "the build is broken"
+# is still the complaint it obviously is.
+_INTERROGATIVE_RE = re.compile(
+    r"\b(?:what|whats|why|how|when|where|who|which|whose)\b"
+    r"|\b(?:is|are|was|were|do|does|did|can|could|would|should|will|shall|"
+    r"has|have|had|am)\s+"
+    r"(?:there|you|u|it|this|that|these|those|i|we|they|he|she|any|anything|"
+    r"the|my|your|it'?s)\b"
+)
+
+
+def _leash_strip_filler(t: str) -> str:
+    """Peel leading politeness/filler until the first real token."""
+    prev = None
+    # Bounded: each pass must shorten the string, and the loop stops when it
+    # cannot.  A malformed pattern therefore cannot spin here.
+    for _ in range(12):
+        if t == prev:
+            break
+        prev = t
+        t = _LEASH_FILLER_RE.sub("", t, count=1).lstrip()
+    return t
+
+
+def _leash_clause_is_work(clause: str, has_object: bool) -> bool:
+    """True if this clause OPENS with a work imperative."""
+    c = _leash_strip_filler(clause.strip())
+    if not c:
+        return False
+    if _VERB_AT_OPERATOR_RE.match(c):
+        return False
+    for p in _WORK_PHRASES:
+        if c.startswith(p):
+            return True
+    m = re.match(r"[a-z][a-z'\-]*", c)
+    if not m:
+        return False
+    verb = m.group(0)
+    if verb in _WORK_VERBS_STRONG:
+        return True
+    if verb in _WORK_VERBS_WEAK and has_object:
+        return True
+    return False
+
+
+def leashed_intent(text: str) -> str:
+    """Classify a leashed turn as 'question' or 'task'.
+
+    'question'  → research it, verify it, answer once, stop.  (The old,
+                  only, behaviour — and still the default, so anything this
+                  function is unsure about behaves exactly as it did before.)
+    'task'      → actually do the work: read the code, edit it, run the
+                  tests, iterate until they pass, then report what changed.
+
+    Pure and total: any input type, any length, no exceptions escape.
+    """
+    try:
+        t = (text or "")
+    except Exception:
+        return "question"
+    if not isinstance(t, str):
+        return "question"
+    t = t.strip().lower()
+    if not t:
+        return "question"
+    # Collapse whitespace so multi-line pastes classify like one sentence.
+    t = re.sub(r"\s+", " ", t)
+    # Very long pastes (a stack trace, a log, a whole file) — look at the
+    # first part, which is where the operator's instruction lives.
+    if len(t) > 4000:
+        t = t[:4000]
+
+    head = _leash_strip_filler(t)
+    if not head:
+        return "question"
+
+    has_object = bool(_CODE_OBJECT_RE.search(t))
+
+    # 1. Opening imperative wins outright: "fix the auth bug in my repo".
+    if _leash_clause_is_work(head, has_object):
+        return "task"
+
+    # 2. A question opener settles it the other way, and nothing later in the
+    #    sentence overrides it.
+    if _QUESTION_OPENER_RE.match(head):
+        return "question"
+
+    # 3. Imperative in a later clause: "the tests are failing, sort it out".
+    for clause in _CLAUSE_SPLIT_RE.split(head):
+        if _leash_clause_is_work(clause, has_object):
+            return "task"
+
+    # 4. Bare complaint about something code-shaped, no imperative at all:
+    #    "my repo won't build".  He is not asking for an essay about it.
+    #    Only when the turn is not phrased as a question at all — no "?", no
+    #    interrogative construction anywhere. A question that MENTIONS a broken
+    #    thing is still a question.
+    if (has_object and _BREAKAGE_RE.search(t)
+            and "?" not in t
+            and not _INTERROGATIVE_RE.search(t)):
+        return "task"
+
+    return "question"
+
+
 # ── (#4) Command de-duplication ──
 _CMD_LOG: List[Tuple[str, float]] = []
 
@@ -6535,13 +6894,38 @@ def _ws():
     return _w
 
 
-def tool_workspace_import(zip_path: str, name: str = "") -> Dict[str, Any]:
-    """Unpack a repo .zip into a private workspace and make it active.
-    Refuses zip-slip paths, symlink entries and zip bombs; flags anything
-    that looks like a credential.  Everything after this call is confined
-    to that tree."""
+def tool_workspace_import(zip_path: str = "", name: str = "",
+                          path: str = "") -> Dict[str, Any]:
+    """Open a repo as a private workspace and make it active.
+
+    Takes a .zip OR a directory. Requiring a zip meant "fix my repo" started
+    with "go and zip your repo", which is not how a repo normally sits on
+    disk — and the model, given only `zip_path`, would hand a directory to
+    the zip loader and get "not a zip archive" back as if the repo were
+    broken. Either argument name works for either shape: the tool looks at
+    what is actually there.
+
+    Zips are unpacked with zip-slip / symlink / zip-bomb refusals; a
+    directory is COPIED (the operator's own tree is never edited in place).
+    Either way everything after this call is confined to that tree."""
+    target = (path or zip_path or "").strip()
+    if not target:
+        return {"ok": False,
+                "error": "give me the repo: a .zip path or a directory"}
     try:
-        return _ws().import_zip(zip_path, name)
+        ws = _ws()
+        # Dispatch on what the path IS, not on which keyword it arrived
+        # under. A model that puts a folder in `zip_path` (or a zip in
+        # `path`) is being helpful about the wrong field, not wrong about
+        # the repo — this is the fix for the class of failure where the
+        # tool blamed the input for the caller's argument choice.
+        try:
+            _real = os.path.realpath(os.path.expanduser(target))
+        except Exception:
+            _real = target
+        if os.path.isdir(_real):
+            return ws.import_dir(target, name)
+        return ws.import_zip(target, name)
     except Exception as e:
         return {"ok": False, "error": f"workspace unavailable: {e}"}
 

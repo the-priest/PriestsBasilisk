@@ -35,6 +35,7 @@ import re
 import json
 import threading
 import urllib.request
+import urllib.parse
 import datetime
 import base64
 import bisect
@@ -124,6 +125,7 @@ from basilisk_core import (
     PROVIDERS, PROVIDERS_BY_KEY,
     VISION_MODELS,
     supports_reasoning_effort, _REASONING_EFFORT_LEVELS,
+    leashed_intent,
     get_ledger,
 )
 from basilisk_persona import (
@@ -183,7 +185,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.basilisk"
 APP_NAME = "Basilisk"
-VERSION = "1.0.0.22"
+VERSION = "1.0.0.23"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -196,6 +198,12 @@ VERSION = "1.0.0.22"
 # it's overridable per-user via the "max_tool_steps" setting, and it resets
 # every turn so "keep going" always grants a fresh budget.
 MAX_TOOL_CHAIN = 150
+# Tools that count as "went and looked". The promise gate below asks whether
+# ANY of these ran this request before it lets a current-events turn end.
+_WEB_TOOL_NAMES = frozenset({
+    "web_read", "web_search", "open_url", "web_sources", "image_search",
+    "fetch", "browse", "read_url",
+})
 # ANSWER MODE stall recovery: how many times a turn may be pushed after the
 # model DESCRIBED its next action but emitted no tool call ("Let me grab the HN
 # thread…" and then nothing).  Two is deliberate — one push covers the ordinary
@@ -4314,6 +4322,51 @@ def _needs_web_verification(text: str) -> bool:
     return False
 
 
+# ── THE PROMISE GATE, AS A PURE DECISION ─────────────────────────────
+# Kept out of the 300-line stream-completion callback on purpose: this is the
+# rule that decides whether the app goes and fetches something the model only
+# promised to fetch, and a rule that important has to be readable and
+# testable on its own, not inferred from a GUI callback.
+#
+# It answers ONE question: this turn is about to end — is it ending on an
+# unkept promise? Two facts decide it, and neither is a phrase in the reply:
+#
+#   · the operator asked something that cannot honestly be answered from
+#     training data (_needs_web_verification), and
+#   · no web tool ran during the whole request.
+#
+# Every earlier fix for "it said it would fetch the news and then stopped"
+# was a better reader of the reply — a stall-phrase list, a printed-URL
+# recovery — and each one was one unseen phrasing away from failing again.
+# This one does not read the reply at all.
+def forced_search_url(question: str, tools_used, already_forced: bool = False):
+    """The URL the app should read ITSELF, or None to let the turn end.
+
+    Pure and total: junk in, None out — a gate that raises is a gate that
+    fails open on exactly the turn it exists to catch."""
+    try:
+        if already_forced:
+            return None
+        q = (question or "")
+        if not isinstance(q, str):
+            return None
+        q = q.strip()
+        if len(q) < 3:
+            return None
+        try:
+            used = set(tools_used or ())
+        except Exception:
+            used = set()
+        if used & _WEB_TOOL_NAMES:
+            return None
+        if not _needs_web_verification(q):
+            return None
+        return ("https://html.duckduckgo.com/html/?q="
+                + urllib.parse.quote_plus(q[:300]))
+    except Exception:
+        return None
+
+
 # ── DECODED-IMAGE CACHE ──────────────────────────────────────────────
 # Every avatar in this file was built with Gtk.Image.new_from_file(path),
 # which decodes the PNG off disk EVERY TIME.  basilisk-avatar.png is 512x512
@@ -7325,6 +7378,21 @@ class MainWindow(Adw.ApplicationWindow):
     _last_stream_truncated: bool = False
     _forged_retries: int = 0                 # forged-tool-result corrections
     _fabricated_this_turn: int = 0
+    # True while a LEASHED turn is doing WORK (edit/run/iterate) rather than
+    # answering a question. Set once per round-trip where the addendum is
+    # built; read by the stall-nudge path, which has to say something
+    # different to a model that stalled mid-job than to one that stalled
+    # mid-answer. Declared here for the same catch-all-__getattr__ reason as
+    # the flags above.
+    _leash_work_turn: bool = False
+    # Names of the tools that have actually run during THIS request, plus the
+    # counters for the end-of-turn promise gate. Same class-attribute reason
+    # as the flags above: the GTK test stub's catch-all __getattr__ makes a
+    # getattr default truthy, and a gate that must be able to read "nothing
+    # ran" cannot be built on that.
+    _tools_used_this_request: set = frozenset()
+    _promise_pushes: int = 0
+    _forced_fetch_done: bool = False
 
     def __init__(self, app: "BasiliskApp"):
         super().__init__(application=app)
@@ -10362,6 +10430,9 @@ class MainWindow(Adw.ApplicationWindow):
             # must not spend this question's nudges.
             self._answer_stall_nudges = 0
             self._tool_ran_this_request = False
+            self._tools_used_this_request = set()
+            self._promise_pushes = 0
+            self._forced_fetch_done = False
 
         # Limit how many model round-trips a turn may chain.  Rather than
         # dead-ending with "chain too long" and no answer (annoying), once
@@ -10484,8 +10555,36 @@ class MainWindow(Adw.ApplicationWindow):
             _answer_only = True
         else:
             _answer_only = not self._mission_active
+        # ── LEASHED SPLITS IN TWO ──
+        # "Research it, verify it, answer once, then STOP" is the right
+        # contract for a QUESTION and the wrong one for WORK. Told to fix a
+        # repo, a model reading that instruction literally writes an ANSWER
+        # about the fix instead of landing it, and "answer once then stop"
+        # fights every multi-file edit that needs read → edit → test → repeat.
+        # So leashed now classifies the turn once, here, and the addendum
+        # below branches on it. Classifier defaults to 'question', which is
+        # the historical behaviour, so an unrecognised turn behaves exactly
+        # as it always did.
+        _leash_kind = "question"
+        if _answer_only:
+            try:
+                _leash_kind = leashed_intent(_opening_user)
+            except Exception:
+                _leash_kind = "question"
+        _leash_work = _answer_only and _leash_kind == "task"
+        self._leash_work_turn = bool(_leash_work)
+        # The operator's actual question for THIS request, kept where the
+        # end-of-turn promise gate can read it. It is already computed here
+        # (correctly — it skips past tool_result envelopes), and recomputing
+        # it in _on_stream_done_body from a different history slice is how two
+        # views of "what did he ask" drift apart.
+        self._turn_question = _opening_user or ""
         if not _continuation:
-            if _answer_only:
+            if _leash_work:
+                self._activity_note(
+                    "LEASHED - work mode: do the work, verify it, report what "
+                    "changed", "note")
+            elif _answer_only:
                 self._activity_note(
                     "LEASHED - answer mode: research, verify, answer once, stop",
                     "note")
@@ -10503,19 +10602,43 @@ class MainWindow(Adw.ApplicationWindow):
         # give ONE reply and stop. Only a runaway (a model that keeps calling
         # tools without converging) needs breaking, so the cap is generous — lock
         # tools and force the answer only after answer_tool_budget round-trips.
-        _ans_cap = self.settings.get("answer_tool_budget", 40)
+        _ans_cap = _as_int(self.settings.get("answer_tool_budget", 40), 40)
+        if _ans_cap < 1:
+            _ans_cap = 40
+        if _leash_work:
+            # A question converges in a handful of reads. REAL WORK on a repo
+            # does not: every file is a read, an edit and a test run, so a
+            # ten-file refactor is comfortably past 40 round-trips before it
+            # has even started iterating. 40 was not a safety limit here, it
+            # was a wall the coding assistant hit mid-job and then had to
+            # "answer" from — which is exactly the "it can't finish a repo"
+            # complaint. Stays under MAX_TOOL_CHAIN so the hard loop-breaker
+            # is still the outer bound.
+            _ans_cap = max(_ans_cap, min(120, MAX_TOOL_CHAIN - 20))
         if _answer_only and self._tool_chain_depth > _ans_cap and not self._tools_locked:
             self._tools_locked = True
-            addendum = (addendum + "\n\n[You've used a lot of tools on this "
-                        "question without converging. Do NOT call any more — give "
-                        "your best, complete answer NOW from what you've gathered, "
-                        "and say plainly if any part is still unverified.]"
-                        ).strip()
-            self.terminal_log("── answer tool-cap reached; answering now", "dim")
-            self._activity_note(
-                "research budget reached (%d steps) - answering from what is "
-                "gathered" % _ans_cap, "gate")
-        if _answer_only:
+            if _leash_work:
+                addendum = (addendum + "\n\n[You've used a lot of tool steps on "
+                            "this job without finishing. Do NOT call any more — "
+                            "STOP here and report honestly: what you changed, "
+                            "what is verified working, what is still broken or "
+                            "untouched, and the exact next step. Do not claim it "
+                            "is done if it is not.]").strip()
+                self.terminal_log("── work tool-cap reached; reporting state", "dim")
+                self._activity_note(
+                    "work budget reached (%d steps) - reporting what changed and "
+                    "what is left" % _ans_cap, "gate")
+            else:
+                addendum = (addendum + "\n\n[You've used a lot of tools on this "
+                            "question without converging. Do NOT call any more — give "
+                            "your best, complete answer NOW from what you've gathered, "
+                            "and say plainly if any part is still unverified.]"
+                            ).strip()
+                self.terminal_log("── answer tool-cap reached; answering now", "dim")
+                self._activity_note(
+                    "research budget reached (%d steps) - answering from what is "
+                    "gathered" % _ans_cap, "gate")
+        if _answer_only and not _leash_work:
             if _needs_web_verification(_opening_user):
                 if not _continuation:
                     self._activity_note(
@@ -10607,6 +10730,78 @@ class MainWindow(Adw.ApplicationWindow):
             if not _continuation:
                 self.terminal_log(
                     "💬 answer mode: research, confirm, answer once", "dim")
+        elif _leash_work:
+            # ── WORK MODE (leashed) ──
+            # Same leash — no offensive posture, no mission latch, no
+            # never-stop directive — but the turn is a JOB, so the model is
+            # told to do the job with its hands instead of describing it.
+            addendum = (addendum + "\n\n[WORK MODE (leashed) — THIS turn is a "
+                "piece of WORK, not a question. The operator wants the change "
+                "MADE, not explained. You are a senior engineer with a "
+                "workspace, a shell and tests. Do the job.\n"
+                "- ACT WITH TOOLS, DON'T DESCRIBE. A fix you narrated is not a "
+                "fix. Edits land through `workspace_write` / "
+                "`workspace_replace` (or `write_file` outside a workspace); "
+                "commands run through `run`. NEVER put code or a command in a "
+                "``` block and call it done — a fenced block changes nothing "
+                "on disk and executes nothing. If you want a file changed, "
+                "call the write tool.\n"
+                "- READ BEFORE YOU WRITE. Never edit a file you have not read "
+                "this turn. `workspace_overview` / `workspace_tree` to find "
+                "your way, `workspace_search` to locate the symbol, "
+                "`workspace_read` to see the real current text. Guessing at "
+                "code you have not read is how you write a patch that does not "
+                "apply.\n"
+                "- WRITE WHOLE, COMPLETE FILES. When you write a file, emit "
+                "its ENTIRE final content — every import, every function, top "
+                "to bottom, syntactically complete. NEVER write `# ... rest "
+                "unchanged ...`, `// existing code here`, an ellipsis "
+                "placeholder, or a truncated tail: that DELETES the omitted "
+                "code. Big files are fine — write the whole thing in one call "
+                "rather than splitting one file across several partial "
+                "writes. For a small surgical change to a big file, prefer "
+                "`workspace_replace` with enough surrounding context to be "
+                "unique.\n"
+                "- ONE FILE PER WRITE CALL, and finish each file before "
+                "starting the next.\n"
+                "- VERIFY, DON'T ASSUME. After changing code, RUN something "
+                "that proves it: the test suite, the linter, the program "
+                "itself, a targeted import. `workspace_test_command` and "
+                "`workspace_verify` exist for this. 'It should work now' is "
+                "not verification.\n"
+                "- ITERATE UNTIL IT ACTUALLY PASSES. If the tests fail, read "
+                "the real error, fix the real cause, and run them AGAIN. Keep "
+                "going round that loop — you have a large tool budget here "
+                "precisely so you can. Do not stop at the first red run, and "
+                "do not hand back a half-finished edit.\n"
+                "- DON'T BREAK WHAT WORKED. Change the least that does the "
+                "job. If a test that passed before now fails, that is YOUR "
+                "regression — fix it before moving on.\n"
+                "- RESEARCH IS ALLOWED AND UNRESTRICTED. If an API, a library "
+                "version or an error message is unfamiliar, `web_read` the "
+                "docs (any public page, no approval needed here) rather than "
+                "inventing a signature.\n"
+                "- Act directly, never via `propose`/`propose_edit` cards.\n"
+                "- FINISH, THEN REPORT ONCE: what you changed (files and why), "
+                "what you ran, what the result actually was. If something is "
+                "still broken or you could not verify it, SAY SO plainly — a "
+                "false 'done' is worse than an honest 'this part still "
+                "fails'. Then stop; do not latch a mission.]").strip()
+            if _continuation:
+                addendum = (addendum + "\n\n[CONTINUATION TURN — you are "
+                    "partway through the job. Anything you already wrote this "
+                    "turn is ON SCREEN; do not repeat it.\n"
+                    "- The next move is a TOOL CALL, with no preamble, until "
+                    "the work is actually done and verified.\n"
+                    "- Do not re-read a file whose current content you already "
+                    "have, and do not re-run a check that just passed.\n"
+                    "- Do not summarise mid-job and stop. You stop when the "
+                    "change is made AND something you ran proves it, or when "
+                    "you are genuinely blocked — and then you say exactly what "
+                    "blocked you.]").strip()
+            if not _continuation:
+                self.terminal_log(
+                    "🔧 work mode: read, edit, run, iterate until green", "dim")
         elif self.settings.get("approval_mode", "none") == "none":
             addendum = (addendum + "\n\n[AUTONOMOUS MODE — THIS OVERRIDES ANY "
                 "CONFLICTING INSTRUCTION ABOVE. The operator turned this on to "
@@ -10799,6 +10994,30 @@ class MainWindow(Adw.ApplicationWindow):
             self.terminal_log(
                 f"↻ retrying with the thinking dialled down and room for "
                 f"{_mt_override} answer tokens", "dim")
+
+        # ── ROOM TO WRITE A WHOLE FILE ───────────────────────────────
+        # THIS is why "it can't write big code": max_tokens ships at 2048 and
+        # the heavy rung of the effort ladder tops out at 4096. A 400-line
+        # source file is 6-8k tokens, so a model told to write one had its
+        # reply CUT at the cap, mid-string, inside the write call's JSON. What
+        # arrives is a `<tool …>` with no closing brace — args land in
+        # {"_raw": …} and the operator is told the JSON was malformed, so the
+        # model re-sends the same too-long call and hits the same wall. No
+        # amount of prompt hardening fixes that: the tokens were never granted.
+        # A turn that is DOING WORK gets a file-sized budget. max_tokens is a
+        # ceiling, not a spend — an answer that needs 300 tokens still costs
+        # 300 — and a model that cannot accept this much now says so and gets
+        # retried at half (see _max_tokens_cap in the backends), instead of
+        # failing the turn.
+        if _leash_work or self._mission_active:
+            _code_cap = _as_int(
+                self.settings.get("code_write_max_tokens", 16384), 16384)
+            if _code_cap < 2048:
+                _code_cap = 2048
+            if _code_cap > 131072:
+                _code_cap = 131072
+            if _code_cap > (_mt_override or 0):
+                _mt_override = _code_cap
 
         # ── STUCK PIVOT (coded, not left to the model) ────────────────
         # If the model has gone DEEP (20+ tool-steps into one turn) and its
@@ -11333,6 +11552,63 @@ class MainWindow(Adw.ApplicationWindow):
                     self._activity_note(
                         "the model printed a URL instead of reading it - "
                         "fetching %s" % _url[:70], "gate")
+
+        # ── THE PROMISE GATE: THE APP FETCHES WHAT THE MODEL ONLY PROMISED ──
+        # Everything above is a RECOVERY: it needs the model to have left
+        # something recoverable behind — a fenced command, a printed URL, a
+        # phrase the stall detector knows. That is why "okay, fetching the
+        # news now." followed by silence kept getting through: no fence, no
+        # URL, and a phrasing the detector had not seen. Every fix of that
+        # shape is one phrasing away from failing again.
+        #
+        # This one does not read the reply at all. It reads two facts the app
+        # OWNS:
+        #
+        #   · the operator asked something that cannot be answered from
+        #     memory (_needs_web_verification — the same judgment that put
+        #     "read a primary source first" in the prompt), and
+        #   · no web tool has run this entire request.
+        #
+        # If both hold, the turn is about to end having answered a
+        # current-events question out of training data, or having promised a
+        # fetch and not made one. Either way it is wrong, and no wording of
+        # the reply can make it right. So the app performs the search itself
+        # — a real web_read of a real results page for HIS question — and
+        # hands it to the model to answer from.
+        #
+        # Fires at most ONCE per request (_forced_fetch_done), and after it
+        # fires a web tool HAS run, so the condition cannot re-arm. It is a
+        # floor under the model, not a loop.
+        if (not executable and not cancelled and not self._stop_requested
+                and self.current_agent_mode and not self._tools_locked
+                and not self._mission_active
+                and not getattr(self, "_forced_fetch_done", False)):
+            _surl = forced_search_url(
+                getattr(self, "_turn_question", ""),
+                getattr(self, "_tools_used_this_request", ()),
+                getattr(self, "_forced_fetch_done", False))
+            if _surl:
+                _synth = ('<tool name="web_read">'
+                          + json.dumps({"url": _surl}) + "</tool>")
+                _rec = parse_tool_calls(_synth)
+                if _rec:
+                    self._forced_fetch_done = True
+                    executable = _rec
+                    self.terminal_log(
+                        "↩ you asked for something current and nothing was "
+                        "fetched — searching it myself", "error")
+                    self._activity_note(
+                        "nothing was fetched for a question that needs a "
+                        "live source - running the search", "gate")
+                    self._deferred_note = (
+                        (self._deferred_note or "")
+                        + "\n[system note: NOTHING had been fetched for this "
+                          "question, so the search was run FOR you. These are "
+                          "real results for the operator's question. web_read "
+                          "the best links from here, then answer from what "
+                          "you actually read and cite it. Do not answer from "
+                          "memory, and do not say you will fetch something — "
+                          "fetch it.]")
 
         if _recover_fence:
             _cmd = self._shell_block_command(final)
@@ -11873,29 +12149,51 @@ class MainWindow(Adw.ApplicationWindow):
             # next step — or just ends "Let me know if you want more" — was read
             # as a stall and nudged, and with a budget of 2 nudges the operator
             # got the SAME ANSWER THREE TIMES for one question.
+            # A WORK turn gets a bigger nudge budget: 2 suits a question, but
+            # a repo job runs 100 steps, where a stall at step 12 and one at
+            # step 60 are independent stalls, not a loop.
+            _work_turn = bool(getattr(self, "_leash_work_turn", False))
+            _nudge_cap = (ANSWER_STALL_NUDGE_MAX * 2 if _work_turn
+                          else ANSWER_STALL_NUDGE_MAX)
             if (not cancelled and not executable
                     and not self._stop_requested
                     and not self._tools_locked
                     and not looks_degraded(final)
                     and reply_is_bare_stall(final)
-                    and getattr(self, "_answer_stall_nudges", 0)
-                        < ANSWER_STALL_NUDGE_MAX):
+                    and getattr(self, "_answer_stall_nudges", 0) < _nudge_cap):
                 self._answer_stall_nudges = getattr(
                     self, "_answer_stall_nudges", 0) + 1
                 self.terminal_log(
                     "↻ you said you'd do something but called no tool "
                     f"— nudging ({self._answer_stall_nudges}/"
-                    f"{ANSWER_STALL_NUDGE_MAX})", "dim")
+                    f"{_nudge_cap})", "dim")
+                if _work_turn:
+                    _nudge = ("<tool_result>\n[system note: you described the "
+                              "change you were about to make but "
+                              "did not emit a tool call"
+                              ", so NOTHING WAS WRITTEN AND NOTHING RAN. "
+                              "Describing an edit is not making it; a fenced "
+                              "code block changes no file. "
+                              "Emit the tool call now"
+                              " — the write/replace/run call. If the work is "
+                              "genuinely finished, say what you changed, what "
+                              "you ran and what the result was; if it is not "
+                              "verified, say that instead of claiming "
+                              "done.]\n</tool_result>")
+                else:
+                    _nudge = ("<tool_result>\n[system note: you described what "
+                              "you were going to do next but "
+                              "did not emit a tool call"
+                              ", so NOTHING RAN. Saying it is not doing it. "
+                              "Either emit the tool call now"
+                              ", or — if you already have enough — give the "
+                              "complete final answer"
+                              " to the operator's question in full, with no "
+                              "further preamble.]\n</tool_result>")
                 try:
                     _sc = self.streaming_chat_id or self.current_chat_id
                     self.store.add_message(
-                        _sc, "user",
-                        "<tool_result>\n[system note: you described what you "
-                        "were going to do next but did not emit a tool call, so "
-                        "NOTHING RAN. Saying it is not doing it. Either emit the "
-                        "tool call now, or — if you already have enough — give "
-                        "the complete final answer to the operator's question in "
-                        "full, with no further preamble.]\n</tool_result>",
+                        _sc, "user", _nudge,
                         meta={"kind": "tool_result"})
                 except Exception as e:
                     log(f"answer-stall nudge: store write failed: {e}")
@@ -13482,6 +13780,18 @@ class MainWindow(Adw.ApplicationWindow):
             # inside fn(). Cleared in finally so a later stray call cannot
             # inherit a stale name and mislabel itself — an unnamed tool is
             # honest, a wrongly-named one is not.
+            # WHICH tools have actually run this request, by name. The
+            # end-of-turn promise gate needs more than "a tool ran": the
+            # failure it exists to stop is a turn that announced a web fetch,
+            # ran something else (or nothing), and ended. Recorded at the one
+            # place that dispatches, so it cannot drift from reality — and
+            # recorded on ATTEMPT, because a fetch that ran and failed is a
+            # result the model has to reckon with, not a reason to fetch again
+            # behind its back.
+            try:
+                self._tools_used_this_request.add(call.name)
+            except Exception:
+                self._tools_used_this_request = {call.name}
             self._dispatching_tool = call.name
             try:
                 fn(call.args)

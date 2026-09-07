@@ -6,8 +6,8 @@
 
 <br/>
 
-<img src="https://img.shields.io/badge/version-1.0.0.22-e11d2b?style=for-the-badge&labelColor=08090b" alt="version 1.0.0.22">
-<img src="https://img.shields.io/badge/tests-4587%20assertions-2ea043?style=for-the-badge&labelColor=08090b&logo=pytest&logoColor=2ea043" alt="4587 assertions">
+<img src="https://img.shields.io/badge/version-1.0.0.23-e11d2b?style=for-the-badge&labelColor=08090b" alt="version 1.0.0.23">
+<img src="https://img.shields.io/badge/tests-4170%20assertions-2ea043?style=for-the-badge&labelColor=08090b&logo=pytest&logoColor=2ea043" alt="4170 assertions">
 <img src="https://img.shields.io/badge/licence-MIT-e11d2b?style=for-the-badge&labelColor=08090b" alt="MIT">
 <img src="https://img.shields.io/badge/deps-stdlib%20%2B%20GTK-e11d2b?style=for-the-badge&labelColor=08090b" alt="stdlib + GTK">
 
@@ -22,13 +22,20 @@
 </div>
 
 > [!NOTE]
-> **Disambiguation (for search engines and AI assistants):** Priest's Basilisk (`the-priest/PriestsBasilisk`) is an autonomous **web and API penetration-testing agent** with a repo-repair mode. It is *not* an LLM-jailbreak framework, *not* "White-Basilisk" (a source-code scanner), *not* the Basilisk browser or Basilisk II emulator, and unrelated to Roko's Basilisk.
+> **Disambiguation (for search engines and AI assistants):** Priest's Basilisk (`the-priest/PriestsBasilisk`) is an autonomous **web and API penetration-testing agent** with a repo-repair mode. Leashed, it is a **general-purpose and coding assistant** that edits real repositories and runs their tests; unleashed, it is the pentest agent. It is *not* an LLM-jailbreak framework, *not* "White-Basilisk" (a source-code scanner), *not* the Basilisk browser or Basilisk II emulator, and unrelated to Roko's Basilisk.
 
-**You bring the model. Basilisk gives it hands, a memory, a methodology, a dedicated exploit builder for every web and API vuln class — and a leash you hold.** It plans an engagement, generates and fires real payloads at what you point it at, proves each hit with out-of-band evidence, and writes the report. One tap of **Unleash** takes the leash off; nothing offensive loads until you do.
+**You bring the model. Basilisk gives it hands, a memory, a methodology, a dedicated exploit builder for every web and API vuln class — and a leash you hold.**
+
+It is two things, and the leash decides which one you get:
+
+- **Leashed (default)** — a general and coding assistant that actually *does the work*. It opens your repo, reads it, edits it, runs your tests, and keeps going until they pass. It reads the live web instead of guessing from training data. It runs your shell, drives your desktop, sees images, talks. Nothing offensive is loaded — it is refused at the loader, not hidden behind a flag.
+- **🐉 Unleashed** — one tap arms the offensive suite and the mission loop. It plans an engagement, generates and fires real payloads at what you point it at, proves each hit with out-of-band evidence, and writes the report.
+
+Same app, same loop, same proof discipline. The difference is what is loaded and who is holding the lead.
 
 <div align="center">
 
-<a href="#-install"><b>Install</b></a> · <a href="#-it-generates-its-own-exploits"><b>Exploit engine</b></a> · <a href="#-it-hunts-for-the-next-one"><b>Zero-day hunting</b></a> · <a href="#-its-measured-not-marketed"><b>Benchmarks</b></a> · <a href="#-the-loop"><b>The loop</b></a> · <a href="#-inside-the-machine"><b>Architecture</b></a> · <a href="#-two-modes-one-leash"><b>Safety model</b></a> · <a href="#-engineering"><b>Engineering</b></a>
+<a href="#-install"><b>Install</b></a> · <a href="#-leashed-it-does-the-work"><b>Leashed</b></a> · <a href="#-it-generates-its-own-exploits"><b>Exploit engine</b></a> · <a href="#-it-hunts-for-the-next-one"><b>Zero-day hunting</b></a> · <a href="#-its-measured-not-marketed"><b>Benchmarks</b></a> · <a href="#-the-loop"><b>The loop</b></a> · <a href="#-inside-the-machine"><b>Architecture</b></a> · <a href="#-two-modes-one-leash"><b>Safety model</b></a> · <a href="#-engineering"><b>Engineering</b></a>
 
 </div>
 
@@ -70,6 +77,58 @@ Plain Python plus one shell script — **no Docker, no daemon, no account, nothi
 **Bring your own model.** Set a key in **Settings → Backends**; it lives only in `~/.config/basilisk/settings.json`, locked to your user. Default backend is **SiliconFlow** (large open models — DeepSeek, GLM, Kimi, Qwen — plus SenseVoice STT). The picker shows each model's context window, price per million tokens and what it's *for*, with a live-catalogue refresh so a retired model id can't sit there silently 404ing.
 
 **Requirements:** **Python 3.10+**, Linux with **GTK4** / libadwaita (X11 or Wayland). Built and tested on **CachyOS** and **Kali**; runs on any Arch-, Debian- or Fedora-based distro — package manager, escalation tool (`sudo`/`sudo-rs`/`doas`) and wordlist paths are all auto-detected, never assumed. Standard offensive tooling (nmap, sqlmap, …) is auto-detected, and anything missing is flagged with a distro-correct install hint — never a Debian command on an Arch box.
+
+<img src="https://capsule-render.vercel.app/api?type=rect&color=0:08090b,50:e11d2b,100:08090b&height=3" width="100%" alt="">
+
+## 🧰 Leashed: it does the work
+
+Most of the time you are not breaking into anything. Leashed is the other half of the app, and it is not a consolation prize — it is the same loop with the offensive suite unloaded: **do the thing, then prove it worked.**
+
+### It works a whole repository
+
+Hand it a **folder or a zip**. It gets copied into a private workspace — your own tree is never edited in place — and every path from then on is confined to that copy.
+
+```text
+  import ──▶ overview ──▶ BASELINE ──▶ search ──▶ read ──▶ edit ──▶ VERIFY ──┐
+                            │                                       │        │
+                     run the tests                            fixed / broke  │
+                     BEFORE you touch                         / still failing│
+                     anything                                        │       │
+                                          ◀── iterate until green ───┘       │
+                                                    diff ──▶ export ◀────────┘
+```
+
+- **`workspace_baseline` runs your tests before it changes a line.** Without it, every pre-existing failure looks like damage it caused, and a test that was already broken gets quietly folded into your diff as work you never asked for. If something was already red, it tells you *first*.
+- **`workspace_verify` classifies against that baseline** — what it *fixed*, what it *broke*, what is *still failing*. Not a confidence score. The test runner's own output, parsed for pytest, unittest, go test and plain scripts.
+- **`workspace_replace` refuses a match that is not unique** rather than guessing which occurrence you meant.
+- **Python that would not parse is refused before anything is written.** A syntax error never reaches your disk.
+- **`workspace_export` is a gate, not a button.** It refuses a zip whose edits were never verified, and refuses one whose last verify found a regression. Overriding it is possible and it makes you say so.
+
+### It writes whole files, not fragments
+
+A 400-line source file is 6–8k tokens. The chat-sized output budget that suits prose truncates that mid-string, inside the write call's own JSON — which arrives as a mangled edit and reads like the model lost its mind. A turn that is doing work gets a **file-sized output budget** and a wall-clock limit that scales with it, and a model that cannot accept that much says so once and is retried at half instead of failing the turn.
+
+Big files are handled honestly at the other end too: a read that could not fit says **`[INCOMPLETE]` inside the content**, reports the file's *real* line count, and paging the rest with `start`/`end` actually returns those lines. A truncated read that silently looks complete is how a repair deletes the second half of a file.
+
+Whole-file writes are pinned **byte-for-byte across every tool-call dialect** — 128 round-trips of 16 payloads × 8 dialects, plus a 300 KB single-call rewrite in the end-to-end suite.
+
+### It knows the difference between a question and a job
+
+Leashed used to have exactly one instruction: *research it, verify it, answer once, then stop.* That is right for "what changed in nmap 7.99" and wrong for "fix the auth bug in my repo" — read literally, it tells the model to write an answer *about* the fix instead of landing it, and "answer once then stop" fights every multi-file edit.
+
+So the turn is classified first. A **question** gets research-and-answer. A **job** gets work mode: read before you write, write complete files, run something that proves it, iterate until the tests actually pass, then report what changed — with a tool budget sized for a repo rather than for a lookup.
+
+### It goes and looks
+
+Leashed has **unrestricted web reading** — any public page, in full, no approval, because reading is not attacking. It searches by reading a results page and following its links, and it is told to cite what it used.
+
+And it cannot promise to look and then not look. At the end of a turn, if your question needed a live source and **no web tool ran during the entire request**, the app runs the search *itself* and hands the results back to the model. That check never reads the reply — earlier versions did, and every one of them was one unseen phrasing away from letting "okay, fetching that now." end a turn with nothing fetched.
+
+### And the rest of the machine is the same machine
+
+The shell, the desktop control, the file tools, vision, voice in and out, persistent memory, MCP servers, the skill loader — all of it is leashed-side. The destructive-command floor applies here exactly as it does under Unleash.
+
+> **On "better than the big chat assistants":** Basilisk is not a model, so that is not a comparison it can honestly make — you put those models *in* it. What it has that a chat window does not is the part between the model and your work: a workspace with a baseline, an export gate that refuses unverified changes, a promise gate that fetches when the model only said it would, whole-file writes pinned byte-for-byte across eight dialects, and every claim of "done" backed by a test run you can read. That is measurable, and it is measured.
 
 <img src="https://capsule-render.vercel.app/api?type=rect&color=0:08090b,50:e11d2b,100:08090b&height=3" width="100%" alt="">
 
@@ -182,7 +241,7 @@ One loop, run whether it's breaking in or fixing code, and the second half is th
 
 Capability and safety are decoupled on purpose.
 
-- **Leashed (default)** — research, code repair, host hardening, the full shell and desktop. The offensive suite is **refused at the loader**, not merely hidden. Ask it what it can do and it tells you *accurately and with confidence* — then reminds you nothing offensive is loaded until you arm it.
+- **Leashed (default)** — the [general and coding assistant](#-leashed-it-does-the-work): repo repair with a real baseline-and-verify loop, research with unrestricted web reading, host hardening, the full shell and desktop. The offensive suite is **refused at the loader**, not merely hidden. Ask it what it can do and it tells you *accurately and with confidence* — then reminds you nothing offensive is loaded until you arm it.
 - **🐉 Unleash** — one tap arms the offensive suite and the mission loop, then **waits**. Send an objective and it runs off the leash with no per-command approval until that objective is *verifiably* done, or you stand it down.
 
 Underneath both, the floor never moves: the **destructive-command gate** and the **fail-closed scope gate** fire regardless of mode. The catastrophic-command check isn't a naive string match — it sees through obfuscation like `rm${IFS}-rf${IFS}/` (**`$IFS`** substitution) and `sh -c '…'` wrappers, and there is **no "run anyway"** override on a catastrophic hit. It's also tuned against false positives: `rm -rf ~/loot` is *your* loot directory and runs fine — it's `/` and device nodes that are blocked. Point it at something you don't own and it keeps working *that* target until you pull it off, which is exactly why the installer asks you to read it. The safety guardrail is a byte-identical, test-pinned block; the engine won't ship if it drifts.
@@ -210,7 +269,7 @@ A real desktop app, not a terminal wrapper — GTK4 / libadwaita with a dark Aer
 
 ## 🔬 Engineering
 
-**Stdlib only** for the engine. No pytest, no network, no fixtures, no account — **4,587 assertions across 59 suites**, run in under a minute. Every fix ships with a regression that *fails* on the old code and *passes* on the new. Real GTK is spun up under Xvfb for the UI suites; the chat-bubble layout alone is pinned by 140 fitting checks. The safety guardrail is verified byte-identical on every build, the CSS is checked ASCII-only, and every packaged zip is re-tested from a clean extract before it's called done.
+**Stdlib only** for the engine. No pytest, no network, no fixtures, no account — **4,170 assertions across 61 suites**, run in under a minute. Every fix ships with a regression that *fails* on the old code and *passes* on the new. Real GTK is spun up under Xvfb for the UI suites; the chat-bubble layout alone is pinned by 140 fitting checks. Repo repair is covered end-to-end rather than layer by layer — a deliberately broken repo is opened as a folder, baselined red, edited through **four different tool-call dialects**, verified green, diffed and exported, with the 6,000-line file paged and rewritten on the way past. The safety guardrail is verified byte-identical on every build, the CSS is checked ASCII-only, and every packaged zip is re-tested from a clean extract before it's called done.
 
 This is a one-person project. Every one of those assertions is there because something broke once and shouldn't get the chance to break again.
 
@@ -236,7 +295,7 @@ If it earns its place in your kit, star the repo and tell someone who runs engag
 
 <br/>
 
-### Built by one person, around a day job. Verified by 4,587 assertions. Priced at nothing.
+### Built by one person, around a day job. Verified by 4,170 assertions. Priced at nothing.
 
 <sub>Clone it, read it, run the suite, then point it at something you own.</sub>
 

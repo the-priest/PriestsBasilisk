@@ -477,6 +477,122 @@ def import_zip(zip_path: str, name: str = "") -> Dict[str, Any]:
         return {"ok": False, "error": f"{type(e).__name__}: {e}"}
 
 
+def import_dir(path: str, name: str = "") -> Dict[str, Any]:
+    """Open a repo that is already a DIRECTORY on disk, not a zip.
+
+    Why this exists: workspace_import took a .zip and nothing else, so
+    "work on my repo" meant "go zip your repo first". A checkout is the
+    normal shape a repo comes in, and the whole point of the workspace is to
+    be the thing that works a whole repo.
+
+    A COPY is made, exactly as for a zip, and every later path is confined to
+    that copy. That is deliberate and not laziness: the operator's own tree is
+    never edited in place, revert always has something to revert TO, and
+    workspace_export stays the one moment work leaves the sandbox. Symlinks
+    are not followed (a link out of the tree is how a confined workspace stops
+    being confined); build and vcs noise is skipped; the same file-count and
+    total-size caps apply.
+    """
+    try:
+        src = os.path.realpath(os.path.expanduser(path or ""))
+        if not src or not os.path.isdir(src):
+            return {"ok": False, "error": f"not a directory: {path}"}
+
+        slug = re.sub(r"[^A-Za-z0-9._-]+", "-",
+                      name or os.path.basename(src.rstrip("/"))).strip("-") \
+            or "repo"
+        root = _base() / f"{slug}-{int(time.time())}"
+        tree = root / "tree"
+        tree.mkdir(parents=True, exist_ok=True)
+
+        count = 0
+        total = 0
+        secrets: List[str] = []
+        skipped: List[str] = []
+        for dirpath, dirnames, filenames in os.walk(src, followlinks=False):
+            dirnames[:] = [d for d in dirnames
+                           if d not in SKIP_DIRS
+                           and not os.path.islink(os.path.join(dirpath, d))]
+            for fn in filenames:
+                fp = os.path.join(dirpath, fn)
+                rel = os.path.relpath(fp, src)
+                if os.path.islink(fp):
+                    skipped.append(f"{rel} (symlink)")
+                    continue
+                try:
+                    st = os.lstat(fp)
+                except OSError as e:
+                    skipped.append(f"{rel} ({type(e).__name__})")
+                    continue
+                if not stat.S_ISREG(st.st_mode):
+                    skipped.append(f"{rel} (not a regular file)")
+                    continue
+                if count >= MAX_FILES:
+                    skipped.append(f"{rel} (file-count cap {MAX_FILES})")
+                    break
+                if total + st.st_size > MAX_TOTAL_UNPACKED:
+                    skipped.append(f"{rel} (total size cap)")
+                    break
+                dest = tree / rel
+                try:
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(fp, str(dest))
+                except Exception as e:
+                    skipped.append(f"{rel} ({type(e).__name__})")
+                    continue
+                count += 1
+                total += st.st_size
+                if _is_secret(rel):
+                    secrets.append(rel)
+
+        if count == 0:
+            return {"ok": False,
+                    "error": f"no readable files under {path}",
+                    "skipped": skipped[:40]}
+
+        (root / "_originals").mkdir(exist_ok=True)
+
+        _STATE.name = slug
+        _STATE.root = str(tree)
+        # The directory it came from, in the field the zip path uses — status
+        # and export both read this, and a workspace with no source recorded
+        # reports as if it came from nowhere.
+        _STATE.source_zip = src
+        _STATE.imported_at = time.time()
+        _STATE.file_count = count
+        _STATE.total_bytes = total
+        _STATE.modified = []
+        _STATE.created = []
+        _STATE.deleted = []
+        _STATE.notes = []
+        _STATE.edits_since_verify = 0
+        _STATE.last_verdict = ""
+        _STATE.verify_count = 0
+        _BASELINE.clear()
+
+        out: Dict[str, Any] = {
+            "ok": True, "workspace": slug, "root": str(tree),
+            "files": count, "bytes": total, "source": src,
+            "note": ("Working on a COPY — your own directory is untouched. "
+                     "workspace_export writes the result back out as a zip."),
+        }
+        if skipped:
+            out["skipped"] = skipped[:40]
+            out["skipped_count"] = len(skipped)
+        if secrets:
+            out["possible_secrets"] = secrets[:20]
+            out["secrets_warning"] = (
+                f"{len(secrets)} file(s) look like credentials. They are "
+                f"excluded from search results and from the export unless "
+                f"you pass include_secrets=True.")
+        _log(f"imported dir {slug}: {count} files, {total / 1e6:.1f} MB")
+        return out
+    except ContainmentError as e:
+        return {"ok": False, "error": str(e)}
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+
+
 # ═════════════════════════════════════════════════════════════════════
 # ORIENT
 # ═════════════════════════════════════════════════════════════════════
@@ -654,10 +770,33 @@ def search(pattern: str, glob: str = "", regex: bool = False,
         return {"ok": False, "error": f"{type(e).__name__}: {e}"}
 
 
+def _as_line(v: Any) -> int:
+    """Coerce a model-supplied line number to a sane int.
+
+    start/end arrive as whatever the model typed — "5000", 5000.0, None,
+    True, "abc". A bool is rejected explicitly (True would read as line 1),
+    and anything unusable becomes 0, which the caller reads as "unset".
+    """
+    if isinstance(v, bool) or v is None:
+        return 0
+    try:
+        n = int(str(v).strip())
+    except Exception:
+        return 0
+    if n < 0 or n > 100_000_000:
+        return 0
+    return n
+
+
 def read(path: str, start: int = 1, end: int = 0,
          max_bytes: int = 200_000) -> Dict[str, Any]:
     """Read a workspace file, optionally a line range."""
     try:
+        # Coerce the line numbers BEFORE anything compares them. `start` and
+        # `end` come straight from the model, and `start > 1` on a None raises
+        # a TypeError that surfaces as "the read tool is broken".
+        start = _as_line(start)
+        end = _as_line(end)
         root = _require()
         fp = _confine(root, path)
         rel = os.path.relpath(fp, root)
@@ -674,17 +813,61 @@ def read(path: str, start: int = 1, end: int = 0,
         if b"\x00" in raw:
             return {"ok": True, "path": rel, "size": size, "kind": "binary",
                     "content": raw[:512].hex()}
+        # ── A RANGED READ MUST NOT BE CLIPPED TO THE FIRST max_bytes ──
+        # This branch used to slice `lines`, which came from `raw` — the first
+        # 200 KB of the file. So on any file bigger than that, asking for
+        # lines 5000-5100 returned NOTHING, and `total_lines` was counted from
+        # the truncated text, so the file also looked shorter than it is.
+        #
+        # That is not a corner case: it is the exact move the truncated-read
+        # note above TELLS the model to make ("read the remainder with
+        # start/end"). The advice was sound and the tool could not honour it,
+        # which is why paging through a large source file to fix it did not
+        # work. A range is served by walking the file line by line instead —
+        # the whole file, not a prefix of it — with the byte budget applied to
+        # the SELECTED lines rather than to the file's opening.
+        if start > 1 or end:
+            lo = max(0, start - 1)
+            hi = end if end > 0 else 0
+            sel: List[str] = []
+            total = 0
+            budget = max_bytes
+            clipped = False
+            with open(fp, "rb") as f:
+                for i, bline in enumerate(f):
+                    total += 1
+                    if i < lo or (hi and i >= hi):
+                        continue
+                    if clipped:
+                        continue
+                    budget -= len(bline)
+                    if budget < 0:
+                        clipped = True
+                        continue
+                    sel.append(bline.decode("utf-8", "replace")
+                               .rstrip("\n").rstrip("\r"))
+            body = "\n".join(f"{lo + k + 1}\t{s}" for k, s in enumerate(sel))
+            out = {"ok": True, "path": rel, "size": size, "kind": "text",
+                   "total_lines": total,
+                   "shown": f"{lo + 1}-{lo + len(sel)}" if sel else "none",
+                   "truncated": clipped,
+                   "content": body}
+            if clipped:
+                out["note"] = (
+                    f"INCOMPLETE RANGE — the requested range was cut at "
+                    f"{max_bytes} bytes; you have lines {lo + 1}-"
+                    f"{lo + len(sel)} of {total}. Ask for a smaller range to "
+                    f"see the rest. Do NOT write this back as the whole file.")
+                out["content"] = body + (
+                    f"\n\n[INCOMPLETE: range cut at line {lo + len(sel)} "
+                    f"of {total}]")
+            elif not sel:
+                out["note"] = (f"no lines in that range — the file has "
+                               f"{total} lines")
+            return out
         text = raw.decode("utf-8", errors="replace")
         lines = text.splitlines()
         total = len(lines)
-        if start > 1 or end:
-            lo = max(0, start - 1)
-            hi = end if end and end > 0 else total
-            sel = lines[lo:hi]
-            body = "\n".join(f"{lo + k + 1}\t{s}" for k, s in enumerate(sel))
-            return {"ok": True, "path": rel, "size": size, "kind": "text",
-                    "total_lines": total, "shown": f"{lo + 1}-{lo + len(sel)}",
-                    "content": body}
         # ── A TRUNCATED READ MUST SAY SO INSIDE THE CONTENT ──────────
         # A big file comes back cut at max_bytes with `truncated: true` in a
         # sibling field — and nothing in the text itself. A model that reads
@@ -1397,8 +1580,23 @@ _TEST_DETECTORS: List[Tuple[str, str, str]] = [
 # which for a big suite is tens of thousands of lines.
 _RX_PYTEST = re.compile(
     r"(\d+) failed|(\d+) passed|(\d+) error|(\d+) skipped")
+# `FAILED foo/test_x.py::test_y` (pytest). The (?!\() is not decoration:
+# unittest ends its run with the summary line
+#
+#     FAILED (failures=2, errors=1)
+#
+# which this pattern happily read as a failing test called "(failures=2,".
+# That fake name then went into `failed_names`, into the baseline, and out
+# the other side as a test that had been "fixed" — a phantom in the one
+# report the operator is meant to trust.
 _RX_FAILNAME = re.compile(
-    r"^(?:FAILED|ERROR)\s+([^\s:]+(?:::[^\s]+)?)", re.M)
+    r"^(?:FAILED|ERROR)\s+(?!\()([^\s:]+(?:::[^\s]+)?)", re.M)
+# unittest's own summary block. Nothing parsed it, so a repo whose tests run
+# under `python -m unittest` reported counts of all zeros next to a list of
+# named failures — internally contradictory, and the zeros are what a model
+# quoting "0 failed" would read.
+_RX_UT_RAN = re.compile(r"^Ran (\d+) tests?\b", re.M)
+_RX_UT_SUMMARY = re.compile(r"^(OK|FAILED)\b(?:\s*\((.*)\))?\s*$", re.M)
 _RX_UNITTEST = re.compile(r"^(?:FAIL|ERROR):\s+(\S+)", re.M)
 _RX_SCRIPT_FAIL = re.compile(r"^\s*FAIL\s+(.+)$", re.M)
 _RX_GO_FAIL = re.compile(r"^---\s+FAIL:\s+(\S+)", re.M)
@@ -1502,6 +1700,24 @@ def parse_test_output(raw: str, rc: int = 0) -> Dict[str, Any]:
         counts["errors"] = max(counts["errors"], int(m.group(1)))
     for m in re.finditer(r"(\d+)\s+skipped", tail):
         counts["skipped"] = max(counts["skipped"], int(m.group(1)))
+
+    # ── unittest, which words all of this differently ──
+    #   Ran 8 tests in 0.001s
+    #   FAILED (failures=2, errors=1, skipped=1)      (or a bare "OK")
+    _ran = _RX_UT_RAN.findall(tail)
+    _sum = _RX_UT_SUMMARY.findall(tail)
+    if _ran and _sum:
+        _total = int(_ran[-1])
+        _verdict, _detail = _sum[-1]
+        _bad = 0
+        for _k, _key in (("failures", "failed"), ("errors", "errors"),
+                         ("unexpected successes", "failed")):
+            for m in re.finditer(re.escape(_k) + r"=(\d+)", _detail or ""):
+                counts[_key] = max(counts[_key], int(m.group(1)))
+        for m in re.finditer(r"skipped=(\d+)", _detail or ""):
+            counts["skipped"] = max(counts["skipped"], int(m.group(1)))
+        _bad = counts["failed"] + counts["errors"] + counts["skipped"]
+        counts["passed"] = max(counts["passed"], max(0, _total - _bad))
 
     errs = [f"{m.group(1)}: {m.group(2)[:140]}"
             for m in _RX_TRACE.finditer(raw)][:12]
