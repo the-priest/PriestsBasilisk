@@ -196,7 +196,7 @@ class ModelInfo:
 SILICONFLOW_CATALOGUE: List[ModelInfo] = [
     # ── Flagship: reach for these when the target is genuinely hard ──
     ModelInfo("zai-org/GLM-5.3-Flash", "GLM-5.3-Flash", 1049, 0.15, 0.50,
-              "PINNED DEFAULT. Tops this provider's intelligence board. "
+              "Tops this provider's intelligence board. "
               "320B/18B MoE, native multimodal, built for efficient coding "
               "+ long-horizon agents. Flagship quality at workhorse money.",
               vision=True, tier="flagship",
@@ -244,9 +244,9 @@ SILICONFLOW_CATALOGUE: List[ModelInfo] = [
     ModelInfo("deepseek-ai/DeepSeek-V4-Flash", "DeepSeek-V4-Flash",
               1049,
               0.13, 0.28,
-              "284B/13B, 1M ctx. Every benchmark in the README was "
-              "produced on this — the scaffolding scores, not the price "
-              "tag. First fallback behind the pinned default.",
+              "PINNED DEFAULT. 284B/13B, 1M ctx. Every benchmark was produced "
+              "on this, and re-verified on it at v1.0.0.17 — the scaffolding "
+              "scores, not the price tag.",
               tier="workhorse",
               cached_in_usd=0.028,
               think_off={"enable_thinking": False}),
@@ -308,9 +308,25 @@ SILICONFLOW_CATALOGUE: List[ModelInfo] = [
 # lands on the model every README benchmark was produced with, and stays in
 # the catalogue unchanged — the benchmark rows and their v7.6.0 labels record
 # which build produced which score and are NOT restated as GLM numbers.
+# ── THE PIN WENT BACK TO DEEPSEEK, AND HERE IS WHY ──────────────
+# The pin moved to GLM-5.3-Flash at v1.0.0.18. Everything that broke after it
+# was GLM behaviour, not app behaviour: the reasoned-but-silent retry loop, the
+# JSON-bodied <tool_call> that neither ran nor stripped, the reasoning read out
+# loud, and — worst — the model WRITING ITS OWN TOOL RESULTS, inventing a fetch,
+# a status code and a page body. Every one of those is fixed and GLM is fully
+# supported, but they were all shipped to an operator who had not chosen GLM.
+#
+# The benchmark settles it. 87/113 was produced on DeepSeek-V4-Flash, and the
+# operator re-ran the board on v1.0.0.17 — also DeepSeek — and got 87 again,
+# challenge for challenge, no regression. That is the configuration with a
+# measured score behind it, so that is what a fresh install gets.
+#
+# GLM-5.3-Flash stays FIRST in the catalogue and one click away in the model
+# picker, with every GLM fix intact. Choosing it is one setting; being moved
+# onto it without asking is what this reverts.
 SILICONFLOW_CHAIN = [
-    "zai-org/GLM-5.3-Flash",
     "deepseek-ai/DeepSeek-V4-Flash",
+    "zai-org/GLM-5.3-Flash",
     "deepseek-ai/DeepSeek-V4-Pro",
     "tencent/Hy3",
 ]
@@ -360,7 +376,7 @@ class ProviderSpec:
 
 
 # UI display order only.  Groq is listed first for historical familiarity,
-# but the DEFAULT active provider is SiliconFlow/GLM-5.3-Flash — set in
+# but the DEFAULT active provider is SiliconFlow/DeepSeek-V4-Flash — set in
 # DEFAULT_SETTINGS["active_provider"] and locked by tests.  Groq is the
 # fallback chain, not the default.
 PROVIDERS: List[ProviderSpec] = [
@@ -432,7 +448,7 @@ def log(msg: str) -> None:
 DEFAULT_SETTINGS = {
     # ── Provider routing ──
     # Which cloud provider to use.  Cloud-only build — no local model.
-    # SiliconFlow/GLM-5.3-Flash is the primary; the rest of the chain backs it.
+    # SiliconFlow/DeepSeek-V4-Flash is the primary; the rest of the chain backs it.
     "active_provider": "siliconflow",
 
     # Per-provider API key + selected model.  One pair per registered
@@ -901,7 +917,7 @@ def _migrate_settings(merged: Dict[str, Any], raw: Dict[str, Any]) -> None:
     # Older builds may carry prefer_groq / prefer_cloud / local-model keys;
     # they're harmless leftovers now (cloud-only) and simply ignored.
     # If active_provider is missing entirely, default to the LOCKED PRIMARY —
-    # SiliconFlow / GLM-5.3-Flash — the same default a fresh install gets.
+    # SiliconFlow / DeepSeek-V4-Flash — the same default a fresh install gets.
     # (Older builds put a Groq-only install on Groq here; that is gone. Groq is
     # the fallback, never the automatic default. A genuine Groq user still
     # selects it in the model switcher, which persists their choice below.)
@@ -4035,9 +4051,93 @@ def _without_signoffs(t: str) -> str:
     return t
 
 
+# ── A BARE PARTICIPLE IS A PROMISE WITH THE PRONOUN DROPPED ──────
+# Every marker above needs a subject ("I'll", "let me") or the literal word
+# "now" glued to the verb ("fetching now"). Models drop both constantly, and
+# the reply still ends the turn holding a promise:
+#
+#     "Okay - fetching the news now."          <- "fetching now" does NOT
+#     "Okay. Fetching."                           match; the words are apart
+#     "Right, checking the RTE page."
+#
+# Reported from a live run as "says okay it'll fetch the news then stops and
+# says done without fetching". Measured: 2 of 15 realistic announce-and-stop
+# phrasings were invisible to the stall check, so no nudge fired and the turn
+# died silently — the same dead end the answer-stall nudge exists to close.
+#
+# Anchored to a CLAUSE START (start of text, or after . ! ? : ; , - and
+# friends) so "the fetching logic" mid-sentence is not a promise. Deliveries
+# are protected downstream, not here: reply_is_bare_stall still requires that
+# NOTHING was delivered, so "Fetching the feed returned 503." keeps its
+# report and is not nudged.
+# A COMMA IS NOT A CLAUSE BOUNDARY HERE. The first version allowed one, and
+# caught the participle in "The scan found 1 live host, 192.168.1.1, running
+# nginx 1.24 with ports 80 and 443 open" — a finished report graded as a stall
+# and nudged, which is the same "same answer twice" bug in the other
+# direction. A mid-sentence participle is a MODIFIER; an announcement opens
+# its own clause. So: start of text, or after a sentence terminator or dash —
+# and a comma only when it follows a bare acknowledgement ("Okay, searching
+# now."), which is the one shape where a comma really does start one.
+_ACTION_VERBS = (r"(fetching|checking|searching|looking\s+up|looking\s+into|"
+                 r"reading|running|scanning|pulling|grabbing|retrieving|"
+                 r"querying|downloading|gathering|collecting|starting|"
+                 r"kicking\s+off|firing\s+off)\b")
+_BARE_ACTION_RE = re.compile(
+    r"(?:"
+    r"(?:^|[.!?\n]|\s[-\u2013\u2014]\s)\s*"
+    r"|(?:^|[.!?\n])\s*(?:ok(?:ay)?|right|sure|yes|alright|understood|"
+    r"got\s+it|on\s+it)\s*[,.\u2013\u2014-]?\s*"
+    r")" + _ACTION_VERBS,
+    re.I)
+
+
+# THE COUNTER-PROPERTY FOR THE RULE ABOVE. A participle can also be the
+# SUBJECT of a finished report, and that is a delivery, not a promise:
+#
+#     "Fetching the feed returned 503, so the news is unavailable."
+#     "Checking the logs showed three failed logins last night."
+#     "Reading the config confirmed PermitRootLogin is no."
+#     "Scanning is complete. Nothing else was listening."
+#
+# Nudging those asks the model to repeat an answer it already gave — the
+# same three-times bug reply_is_bare_stall was written to stop. The tell is a
+# FINITE verb after the participle clause: an announcement has none, because
+# it never gets as far as saying what happened. Measured: 4 false nudges
+# before this guard, 0 after, with all 20 announce-and-stop shapes still
+# caught.
+_REPORTING_VERB_RE = re.compile(
+    r"\b(?:returned|showed|shows|confirmed|confirms|found|finds|revealed|"
+    r"reveals|gave|gives|produced|produces|yielded|yields|failed|fails|"
+    r"worked|works|came\s+back|turned\s+up|is|are|was|were|has|have|had|"
+    r"contains|contained|says|said|reports|reported)\b", re.I)
+
+
+def _clause_reports_a_result(t: str) -> bool:
+    """True when the opening participle clause goes on to REPORT something.
+
+    Only the first sentence is examined: a later sentence carrying a result
+    belongs to the delivery test in reply_is_bare_stall, not to whether this
+    clause was a promise.
+    """
+    first = re.split(r"[.!?\n]", (t or "").lower(), 1)[0]
+    m = _BARE_ACTION_RE.search(first)
+    tail = first[m.end():] if m else first
+    return bool(_REPORTING_VERB_RE.search(tail))
+
+
 def _has_intent(t: str) -> bool:
     t = _without_signoffs((t or "").lower())
-    return any(m in t for m in _INTENT_MARKERS)
+    if any(m in t for m in _INTENT_MARKERS):
+        return True
+    m = _BARE_ACTION_RE.search(t)
+    if not m:
+        return False
+    # Only the remainder of the participle's OWN sentence is examined: a later
+    # sentence reporting a result belongs to the delivery test downstream, not
+    # to whether this clause was a promise.
+    tail = t[m.end():]
+    tail = re.split(r"[.!?\n]", tail, 1)[0]
+    return not _REPORTING_VERB_RE.search(tail)
 
 
 def reply_intends_action(text: str) -> bool:
@@ -4069,8 +4169,20 @@ def reply_intends_action(text: str) -> bool:
     # the FIRST word so a delivered answer that merely contains a gerund
     # ("I found 3 hosts, still scanning the rest") is not caught. The past
     # tense check below still lets a genuine report through.
-    if _ACTION_GERUND_RE.match(t) and not _PAST_DELIVERY_RE.search(t) \
-            and not _GERUND_IDIOM_RE.match(t):
+    # `_PAST_DELIVERY_RE` misses the commonest delivered shape of all: the
+    # gerund as the SUBJECT of a finished report. Verified against v1.0.0.17,
+    # where all five of these were graded as stalls and nudged, so the operator
+    # was asked to hear the same answer again:
+    #     "Fetching the feed returned 503, so the news is unavailable."
+    #     "Checking the logs showed three failed logins last night."
+    #     "Running that scan found 4 open ports: 22, 80, 443 and 8080."
+    #     "Scanning is complete. Nothing else was listening."
+    #     "Reading the config confirmed PermitRootLogin is set to no."
+    # The tell is a FINITE verb in the participle's own clause: an
+    # announcement never gets as far as saying what happened.
+    if (_ACTION_GERUND_RE.match(t) and not _PAST_DELIVERY_RE.search(t)
+            and not _GERUND_IDIOM_RE.match(t)
+            and not _clause_reports_a_result(t)):
         return True
     # A trailing ellipsis reads as "more coming".
     ts = t.rstrip()
@@ -9892,69 +10004,104 @@ _TOOL_DEBRIS_RES = [
 #
 # FOR A TOOL WHOSE PREMISE IS "NO PROOF, NO FINDING", a fabricated tool result
 # is the worst reachable failure: it looks exactly like evidence.
-_HOST_ENVELOPE_MARKS = (
-    "⟦UNTRUSTED WEB CONTENT",
-    "⟦END UNTRUSTED WEB CONTENT⟧",
-    "BEGIN UNTRUSTED DATA",
-    "END UNTRUSTED DATA",
-    "<tool_result>",
-    "</tool_result>",
-)
-# The end of a fabricated span, so the model's own surrounding prose survives.
-_HOST_ENVELOPE_ENDS = (
-    "⟦END UNTRUSTED WEB CONTENT⟧",
-    "</tool_result>",
-)
+# ── THE FIRST VERSION OF THIS LIST WAS A TEXT-EATING BUG ─────────
+# It triggered on the bare phrases "BEGIN UNTRUSTED DATA" / "END UNTRUSTED
+# DATA" and on a lone "<tool_result>". Those are things a model writes in
+# ORDINARY PROSE while explaining itself, and because an opener with no closer
+# was cut to end-of-buffer, one mention destroyed the rest of the reply:
+#
+#   "Summary of the engagement:
+#    - BOLA on /api/users confirmed
+#    - The response body contained BEGIN UNTRUSTED DATA which I ignored
+#    - Recommend object-level authorisation checks"
+#
+# ...lost every line from the mention onward, AND tripped the forged-result
+# retry, so the operator watched a finished answer vanish and regenerate.
+# Measured on a prose corpus: 4 false positives, up to 144 characters
+# destroyed each.
+#
+# The fix is to require the STRUCTURE, not a substring. A forged result is a
+# whole envelope, and there are exactly two shapes of one:
+#   * the banner, delimited by U+27E6/U+27E7 MATHEMATICAL WHITE SQUARE
+#     BRACKETS — characters prose does not produce by accident;
+#   * a <tool_result> … </tool_result> PAIR. A bare opener is somebody talking
+#     about the tag, and talking about it is not forging one.
+# BEGIN/END UNTRUSTED DATA are gone entirely: they only ever appear INSIDE an
+# envelope whose banner already fires, so they added no detection at all and
+# caused every false positive.
+_HOST_ENVELOPE_BANNER = "\u27e6UNTRUSTED WEB CONTENT"
+_HOST_ENVELOPE_BANNER_END = "\u27e6END UNTRUSTED WEB CONTENT\u27e7"
+_HOST_RESULT_OPEN = "<tool_result>"
+_HOST_RESULT_CLOSE = "</tool_result>"
 
 
-def fabricated_tool_result(text: str) -> str:
-    """The host-only envelope marker this ASSISTANT text contains, or "".
+def _forged_spans(text: str):
+    """[(start, end)] of every forged host envelope in `text`.
 
     Fence-masked, for the same reason contains_tool_markup is: a reply that
     quotes the envelope inside ``` to explain it to the operator is
     documentation, not a forged result.
     """
     if not text:
-        return ""
+        return []
     scan = _mask_fences(text)
-    for mark in _HOST_ENVELOPE_MARKS:
-        if mark in scan:
-            return mark
-    return ""
+    spans = []
+    # (a) The bracketed banner. Its closer may legitimately be absent — a turn
+    #     can end mid-fabrication — so this one may run to end-of-buffer. That
+    #     is safe here and was NOT safe for the old generic phrases, because
+    #     the U+27E6 bracket is not something prose puts there.
+    i = scan.find(_HOST_ENVELOPE_BANNER)
+    while i >= 0:
+        j = scan.find(_HOST_ENVELOPE_BANNER_END, i)
+        end = (j + len(_HOST_ENVELOPE_BANNER_END)) if j >= 0 else len(text)
+        spans.append((i, end))
+        if end >= len(text):
+            break
+        i = scan.find(_HOST_ENVELOPE_BANNER, end)
+    # (b) A COMPLETE <tool_result> … </tool_result> pair.
+    i = scan.find(_HOST_RESULT_OPEN)
+    while i >= 0:
+        j = scan.find(_HOST_RESULT_CLOSE, i + len(_HOST_RESULT_OPEN))
+        if j < 0:
+            break
+        end = j + len(_HOST_RESULT_CLOSE)
+        spans.append((i, end))
+        i = scan.find(_HOST_RESULT_OPEN, end)
+    spans.sort()
+    return spans
+
+
+def fabricated_tool_result(text: str) -> str:
+    """The host-only envelope this ASSISTANT text forges, or "" — see
+    _forged_spans for why this demands a structure and not a substring."""
+    sp = _forged_spans(text)
+    if not sp:
+        return ""
+    return (_HOST_ENVELOPE_BANNER
+            if text[sp[0][0]:].startswith(_HOST_ENVELOPE_BANNER)
+            else _HOST_RESULT_OPEN)
 
 
 def strip_fabricated_results(text: str) -> Tuple[str, int]:
     """Remove every forged tool-result span from assistant text.
 
-    Returns (clean_text, spans_removed). Cuts from a host-only opener to the
-    matching closer inclusive — or, when the closer never arrives (the model
-    was still mid-fabrication when the turn ended), to the end of the buffer.
-    The model's own prose either side is kept: it is usually the only part of
-    the reply worth reading, and deleting it would replace a wrong answer with
-    an empty one.
+    Returns (clean_text, spans_removed). The model's own prose either side is
+    KEPT: it is usually the only part of the reply worth reading, and deleting
+    it would replace a wrong answer with an empty one.
     """
-    if not text or not fabricated_tool_result(text):
+    spans = _forged_spans(text)
+    if not spans:
         return text, 0
-    out = text
-    removed = 0
-    for _ in range(20):                      # bounded: no unbounded rescan
-        scan = _mask_fences(out)
-        starts = [scan.find(m) for m in _HOST_ENVELOPE_MARKS]
-        starts = [i for i in starts if i >= 0]
-        if not starts:
-            break
-        b = min(starts)
-        ends = []
-        for e in _HOST_ENVELOPE_ENDS:
-            j = scan.find(e, b)
-            if j >= 0:
-                ends.append(j + len(e))
-        cut_to = min(ends) if ends else len(out)
-        out = out[:b] + out[cut_to:]
-        removed += 1
-    # Collapse the blank run the excision leaves behind.
-    out = re.sub(r"\n{3,}", "\n\n", out).strip()
-    return out, removed
+    out, prev, n = [], 0, 0
+    for a, b in spans:
+        if a < prev:                 # nested/overlapping — already removed
+            continue
+        out.append(text[prev:a])
+        prev = b
+        n += 1
+    out.append(text[prev:])
+    cleaned = re.sub(r"\n{3,}", "\n\n", "".join(out)).strip()
+    return cleaned, n
 
 
 def contains_tool_markup(text: str) -> bool:

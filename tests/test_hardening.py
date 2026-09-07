@@ -347,5 +347,64 @@ for _name, _lines in _SHAPES.items():
     ck(f"{_name}: ends in exactly one callback", _outcome == 1, str(_outcome))
 
 
+
+# =====================================================================
+# 6. "IT SAYS IT'LL FETCH THE NEWS THEN STOPS AND SAYS DONE"
+# =====================================================================
+# Reported from a live run. The answer-stall nudge exists for exactly this —
+# the model announces an action, emits no tool call, and the turn ends holding
+# a promise — but every marker it keyed on needed a SUBJECT ("I'll", "let me")
+# or the literal word "now" glued to the verb ("fetching now"). Models drop
+# both constantly. Verified against v1.0.0.17: these were invisible there too,
+# so this is not a regression, it is a hole that was always open.
+print("\n== an announcement with the pronoun dropped is still a stall ==")
+_ANNOUNCE = [
+    "Okay, I'll fetch the news.",
+    "Okay - fetching the news now.",
+    "Okay. Fetching.",
+    "Right, checking the RTE page.",
+    "Okay, searching now.",
+    "Sure. Reading the article.",
+    "Alright, fetching that now.",
+    "Understood. Checking the logs.",
+    "Starting the scan.",
+    "Kicking off the news search.",
+    "Fetching updates on both.",
+    "Getting the headlines.",
+    "Searching for recent updates.",
+    "On it - pulling the latest headlines.",
+    "Give me a second while I fetch that.",
+]
+for _t in _ANNOUNCE:
+    ck(f"stall: {_t!r}", C.reply_is_bare_stall(_t))
+
+# THE COUNTER-PROPERTY, which is what makes this safe to ship. A participle is
+# also the subject of a finished report, and a modifier mid-sentence. Nudging
+# either asks the operator to hear the same answer twice - the bug
+# reply_is_bare_stall was written to stop. Five of these were graded as stalls
+# by v1.0.0.17 and are fixed here too.
+print("\n== a finished report that happens to contain a participle is NOT ==")
+_DELIVERED = [
+    "The scan found 1 live host, 192.168.1.1, running nginx 1.24 with ports "
+    "53, 80 and 443 open. Nothing else responded.",
+    "Fetching the feed returned 503, so the news is unavailable right now.",
+    "Checking the logs showed three failed logins from 10.0.0.5 last night.",
+    "Running that scan found 4 open ports: 22, 80, 443 and 8080.",
+    "Scanning is complete. Nothing else was listening.",
+    "Reading the config confirmed PermitRootLogin is set to no.",
+    "The fetching logic in their API is what leaks the token.",
+    "I found 3 hosts, still scanning the rest.",
+    "Two services, one running nginx and one running sshd.",
+    "Here are today's headlines: a man was arrested, and the budget passed.",
+    "I could not reach the feed - it returned 503. Try again shortly.",
+    "Let me know if you want more detail on any of those.",
+]
+for _t in _DELIVERED:
+    ck(f"NOT a stall: {_t[:52]!r}", not C.reply_is_bare_stall(_t))
+ck("a comma alone never starts an announcement clause "
+   "(', running nginx' is a modifier, not a promise)",
+   not C.reply_is_bare_stall(
+       "The host is up, running nginx and sshd, with 22 and 80 open."))
+
 print(f"\nhardening: {_p} passed, {_f} failed")
 sys.exit(1 if _f else 0)

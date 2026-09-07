@@ -1,3 +1,68 @@
+## v1.0.0.21 — the stall that ate your news fetch, my own text-eating filter, and the pin back where the benchmark is
+
+### "It says it'll fetch the news, then stops and says done"
+
+The answer-stall nudge exists for exactly this: the model announces an action,
+emits no tool call, and the turn ends holding a promise. But every marker it
+keyed on needed a SUBJECT — "I'll", "let me" — or the literal word "now" glued
+to the verb ("fetching now"). Models drop both constantly:
+
+    "Okay - fetching the news now."      <- "fetching now" does not match;
+    "Okay. Fetching."                       the words are apart
+    "Right, checking the RTE page."
+
+None of those fired the nudge, so the turn died silently. **Verified against
+v1.0.0.17: they were invisible there too** — this is not a regression, it is a
+hole that was always open, and it is the reported bug. 22 realistic
+announce-and-stop phrasings now all nudge.
+
+The counter-property is what makes it safe: a participle is also the subject of
+a finished report and a modifier mid-sentence. `"The scan found 1 live host,
+192.168.1.1, running nginx"` and `"Fetching the feed returned 503"` were graded
+as stalls **by v1.0.0.17** and nudged, so the operator was asked to hear the
+same answer twice. Both directions are fixed: 22/22 announcements caught, 0 of
+15 delivered replies falsely nudged.
+
+### My own filter was eating your replies
+
+The forged-tool-result filter shipped in v1.0.0.19 triggered on the bare
+phrases "BEGIN UNTRUSTED DATA" / "END UNTRUSTED DATA" and on a lone
+`<tool_result>` — things a model writes in ordinary prose while explaining
+itself. Because an opener with no closer was cut to end-of-buffer, one mention
+destroyed the rest of the reply AND tripped the forged-result retry, so a
+finished answer vanished and regenerated:
+
+    "Summary of the engagement:
+     - BOLA on /api/users confirmed
+     - The response body contained BEGIN UNTRUSTED DATA which I ignored
+     - Recommend object-level authorisation checks"
+
+...lost every line from the mention onward. Measured: 4 false positives on a
+prose corpus, up to 144 characters destroyed each. That was mine and it is
+fixed — the filter now demands the STRUCTURE (the bracketed banner, or a
+complete `<tool_result>` … `</tool_result>` pair), not a substring. 0 false
+positives, and the real forgery from the screenshot is still caught.
+
+### The pin goes back to DeepSeek-V4-Flash
+
+The pin moved to GLM-5.3-Flash at v1.0.0.18. Everything that broke after it was
+GLM behaviour — the reasoned-but-silent retry loop, the JSON-bodied
+`<tool_call>`, the reasoning read aloud, and the model writing its own tool
+results — shipped to an operator who had not chosen GLM. Every one of those is
+fixed and GLM is fully supported, but the benchmark settles where the pin sits:
+87/113 was produced on DeepSeek-V4-Flash and **re-run on v1.0.0.17, also
+DeepSeek, coming back 87 again, challenge for challenge**. The configuration
+with a measured score behind it is what a fresh install gets. GLM-5.3-Flash
+stays FIRST in the picker and one place behind in the fallback walk.
+
+The site now states that re-run instead of hedging about it.
+
+### Tests
+
+58 suites, 4,557 assertions. A 527-input differential against v1.0.0.17 shows
+zero tool calls lost and zero text lost — the only behavioural difference in
+the whole corpus is the GLM JSON call now running instead of printing raw.
+
 ## v1.0.0.20 — the site catches up, and the benchmark table finally shows the gap
 
 ### index.html

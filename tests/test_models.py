@@ -54,7 +54,7 @@ SF = C.PROVIDERS_BY_KEY["siliconflow"]
 
 # ── 1. the pinned default ────────────────────────────────────────────
 print("\n== pinned default ==")
-PINNED = "zai-org/GLM-5.3-Flash"
+PINNED = "deepseek-ai/DeepSeek-V4-Flash"
 ck("chain[0] is the pinned default", SF.chain[0] == PINNED, SF.chain[0])
 ck("default_model agrees", SF.default_model == PINNED)
 ck("pinned default is also pickable", PINNED in SF.pick_ids)
@@ -185,16 +185,23 @@ ck("GLM-5.2 keeps its think toggle (hybrid)",
 # Natively multimodal, so it must be offered as a vision model too.
 ck("GLM-5.3-Flash is a pickable vision model",
    "zai-org/GLM-5.3-Flash" in C.VISION_MODELS.get("siliconflow", []))
-ck("the pin is GLM-5.3-Flash and the chain head agrees",
-   SF.chain[0] == PINNED and PINNED == "zai-org/GLM-5.3-Flash")
+# THE PIN WENT BACK. It moved to GLM at v1.0.0.18; everything that broke after
+# it was GLM behaviour shipped to operators who had not chosen GLM, and the
+# 87/113 board was measured on DeepSeek-V4-Flash and re-verified on it at
+# v1.0.0.17. The configuration with a measured score behind it is the one a
+# fresh install gets. GLM stays FIRST in the catalogue, one click away.
+ck("the pin is DeepSeek-V4-Flash and the chain head agrees",
+   SF.chain[0] == PINNED and PINNED == "deepseek-ai/DeepSeek-V4-Flash")
+ck("GLM-5.3-Flash is still the FIRST pick in the catalogue",
+   SF.pick_ids[0] == "zai-org/GLM-5.3-Flash", SF.pick_ids[0])
+ck("...and is one place behind the pin in the fallback walk",
+   SF.chain[1] == "zai-org/GLM-5.3-Flash", str(SF.chain))
 # THE BENCHMARK ROWS DO NOT MOVE WITH THE PIN. Every README score was produced
 # driving DeepSeek-V4-Flash; that model stays in the catalogue, stays FIRST in
 # the fallback walk behind the pin, and its blurb keeps saying so. Restating
 # those numbers as GLM numbers would be a fabricated benchmark.
 ck("DeepSeek-V4-Flash is still catalogued", SF.info(
     "deepseek-ai/DeepSeek-V4-Flash") is not None)
-ck("…and is the FIRST fallback behind the pin",
-   SF.chain[1] == "deepseek-ai/DeepSeek-V4-Flash", str(SF.chain))
 ck("…and still carries the benchmark provenance in its blurb",
    "benchmark" in (SF.info("deepseek-ai/DeepSeek-V4-Flash").note or "").lower(),
    SF.info("deepseek-ai/DeepSeek-V4-Flash").note)

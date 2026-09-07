@@ -367,6 +367,9 @@ ck("a model with no dial gets no fields at all",
    reasoning_extra("deepseek-ai/DeepSeek-V4-Flash", "high") == {})
 ck("the shipped default rung is 'low'",
    C.DEFAULT_SETTINGS.get("reasoning_effort") == "low")
+ck("GLM is no longer the shipped default, but is still first in the picker",
+   C.DEFAULT_SETTINGS["siliconflow_model"] != GLM53
+   and C.PROVIDERS_BY_KEY["siliconflow"].pick_ids[0] == GLM53)
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -515,6 +518,11 @@ def _drive(**kw):
     st = dict(C.DEFAULT_SETTINGS)
     st["active_provider"] = "siliconflow"
     st["headroom_enabled"] = False
+    # PIN THE MODEL THIS SUITE IS ABOUT. It used to inherit the shipped
+    # default, which was GLM while the pin was GLM; when the pin went back to
+    # DeepSeek every assertion here silently started driving a model with no
+    # reasoning dial. A suite about GLM must name GLM.
+    st["siliconflow_model"] = GLM53
     C.BackendRouter({"siliconflow": be}, st).stream_chat(
         [{"role": "user", "content": "x"}], lambda t: None,
         lambda m: None, lambda e: None, **kw)
@@ -540,7 +548,7 @@ ck("…and gives the ANSWER more room",
 _be = _RecordingBackend()
 _st = dict(C.DEFAULT_SETTINGS)
 _st.update({"active_provider": "siliconflow", "headroom_enabled": False,
-            "reasoning_effort": "high"})
+            "siliconflow_model": GLM53, "reasoning_effort": "high"})
 C.BackendRouter({"siliconflow": _be}, _st).stream_chat(
     [{"role": "user", "content": "x"}], lambda t: None, lambda m: None,
     lambda e: None, reasoning_override="low", effort="heavy")

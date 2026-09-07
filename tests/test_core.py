@@ -102,7 +102,7 @@ class TestSettings(unittest.TestCase):
         # The old contract kept legacy installs on Groq; that turned out to be
         # the bug — a stale groq value persisted from the removed auto-hop and
         # left boxes stuck off the operator's pinned provider. The pin is the
-        # invariant now: SiliconFlow / GLM-5.3-Flash is the default and
+        # invariant now: SiliconFlow / DeepSeek-V4-Flash is the default and
         # nothing switches clouds behind the operator's back.
         merged = dict(basilisk_core.DEFAULT_SETTINGS)
         raw = {"temperature": 0.7}  # no active_provider -> legacy install
@@ -133,15 +133,14 @@ class TestProviderRegistry(unittest.TestCase):
             self.assertTrue(prov.default_model,
                             f"{key} default_model is empty")
 
-    def test_siliconflow_primary_model_is_glm_5_3_flash(self):
+    def test_siliconflow_primary_model_is_deepseek_v4_flash(self):
         # The locked default model. Guards against an accidental reorder of the
         # chain that would silently change which model fresh installs use.
         sf = basilisk_core.PROVIDERS_BY_KEY["siliconflow"]
-        self.assertEqual(sf.chain[0], "zai-org/GLM-5.3-Flash")
-        # DeepSeek-V4-Flash stays FIRST behind it: every README
-        # benchmark was produced on that model, so an outage on the
-        # pin lands on known ground rather than an untested one.
-        self.assertEqual(sf.chain[1], "deepseek-ai/DeepSeek-V4-Flash")
+        self.assertEqual(sf.chain[0], "deepseek-ai/DeepSeek-V4-Flash")
+        # GLM-5.3-Flash stays one place behind and first in the
+        # picker: fully supported, never imposed.
+        self.assertEqual(sf.chain[1], "zai-org/GLM-5.3-Flash")
 
 
 # Persona fixtures for the guardrail tests.  A GUARDRAIL block is delimited by
