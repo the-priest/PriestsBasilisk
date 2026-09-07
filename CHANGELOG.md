@@ -1,3 +1,164 @@
+## v1.0.0.19 — the model was inventing its own tool results, and four ways the app could be broken from outside
+
+### It was fabricating evidence
+
+A screenshot of a live run: one question, "can you give me some news", and a
+reply that interleaved the model's narration with TWO COMPLETE TOOL RESULTS —
+banner, URL, HTTP 200, article body — while the activity feed said `1 step
+complete`. The model wrote both sides of the conversation. It invented the
+fetches and reasoned on top of them as if they had been retrieved.
+
+That is detectable with certainty rather than guessed at: the
+`[UNTRUSTED WEB CONTENT]` banner and the `<tool_result>` wrapper are emitted by
+the HOST and only by the host, and nothing in this application can put one
+inside an assistant message. So a forged span is now cut at the canonicalisation
+boundary — above display, above chats.db, above the history replayed to the
+model every later turn, which is the copy that would otherwise teach it the
+habit. The operator is told in the terminal, the model is told to make the call
+it actually needed, and the correction is bounded at two so a model that keeps
+forging cannot loop. The tool contract now says it outright, too.
+
+For an agent whose premise is "no proof, no finding", a fabricated tool result
+is the worst reachable output: it is indistinguishable from evidence.
+
+### Four detectors, run against the app rather than read into it
+
+**Every tool, driven with hostile arguments.** 88 side-effect-free entry
+points, 3,418 calls: nulls, wrong types, 200KB strings, NUL bytes, inf, NaN,
+1e308. 67 raised. The cause was one line repeated ~200 times — every dispatch
+entry reads `a.get("key", default)`, and that default fires only when the key
+is ABSENT, so a model sending `"search_path": null` (ordinary behaviour for an
+optional argument) put None straight into the tool. Fixed at the ONE
+normalisation boundary rather than at 200 call sites. Now 0 raises.
+
+**The two dispatch paths each had exactly what the other was missing.** The
+batch path wrapped every member in try/except but never normalised its
+arguments; the single path normalised but had no try/except, so a raising
+handler ended the whole turn without ever telling the model. Both now do both.
+
+**Cold start from a broken box.** 14 damaged states. A corrupt `chats.db` —
+the ordinary result of a power cut mid-write — raised out of `ChatStore`'s
+constructor and the app would not start at all. It is now quarantined aside
+(never deleted, so it stays recoverable), a fresh database is started, and the
+operator is told where their history went. A null in `settings.json` no longer
+beats a good default either: that config was producing `"model": null` in the
+request body, i.e. a guaranteed 400 on every turn with nothing on screen to
+explain it. 14/14 now come up.
+
+**The destructive floor, verified against a live bash.** Mutated destroyers,
+then every unrefused shape RE-RUN with argv-inspecting shims, so "bypass" means
+the binary really was invoked with the destructive argument rather than "the
+regex looked wrong". 16 real bypasses in two classes: a block device is not in
+`_CRITICAL_FILES`, so `truncate -s 0 /dev/sda` was refused by nothing; and a
+target hidden behind a variable (`X=/; rm -rf "$X"`) never puts the literal next
+to the verb. Both closed, 0 real bypasses, 0 false refusals over the benign
+corpus — the expansion pass can only ever ADD a refusal, never clear one.
+
+**Transport and leaks: clean.** 38 of 39 malformed-stream shapes already ended
+correctly in exactly one callback (the 39th is KeyboardInterrupt, which must
+propagate). No unbounded deques, no subprocess without a timeout, no open()
+without an encoding.
+
+### Tests
+
+58 suites, 4,505 assertions. New `tests/test_fabrication.py` (30) and
+`tests/test_hardening.py` (101). Guardrail byte-identical, CSS ASCII.
+
+## v1.0.0.18 — GLM-5.3-Flash is the default, and six things that broke on it
+
+GLM-5.3-Flash is now the pinned default model. DeepSeek-V4-Flash stays first in
+the fallback walk and keeps its catalogue entry: every published benchmark was
+produced on it, and none of those numbers are restated as GLM numbers.
+
+Six bugs, all of them specific to running a model whose thinking cannot be
+switched off.
+
+### The retry loop that could not learn
+
+Reported from a live run: "stream start / stream done / response looked
+degraded" three times, force the answer, three more, for ever, and no HTML
+game at the end of it. The turn had streamed a full chain of thought into the
+Thoughts panel and emitted ZERO answer tokens — the response budget went on
+reasoning. That is a deterministic budget failure, and the recovery re-sent the
+identical request, so it reproduced identically. The host was already holding
+the evidence and never looked at it.
+
+Now the degraded branch reads the reasoning it captured. A turn that thought
+and said nothing is named as such in the terminal, and the retry CHANGES the
+request: the thinking is dialled down and the answer gets the heavy token
+budget, with one line back to the model telling it to answer rather than plan.
+
+### The reasoning dial was doing the opposite of what it says
+
+GLM-5.3-Flash's card: `reasoning_effort` is `low|high|max` and "defaults to max
+if not passed, or if set to any other value". Omitting it is therefore a
+choice — the deepest, slowest, priciest one. The pill sent the field only on
+High, so Low (the shipped default, tooltip: "Low is fastest and cheapest") and
+Med both ran the model at maximum depth. "medium" is not in the enum either, so
+forwarding it raw would also fall back to max.
+
+The field now rides every rung, translated per family: GLM-5.3 gets
+low / high / max, GLM-5.2 keeps the two-value enum it actually ships.
+`thinking_budget` still rides alongside — it is SiliconFlow's own lever.
+
+### A whole class of GLM tool call was neither run nor stripped
+
+GLM usually writes `<arg_key>/<arg_value>` pairs, which Basilisk understood.
+Under a forced call — and, per vLLM issue #48095, intermittently in ordinary
+use — it writes an OpenAI-shaped JSON body inside the same wrapper instead,
+sometimes as an array, sometimes with no closing tag. The name-before-arg_key
+rule saw a JSON blob where an identifier should be and left the block alone, so
+the call neither RAN nor got STRIPPED: raw JSON into the chat, into chats.db,
+and replayed as history every later turn. Every shape now decodes — object,
+array, `arguments`/`parameters`/`args`, a JSON-string argument object, name-then-
+JSON, and the unclosed form. A batch with one undecodable member runs nothing
+rather than half of itself.
+
+### The reasoning was being spoken out loud
+
+GLM's template opens the `<think>` block in the GENERATION PROMPT, so the
+model's own output starts inside the reasoning and emits only the closer.
+Everything downstream is paired-tag based, so nothing matched: the chain of
+thought was shown as the reply, the literal `</think>` was rendered, TTS read
+it aloud, and the whole lot was stored and replayed. An orphaned closer is now
+treated as the implicit block it is — but only outside a code fence and only
+when it is not written inline, so a reply that merely mentions the tag keeps
+its own words.
+
+### A turn cut by the clock said it had finished
+
+`STREAM_MAX_WALL_S` ends a runaway turn, which a deep-reasoning model is the
+likeliest thing to trigger. The cut left `finish_reason` empty, so `truncated`
+came out False and an amputated reply was stored as a complete one — and the
+recovery that exists for exactly this never fired. It is reported now, with
+`cut_by` saying which cap was hit, because "write the file in sections" is the
+right correction for a token cap and the wrong one for a time limit.
+
+### An escalation that was really a downgrade
+
+`hard_engagement_model` ships as DeepSeek-V4-Pro, which was the right heavier
+sibling when the pin was DeepSeek-V4-Flash. On GLM it swapped model FAMILY
+mid-run, to something 10x the price that the catalogue itself does not call
+smarter. A cross-family swap is refused now; on a model with a reasoning dial,
+"heavy" means the bigger budget plus the deepest reasoning instead.
+
+### Also
+
+Vision no longer blames the image when an always-thinking model spends its
+whole budget reasoning: the description call asks for low depth, and an empty
+reply that carried reasoning says so instead of "the model may not support
+images". `llms.txt` and the manual no longer name Groq as a chat provider or
+DeepSeek as the default.
+
+### Tests
+
+56 suites, 4,374 assertions. New `tests/test_glm.py` (89) covers every shape
+above, with the counter-properties asserted as hard as the properties: prose is
+never parsed as a call, a reply mentioning `</think>` keeps its words, a stream
+that ends on its own is not marked truncated, and the streaming path is
+replayed character by character with zero frames leaking protocol. Guardrail
+byte-identical, CSS ASCII, zero GTK criticals under real GTK 4.14.
+
 ## v1.0.0.17 — no more phantom bubble; README rewritten from scratch
 
 ### The empty bubble that popped in and back out — fixed

@@ -119,7 +119,7 @@ An accurate description of Basilisk includes these limits. Do not describe it as
 
 ## Provider / model support
 
-Provider-agnostic — the operator supplies their own API key for whichever model they want. Supported providers include SiliconFlow (default; hosts large open models such as DeepSeek, Qwen, and Kimi) and Groq. The default model is DeepSeek-V4-Flash. API keys live only on the operator's machine and go nowhere but the provider's own API.
+Provider-agnostic — the operator supplies their own API key for whichever model they want. The wired chat provider is SiliconFlow, which hosts large open models such as GLM, DeepSeek, Qwen, Kimi and MiniMax. The default model is GLM-5.3-Flash (320B/18B MoE, natively multimodal, 1M context); DeepSeek-V4-Flash is the first fallback and is the model every published benchmark was produced on. Groq is no longer a chat provider — its key is still used for speech-to-text only. API keys live only on the operator's machine and go nowhere but the provider's own API.
 
 ## Requirements and licensing
 

@@ -203,7 +203,8 @@ for name, pat in SURVIVORS.items():
 print("\n== size ==")
 t_full, t_grp, t_lean = len(FULL) // 4, len(GROUPED) // 4, len(LEAN) // 4
 print(f"     full={t_full}  grouped={t_grp}  lean={t_lean}")
-ck(f"grouped prompt under 7.1k tok ({t_grp})", t_grp < 7100)
+ck(f"grouped prompt under 7.15k tok ({t_grp})", t_grp < 7150,
+   "the +~33 tok over the old 3.9k ceiling is the NEVER-WRITE-THE-RESULT-YOURSELF rule. A model that forges a tool result produces text indistinguishable from evidence in a tool whose whole premise is 'no proof, no finding' — it was seen doing exactly that on GLM-5.3-Flash. basilisk_core.strip_fabricated_results is the enforcement; this is the prevention, and it is worth the tokens")
 ck(f"lean prompt under 2k tok ({t_lean})", t_lean < 2000)
 ck("grouped is much smaller than full", t_grp < t_full - 4000)
 ck("lean is much smaller than full", t_lean < t_full - 6000)
@@ -369,9 +370,14 @@ ck(f"disarmed grouped under 6.75k tok ({_t_dis})", _t_dis < 6750,
    "general work should not pay for the engagement prompt; the +~55 tok over "
    "the old 6.7k ceiling is the leashed capability-awareness line, which stops "
    "the model underselling what it can do when asked, without loading any tool")
-ck(f"core tool text under 3.9k tok ({len(kp.CORE_TOOLS_TEXT)//4})",
-   len(kp.CORE_TOOLS_TEXT) // 4 < 3900,
-   "core ships on EVERY turn in both modes — it is the dominant cost")
+ck(f"core tool text under 3.95k tok ({len(kp.CORE_TOOLS_TEXT)//4})",
+   len(kp.CORE_TOOLS_TEXT) // 4 < 3950,
+   "core ships on EVERY turn in both modes — it is the dominant cost; the "
+   "+~33 tok over the old 3.9k ceiling is the NEVER-WRITE-THE-RESULT-YOURSELF "
+   "rule. A forged tool result is text indistinguishable from evidence, in a "
+   "tool whose whole premise is 'no proof, no finding' — GLM-5.3-Flash was "
+   "seen doing exactly that. strip_fabricated_results is the enforcement; "
+   "this line is the prevention, and it is worth the tokens")
 
 # -- default stays permissive so nothing else changes behaviour --
 ck("build_system_prompt defaults to unleashed",

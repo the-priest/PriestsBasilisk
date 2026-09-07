@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 <title>Basilisk — Autonomous AI Penetration-Testing Agent (open source, runs locally)</title>
-<meta name="description" content="Basilisk is an open-source autonomous AI penetration-testing agent: a native Linux desktop app that turns any LLM into a working pentester. Fully autonomous and black-box, it solves 87/113 on OWASP Juice Shop and 22/22 on the Duck Store API benchmark, verifying every exploit before it counts. It also repairs your own code: hand it a zip of your repo and it edits, runs your tests, and returns a fixed zip. Runs locally, MIT-licensed, verified by 4,190 assertions.">
+<meta name="description" content="Basilisk is an open-source autonomous AI penetration-testing agent: a native Linux desktop app that turns any LLM into a working pentester. Fully autonomous and black-box, it solves 87/113 on OWASP Juice Shop and 22/22 on the Duck Store API benchmark, verifying every exploit before it counts. It also repairs your own code: hand it a zip of your repo and it edits, runs your tests, and returns a fixed zip. Runs locally, MIT-licensed, verified by 4,188 assertions.">
 <meta name="keywords" content="AI penetration testing agent, autonomous pentest agent, LLM red team tool, open source security tool, automated exploitation, offensive security AI, OWASP Juice Shop benchmark, Kali Linux AI, DeepSeek pentest, Basilisk, AI hacking tool, autonomous security agent, AI code repair agent, autonomous bug fixing, AI coding assistant Linux">
 <meta name="author" content="the-priest">
 <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1">
@@ -17,7 +17,7 @@
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Basilisk">
 <meta property="og:title" content="Basilisk — Autonomous AI Penetration-Testing Agent">
-<meta property="og:description" content="An open-source AI pentester that runs on your machine and proves every exploit — and repairs your own repo the same way. 87/113 OWASP Juice Shop black-box · 22/22 Duck Store API · 4,190 assertions. MIT-licensed.">
+<meta property="og:description" content="An open-source AI pentester that runs on your machine and proves every exploit — and repairs your own repo the same way. 87/113 OWASP Juice Shop black-box · 22/22 Duck Store API · 4,188 assertions. MIT-licensed.">
 <meta property="og:url" content="https://the-priest.github.io/PriestsBasilisk/">
 <meta property="og:image" content="https://the-priest.github.io/PriestsBasilisk/assets/brand/banner.png">
 <meta property="og:image:alt" content="Basilisk — autonomous AI penetration-testing agent">
@@ -48,7 +48,7 @@
   "downloadUrl": "https://github.com/the-priest/PriestsBasilisk",
   "codeRepository": "https://github.com/the-priest/PriestsBasilisk",
   "programmingLanguage": "Python",
-  "softwareVersion": "1.0.0.17",
+  "softwareVersion": "9.9.2",
   "license": "https://opensource.org/licenses/MIT",
   "isAccessibleForFree": true,
   "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
@@ -73,7 +73,7 @@
     "Baseline-before-edit: records which of your tests were already failing, so pre-existing failures are never misreported as agent damage",
     "Export gate: refuses to hand back a change set it has not verified, or one whose last verification reported a regression",
     "Contained extraction: zip slip, symlink entries and zip bombs refused before anything is written, and refusals are reported rather than silently dropped",
-    "Verified by 4,190 assertions across 53 stdlib-only test suites, runnable offline before you trust it"
+    "Verified by 4,188 assertions across 53 stdlib-only test suites, runnable offline before you trust it"
   ]
 }
 </script>
@@ -125,7 +125,7 @@
     {
       "@type": "Question",
       "name": "How do I know the safety guarantees are real and not marketing?",
-      "acceptedAnswer": { "@type": "Answer", "text": "Run the suite: for f in tests/test_*.py; do python3 \"$f\"; done. It's stdlib-only \u2014 no pytest, no network, no account \u2014 4,190 assertions across 53 suites, done in under a minute. Three things make it worth more than a green tick: every fixed bug gets a test written to fail against the previous release, so regressions can't quietly return; performance is asserted as a scaling exponent rather than a millisecond ceiling, so it fails the same on a fast box and a slow one; and every safety check is paired with a corpus of ordinary work it must stay silent on, so over-blocking fails the suite too." }
+      "acceptedAnswer": { "@type": "Answer", "text": "Run the suite: for f in tests/test_*.py; do python3 \"$f\"; done. It's stdlib-only \u2014 no pytest, no network, no account \u2014 4,188 assertions across 53 suites, done in under a minute. Three things make it worth more than a green tick: every fixed bug gets a test written to fail against the previous release, so regressions can't quietly return; performance is asserted as a scaling exponent rather than a millisecond ceiling, so it fails the same on a fast box and a slow one; and every safety check is paired with a corpus of ordinary work it must stay silent on, so over-blocking fails the suite too." }
     },
     {
       "@type": "Question",
@@ -437,76 +437,9 @@
     body::after{animation:none}
   }
   :focus-visible{outline:2px solid var(--neon);outline-offset:3px;border-radius:4px}
-/* == basilisk power-up layer == */
-  .rel-line{font-size:.8rem;letter-spacing:.04em;padding-bottom:.4rem}
-  .rel-line .hi{color:var(--neon-soft);text-shadow:0 0 12px var(--glow-soft)}
-
-  #scrollbar{position:fixed;top:0;left:0;height:2px;width:0;z-index:100;
-    background:linear-gradient(90deg,var(--crimson),var(--neon),var(--magenta));
-    box-shadow:0 0 10px var(--glow)}
-  .grad-sweep{background:linear-gradient(90deg,var(--neon-soft),var(--magenta),var(--neon-soft));
-    background-size:200% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;
-    animation:sweep 3s linear infinite}
-  @keyframes sweep{to{background-position:-200% 0}}
-  .glitch{position:relative;display:inline-block}
-  .glitch::before,.glitch::after{content:attr(data-text);position:absolute;inset:0;overflow:hidden;
-    -webkit-background-clip:initial;background:none;pointer-events:none}
-  .glitch::before{color:var(--magenta);clip-path:inset(0 0 52% 0);opacity:0;animation:gl 3.2s steps(1) infinite}
-  .glitch::after{color:var(--neon);clip-path:inset(52% 0 0 0);opacity:0;animation:gl 3.2s steps(1) infinite reverse}
-  @keyframes gl{0%,90%,100%{opacity:0;transform:translate(0,0)}92%{opacity:.5;transform:translate(-3px,1px)}
-    94%{opacity:.5;transform:translate(3px,-1px)}96%{opacity:.4;transform:translate(-2px,0)}98%{opacity:.4;transform:translate(2px,1px)}}
-  .term{position:relative;animation:borderpulse 5s ease-in-out infinite}
-  @keyframes borderpulse{0%,100%{box-shadow:0 40px 90px -50px #000,0 0 0 1px var(--glow-soft),0 0 60px -30px var(--glow)}
-    50%{box-shadow:0 40px 90px -50px #000,0 0 0 1px var(--glow),0 0 96px -26px var(--glow)}}
-  .term::after{content:"";position:absolute;inset:0;pointer-events:none;
-    background:linear-gradient(180deg,transparent 0%,rgba(255,43,61,.06) 50%,transparent 100%);
-    background-size:100% 220%;animation:scan 4.5s linear infinite}
-  @keyframes scan{0%{background-position:0 -110%}100%{background-position:0 110%}}
-  @property --a{syntax:'<angle>';initial-value:0deg;inherits:false}
-  .ring{position:relative;display:inline-block;padding:.2em .35em;border-radius:18px}
-  .ring::before{content:"";position:absolute;inset:-8px;border-radius:20px;z-index:-1;filter:blur(1px);opacity:.9;
-    background:conic-gradient(from var(--a),transparent 0 68%,var(--neon) 84%,var(--magenta) 93%,transparent 100%);
-    animation:spin 3.6s linear infinite}
-  .ring::after{content:"";position:absolute;inset:-5px;border-radius:17px;z-index:-1;background:var(--ink)}
-  @keyframes spin{to{--a:360deg}}
-  .card{position:relative}
-  .card::before{content:"";position:absolute;inset:0;border-radius:inherit;padding:1px;opacity:0;pointer-events:none;
-    background:linear-gradient(120deg,transparent 30%,var(--neon) 50%,var(--magenta) 62%,transparent 78%);
-    background-size:280% 280%;background-position:110% 110%;transition:opacity .25s;
-    -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);
-    -webkit-mask-composite:xor;mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);mask-composite:exclude}
-  .card:hover::before{opacity:1;animation:cardsweep 1.3s linear infinite}
-  @keyframes cardsweep{to{background-position:-90% -90%}}
-  .ticker{overflow:hidden;border-top:1px solid var(--line);border-bottom:1px solid var(--line);
-    background:rgba(255,43,61,.03);margin-top:clamp(28px,4vw,44px)}
-  .ticker-in{display:flex;width:max-content;white-space:nowrap;padding:.72rem 0;
-    font-family:var(--font-mono);font-size:.78rem;letter-spacing:.18em;text-transform:uppercase;color:var(--steel);
-    animation:tick 32s linear infinite}
-  .ticker-in b{color:var(--neon-soft);font-weight:500;text-shadow:0 0 12px var(--glow-soft)}
-  .ticker:hover .ticker-in{animation-play-state:paused}
-  @keyframes tick{to{transform:translateX(-50%)}}
-
-/* == basilisk glow boost == */
-  :root{--glow:rgba(255,43,61,.75);--glow-soft:rgba(255,43,61,.34)}
-  body::after{opacity:.8;background-size:40px 40px}
-  body::before{background:
-    radial-gradient(120vw 78vh at 50% -14%, rgba(255,43,61,.30), transparent 62%),
-    radial-gradient(84vw 58vh at 90% 4%, rgba(255,45,111,.16), transparent 60%),
-    radial-gradient(74vw 54vh at 6% 30%, rgba(200,16,46,.15), transparent 62%),
-    linear-gradient(180deg, transparent 52%, rgba(0,0,0,.66))}
-  h1{text-shadow:0 0 34px var(--glow-soft),0 0 80px rgba(255,43,61,.18)}
-  .neon-text{text-shadow:0 0 14px var(--glow),0 0 46px var(--glow),0 0 90px rgba(255,45,111,.35)}
-  .hero-art .halo{background:radial-gradient(circle, rgba(255,43,61,.46), rgba(255,45,111,.16) 45%, transparent 70%)}
-  .card:hover{box-shadow:0 0 44px -12px var(--glow),0 0 90px -30px var(--glow)}
-  .btn-primary{box-shadow:0 0 34px -4px var(--glow),0 0 70px -14px var(--glow),inset 0 1px 0 rgba(255,255,255,.3)}
-  .stat .n{text-shadow:0 0 18px var(--glow-soft)}
-  .ticker-in{color:var(--bone-dim)}
-  .bignum{text-shadow:0 0 60px var(--glow),0 0 120px rgba(255,45,111,.30)}
-
 </style>
 </head>
 <body>
-<div id="scrollbar" aria-hidden="true"></div>
 
 <header class="nav">
   <div class="wrap nav-in">
@@ -538,8 +471,8 @@
   <section class="hero">
     <div class="wrap hero-grid">
       <div>
-        <span class="eyebrow">Basilisk · autonomous offensive security · open source · v1.0.0.17</span>
-        <h1>The autonomous AI pentester that <span class="neon-text grad-sweep glitch" data-text="proves">proves</span> every exploit.</h1>
+        <span class="eyebrow">Basilisk · autonomous offensive security · open source · v9.7.0</span>
+        <h1>The autonomous AI pentester that <span class="neon-text">proves</span> every exploit.</h1>
         <p class="sub">Basilisk is an <strong>open-source autonomous penetration-testing agent</strong> — a native Linux desktop app that hands a language model a real shell and a real methodology, then gets out of the way.</p>
         <p class="sub"><strong>87 of 113 on OWASP Juice Shop.</strong> Black-box, fully autonomous, no source on the machine. The leading commercial agent scores <strong>49</strong> on that board <em>with your source code in its hands</em> — and 36 without. Basilisk beats its white-box run <strong>blind, by 38 challenges</strong>, on one of the cheapest models on the market. Then <strong>22 of 22</strong> on Escape's Duck Store API, a target no model has memorised. <b class="ok">MIT — free to own, free to run.</b></p>
         <p class="sub">It did all of that driving <strong>DeepSeek-V4-Flash</strong>, one of the cheapest models on the market. Read that twice: the scaffolding scores, not the price tag.</p>
@@ -561,10 +494,10 @@
 
     <div class="wrap">
       <div class="stats reveal">
-        <div class="stat"><div class="n"><span class="cu" data-target="87">87</span><span class="slash">/</span><span class="cu" data-target="113">113</span></div><div class="l">Juice Shop · black-box</div></div>
-        <div class="stat"><div class="n"><span class="cu" data-target="22">22</span><span class="slash">/</span><span class="cu" data-target="22">22</span></div><div class="l">Duck Store API · black-box</div></div>
+        <div class="stat"><div class="n">87<span class="slash">/</span>113</div><div class="l">Juice Shop · black-box</div></div>
+        <div class="stat"><div class="n">22<span class="slash">/</span>22</div><div class="l">Duck Store API · black-box</div></div>
         <div class="stat"><div class="n">14<span class="slash">/</span>14</div><div class="l">OWASP classes · F1 0.95</div></div>
-        <div class="stat"><div class="n"><span class="cu" data-target="4190" data-format="comma">4,190</span></div><div class="l">Assertions · 53 suites</div></div>
+        <div class="stat"><div class="n">4,188</div><div class="l">Assertions · 53 suites</div></div>
         <div class="stat"><div class="n">MIT</div><div class="l">Licensed · no account</div></div>
       </div>
 
@@ -581,8 +514,7 @@
   </section>
 
   <!-- AUTHORIZED USE / DANGER -->
-  <div class="ticker" aria-hidden="true"><div class="ticker-in"><b>SQLi</b> · <b>JWT</b> · <b>NoSQL</b> · <b>XXE</b> · <b>SSTi</b> · <b>SSRF</b> · <b>Deser→RCE</b> · <b>XSS</b> · <b>IDOR</b> · <b>Race</b> · <b>Upload</b> · <b>GraphQL</b> · <b>CORS</b> · <b>BOLA</b> · <b>BFLA</b> · <b>Mass-Assign</b> · <b>Open Redirect</b> · <b>Proto Pollution</b> · <b>SQLi</b> · <b>JWT</b> · <b>NoSQL</b> · <b>XXE</b> · <b>SSTi</b> · <b>SSRF</b> · <b>Deser→RCE</b> · <b>XSS</b> · <b>IDOR</b> · <b>Race</b> · <b>Upload</b> · <b>GraphQL</b> · <b>CORS</b> · <b>BOLA</b> · <b>BFLA</b> · <b>Mass-Assign</b> · <b>Open Redirect</b> · <b>Proto Pollution</b> · </div></div>
-<section class="block" style="padding-top:0">
+  <section class="block" style="padding-top:0">
     <div class="wrap">
       <div style="border:1px solid var(--crimson);border-left:4px solid var(--crimson);border-radius:12px;background:linear-gradient(180deg,rgba(200,16,46,.10),rgba(200,16,46,.03));padding:1.3rem 1.5rem">
         <div style="font-family:'Chakra Petch',sans-serif;font-weight:700;letter-spacing:.03em;color:var(--bone);font-size:1.02rem;margin-bottom:.5rem">⚠ Authorized targets only — this is a live weapon, not a demo</div>
@@ -606,7 +538,7 @@
         <div class="truth"><b>Black-box</b><span>No target source needed. It reads behaviour, not code — the way an attacker actually has to.</span></div>
         <div class="truth"><b>A receipt for everything</b><span>Every command it runs is hashed into a tamper-evident ledger as it goes. Findings you can hand to a client.</span></div>
         <div class="truth"><b>A floor it can't cross</b><span>The irreversible command class is blocked in two places, below the model. There is no "Run anyway."</span></div>
-        <div class="truth"><b>Verified, not asserted</b><span>4,190 stdlib-only assertions across 53 suites. Run them yourself before you trust it with a shell.</span></div>
+        <div class="truth"><b>Verified, not asserted</b><span>4,188 stdlib-only assertions across 53 suites. Run them yourself before you trust it with a shell.</span></div>
       </div>
     </div>
   </section>
@@ -622,7 +554,7 @@
 
       <div class="reveal">
         <div class="bench-hero">
-          <div class="meta rel-line">current release <span class="hi">v1.0.0.17</span> &mdash; no regression since the scored run: 4,190 assertions / 53 suites green. The score stands: <span class="hi">87/113</span> (scorecard 2026‑07‑20).</div><div class="bignum"><span class="ring">87<span class="of">/113</span></span></div>
+          <div class="bignum">87<span class="of">/113</span></div>
           <div class="meta">
             <span class="hi">77%</span> solved · fully autonomous · black-box<br>
             no per-command approval · no source on the machine<br>
@@ -1026,7 +958,7 @@ less install.sh          <span class="c"># read it first</span>
         <details><summary>What vulnerabilities can Basilisk exploit? <span class="pl">+</span></summary><div class="a">Every major web-vulnerability class via general-purpose exploit builders: SQL injection (5 DBMS plus sqlmap), JWT attacks, NoSQL, XXE, SSTi, SSRF, insecure deserialization to RCE, prototype pollution, path traversal, cross-site scripting, OS command injection, IDOR / broken access control, race conditions, file-upload bypass, GraphQL abuse, open redirect and CORS misconfiguration — plus API-first classes such as BOLA, BFLA and mass assignment.</div></details>
         <details><summary>Is Basilisk safe to run? What stops it doing damage? <span class="pl">+</span></summary><div class="a">The irreversible command class (disk wipes, fork bombs, raw block-device writes) is hard-blocked in two independent places with no "Run anyway" option. Untrusted input is quarantined as data rather than instructions, self-written code runs in a bubblewrap jail, and Basilisk will not produce standalone weaponized malware. Use it only on systems you're authorized to test.</div></details>
         <details><summary>Can Basilisk fix my code, not just attack things? <span class="pl">+</span></summary><div class="a">Yes — it's half the product. Hand it a <span class="inline-code">.zip</span> of your repository and it searches, reads and edits the whole tree, runs <strong>your</strong> test suite, and hands back a fixed zip. It records which tests were already failing before it touched anything, so pre-existing failures are never misreported as its own damage, and it refuses to export a change set it hasn't verified. It will not edit your tests to make them pass.</div></details>
-        <details><summary>How do I know the safety guarantees are real and not marketing? <span class="pl">+</span></summary><div class="a">Run the suite: <span class="inline-code">for f in tests/test_*.py; do python3 "$f"; done</span>. It's stdlib-only — no pytest, no network, no account — 4,190 assertions across 53 suites, done in under a minute. Three things make it worth more than a green tick: every fixed bug gets a test written to <strong>fail against the previous release</strong>, so regressions can't quietly return; performance is asserted as a scaling exponent rather than a millisecond ceiling, so it fails the same on a fast box and a slow one; and every safety check is paired with a corpus of ordinary work it must stay silent on, so over-blocking fails the suite too.</div></details>
+        <details><summary>How do I know the safety guarantees are real and not marketing? <span class="pl">+</span></summary><div class="a">Run the suite: <span class="inline-code">for f in tests/test_*.py; do python3 "$f"; done</span>. It's stdlib-only — no pytest, no network, no account — 4,188 assertions across 53 suites, done in under a minute. Three things make it worth more than a green tick: every fixed bug gets a test written to <strong>fail against the previous release</strong>, so regressions can't quietly return; performance is asserted as a scaling exponent rather than a millisecond ceiling, so it fails the same on a fast box and a slow one; and every safety check is paired with a corpus of ordinary work it must stay silent on, so over-blocking fails the suite too.</div></details>
         <details><summary>Has Basilisk ever had a security hole of its own? <span class="pl">+</span></summary><div class="a">Yes, and they get published. In v9.7.0 the hard block on irreversible commands was fuzzed against a <strong>live shell</strong> — each candidate bypass re-run in real bash with the destructive verb swapped for a harmless marker, counting only shapes the shell actually executed. Twenty-one that had been getting through were found and closed, including <span class="inline-code">timeout 5 rm -rf /</span> and <span class="inline-code">( rm -rf ~ )</span>. They're now pinned by a test suite that fails against the previous release. The honest claim isn't that Basilisk has never had a hole — it's that the holes get hunted, published and pinned. Find a twenty-second and open an issue.</div></details>
         <details><summary>What are the requirements? <span class="pl">+</span></summary><div class="a">Python 3.10+ and Linux with GTK4 / libadwaita (X11 or Wayland). It is built and tested on Kali and CachyOS, and runs on any Arch-, Debian- or Fedora-based distro — package manager, escalation tool and wordlist paths are auto-detected.</div></details>
       </div>
@@ -1113,29 +1045,6 @@ less install.sh          <span class="c"># read it first</span>
       },{threshold:.35});
       to.observe(host);
     }
-  }
-})();
-</script>
-<script>
-/* basilisk fx js: scroll progress + stat count-up (no-ops under prefers-reduced-motion) */
-(function(){
-  var rm=matchMedia('(prefers-reduced-motion: reduce)').matches;
-  var bar=document.getElementById('scrollbar');
-  if(bar&&!rm){var up=false;
-    var paint=function(){var h=document.documentElement,max=h.scrollHeight-h.clientHeight;
-      bar.style.width=(max>0?(h.scrollTop||document.body.scrollTop)/max*100:0)+'%';up=false;};
-    addEventListener('scroll',function(){if(!up){up=true;requestAnimationFrame(paint);}},{passive:true});paint();}
-  var cus=document.querySelectorAll('.cu');
-  if(cus.length&&!(rm||!('IntersectionObserver' in window))){
-    var io=new IntersectionObserver(function(es){es.forEach(function(e){
-      if(!e.isIntersecting)return;io.unobserve(e.target);
-      var el=e.target,end=parseInt(el.dataset.target,10),t0=null;
-      var step=function(ts){if(!t0)t0=ts;var k=Math.min((ts-t0)/1300,1);k=1-Math.pow(1-k,3);
-        var v=Math.round(end*k);el.textContent=(el.dataset.format==='comma')?v.toLocaleString('en-US'):String(v);
-        if(k<1)requestAnimationFrame(step);};
-      requestAnimationFrame(step);
-    });},{threshold:.5});
-    cus.forEach(function(el){io.observe(el);});
   }
 })();
 </script>

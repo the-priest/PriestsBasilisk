@@ -94,6 +94,13 @@ def _settings(**over):
     s["active_provider"] = "siliconflow"
     s["siliconflow_api_key"] = "sk-test"
     s["headroom_enabled"] = False      # keep the body deterministic
+    # PIN THE MODEL THIS SUITE IS ABOUT rather than inheriting the shipped
+    # default. fast_light_turns is the `enable_thinking` toggle, a DeepSeek
+    # feature; when the pinned default moved to GLM-5.3-Flash (which has no
+    # such toggle) every assertion here quietly started testing a model that
+    # does not have the feature under test. A suite about a feature must name
+    # a model that HAS it. The shipped default is asserted separately below.
+    s["siliconflow_model"] = PINNED
     s.update(over)
     return s
 
@@ -251,5 +258,37 @@ ck("adaptive_effort=False disables the toggle too",
    "enable_thinking" not in SENT[0], str(sorted(SENT[0])))
 
 
+
+# == 4. THE SHIPPED DEFAULT IS A DIFFERENT KIND OF MODEL =============
+# GLM-5.3-Flash cannot have its thinking turned off, and OMITTING
+# reasoning_effort selects its DEEPEST mode -- so the two dials must not be
+# confused. fast_light_turns must invent no toggle for it, and every turn must
+# still carry an explicit depth.
+print("\n== the shipped default (GLM-5.3-Flash) ==")
+_GLM = C.DEFAULT_SETTINGS["siliconflow_model"]
+ck("the shipped default is GLM-5.3-Flash", _GLM == "zai-org/GLM-5.3-Flash", _GLM)
+_run(_settings(siliconflow_model=_GLM, fast_light_turns=True), "light",
+     _urlopen_factory())
+_glm_light = dict(SENT[0])
+ck("GLM: fast_light_turns invents no enable_thinking",
+   "enable_thinking" not in _glm_light, str(sorted(_glm_light)))
+ck("GLM: a light turn still carries an explicit reasoning_effort",
+   _glm_light.get("reasoning_effort") in ("low", "high", "max"),
+   str(_glm_light.get("reasoning_effort")))
+ck("GLM: ...and it is the cheap end on a light turn",
+   _glm_light.get("reasoning_effort") == "low",
+   str(_glm_light.get("reasoning_effort")))
+_run(_settings(siliconflow_model=_GLM), "heavy", _urlopen_factory())
+_glm_heavy = dict(SENT[0])
+ck("GLM: a HEAVY turn stays on the operator's model instead of swapping "
+   "family to hard_engagement_model",
+   _glm_heavy.get("model") == _GLM, str(_glm_heavy.get("model")))
+ck("GLM: ...and escalates the reasoning dial instead",
+   _glm_heavy.get("reasoning_effort") == "max",
+   str(_glm_heavy.get("reasoning_effort")))
+_run(_settings(), "heavy", _urlopen_factory())
+ck("DeepSeek: a heavy turn STILL escalates to its same-family sibling",
+   SENT[0].get("model") == C.DEFAULT_SETTINGS["hard_engagement_model"],
+   str(SENT[0].get("model")))
 print(f"\neffort: {_p} passed, {_f} failed")
 sys.exit(1 if _f else 0)

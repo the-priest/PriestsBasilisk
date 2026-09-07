@@ -1121,7 +1121,7 @@ if defaults is None:
     # were never in the registry at all — dead weight that could only ever
     # produce a default pointing at nothing.
     providers = {
-        "siliconflow": "deepseek-ai/DeepSeek-V4-Flash",
+        "siliconflow": "zai-org/GLM-5.3-Flash",
     }
     defaults = {
         "active_provider": "siliconflow",

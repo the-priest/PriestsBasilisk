@@ -47,6 +47,8 @@ except Exception:
 from typing import List, Dict, Any, Optional, Callable, Tuple
 
 from basilisk_core import (
+    _as_int,
+    fabricated_tool_result, strip_fabricated_results,
     GroqBackend, OpenAICompatBackend, BackendRouter,
     ChatStore, Chat,
     load_settings, save_settings, log,
@@ -181,7 +183,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.basilisk"
 APP_NAME = "Basilisk"
-VERSION = "1.0.0.17"
+VERSION = "1.0.0.19"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -3461,6 +3463,27 @@ def _normalise_tool_args(name: str, args: Any) -> Tuple[Dict[str, Any], str]:
     """
     if not isinstance(args, dict):
         return ({}, "")
+    # ── A JSON `null` IS NOT A VALUE, IT IS AN OMISSION ──────────────
+    # Every dispatch entry reads its arguments as `a.get("key", default)`, and
+    # that default fires only when the key is ABSENT. A model that supplies the
+    # key with a null — ordinary, near-universal behaviour for an optional
+    # argument — hands None straight past the default and into the tool.
+    #
+    # Not theoretical. A blind fuzz of the 88 side-effect-free tool entry
+    # points found three that TypeError on exactly that:
+    #   find_file(search_path=None)  -> expected str, bytes or os.PathLike
+    #   processes(top_n=None)        -> unsupported operand type(s) for +
+    #   sqlmap_plan(target=None)     -> 'NoneType' has no attribute 'strip'
+    # On the single-call path a raise ends the whole turn: the model is never
+    # told the tool failed, and an autonomous run just stops.
+    #
+    # Fixed HERE rather than at the ~200 call sites, because 200 hand-written
+    # guards is how two dispatch paths drift apart in the first place. Dropping
+    # the key restores the exact case every `.get(key, default)` already
+    # handles correctly, and a `.get(key)` with NO default still yields None —
+    # so a tool that reads None as "unset" (service_status, journal_tail) is
+    # unaffected either way.
+    args = {k: v for k, v in args.items() if v is not None}
     out = dict(args)
     for alias, real in (_ARG_ALIASES.get(name) or {}).items():
         if alias in out and not str(out.get(real) or "").strip():
@@ -5579,13 +5602,17 @@ class MessageWidget(Gtk.Box):
                         if "_raw" in call.args or not epath or econtent is None:
                             if "_raw" in call.args:
                                 why = (
-                                    "the reply hit the response-token cap "
+                                    "the reply hit the per-turn time limit "
+                                    "part-way through the file, so the call "
+                                    "arrived unfinished (ask it to re-send "
+                                    "with less preamble)"
+                                    if self._last_stream_cut_by == "time"
+                                    else "the reply hit the response-token cap "
                                     "part-way through the file, so the call "
                                     "arrived unfinished (raise Max response "
                                     "tokens in Settings, or have it write the "
                                     "file in sections)"
-                                    if getattr(self, "_last_stream_truncated",
-                                               False)
+                                    if self._last_stream_truncated
                                     else "the file contents couldn't be "
                                          "parsed — most likely an unescaped "
                                          "\" or a stray control character in "
@@ -7284,6 +7311,21 @@ class SettingsDialog(Adw.PreferencesDialog):
 
 class MainWindow(Adw.ApplicationWindow):
 
+    # ── PER-TURN STREAM STATE, DECLARED ON THE CLASS ON PURPOSE ──────
+    # These are read on paths that can run before __init__ has set them (and
+    # by the test harnesses, which build the window with __new__). Declaring
+    # them here rather than reading them with getattr(..., default) makes the
+    # default a REAL attribute lookup: a base class with a catch-all
+    # __getattr__ — which the GTK test stub has — hands back a TRUTHY object
+    # for any missing name, so a flag whose entire job is to be false would
+    # arm its recovery path on every single turn. Caught by
+    # tests/test_turn_directives.py the first time it happened.
+    _recover_silent_reasoner: bool = False   # last turn reasoned, said nothing
+    _last_stream_cut_by: str = ""            # "" | "length" | "time"
+    _last_stream_truncated: bool = False
+    _forged_retries: int = 0                 # forged-tool-result corrections
+    _fabricated_this_turn: int = 0
+
     def __init__(self, app: "BasiliskApp"):
         super().__init__(application=app)
         self.set_title(APP_NAME)
@@ -7355,6 +7397,13 @@ class MainWindow(Adw.ApplicationWindow):
         self.groq = self.cloud.get("groq")
         self.router = BackendRouter(self.cloud, self.settings)
         self.store = ChatStore()
+        # If the previous chats.db could not be opened it was moved aside and
+        # a fresh one started (see ChatStore.__init__). SAY SO — a silent
+        # recovery is how an operator discovers months of history are gone by
+        # noticing, weeks later, that the sidebar is empty.
+        if getattr(self.store, "quarantined_from", ""):
+            GLib.idle_add(self._warn_db_quarantined,
+                          self.store.quarantined_from)
         self.watcher = Watcher(self.settings, self._on_watcher_event)
 
         # ── basilisk_ext sidecar (optional) ──
@@ -10308,6 +10357,7 @@ class MainWindow(Adw.ApplicationWindow):
             self._tool_chain_depth = 0
             self._tools_locked = False
             self._force_answer_tries = 0
+            self._forged_retries = 0
             # Per-request, like the counters above: a stall on the LAST question
             # must not spend this question's nudges.
             self._answer_stall_nudges = 0
@@ -10731,6 +10781,25 @@ class MainWindow(Adw.ApplicationWindow):
         else:
             _effort = "standard"
 
+        # ── RECOVERING FROM A TURN THAT THOUGHT AND SAID NOTHING ──────
+        # Set by the degraded branch in _on_stream_done_body when the model
+        # streamed reasoning and no content (or was cut at the time limit).
+        # Repeating that request unchanged reproduces it, so this ONE turn
+        # gets a shorter leash on the thinking and a bigger room for the
+        # answer. Consumed here, so it applies to exactly one retry and the
+        # operator's own reasoning-depth pill is never edited.
+        _re_override = None
+        _mt_override = None
+        if self._recover_silent_reasoner:
+            self._recover_silent_reasoner = False
+            _re_override = "low"
+            _mt_override = max(
+                int(self.settings.get("max_tokens", 2048) or 2048),
+                int(self.settings.get("effort_heavy_max_tokens", 4096) or 4096))
+            self.terminal_log(
+                f"↻ retrying with the thinking dialled down and room for "
+                f"{_mt_override} answer tokens", "dim")
+
         # ── STUCK PIVOT (coded, not left to the model) ────────────────
         # If the model has gone DEEP (20+ tool-steps into one turn) and its
         # recent results are mostly failures / no-progress, it's grinding the
@@ -10908,7 +10977,9 @@ class MainWindow(Adw.ApplicationWindow):
                 self.router.stream_chat(full, _on_tok, _on_done, _on_err,
                                         self.streaming_cancel,
                                         on_reasoning=_on_reason,
-                                        effort=_effort)
+                                        effort=_effort,
+                                        max_tokens_override=_mt_override,
+                                        reasoning_override=_re_override)
             except Exception as e:
                 log(f"stream worker died: {traceback.format_exc()}")
                 _on_err(f"internal error starting the reply: "
@@ -11043,6 +11114,11 @@ class MainWindow(Adw.ApplicationWindow):
         # Without it, a write cut off mid-file was reported as bad JSON
         # escaping, and the model "fixed" the escaping and hit the same cap.
         self._last_stream_truncated = bool(meta.get("truncated"))
+        # WHICH cap. A turn cut at STREAM_MAX_WALL_S is also unfinished, but the
+        # advice differs: telling a model that ran out of TIME to "write the
+        # file in sections" is the wrong correction, and it will hit the clock
+        # again doing exactly what it was told.
+        self._last_stream_cut_by = str(meta.get("cut_by") or "")
         # ── CANONICALISE ONCE, AT THE BOUNDARY ──
         # Everything downstream — parsing, stripping, the stored message, the
         # history re-sent on every later turn, the widget the operator reads —
@@ -11055,6 +11131,78 @@ class MainWindow(Adw.ApplicationWindow):
             final = _normalise_tool_syntax(final or "")
         except Exception:
             pass
+        # ── THE MODEL WROTE THE HOST'S LINES: DELETE THEM ──
+        # See basilisk_core.strip_fabricated_results. A reply carrying the
+        # host's own tool-result envelope is a FORGED result — the model
+        # invented a fetch, an HTTP status and a page body and presented them
+        # as retrieved fact. This sits at the canonicalisation boundary, above
+        # everything, so the forgery is gone before it can be rendered, spoken,
+        # written to chats.db, or replayed to the model as history — that last
+        # one matters most: a stored forgery teaches every later turn that
+        # writing results is acceptable.
+        _forged = 0
+        try:
+            if fabricated_tool_result(final or ""):
+                final, _forged = strip_fabricated_results(final or "")
+        except Exception:
+            _forged = 0
+        if _forged:
+            log(f"FABRICATED TOOL RESULT: removed {_forged} forged span(s) "
+                f"from an assistant turn")
+            self.terminal_log(
+                f"⛔ the model WROTE {_forged} tool result(s) itself instead "
+                f"of calling a tool — invented data, removed and not stored",
+                "error")
+            try:
+                self._activity_note(
+                    "fabricated tool result removed - the model wrote a "
+                    "result it never fetched", "gate")
+            except Exception:
+                pass
+            # TELL THE MODEL, AND MAKE IT DO THE WORK. Silently deleting the
+            # forgery would leave the operator a reply whose evidence had been
+            # cut out of it and no explanation. Bounded at two corrections so a
+            # model that keeps forging cannot loop — after that the turn
+            # continues with the forgery removed and the operator can see, from
+            # the terminal line above, exactly what happened.
+            # NOT `cancelled` — that local is not bound until much further
+            # down this function. Read the same two facts it is built from.
+            if (self._forged_retries < 2 and not self._stop_requested
+                    and not meta.get("cancelled")):
+                self._forged_retries += 1
+                try:
+                    _fc = self.streaming_chat_id or self.current_chat_id
+                    self.store.add_message(
+                        _fc, "user",
+                        "<tool_result>\n[system] STOP. Your last reply "
+                        "contained a tool result that YOU WROTE. That text was "
+                        "not fetched by anything — you invented the request, "
+                        "the status code and the content, and it has been "
+                        "deleted. A tool result only ever arrives from the "
+                        "host, in a later message, after you emit a tool call "
+                        "and stop. Never write one yourself, never predict "
+                        "what one will say, and never continue past a call as "
+                        "if its result had arrived. Emit the tool call you "
+                        "actually need now, in the documented format, and end "
+                        "your turn there. If you cannot call the tool, say so "
+                        "plainly instead of inventing the answer.\n"
+                        "</tool_result>",
+                        meta={"kind": "tool_result"})
+                except Exception:
+                    pass
+                _junk = self.streaming_msg_widget
+                self.streaming_msg_widget = None
+                self.streaming_msg_db_id = None
+                if _junk is not None:
+                    try:
+                        self.msg_box.remove(_junk)
+                    except Exception:
+                        pass
+                self.terminal_log(
+                    f"↻ asking it to actually call the tool "
+                    f"({self._forged_retries}/2)", "dim")
+                self._schedule_kick(600)
+                return
         # Mission completion signal: strip the token from what's shown/stored/
         # spoken, but remember that it fired this turn.
         _mission_done_signal = MISSION_COMPLETE_TOKEN in final
@@ -11373,8 +11521,36 @@ class MainWindow(Adw.ApplicationWindow):
             # has a key so the NEXT turn retries elsewhere.
             if (not cancelled and not executable
                     and looks_degraded(final)):
-                self.terminal_log("⚠ response looked degraded (empty/"
-                                  "repetitive)", "error")
+                # ── WHY IT WAS EMPTY, NOT JUST THAT IT WAS ──
+                # The reported symptom: "stream start / stream done / response
+                # looked degraded" three times, force-answer, three more, for
+                # ever — on a model whose thinking cannot be turned off. The
+                # host already HELD the answer and threw it away: the turn had
+                # streamed a full chain of thought into the Thoughts panel and
+                # emitted zero content tokens. That is not junk output, it is
+                # the response budget being spent on reasoning — and a retry
+                # that changes NOTHING is guaranteed to reproduce it, which is
+                # exactly the stable loop in the log.
+                _thoughts = ""
+                try:
+                    if self.streaming_msg_widget is not None:
+                        _thoughts = self.streaming_msg_widget.get_thoughts()
+                except Exception:
+                    _thoughts = ""
+                _cut = self._last_stream_cut_by
+                _reasoned_silent = bool(_thoughts) and not (final or "").strip()
+                if _reasoned_silent:
+                    self.terminal_log(
+                        f"⚠ the model thought for {len(_thoughts)} characters "
+                        f"and said nothing — the response budget went on "
+                        f"reasoning, not on the answer", "error")
+                elif _cut == "time":
+                    self.terminal_log(
+                        "⚠ the turn was cut at the per-turn time limit before "
+                        "the answer started", "error")
+                else:
+                    self.terminal_log("⚠ response looked degraded (empty/"
+                                      "repetitive)", "error")
                 # Never just stop on a degraded reply — retry automatically,
                 # bounded so it can't loop forever. Hop to another provider
                 # (if one has a key) and re-kick the SAME turn so the work
@@ -11383,9 +11559,30 @@ class MainWindow(Adw.ApplicationWindow):
                 if (self.settings.get("auto_fallback_on_degraded", True)
                         and _dret < 3 and not self._stop_requested):
                     self._degraded_retries = _dret + 1
+                    # CHANGE SOMETHING BEFORE RETRYING. A deterministic budget
+                    # failure does not care how many times it is asked again.
+                    if _reasoned_silent or _cut == "time":
+                        self._recover_silent_reasoner = True
+                        try:
+                            _fc = self.streaming_chat_id or self.current_chat_id
+                            self.store.add_message(
+                                _fc, "user",
+                                "<tool_result>\n[system] your last turn "
+                                "produced REASONING ONLY and no answer — the "
+                                "operator saw an empty message. Nothing you "
+                                "worked out is lost, it is in this "
+                                "conversation. Answer NOW, directly, in the "
+                                "reply itself. Think briefly and write the "
+                                "answer; if the job is long, deliver the first "
+                                "complete, usable part of it in this turn "
+                                "rather than planning the whole thing.\n"
+                                "</tool_result>",
+                                meta={"kind": "tool_result"})
+                        except Exception:
+                            pass
                     # PINNED PROVIDER: never hop clouds behind the operator's
                     # back. Whatever provider is selected (default
-                    # SiliconFlow · DeepSeek-V4-Flash) STAYS selected — a
+                    # SiliconFlow · GLM-5.3-Flash) STAYS selected — a
                     # degraded reply just re-kicks the SAME provider. The backend
                     # already walks its own model chain for rate-limits /
                     # unavailability; a junk-content reply gets one more shot on
@@ -11478,8 +11675,19 @@ class MainWindow(Adw.ApplicationWindow):
                 if _locked_drop:
                     _why = ("your tool call was NOT run — the tool budget for "
                             "this question is spent")
-                elif _bad_call and getattr(self, "_last_stream_truncated",
-                                            False):
+                elif _bad_call and self._last_stream_cut_by == "time":
+                    # Cut by the CLOCK, not the token cap. "Write it in
+                    # sections" is the wrong instruction here — more, shorter
+                    # round-trips is exactly what runs the clock down again.
+                    _why = (
+                        "your last reply was CUT OFF at the per-turn TIME "
+                        "limit, mid-tool-call — nothing ran. The format was "
+                        "fine and the reply was not too long; it took too "
+                        "long to produce. Re-send the SAME call, but get to "
+                        "it immediately: no preamble, no restating the plan, "
+                        "and keep the reasoning short. If the step is genuinely "
+                        "big, do the smallest useful part of it first")
+                elif _bad_call and self._last_stream_truncated:
                     # NOT a syntax problem. Sending the re-send-in-this-format
                     # lecture here is worse than useless: the format was right
                     # and the reply was cut off, so the model re-sends the same
@@ -12350,6 +12558,43 @@ class MainWindow(Adw.ApplicationWindow):
         # Individually-blocked calls are DROPPED from the batch rather than
         # failing the whole thing — the other tools in it are still useful, and
         # a batch is a convenience, not an atomic unit.
+        # ── AND SO MUST ARGUMENT NORMALISATION ──
+        # Same drift, one layer along. _normalise_tool_args is called at
+        # exactly one place — the SINGLE-call path — so everything it enforces
+        # (the synonym map, the required-argument check, and the null-stripping
+        # above it) was absent from a batched call. `pentest_plan` bundled with
+        # `system_info` therefore ran with arguments that would have been
+        # corrected, or refused, had it arrived on its own: the same tool, the
+        # same arguments, a different answer depending only on what the model
+        # happened to call alongside it.
+        #
+        # A member whose arguments are unusable is DROPPED from the batch with
+        # its reason recorded, exactly as the repeat guard drops one — the rest
+        # of the batch is still useful, and a batch is a convenience, not an
+        # atomic unit.
+        _argerrs = []
+        for c in calls:
+            _na, _ae = _normalise_tool_args(c.name, c.args)
+            if _ae:
+                _argerrs.append((c, _ae))
+            else:
+                c.args = _na
+        if _argerrs:
+            _bad = {id(c) for c, _ in _argerrs}
+            calls = [c for c in calls if id(c) not in _bad]
+            for c, e in _argerrs:
+                self.terminal_log(f"✗ {c.name}: {e}", "error")
+                self._activity_note(f"{c.name} rejected: {e}", "gate")
+            self._deferred_note = (getattr(self, "_deferred_note", "") or "") + (
+                "\n\n[system] These calls in that batch were NOT run: "
+                + "; ".join(f"{c.name} — {e}" for c, e in _argerrs)
+                + " Re-issue them with the argument names named above.")
+            if not calls:
+                self._feed_tool_result(
+                    "NOT RUN — every tool in that batch was called with "
+                    "unusable arguments.")
+                return
+            names = ", ".join(c.name for c in calls)
         _kept, _dropped = [], []
         for c in calls:
             if self._repeat_guard_blocks(self._action_label(c)):
@@ -12440,6 +12685,28 @@ class MainWindow(Adw.ApplicationWindow):
             feed(combined)
 
         self._tool_thread(_bg, f"batch({names})")
+
+    def _warn_db_quarantined(self, moved_to: str) -> bool:
+        """Tell the operator the chat database was unreadable and what was
+        done about it. Never silent, never fatal."""
+        if moved_to == "(memory-only)":
+            msg = ("Your chat database could not be opened OR moved aside, so "
+                   "this session is running in memory — chats will NOT be "
+                   "saved. Check permissions on the Basilisk data directory.")
+        else:
+            msg = ("Your chat database was unreadable and has been moved to "
+                   f"{moved_to} — a fresh one was started, so past chats are "
+                   "not in the sidebar. Nothing was deleted; the old file is "
+                   "still there if you want to recover it.")
+        try:
+            self.terminal_log("! " + msg, "error")
+        except Exception:
+            pass
+        try:
+            self._show_toast(msg, timeout=12)
+        except Exception:
+            pass
+        return False
 
     def _execute_tool_calls(self, calls):
         call = calls[0]
@@ -12545,11 +12812,11 @@ class MainWindow(Adw.ApplicationWindow):
         # args ("fifteen", null, "15.5", {}).  A bare int() on those raises
         # and kills the whole tool turn — coerce safely and fall back to
         # the default instead.
-        def _safe_int(v, default):
-            try:
-                return int(float(v))   # tolerates "15", 15, "15.5"
-            except (TypeError, ValueError):
-                return default
+        # ONE definition, in basilisk_core. This used to be a second, weaker
+        # copy: `int(float(v))` still raises OverflowError on inf and
+        # ValueError on NaN, and quietly turns `true` into 1. Two functions
+        # with the same job is how one of them gets fixed alone.
+        _safe_int = _as_int
 
         dispatch = {
             "read_file":         lambda a: self._tool_read_file(a.get("path", "")),
@@ -13218,6 +13485,32 @@ class MainWindow(Adw.ApplicationWindow):
             self._dispatching_tool = call.name
             try:
                 fn(call.args)
+            except Exception as _te:
+                # ── THE MIRROR OF THE BATCH PATH'S MISSING NORMALISER ──
+                # _execute_tool_batch wraps each member in try/except and turns
+                # a raise into an "error: …" string the model reads and works
+                # around. This path had no such guard: a handler that raised
+                # unwound to _on_stream_done's catch-all, which ends the TURN.
+                # The tool result is never fed back, so the model is never told
+                # its call failed — an autonomous run simply stops mid-mission,
+                # and the operator sees "internal error finishing that reply".
+                # Each of the two dispatch paths had exactly the protection the
+                # other was missing.
+                log(f"tool {call.name} raised: {traceback.format_exc()}")
+                self.terminal_log(
+                    f"✗ {call.name} raised {type(_te).__name__}: "
+                    f"{str(_te)[:160]}", "error")
+                try:
+                    self._activity_end(getattr(self, "_activity_sid", 0),
+                                       ok=False,
+                                       preview=f"{type(_te).__name__}")
+                except Exception:
+                    pass
+                self._feed_tool_result(
+                    f"error: {call.name} failed with "
+                    f"{type(_te).__name__}: {str(_te)[:300]}. The tool did "
+                    f"NOT run. Check the argument types and values and try a "
+                    f"different approach — do not re-send the identical call.")
             finally:
                 self._dispatching_tool = ""
         else:

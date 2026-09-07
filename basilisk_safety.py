@@ -862,6 +862,32 @@ def _sub_is_catastrophic(args: List[str], depth: int) -> bool:
             if _is_critical_file(t):
                 return True
 
+    # ── A BLOCK DEVICE IS A CRITICAL FILE THE RULES ABOVE COULD NOT SEE ──
+    # The clobber family was scoped to _CRITICAL_FILES, which is a list of
+    # PATHS under /etc, /boot and friends. A raw disk is not on that list, so
+    # every write verb except dd and shred walked straight past it:
+    #
+    #     truncate -s 0 /dev/sda      <- refused by nothing, wipes the
+    #                                    partition table in one syscall
+    #     tee /dev/sda < payload
+    #     cp payload /dev/sda
+    #     install -m 0 /dev/null /dev/sda
+    #
+    # `truncate -s 0 /dev/sda` was verified UNREFUSED against a live bash with
+    # an argv-inspecting shim, i.e. bash really did invoke truncate with
+    # /dev/sda. dd and shred were already covered by _BLOCK_DEV_RE below;
+    # this closes the same hole for the rest of the family. Classify by what
+    # the command does to its DESTINATION, which is the rule the clobber block
+    # above already states — it was just applied to one kind of destination.
+    if cmd in ("truncate", "tee"):
+        for t in _operands(rest):
+            if _BLOCK_DEV_RE.match(t.strip("'\"")):
+                return True
+    if cmd in ("cp", "install", "mv", "ln"):
+        _ops = _operands(rest)
+        if len(_ops) >= 2 and _BLOCK_DEV_RE.match(_ops[-1].strip("'\"")):
+            return True
+
     # ── A DOWNLOADER IS A FILE WRITER ──
     # The clobber rule above covered cp/install/mv/ln/truncate/tee/dd and missed
     # the tools this app reaches for most: `curl -o /etc/shadow http://…` and
@@ -1080,6 +1106,64 @@ _RAW_FALLBACK_RE = re.compile(
     re.IGNORECASE)
 
 
+# ── A TARGET HIDDEN BEHIND A VARIABLE ────────────────────────────────
+# Every rule in this file judges the TARGET, and finds it by looking at the
+# literal text of the command. Assign the target to a shell variable first and
+# the literal is no longer next to the verb:
+#
+#     X=/; rm -rf "$X"            <- verified UNREFUSED, and verified to
+#     X=/; chmod -R 000 "$X"         really execute against a live bash with
+#     X=/; truncate -s 0 "$X"dev/sda an argv-inspecting shim
+#
+# This is the same disease as `$(echo rm) -rf /`, which an earlier pass closed
+# for the VERB: a body-scan cannot help, because the variable's VALUE is what
+# runs. The answer there was to reason about what the shell produces, and it is
+# the answer here too — substitute the literal assignments the command makes to
+# itself, then re-scan.
+#
+# DELIBERATELY NARROW, and it can only ever turn ALLOW into REFUSE:
+#   * only `VAR=literal` assignments written in this same command string;
+#   * only unquoted / simply-quoted literals with no expansion of their own,
+#     so nothing here has to emulate the shell;
+#   * a bounded number of variables and one extra scan, so a pathological
+#     input cannot multiply the work;
+#   * the result is only ever OR-ed with the original verdict, never used to
+#     clear one — an expansion that goes wrong cannot un-refuse anything.
+_VAR_ASSIGN_RE = re.compile(
+    r"(?:^|[;&|(\s])([A-Za-z_][A-Za-z0-9_]{0,63})="
+    r"(?:'([^'\n]{0,256})'"
+    r"|\"([^\"$`\n]{0,256})\""
+    r"|([^\s;&|<>'\"$`\n]{1,256}))")
+_MAX_VARS = 12
+
+
+def _expand_literal_vars(command: str) -> str:
+    """`X=/; rm -rf "$X"` -> `X=/; rm -rf /`, or the input unchanged.
+
+    Not a shell. It resolves only what it can see assigned literally in the
+    same string, which is exactly the shape that hid a target from the rules
+    above.
+    """
+    if "=" not in command or "$" not in command:
+        return command
+    seen = {}
+    for m in _VAR_ASSIGN_RE.finditer(command):
+        name = m.group(1)
+        val = m.group(2) or m.group(3) or m.group(4) or ""
+        if name and name not in seen:
+            seen[name] = val
+        if len(seen) >= _MAX_VARS:
+            break
+    if not seen:
+        return command
+    out = command
+    for name, val in seen.items():
+        for form in ('"$%s"' % name, "${%s}" % name, "$%s" % name):
+            if form in out:
+                out = out.replace(form, val)
+    return out
+
+
 def is_catastrophic_command(command: str) -> bool:
     """True if a command looks like it would irreversibly destroy the system or
     its storage (disk wipe, filesystem nuke, recursive root/home delete, fork
@@ -1092,11 +1176,22 @@ def is_catastrophic_command(command: str) -> bool:
     if not command:
         return False
     try:
-        return _scan(command, 0)
+        if _scan(command, 0):
+            return True
     except Exception:
         # A bug in the detector must fail SAFE — force the confirm rather than
         # silently waving a possibly-destructive command through.
         return bool(_RAW_FALLBACK_RE.search(command or ""))
+    # Second and last scan, over the same command with its own literal variable
+    # assignments substituted in (see _expand_literal_vars). OR-ed with the
+    # verdict above, never replacing it, and bounded to exactly one extra pass.
+    try:
+        expanded = _expand_literal_vars(command)
+        if expanded != command and _scan(expanded, 0):
+            return True
+    except Exception:
+        pass
+    return False
 
 
 # ── Self-source tamper backstop ──────────────────────────────────────
