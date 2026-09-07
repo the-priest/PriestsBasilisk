@@ -10288,6 +10288,35 @@ def parse_tool_calls(text: str) -> List[ToolCall]:
         # untouched.  Without this the body is not valid JSON, lands in
         # {"_raw": …}, and the tool runs with none of its real arguments —
         # which reads as a successful call and teaches the loop nothing.
+        # ── A FILE CONTAINING `</tool>` CUT ITS OWN CALL SHORT, AGAIN ──
+        # TOOL_TAG_RE is non-greedy, so a write whose CONTENT contains the
+        # literal `</tool>` ends the match inside the file. The JSON path below
+        # already repairs that by re-cutting at the LAST closer; the
+        # `<parameter>` dialect never reached the repair, because
+        # _params_to_args "succeeded" — it decoded the parameters that arrived
+        # before the premature cut and silently dropped the rest. Measured: the
+        # content argument vanished entirely (args=['path']), so the write ran
+        # with no file body at all.
+        #
+        # This bites hardest on exactly the job it is used for: Basilisk's own
+        # source, its persona and its tests are full of `</tool>`, so asking it
+        # to repair its own repo lost the write every time.
+        #
+        # The structural tell is arity — an opener with no closer means the
+        # span ended mid-parameter. Widen to the last `</tool>` and re-decode;
+        # only a body that yields MORE parameters is accepted, so a genuinely
+        # short call can never be widened into the next one.
+        if (json_src.count("<parameter") > json_src.count("</parameter>")):
+            _tail = text[m.start():]
+            _open = _tail.find(">")
+            _last = _tail.rfind("</tool>")
+            if _open > 0 and _last > _open:
+                _wide = _tail[_open + 1:_last]
+                if (_wide.count("<parameter")
+                        <= _wide.count("</parameter>")):
+                    _try = _params_to_args(_wide)
+                    if _try and len(_try) > len(_params_to_args(json_src) or {}):
+                        json_src = _wide
         parsed = _params_to_args(json_src)
         if parsed is None:
             try:
@@ -10330,6 +10359,20 @@ def parse_tool_calls(text: str) -> List[ToolCall]:
                             _last = _tail.rfind("</tool>")
                             if _open > 0 and _last > _open:
                                 _wide = _tail[_open + 1:_last].strip()
+                                # THE WIDENED SPAN IS RAW TEXT, so it carries
+                                # back anything the normal body path had
+                                # already stripped — in particular a ```json
+                                # fence. Without this the re-cut recovered the
+                                # right characters and then failed to parse
+                                # them, and a fenced write whose content held
+                                # `</tool>` still landed in {"_raw": …}.
+                                _fm = _FENCE_JSON_RE.search(_wide)
+                                if _fm:
+                                    _wide = _fm.group(1)
+                                elif _wide.startswith("```"):
+                                    _wide = _wide.split("\n", 1)[-1]
+                                    if _wide.rstrip().endswith("```"):
+                                        _wide = _wide.rstrip()[:-3]
                                 if len(_wide) > len(json_src):
                                     recovered = (_loads_lenient(_wide)
                                                  or _structural_write_args(_wide))

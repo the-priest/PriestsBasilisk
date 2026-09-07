@@ -6,8 +6,8 @@
 
 <br/>
 
-<img src="https://img.shields.io/badge/version-1.0.0.21-e11d2b?style=for-the-badge&labelColor=08090b" alt="version 1.0.0.21">
-<img src="https://img.shields.io/badge/tests-4557%20assertions-2ea043?style=for-the-badge&labelColor=08090b&logo=pytest&logoColor=2ea043" alt="4557 assertions">
+<img src="https://img.shields.io/badge/version-1.0.0.22-e11d2b?style=for-the-badge&labelColor=08090b" alt="version 1.0.0.22">
+<img src="https://img.shields.io/badge/tests-4587%20assertions-2ea043?style=for-the-badge&labelColor=08090b&logo=pytest&logoColor=2ea043" alt="4587 assertions">
 <img src="https://img.shields.io/badge/licence-MIT-e11d2b?style=for-the-badge&labelColor=08090b" alt="MIT">
 <img src="https://img.shields.io/badge/deps-stdlib%20%2B%20GTK-e11d2b?style=for-the-badge&labelColor=08090b" alt="stdlib + GTK">
 
@@ -210,7 +210,7 @@ A real desktop app, not a terminal wrapper — GTK4 / libadwaita with a dark Aer
 
 ## 🔬 Engineering
 
-**Stdlib only** for the engine. No pytest, no network, no fixtures, no account — **4,557 assertions across 58 suites**, run in under a minute. Every fix ships with a regression that *fails* on the old code and *passes* on the new. Real GTK is spun up under Xvfb for the UI suites; the chat-bubble layout alone is pinned by 140 fitting checks. The safety guardrail is verified byte-identical on every build, the CSS is checked ASCII-only, and every packaged zip is re-tested from a clean extract before it's called done.
+**Stdlib only** for the engine. No pytest, no network, no fixtures, no account — **4,587 assertions across 59 suites**, run in under a minute. Every fix ships with a regression that *fails* on the old code and *passes* on the new. Real GTK is spun up under Xvfb for the UI suites; the chat-bubble layout alone is pinned by 140 fitting checks. The safety guardrail is verified byte-identical on every build, the CSS is checked ASCII-only, and every packaged zip is re-tested from a clean extract before it's called done.
 
 This is a one-person project. Every one of those assertions is there because something broke once and shouldn't get the chance to break again.
 
@@ -236,7 +236,7 @@ If it earns its place in your kit, star the repo and tell someone who runs engag
 
 <br/>
 
-### Built by one person, around a day job. Verified by 4,557 assertions. Priced at nothing.
+### Built by one person, around a day job. Verified by 4,587 assertions. Priced at nothing.
 
 <sub>Clone it, read it, run the suite, then point it at something you own.</sub>
 

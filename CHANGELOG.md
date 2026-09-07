@@ -1,3 +1,73 @@
+## v1.0.0.22 — big writes, and repo repair that the tool was blocking
+
+Four faults behind "it can't write big code at once, and when it fixes a repo
+the write doesn't go through or the code comes back scrambled". Three of them
+fired every single time Basilisk was pointed at its own source, which is the
+repo it gets pointed at most.
+
+### A file containing `</tool>` cut its own call short — in two dialects
+
+`TOOL_TAG_RE` is non-greedy, so a write whose CONTENT holds the literal
+`</tool>` ends the match inside the file. The JSON body already had a repair
+for this: re-cut the span at the LAST closer. The `<parameter>` dialect never
+reached it, because the decoder "succeeded" on the parameters that arrived
+before the premature cut and silently dropped the rest — the content argument
+vanished entirely and the write ran with no file body. The same repair was also
+defeated by a ```json fence, because the widened span is RAW text and carried
+the fence back with it.
+
+Basilisk's own persona, tests and source say `</tool>` constantly. 128 round
+trips — 16 payloads (real Python, HTML, shell, JSON, backslashes, triple
+quotes, unicode, a file that is just `42`) across 8 dialects — now come back
+byte-identical. Before: 3 broken, all of them that one shape.
+
+### The syntax guard deadlocked the job it exists for
+
+It judged the RESULT only, so ANY edit to a file that did not already parse was
+refused — including an edit with nothing to do with the breakage:
+
+    repo file broken at line 1
+    replace "return 2" -> "return 22" at line 5
+    => "refused: Python syntax error at line 1. Nothing was written."
+
+The model did not cause that error and was not trying to fix it, but the
+message reads as a complaint about ITS edit, so it retries with different
+escaping and is refused identically. That is "the tool doesn't let it". And it
+is a real deadlock: a broken file could only be edited by an edit that made the
+whole file valid in ONE shot, which is exactly what repairing a repo with
+several faults cannot do.
+
+The guard is a COMPARISON now. Breaking working code is still refused, and the
+file on disk is still untouched when it is. Leaving a pre-existing break in
+place is allowed and REPORTED — the result carries `parses: false` and says the
+file still does not parse, so the model keeps repairing instead of fighting the
+tool. A brand-new file must still be valid; nothing existed to be broken.
+
+### A truncated read did not say so where it counts
+
+A big file came back cut at the read cap with `truncated: true` in a sibling
+field and nothing in the text itself. A model that reads a 16,000-line file and
+is then asked to fix it writes back what it read, deleting everything past the
+cut — that is the scrambled code. `total_lines` was counted from the truncated
+text too, so a 16,000-line file reported 5,212 and the model believed it had
+all of it.
+
+The marker now travels WITH the payload (`[INCOMPLETE: file continues past line
+N of M]`), `total_lines` counts the real file, `shown_lines` says how much
+arrived, and the note tells it not to write this back as the whole file and
+points at start/end and workspace_replace. Same remedy as headroom's
+`[INCOMPLETE]`, for the same reason: a flag beside the payload is a flag the
+model can skip.
+
+### Verified, not assumed
+
+Headroom does not touch an outgoing big write (40 KB in, 40 KB out). Imported
+files read back byte-exact. Big single-shot writes and targeted replaces both
+land. New `tests/test_repofix.py` (30) fails 12 assertions against the build
+that shipped these.
+
+59 suites, 4,587 assertions.
+
 ## v1.0.0.21 — the stall that ate your news fetch, my own text-eating filter, and the pin back where the benchmark is
 
 ### "It says it'll fetch the news, then stops and says done"

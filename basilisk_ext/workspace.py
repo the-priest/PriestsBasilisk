@@ -685,8 +685,43 @@ def read(path: str, start: int = 1, end: int = 0,
             return {"ok": True, "path": rel, "size": size, "kind": "text",
                     "total_lines": total, "shown": f"{lo + 1}-{lo + len(sel)}",
                     "content": body}
+        # ── A TRUNCATED READ MUST SAY SO INSIDE THE CONTENT ──────────
+        # A big file comes back cut at max_bytes with `truncated: true` in a
+        # sibling field — and nothing in the text itself. A model that reads
+        # a 4,000-line file and is then asked to fix it writes back what it
+        # read, silently deleting everything past the cut. That is the
+        # "scrambled code" a repo repair produces, and it looks like the model
+        # dropped the tail rather than never having seen it.
+        #
+        # Same remedy as headroom's [INCOMPLETE] marker, for the same reason:
+        # the fact has to travel WITH the payload, because a flag beside it is
+        # a flag the model can skip.
+        #
+        # `total_lines` was a lie too — counted from the truncated text, so a
+        # 5,200-line file reported 4,099 and the model believed it had all of
+        # it. Counted from the real file now.
+        if size > max_bytes:
+            _real_total = total
+            try:
+                with open(fp, "rb") as _f:
+                    _real_total = sum(1 for _ in _f)
+            except Exception:
+                pass
+            return {
+                "ok": True, "path": rel, "size": size, "kind": "text",
+                "total_lines": _real_total, "shown_lines": total,
+                "truncated": True,
+                "note": (f"INCOMPLETE READ — you have the first {total} of "
+                         f"{_real_total} lines ({len(raw)} of {size} bytes). "
+                         f"Do NOT write this back as the whole file; that "
+                         f"would delete the rest. Read the remainder with "
+                         f"start/end, or edit with workspace_replace."),
+                "content": (text + f"\n\n[INCOMPLETE: file continues past "
+                                   f"line {total} of {_real_total} — "
+                                   f"{size - len(raw)} bytes not shown]"),
+            }
         return {"ok": True, "path": rel, "size": size, "kind": "text",
-                "total_lines": total, "truncated": size > max_bytes,
+                "total_lines": total, "truncated": False,
                 "content": text}
     except ContainmentError as e:
         return {"ok": False, "error": str(e)}
@@ -772,23 +807,74 @@ def _mark(rel: str, kind: str) -> None:
             _STATE.modified.append(rel)
 
 
-def _syntax_check(rel: str, content: str) -> Optional[str]:
-    """Refuse to write a .py file that will not parse.
+def _parses(src: str) -> bool:
+    try:
+        ast.parse(src)
+        return True
+    except SyntaxError:
+        return False
+    except Exception:
+        # A null byte or a decoding oddity is not a syntax verdict; do not let
+        # it masquerade as one and block an edit.
+        return True
 
-    Mirrors the core's own self-edit guard.  The reasoning is identical and
-    worth restating: an agent editing a repo it cannot run is flying blind,
-    and a syntax error introduced at step 3 of a 30-step refactor will be
-    blamed on step 27.  Catching it at write time is the difference between
-    a one-line fix and an archaeology session.
+
+def _syntax_check(rel: str, content: str,
+                  before: Optional[str] = None) -> Optional[str]:
+    """Refuse a .py write that BREAKS the file. Allow one that leaves an
+    already-broken file broken.
+
+    Mirrors the core's own self-edit guard, and the reasoning still holds: a
+    syntax error introduced at step 3 of a 30-step refactor gets blamed on
+    step 27, so catching it at write time is the difference between a one-line
+    fix and an archaeology session.
+
+    ── BUT IT DEADLOCKED THE ONE JOB IT IS FOR ──
+    The check looked only at the RESULT, so any edit to a file that did not
+    already parse was refused — including an edit that had nothing to do with
+    the breakage:
+
+        repo file broken at line 1
+        replace "return 2" -> "return 22" somewhere at line 5
+        => "refused: Python syntax error at line 1. Nothing was written."
+
+    The model did not cause that error and was not trying to fix it, but the
+    message reads as a complaint about ITS edit, so it retries with different
+    escaping and is refused identically. Reported as "the tool doesn't let it".
+    And it is a genuine deadlock: a broken file could only ever be edited by an
+    edit that made the whole file valid in ONE shot, which is exactly what
+    repairing a repo with several faults cannot do.
+
+    The guard that was actually wanted is a COMPARISON. Breaking working code
+    is refused, as before. Leaving a pre-existing break in place is allowed and
+    REPORTED, so the model knows the file still does not parse and keeps
+    going instead of fighting the tool.
     """
     if not rel.endswith(".py"):
         return None
+    if _parses(content):
+        return None
     try:
         ast.parse(content)
-        return None
     except SyntaxError as e:
-        return (f"refused: Python syntax error at line {e.lineno} "
-                f"({e.msg}). Nothing was written.")
+        _where, _msg = e.lineno, e.msg
+    except Exception:
+        return None
+    # `before is None` means the caller could not supply the previous text
+    # (a create). Nothing existed to be broken, so the strict rule stands.
+    if before is not None and not _parses(before):
+        return None
+    return (f"refused: Python syntax error at line {_where} "
+            f"({_msg}). Nothing was written.")
+
+
+def _still_broken_note(rel: str, content: str) -> str:
+    """The honest half of the rule above: say the file still does not parse."""
+    if rel.endswith(".py") and not _parses(content):
+        return ("written, but this file STILL does not parse as Python — it "
+                "was already broken before this edit and remains so. Keep "
+                "fixing it; run the tests before calling it done.")
+    return ""
 
 
 def write(path: str, content: str, create: bool = False) -> Dict[str, Any]:
@@ -805,13 +891,23 @@ def write(path: str, content: str, create: bool = False) -> Dict[str, Any]:
                     "error": "file does not exist; pass create=True to make "
                              "a new one (guards against a typo'd path "
                              "silently creating a stray file)"}
-        err = _syntax_check(rel, content)
+        # The PREVIOUS text is read first because the syntax guard is now a
+        # comparison — it refuses an edit that breaks working code, not one
+        # that leaves an already-broken file broken. See _syntax_check.
+        _prev = None
+        if existed:
+            try:
+                with open(fp, "r", encoding="utf-8", errors="replace") as f:
+                    _prev = f.read()
+            except Exception:
+                _prev = None
+        err = _syntax_check(rel, content, _prev)
         if err:
             return {"ok": False, "path": rel, "error": err,
                     "syntax_error": True}
         with _LOCK:
-            old = ""
-            if existed:
+            old = _prev or ""
+            if existed and _prev is None:
                 with open(fp, "r", encoding="utf-8", errors="replace") as f:
                     old = f.read()
             _stash_original(root, fp, rel)
@@ -824,9 +920,14 @@ def write(path: str, content: str, create: bool = False) -> Dict[str, Any]:
         diff = list(difflib.unified_diff(
             old.splitlines(), content.splitlines(),
             fromfile=f"a/{rel}", tofile=f"b/{rel}", lineterm="", n=2))
-        return {"ok": True, "path": rel, "created": not existed,
+        _res = {"ok": True, "path": rel, "created": not existed,
                 "bytes": len(content.encode("utf-8")),
                 "diff": "\n".join(diff[:200]) or "(new file)"}
+        _note = _still_broken_note(rel, content)
+        if _note:
+            _res["note"] = _note
+            _res["parses"] = False
+        return _res
     except ContainmentError as e:
         return {"ok": False, "error": str(e)}
     except Exception as e:
@@ -877,7 +978,10 @@ def replace(path: str, old: str, new: str, count: int = 1) -> Dict[str, Any]:
                                  f"lines until it is unique, or raise count "
                                  f"deliberately."}
             updated = body.replace(old, new, count)
-            err = _syntax_check(rel, updated)
+            # `body` is the file as it was, so the guard can tell "this edit
+            # broke it" from "it was already broken". Refusing the second is
+            # what deadlocked repo repair.
+            err = _syntax_check(rel, updated, body)
             if err:
                 return {"ok": False, "path": rel, "error": err,
                         "syntax_error": True}
@@ -890,8 +994,13 @@ def replace(path: str, old: str, new: str, count: int = 1) -> Dict[str, Any]:
         diff = list(difflib.unified_diff(
             body.splitlines(), updated.splitlines(),
             fromfile=f"a/{rel}", tofile=f"b/{rel}", lineterm="", n=2))
-        return {"ok": True, "path": rel, "replaced": found,
+        _res = {"ok": True, "path": rel, "replaced": found,
                 "diff": "\n".join(diff[:120])}
+        _note = _still_broken_note(rel, updated)
+        if _note:
+            _res["note"] = _note
+            _res["parses"] = False
+        return _res
     except ContainmentError as e:
         return {"ok": False, "error": str(e)}
     except Exception as e:
