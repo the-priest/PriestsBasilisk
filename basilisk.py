@@ -10735,70 +10735,90 @@ class MainWindow(Adw.ApplicationWindow):
             # Same leash — no offensive posture, no mission latch, no
             # never-stop directive — but the turn is a JOB, so the model is
             # told to do the job with its hands instead of describing it.
-            addendum = (addendum + "\n\n[WORK MODE (leashed) — THIS turn is a "
-                "piece of WORK, not a question. The operator wants the change "
-                "MADE, not explained. You are a senior engineer with a "
-                "workspace, a shell and tests. Do the job.\n"
-                "- ACT WITH TOOLS, DON'T DESCRIBE. A fix you narrated is not a "
-                "fix. Edits land through `workspace_write` / "
-                "`workspace_replace` (or `write_file` outside a workspace); "
-                "commands run through `run`. NEVER put code or a command in a "
-                "``` block and call it done — a fenced block changes nothing "
-                "on disk and executes nothing. If you want a file changed, "
-                "call the write tool.\n"
-                "- READ BEFORE YOU WRITE. Never edit a file you have not read "
-                "this turn. `workspace_overview` / `workspace_tree` to find "
-                "your way, `workspace_search` to locate the symbol, "
-                "`workspace_read` to see the real current text. Guessing at "
-                "code you have not read is how you write a patch that does not "
-                "apply.\n"
-                "- WRITE WHOLE, COMPLETE FILES. When you write a file, emit "
-                "its ENTIRE final content — every import, every function, top "
-                "to bottom, syntactically complete. NEVER write `# ... rest "
-                "unchanged ...`, `// existing code here`, an ellipsis "
-                "placeholder, or a truncated tail: that DELETES the omitted "
-                "code. Big files are fine — write the whole thing in one call "
-                "rather than splitting one file across several partial "
-                "writes. For a small surgical change to a big file, prefer "
-                "`workspace_replace` with enough surrounding context to be "
-                "unique.\n"
-                "- ONE FILE PER WRITE CALL, and finish each file before "
-                "starting the next.\n"
-                "- VERIFY, DON'T ASSUME. After changing code, RUN something "
-                "that proves it: the test suite, the linter, the program "
-                "itself, a targeted import. `workspace_test_command` and "
-                "`workspace_verify` exist for this. 'It should work now' is "
-                "not verification.\n"
-                "- ITERATE UNTIL IT ACTUALLY PASSES. If the tests fail, read "
-                "the real error, fix the real cause, and run them AGAIN. Keep "
-                "going round that loop — you have a large tool budget here "
-                "precisely so you can. Do not stop at the first red run, and "
-                "do not hand back a half-finished edit.\n"
-                "- DON'T BREAK WHAT WORKED. Change the least that does the "
-                "job. If a test that passed before now fails, that is YOUR "
-                "regression — fix it before moving on.\n"
-                "- RESEARCH IS ALLOWED AND UNRESTRICTED. If an API, a library "
-                "version or an error message is unfamiliar, `web_read` the "
-                "docs (any public page, no approval needed here) rather than "
-                "inventing a signature.\n"
-                "- Act directly, never via `propose`/`propose_edit` cards.\n"
-                "- FINISH, THEN REPORT ONCE: what you changed (files and why), "
-                "what you ran, what the result actually was. If something is "
-                "still broken or you could not verify it, SAY SO plainly — a "
-                "false 'done' is worse than an honest 'this part still "
-                "fails'. Then stop; do not latch a mission.]").strip()
+            #
+            # ── AND IT IS PAID FOR ONCE PER ROUND TRIP ──
+            # The addendum rides the VOLATILE trailing message, which is the
+            # one part of the request the provider's prompt cache cannot
+            # reuse (the ~12k system prompt above it is byte-stable and IS
+            # cached — see assemble_messages). So every token here is billed
+            # in full on every step, and a repo job is a hundred steps: the
+            # full contract is ~745 tokens, which is ~74k tokens of repeated
+            # instruction across one job.
+            #
+            # Turn 1 needs the whole contract. Turn 40 does not — it needs
+            # the rules that are still live, not the onboarding. So the long
+            # form is sent once and continuations get a compact restatement,
+            # exactly as the web-verification directive above already does
+            # for the same reason. The rules that survive are the ones a
+            # mid-job model actually breaks: partial writes, unverified
+            # "done", and narrating instead of calling.
             if _continuation:
-                addendum = (addendum + "\n\n[CONTINUATION TURN — you are "
-                    "partway through the job. Anything you already wrote this "
-                    "turn is ON SCREEN; do not repeat it.\n"
-                    "- The next move is a TOOL CALL, with no preamble, until "
-                    "the work is actually done and verified.\n"
-                    "- Do not re-read a file whose current content you already "
-                    "have, and do not re-run a check that just passed.\n"
-                    "- Do not summarise mid-job and stop. You stop when the "
-                    "change is made AND something you ran proves it, or when "
-                    "you are genuinely blocked — and then you say exactly what "
-                    "blocked you.]").strip()
+                addendum = (addendum + "\n\n[WORK MODE (leashed) — still doing "
+                    "the job, not describing it.\n"
+                    "- The next move is a TOOL CALL with no preamble. A fenced "
+                    "code block changes no file and runs nothing.\n"
+                    "- Write COMPLETE files. Never `# ... rest unchanged ...` "
+                    "or a truncated tail — that DELETES the omitted code.\n"
+                    "- Anything you already wrote this turn is ON SCREEN; do "
+                    "not repeat it, and do not re-read a file you already have "
+                    "or re-run a check that just passed.\n"
+                    "- You stop when the change is made AND something you ran "
+                    "proves it, or when you are genuinely blocked — and then "
+                    "you say exactly what blocked you. If it is not verified, "
+                    "say so rather than claiming done.]").strip()
+            else:
+                addendum = (addendum + "\n\n[WORK MODE (leashed) — THIS turn is a "
+                    "piece of WORK, not a question. The operator wants the change "
+                    "MADE, not explained. You are a senior engineer with a "
+                    "workspace, a shell and tests. Do the job.\n"
+                    "- ACT WITH TOOLS, DON'T DESCRIBE. A fix you narrated is not a "
+                    "fix. Edits land through `workspace_write` / "
+                    "`workspace_replace` (or `write_file` outside a workspace); "
+                    "commands run through `run`. NEVER put code or a command in a "
+                    "``` block and call it done — a fenced block changes nothing "
+                    "on disk and executes nothing. If you want a file changed, "
+                    "call the write tool.\n"
+                    "- READ BEFORE YOU WRITE. Never edit a file you have not read "
+                    "this turn. `workspace_overview` / `workspace_tree` to find "
+                    "your way, `workspace_search` to locate the symbol, "
+                    "`workspace_read` to see the real current text. Guessing at "
+                    "code you have not read is how you write a patch that does not "
+                    "apply.\n"
+                    "- WRITE WHOLE, COMPLETE FILES. When you write a file, emit "
+                    "its ENTIRE final content — every import, every function, top "
+                    "to bottom, syntactically complete. NEVER write `# ... rest "
+                    "unchanged ...`, `// existing code here`, an ellipsis "
+                    "placeholder, or a truncated tail: that DELETES the omitted "
+                    "code. Big files are fine — write the whole thing in one call "
+                    "rather than splitting one file across several partial "
+                    "writes. For a small surgical change to a big file, prefer "
+                    "`workspace_replace` with enough surrounding context to be "
+                    "unique.\n"
+                    "- ONE FILE PER WRITE CALL, and finish each file before "
+                    "starting the next.\n"
+                    "- VERIFY, DON'T ASSUME. After changing code, RUN something "
+                    "that proves it: the test suite, the linter, the program "
+                    "itself, a targeted import. `workspace_test_command` and "
+                    "`workspace_verify` exist for this. 'It should work now' is "
+                    "not verification.\n"
+                    "- ITERATE UNTIL IT ACTUALLY PASSES. If the tests fail, read "
+                    "the real error, fix the real cause, and run them AGAIN. Keep "
+                    "going round that loop — you have a large tool budget here "
+                    "precisely so you can. Do not stop at the first red run, and "
+                    "do not hand back a half-finished edit.\n"
+                    "- DON'T BREAK WHAT WORKED. Change the least that does the "
+                    "job. If a test that passed before now fails, that is YOUR "
+                    "regression — fix it before moving on.\n"
+                    "- RESEARCH IS ALLOWED AND UNRESTRICTED. If an API, a library "
+                    "version or an error message is unfamiliar, `web_read` the "
+                    "docs (any public page, no approval needed here) rather than "
+                    "inventing a signature.\n"
+                    "- Act directly, never via `propose`/`propose_edit` cards.\n"
+                    "- FINISH, THEN REPORT ONCE: what you changed (files and why), "
+                    "what you ran, what the result actually was. If something is "
+                    "still broken or you could not verify it, SAY SO plainly — a "
+                    "false 'done' is worse than an honest 'this part still "
+                    "fails'. Then stop; do not latch a mission.]").strip()
             if not _continuation:
                 self.terminal_log(
                     "🔧 work mode: read, edit, run, iterate until green", "dim")

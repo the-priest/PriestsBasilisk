@@ -7,7 +7,7 @@
 <br/>
 
 <img src="https://img.shields.io/badge/version-1.1.0.0-e11d2b?style=for-the-badge&labelColor=08090b" alt="version 1.1.0.0">
-<img src="https://img.shields.io/badge/tests-4170%20assertions-2ea043?style=for-the-badge&labelColor=08090b&logo=pytest&logoColor=2ea043" alt="4170 assertions">
+<img src="https://img.shields.io/badge/tests-4225%20assertions-2ea043?style=for-the-badge&labelColor=08090b&logo=pytest&logoColor=2ea043" alt="4225 assertions">
 <img src="https://img.shields.io/badge/licence-MIT-e11d2b?style=for-the-badge&labelColor=08090b" alt="MIT">
 <img src="https://img.shields.io/badge/deps-stdlib%20%2B%20GTK-e11d2b?style=for-the-badge&labelColor=08090b" alt="stdlib + GTK">
 
@@ -78,9 +78,18 @@ cd basilisk && less install.sh
 | **Fedora** | `sudo dnf install python3-gobject python3-cairo gtk4 libadwaita-devel` |
 | **openSUSE** | `sudo zypper install python3-gobject python3-cairo gtk4 libadwaita-devel` |
 
-**From PyPI:** `pip install priestsbasilisk`, then run `basilisk`.
-
 **Bring your own model.** Set a key in **Settings → Backends**; it lives only in `~/.config/basilisk/settings.json`, locked to your user. The default backend is **SiliconFlow** (large open models — DeepSeek, GLM, Kimi, Qwen — plus SenseVoice STT). The picker shows each model's context window, price per million tokens and what it is *for*, with a live-catalogue refresh so a retired model id cannot sit there silently 404ing.
+
+**GLM-5.3-Flash is first in the picker and the one the engine is tuned hardest for.** 1M context, 128K output, natively multimodal, at 0.15/0.50 per million. Six things in the engine exist specifically because of how it behaves:
+
+- its `reasoning_effort` enum is **low | high | max**, and *omitting the field selects `max`* — so the field is sent on every request, translated to that model's own enum, alongside SiliconFlow's `thinking_budget`. Not sending it is the single most expensive mistake this app could make by accident;
+- its `<tool_call>` dialect is decoded in both shapes it emits — `<arg_key>`/`<arg_value>` pairs *and* a JSON body — plus the unclosed variant;
+- it opens `<think>` in the generation prompt, so an orphaned `</think>` is handled rather than rendered;
+- a turn that reasoned and returned nothing is retried with the thinking dialled down instead of repeated unchanged;
+- a model writing its *own* tool results — inventing a fetch, a status code and a page body — is detected structurally and deleted before it can be shown, stored, or replayed to itself as history;
+- its 128K output ceiling is what makes the file-sized write budget usable.
+
+**On the benchmark numbers below:** they were produced on **DeepSeek-V4-Flash**, which is why that is what a fresh install pins. GLM-5.3-Flash has not been re-benchmarked on that board, so its score is not stated — choosing it is one click, and every GLM fix above is in the engine either way.
 
 **Requirements:** **Python 3.10+**, Linux with **GTK4** / libadwaita (X11 or Wayland). Built and tested on **CachyOS** and **Kali**; runs on any Arch-, Debian- or Fedora-based distro — package manager, escalation tool (`sudo`/`sudo-rs`/`doas`) and tool paths are all auto-detected, never assumed.
 
@@ -256,7 +265,7 @@ Capability and safety are decoupled on purpose.
 
 ## 🔬 Engineering
 
-**Stdlib only** for the engine. No pytest, no network, no fixtures, no account — **4,170 assertions across 65 suites**, run in under a minute. Four of those suites are adversarial probes that report *findings* rather than a pass count, so their checks are not in that total.
+**Stdlib only** for the engine. No pytest, no network, no fixtures, no account — **4,225 assertions across 67 suites**, run in under a minute. Four of those suites are adversarial probes that report *findings* rather than a pass count, so their checks are not in that total.
 
 Every fix ships with a regression that *fails* on the old code and *passes* on the new. Real GTK is spun up under Xvfb for the UI suites; the chat-bubble layout alone is pinned by 140 fitting checks. Repo work is covered end-to-end rather than layer by layer — a deliberately broken repo is opened as a folder, baselined red, edited through four different tool-call dialects, verified green, diffed and exported, with a 6,000-line file paged and rewritten on the way past.
 
@@ -286,7 +295,7 @@ If it earns its place in your kit, star the repo and tell someone who would use 
 
 <br/>
 
-### Built by one person, around a day job. Verified by 4,170 assertions. Priced at nothing.
+### Built by one person, around a day job. Verified by 4,225 assertions. Priced at nothing.
 
 <sub>Clone it, read it, run the suite, then point it at something you own.</sub>
 

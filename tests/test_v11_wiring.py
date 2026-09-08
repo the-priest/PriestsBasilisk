@@ -209,12 +209,27 @@ for must in ("ENTIRE final content", "rest unchanged", "READ BEFORE YOU WRITE",
     if must.lower() not in a.lower():
         note(f"6: work mode is missing {must!r}")
 
-# ── 7. a work CONTINUATION must not be told to answer-and-stop ──────
-a = turn("fix the auth bug in my repo", depth=3)[0]
-if "CONTINUATION TURN" not in a:
-    note("7: no continuation guidance on a mid-job turn")
-if "Deliver ONE complete" in a:
+# ── 7. a work CONTINUATION is SHORT, and still says the load-bearing bits ──
+# The addendum rides the volatile trailing message, which is the one part of
+# the request a prompt cache cannot reuse — so it is billed in full on every
+# step of a hundred-step job. Turn 1 gets the whole contract; continuations
+# get a compact restatement of the rules a mid-job model actually breaks.
+# Measured: 886 -> 175 tokens per continuation, ~71k saved on a long job.
+a1 = turn("fix the auth bug in my repo", depth=1)[0]
+a3 = turn("fix the auth bug in my repo", depth=3)[0]
+if "WORK MODE (leashed)" not in a3:
+    note("7: a mid-job turn was not told it is still in work mode")
+if "Deliver ONE complete" in a3:
     note("7: a mid-job turn is being told to deliver one complete answer")
+if len(a3) >= len(a1):
+    note(f"7: the continuation form is not shorter ({len(a3)} vs {len(a1)})")
+# The three rules that must survive the trim, because they are the three
+# failures that cost the operator real work.
+for must, why in (("rest unchanged", "a partial write DELETES code"),
+                  ("TOOL CALL", "narrating instead of calling is the stall"),
+                  ("not verified", "a false 'done' is the worst outcome")):
+    if must.lower() not in a3.lower():
+        note(f"7: the short continuation dropped {must!r} — {why}")
 
 print("\n".join(bad) if bad else "no findings")
 print(f"\nv11_wiring: {len(bad)} finding(s)")

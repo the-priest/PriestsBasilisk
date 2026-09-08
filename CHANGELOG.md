@@ -90,6 +90,57 @@ and the benchmarks folded into a collapsed block rather than the headline.
 Every load-bearing fact the README test pins — all forty of them — survives
 the rewrite.
 
+### The site said one thing and the README another
+
+`index.html` still led with "The autonomous AI pentester", its `<title>`, og
+tags and `applicationCategory` said SecurityApplication, and its FAQ called
+repository work "half the product" and zip-only. An answer engine reads that
+structured data; a reader reads the README. They now say the same thing: the
+assistant leads, the security suite is one armable capability, and the
+repo-work section moved above the benchmarks. The stale PyPI install path is
+gone from both, replaced by the native packages.
+
+Nothing pinned any of it, which is why an edit to that page had already been
+applied by a script that raised before its write — reported as done, silently
+not done, found by looking at a screenshot. `tests/test_site.py` now computes
+every number on the page from the repo, parses the structured data, resolves
+every anchor, and checks the positioning against the README.
+
+### Where the API tokens actually go
+
+Measured rather than assumed, because the answer changed two decisions:
+
+  * The shipped system prompt is **7,498 tokens leashed / 7,918 armed**, not
+    the 12.4k/24.2k that `build_system_prompt()`'s bare default produces —
+    `basilisk.py` passes `grouped=(not max_mode)` and `max_mode` ships False.
+    Measuring the function default instead of the call site reports a number
+    nobody is billed for.
+  * That prompt is **byte-stable across turns** and the volatile material
+    rides its own trailing message, so ~7.5k is served from the provider's
+    prefix cache every round trip rather than recomputed.
+  * The per-step addendum is the part a cache *cannot* reuse, and the work
+    contract was being re-sent in full on every step: 886 tokens x ~100 steps
+    on a repo job. Turn 1 keeps the whole contract; continuations get a
+    compact restatement of the three rules a mid-job model actually breaks
+    (partial writes, narrating instead of calling, claiming an unverified
+    "done"). **886 -> 175 tokens, ~71k saved per long job.**
+
+`tests/test_token_budget.py` pins all three as ceilings, so prompt bloat
+fails the suite instead of arriving fifty tokens at a time.
+
+### GLM-5.3-Flash, documented for what it is
+
+The README now says plainly that GLM-5.3-Flash is first in the picker and the
+model the engine is tuned hardest for, and lists the six things that exist
+specifically because of it — chief among them that its `reasoning_effort` enum
+is low|high|max and *omitting the field selects max*, which is the single most
+expensive thing this app could do by accident.
+
+It also says, in the same breath, that the benchmark numbers were produced on
+DeepSeek-V4-Flash and that GLM has not been re-run on that board, so no score
+is claimed for it. Same rule as always: a version that has not been
+re-benchmarked does not inherit the previous one's number.
+
 ### Native packages for Kali and CachyOS
 
 `.deb` for Kali/Debian/Ubuntu and `.pkg.tar.zst` for Arch/CachyOS, plus an
