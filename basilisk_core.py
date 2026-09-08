@@ -1567,16 +1567,52 @@ class OpenAICompatBackend:
                     on_error(f"{self.name} {last_err} mid-stream")
                     return
 
-                # AUTH FIRST.  A missing/invalid key must stop immediately —
+                # ── OUR OWN BUDGET, BEFORE ANY OTHER READING OF A 400 ──
+                # This one is unambiguous (the body names a token budget), it
+                # retries the SAME model rather than walking the chain, and it
+                # terminates at a 1024 floor — so it is safe to consult first,
+                # and it has to be, because a token-budget message is the
+                # single easiest 400 to misread as something else.
+                _mt_words = ("max_tokens", "max tokens", "max_new_tokens",
+                             "max_completion_tokens", "output token",
+                             "maximum context", "too large", "exceeds")
+                _cur_mt = int(payload.get("max_tokens") or 2048)
+                if (e.code == 400 and _cur_mt > 1024
+                        and any(w in (detail or "").lower()
+                                for w in _mt_words)):
+                    _new_mt = max(1024, _cur_mt // 2)
+                    self._max_tokens_cap[attempt_model] = _new_mt
+                    log(f"{self.name} {attempt_model} rejected "
+                        f"max_tokens={_cur_mt} -> retrying at {_new_mt} "
+                        f"(remembered for this session)")
+                    idx -= 1            # retry this same model
+                    continue
+
+                # AUTH.  A missing/invalid key must stop immediately —
                 # never walk the model chain (that produced the bogus
                 # "exhausted all models" message).  Some providers signal a
                 # bad key with 401/403; others (GitHub, Google) use 400/404
                 # with an auth message in the body — catch those too.
                 low = (detail or "").lower()
+                # ── "token" ALONE IS NOT AN AUTH WORD ──
+                # It was, and it made a 400 saying "max_tokens is too large
+                # for this model" come back to the operator as
+                #
+                #     authentication failed (HTTP 400). Check the API key
+                #
+                # — sending him to re-paste a key that was never wrong, while
+                # the real problem (an output budget one notch too high) went
+                # unreported and unretried. Every phrase below now has to name
+                # a CREDENTIAL token, not any sentence containing the word;
+                # "token limit", "max_completion_tokens", "not enough tokens"
+                # and "output tokens exceeded" all used to trip it.
                 auth_words = ("api key", "api_key", "apikey", "unauthorized",
                               "permission", "invalid authentication",
                               "invalid key", "forbidden", "credential",
-                              "token", "must provide")
+                              "invalid token", "bad token", "expired token",
+                              "token expired", "token is invalid",
+                              "access token", "auth token", "bearer token",
+                              "must provide")
                 if e.code in (401, 403) or (
                         e.code in (400, 404) and any(w in low for w in auth_words)):
                     on_error(f"{self.name}: authentication failed "
@@ -1595,27 +1631,6 @@ class OpenAICompatBackend:
                     log(f"{self.name} {attempt_model} rejected "
                         f"{sorted(extra_body)} -> retrying without it "
                         f"(and not sending it again this session)")
-                    idx -= 1            # retry this same model
-                    continue
-
-                # ── WE ASKED FOR MORE OUTPUT THAN THIS MODEL ALLOWS ──
-                # Also our own fault, and also fixable without changing model:
-                # halve the budget and retry the same one. Without this, a
-                # too-large max_tokens looked like a stale model id, sent the
-                # client hunting through the whole fallback chain, and ended
-                # as "exhausted all models" — on a request that would have
-                # worked at half the size.
-                _mt_words = ("max_tokens", "max tokens", "max_new_tokens",
-                             "max_completion_tokens", "output token",
-                             "maximum context", "too large", "exceeds")
-                _cur_mt = int(payload.get("max_tokens") or 2048)
-                if (e.code == 400 and _cur_mt > 1024
-                        and any(w in low for w in _mt_words)):
-                    _new_mt = max(1024, _cur_mt // 2)
-                    self._max_tokens_cap[attempt_model] = _new_mt
-                    log(f"{self.name} {attempt_model} rejected "
-                        f"max_tokens={_cur_mt} -> retrying at {_new_mt} "
-                        f"(remembered for this session)")
                     idx -= 1            # retry this same model
                     continue
 
@@ -4558,6 +4573,11 @@ run execute
 _VERB_AT_OPERATOR_RE = re.compile(
     r"^(?:run|walk|take|talk|step)\s+(?:me|us)\b")
 
+# Every verb either list knows, for the "a verb is not its own object" guard
+# in leashed_intent. Built from the two sets rather than retyped, so a verb
+# added above can never be forgotten here.
+_WORK_VERBS_ALL = _WORK_VERBS_STRONG | _WORK_VERBS_WEAK
+
 # Multi-word imperatives that are unmistakably work, object or not.  These are
 # checked as PREFIXES of a clause, so "sort it out" at the end of "the tests
 # are failing, sort it out" is caught.
@@ -4591,12 +4611,30 @@ _CODE_OBJECT_RE = re.compile(
     r"error|errors|failure|failures|regression|"
     r"build|builds|compile|compiles|ci|pipeline|"
     r"api|apis|endpoint|endpoints|route|routes|handler|handlers|"
-    r"cli|flag|flags|arg|args|argument|arguments|option|options|"
+    # "argument" is deliberately NOT here. A code argument is written "arg",
+    # "args" or "parameter" in every real request; the long form almost always
+    # means the rhetorical one, and it turned "make an argument against
+    # microservices" into a repo job.
+    r"cli|flag|flags|arg|args|kwarg|kwargs|parameter|parameters|"
+    r"option|options|"
     r"parser|parsers|server|servers|client|clients|daemon|service|"
     r"database|db|schema|migration|migrations|query|queries|"
     r"component|components|widget|widgets|ui|frontend|backend|"
     r"config|configs|settings|makefile|dockerfile|"
-    r"import|imports|dependency|dependencies|requirements|"
+    r"import|imports|dependency|dependencies|dep|deps|requirements|"
+    # The nouns the probe caught missing: a request to "wire the new tool into
+    # the dispatcher" or "extract the retry logic into a helper" is obviously
+    # work, and was classified as a question purely because the noun was not
+    # on this list.
+    r"tool|tools|tooling|logger|logging|log|logs|"
+    r"helper|helpers|util|utils|utility|wrapper|decorator|"
+    r"dispatcher|dispatch|hook|hooks|callback|callbacks|"
+    r"validation|validator|sanitiser|sanitizer|"
+    r"stub|stubs|type|types|typing|annotation|annotations|"
+    r"logic|refactor|rewrite|cleanup|clean-up|"
+    r"lint|linter|formatting|formatter|"
+    r"classifier|regex|pattern|parser|lexer|tokenizer|"
+    r"docstring|docstrings|comment|comments|"
     r"python|py|javascript|js|typescript|ts|rust|golang|java|"
     r"c\+\+|cpp|bash|shell|sql|html|css|json|yaml|toml|csv|"
     r"branch|commit|diff|patch|pr|merge"
@@ -4625,7 +4663,12 @@ _QUESTION_OPENER_RE = re.compile(
 _BREAKAGE_RE = re.compile(
     r"\b(?:"
     r"broken|breaking|broke|failing|fails|failed|crashing|crashes|crashed|"
-    r"erroring|throwing|hanging|hangs|stuck|"
+    r"erroring|throwing|throws|throw|raises|raising|"
+    r"segfault|segfaults|segfaulting|"
+    r"hanging|hangs|stuck|"
+    # "tests are red" / "the build went red" — the everyday way a person
+    # reports a failing suite, and it matched nothing.
+    r"(?:are|is|went|going|gone)\s+red|"
     r"(?:does\s?n[o']?t|do\s?n[o']?t|wo\s?n[o']?t|can\s?not|ca\s?n[o']?t|"
     r"is\s?n[o']?t|are\s?n[o']?t)\s+"
     r"(?:work|working|build|building|compile|compiling|run|running|pass|"
@@ -4717,7 +4760,24 @@ def leashed_intent(text: str) -> str:
     if not head:
         return "question"
 
-    has_object = bool(_CODE_OBJECT_RE.search(t))
+    # ── A VERB MUST NOT SATISFY ITS OWN OBJECT REQUIREMENT ──
+    # Several words are legitimately in BOTH lists: `build`, `run`, `test`,
+    # `patch`, `import`, `commit`, `merge`, `diff` are weak verbs AND code
+    # nouns ("the build is broken" vs "build me a…"). Searching the whole
+    # message for an object therefore let the leading verb match ITSELF, and
+    # every one of those verbs became self-satisfying — "build me a mental
+    # model of tcp" classified as a repo job because the word "build" was
+    # present, which it always is when the verb is "build".
+    #
+    # So the object is looked for in the text with that leading verb removed.
+    # A real object anywhere else still counts, and a message that does not
+    # OPEN with a verb (";the build is broken, fix it") is untouched, because
+    # nothing is removed from it.
+    _obj_text = head
+    _lead = re.match(r"[a-z][a-z'\-]*", head)
+    if _lead and _lead.group(0) in _WORK_VERBS_ALL:
+        _obj_text = head[_lead.end():]
+    has_object = bool(_CODE_OBJECT_RE.search(_obj_text))
 
     # 1. Opening imperative wins outright: "fix the auth bug in my repo".
     if _leash_clause_is_work(head, has_object):

@@ -10,7 +10,8 @@ include llms.txt
 include install.sh
 include pyproject.toml
 
-# The suite: 44 stdlib-only files, runnable straight out of the sdist.
+# The suite: stdlib-only, runnable straight out of the sdist. Deliberately
+# NOT a hard-coded count — the last one said 44 while the repo had 65.
 recursive-include tests *.py
 
 # Runtime art (also declared as package-data; belt and braces for the sdist).

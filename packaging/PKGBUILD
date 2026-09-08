@@ -1,0 +1,75 @@
+# Maintainer: the-priest <https://github.com/the-priest/PriestsBasilisk>
+# Arch / CachyOS package for Priest's Basilisk.
+#
+# Build:   cd packaging && makepkg -si
+#
+# WHY /usr/share/priestsbasilisk AND NOT site-packages
+# ----------------------------------------------------
+# Arch is rolling. A path pinned to python3.13/site-packages stops being
+# importable the day python moves to 3.14, and the failure is a bare
+# ImportError with nothing to point at. A fixed directory plus one explicit
+# sys.path entry in the launcher survives every python bump.
+pkgname=priestsbasilisk
+pkgver=1.1.0.0
+pkgrel=1
+pkgdesc="Autonomous AI pentesting agent and coding assistant - GTK4 desktop app"
+arch=('any')
+url="https://github.com/the-priest/PriestsBasilisk"
+license=('MIT')
+depends=('python' 'python-gobject' 'python-cairo' 'gtk4' 'libadwaita')
+optdepends=(
+  'nmap: network scanning'
+  'sqlmap: SQL injection testing'
+  'ffuf: content discovery'
+  'nuclei: template-driven scanning'
+  'bubblewrap: sandboxed repo repair'
+  'python-pip: install optional backend libraries'
+)
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+_modules=(basilisk basilisk_core basilisk_safety basilisk_scope
+          basilisk_ledger basilisk_persona basilisk_voice basilisk_btn_art)
+
+check() {
+  cd "$srcdir/PriestsBasilisk-$pkgver"
+  # Stdlib-only, no network, no fixtures. If the engine is broken the package
+  # does not get built -- that is the whole point of shipping the suite.
+  local f rc=0
+  for f in tests/test_*.py; do
+    python3 "$f" >/dev/null 2>&1 || { echo "FAILED: $f"; rc=1; }
+  done
+  return $rc
+}
+
+package() {
+  cd "$srcdir/PriestsBasilisk-$pkgver"
+  local appdir="$pkgdir/usr/share/$pkgname"
+  install -dm755 "$appdir/basilisk_ext" "$appdir/basilisk_assets"
+
+  local m
+  for m in "${_modules[@]}"; do
+    install -Dm644 "$m.py" "$appdir/$m.py"
+  done
+  cp -r basilisk_ext/. "$appdir/basilisk_ext/"
+  cp -r assets/app/.   "$appdir/basilisk_assets/"
+  find "$appdir" -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
+  find "$appdir" -type f -exec chmod 644 {} +
+  find "$appdir" -type d -exec chmod 755 {} +
+
+  install -dm755 "$pkgdir/usr/bin"
+  cat > "$pkgdir/usr/bin/basilisk" <<'EOF'
+#!/bin/sh
+exec python3 -c "import sys; sys.path.insert(0, '/usr/share/priestsbasilisk'); import basilisk; basilisk.main()" "$@"
+EOF
+  chmod 755 "$pkgdir/usr/bin/basilisk"
+  ln -sf basilisk "$pkgdir/usr/bin/priestsbasilisk"
+
+  install -Dm644 org.thepriest.basilisk.desktop \
+    "$pkgdir/usr/share/applications/org.thepriest.basilisk.desktop"
+  install -Dm644 assets/app/org.thepriest.basilisk.svg \
+    "$pkgdir/usr/share/icons/hicolor/scalable/apps/org.thepriest.basilisk.svg"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+  install -Dm644 CHANGELOG.md "$pkgdir/usr/share/doc/$pkgname/CHANGELOG.md"
+}

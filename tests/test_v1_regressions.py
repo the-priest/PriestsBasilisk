@@ -476,9 +476,16 @@ ck("the CSS is ASCII-only",
 # readable (test_packaging cross-checks it against pyproject and the README
 # badge), not that the build is frozen at the version this suite was written
 # for -- pinning that meant every later patch release started red.
+# ...and "not frozen" has to mean ANY release, not just any patch of the one
+# that happened to be current. This pattern was 1\.0\.0\.\d+, which is the
+# same trap one component up: the 1.1.0.0 bump turned it red for no reason
+# anyone could act on. Assert the SHAPE — a dotted numeric release — and let
+# test_packaging be the thing that cross-checks the actual number against
+# pyproject and the README badge.
 ck("the version line is present and well formed",
-   re.search(r'^VERSION = "1\.0\.0\.\d+"$', _B.decode("utf-8"), re.M)
-   is not None)
+   re.search(r'^VERSION = "\d+(?:\.\d+){1,3}"$', _B.decode("utf-8"), re.M)
+   is not None,
+   "VERSION must be a plain dotted numeric release on its own line")
 
 
 # ══════════════════════════════════════════════════════════════════════

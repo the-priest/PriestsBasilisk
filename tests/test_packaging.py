@@ -266,5 +266,27 @@ ck("floor is at least 3.10 (PyGObject's own floor)",
 ck("this interpreter meets the declared floor",
    sys.version_info[:2] >= (int(_floor.group(1)), int(_floor.group(2))))
 
+# ── 8. NO BUILD ARTEFACTS IN THE SOURCE TREE ──────────────────────────
+# `python -m build` leaves build/ and priestsbasilisk.egg-info/ behind.
+# .gitignore covers git, but the RELEASE ZIP is made by copying the working
+# tree, so 11 MB of stale duplicate source — build/lib/basilisk_core.py and
+# every other module, at whatever revision the last wheel was cut from —
+# shipped inside PriestsBasilisk-1.1.0.0.zip.
+#
+# A second, older copy of every module is worse than clutter. It is the copy
+# someone greps by accident, and the one an agent told to "read the source"
+# may well read: it looks exactly like the real tree and is silently behind
+# it. Caught by the v1.1.0.0 consistency scan; pinned here so a build run
+# before a release cannot ship it again.
+print("\n== no build artefacts in the tree ==")
+for _junk in ("build", "priestsbasilisk.egg-info", ".eggs"):
+    ck(f"{_junk}/ is not in the source tree",
+       not os.path.isdir(_rel(_junk)),
+       "delete it before packaging - the release zip copies the whole tree")
+ck("gitignore covers build artefacts",
+   all(_t in io.open(_rel(".gitignore"), encoding="utf-8").read()
+       for _t in ("build/", "*.egg-info/")))
+
+
 print(f"\npackaging: {_p} passed, {_f} failed")
 sys.exit(1 if _f else 0)

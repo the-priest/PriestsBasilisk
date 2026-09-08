@@ -494,7 +494,17 @@ def import_dir(path: str, name: str = "") -> Dict[str, Any]:
     total-size caps apply.
     """
     try:
-        src = os.path.realpath(os.path.expanduser(path or ""))
+        # ── AN EMPTY PATH IS NOT "HERE" ──
+        # os.path.realpath("") is the CURRENT WORKING DIRECTORY, so a call
+        # with a missing, empty or wrong-typed path silently imported whatever
+        # directory the app happened to be running in — for an installed copy,
+        # its own source tree. A model that put the repo in the wrong argument
+        # key got a confident "imported 340 files" for a repo it never named.
+        # Refuse, and say what was wanted.
+        if not isinstance(path, str) or not path.strip():
+            return {"ok": False,
+                    "error": "no directory given — pass the path to the repo"}
+        src = os.path.realpath(os.path.expanduser(path.strip()))
         if not src or not os.path.isdir(src):
             return {"ok": False, "error": f"not a directory: {path}"}
 
@@ -795,8 +805,20 @@ def read(path: str, start: int = 1, end: int = 0,
         # Coerce the line numbers BEFORE anything compares them. `start` and
         # `end` come straight from the model, and `start > 1` on a None raises
         # a TypeError that surfaces as "the read tool is broken".
+        # Remember whether a range was ASKED FOR, separately from whether it
+        # parsed. "start=-4" is unusable, but silently serving the whole file
+        # instead is a mode switch the caller never sees — and a whole-file
+        # read of a big file is the exact input that gets written back with
+        # its tail missing. Refuse instead.
+        _range_asked = not (start in (None, 0, 1, "", "1") and
+                            end in (None, 0, "", "0"))
         start = _as_line(start)
         end = _as_line(end)
+        if _range_asked and start <= 0 and end <= 0:
+            return {"ok": False,
+                    "error": ("unusable line range — start/end must be "
+                              "positive line numbers (1-based); omit both to "
+                              "read the whole file")}
         root = _require()
         fp = _confine(root, path)
         rel = os.path.relpath(fp, root)
@@ -1682,7 +1704,17 @@ def parse_test_output(raw: str, rc: int = 0) -> Dict[str, Any]:
     difference between "fixed one, broke another" and "nothing changed".
     Both show 3 failed.  That distinction is the entire value of the loop.
     """
-    raw = raw or ""
+    # Total by construction: this is fed subprocess output, and a runner that
+    # returns bytes (or a caller that passes None) must not take the whole
+    # verify step down with a TypeError from inside a regex.
+    if isinstance(raw, (bytes, bytearray)):
+        raw = raw.decode("utf-8", "replace")
+    elif not isinstance(raw, str):
+        raw = "" if raw is None else str(raw)
+    try:
+        rc = int(rc)
+    except Exception:
+        rc = 1          # unknown exit status is NOT "it passed"
     failed_names: List[str] = []
     for rx in (_RX_FAILNAME, _RX_UNITTEST, _RX_GO_FAIL, _RX_SCRIPT_FAIL):
         for m in rx.finditer(raw):

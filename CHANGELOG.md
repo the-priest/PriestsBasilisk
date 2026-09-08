@@ -1,3 +1,112 @@
+## v1.1.0.0 — the debug pass on v1.0.0.23, and native packages
+
+Four adversarial probe suites written against everything v1.0.0.23 changed.
+They found seven real defects; all seven are fixed and all four probes now
+ship as tests.
+
+### A 400 about `max_tokens` was reported as "check your API key"
+
+The worst one. `"token"` was in the backend's auth-word list, so a provider
+replying *"max_tokens is too large for this model"* matched as an
+authentication failure and the turn died with
+
+    authentication failed (HTTP 400). Check the API key
+
+— sending the operator to re-paste a key that was never wrong, while the real
+problem (an output budget one notch too high) went unreported and unretried.
+This was latent before; granting work turns a 16k budget is what made it fire.
+Every auth phrase now has to name a CREDENTIAL token, and the budget check
+runs first: it is unambiguous, it retries the same model, and it terminates at
+a 1024 floor.
+
+### A verb was satisfying its own object requirement
+
+`leashed_intent` asks whether a weak verb is acting on something code-shaped.
+Several words are legitimately in BOTH lists — `build`, `run`, `test`,
+`patch`, `import`, `commit`, `merge`, `diff` — so the leading verb matched
+ITSELF and every one of them became self-satisfying: "build me a mental model
+of tcp" classified as a repo job because the word "build" was present, which
+it always is when the verb is "build". The object is now looked for in the
+text with that leading verb removed.
+
+Same probe found eleven vocabulary misses in the other direction — "wire the
+new tool into the dispatcher", "extract the retry logic into a helper",
+"upgrade the deps", "tests are red", "this module throws on import" were all
+classified as questions, so the coding assistant would have answered *about*
+them instead of doing them. And "make an argument against microservices" was
+work, because `argument` was in the code-object list; it is not any more.
+
+### An empty path imported the current working directory
+
+`os.path.realpath("")` is the CWD, so `workspace_import` with a missing,
+empty or wrong-typed path silently imported whatever directory the app was
+running in — for an installed copy, its own source tree — and reported a
+confident "imported 340 files" for a repo the operator never named.
+
+### Two more, from the same sweep
+
+`parse_test_output` raised a `TypeError` from inside a regex when handed
+`bytes` or `None`, which would take down the verify step that exists to be
+the trustworthy part. And a line range the caller clearly meant but named
+impossibly (`start=-4`) fell back to a whole-file read without saying so —
+a silent mode switch, on the exact path where a whole-file read is the input
+that gets written back with its tail missing.
+
+### A test that pinned the version it was written for
+
+`test_v1_regressions` asserted `VERSION = "1.0.0.N"`, directly under a comment
+explaining why pinning the version is wrong. The 1.1.0.0 bump turned it red
+for no reason anyone could act on. It asserts the SHAPE now; `test_packaging`
+remains the thing that cross-checks the actual number.
+
+### The release zip was shipping a second, older copy of the whole codebase
+
+`python -m build` leaves `build/` and `priestsbasilisk.egg-info/` behind.
+`.gitignore` covers git, but the release ZIP is made by copying the working
+tree — so 11 MB and 64 files of stale duplicate source, every module at
+whatever revision the last wheel was cut from, shipped inside
+`PriestsBasilisk-1.1.0.0.zip`. The `.deb`, the Arch package and the wheel were
+clean, because those enumerate their files explicitly.
+
+A second, older copy of every module is worse than clutter: it is the copy
+someone greps by accident, and the one an agent told to "read the source" may
+well read. It looks exactly like the real tree and is silently behind it.
+Found by the consistency scan, pinned by `tests/test_packaging.py`.
+
+### The docs said three different things about what this is
+
+`README.md` had been rewritten to lead with the general and coding assistant.
+`llms.txt` — the file AI assistants read to describe the project — still
+opened "Basilisk is an open-source, autonomous AI penetration-testing agent"
+and called repository work "a second mode", which is now backwards: the
+security suite is the armed second mode. It also said ~52,000 lines (it is
+~63,000) and described repo work as zip-only, months after folders were
+supported. All three realigned, and the site's meta description and FAQ with
+them.
+
+The README itself is rewritten around what the tool actually is: the workspace
+and the proof discipline first, the security suite as one armable capability,
+and the benchmarks folded into a collapsed block rather than the headline.
+Every load-bearing fact the README test pins — all forty of them — survives
+the rewrite.
+
+### Native packages for Kali and CachyOS
+
+`.deb` for Kali/Debian/Ubuntu and `.pkg.tar.zst` for Arch/CachyOS, plus an
+auditable `PKGBUILD` that runs the whole test suite as its `check()` step.
+Both install the engine, the app, the desktop entry and the icon; neither
+installs a model or a key.
+
+The Arch package deliberately puts the modules in `/usr/share/priestsbasilisk`
+rather than site-packages. Arch is rolling, and a path pinned to
+`python3.13/site-packages` stops being importable the day python moves to
+3.14 — with a bare `ImportError` and nothing to point at. One fixed directory
+plus one `sys.path` line survives every python bump. Debian's
+`dist-packages` is already version-independent, so the `.deb` uses it.
+
+65 suites, all green. Both packages extracted and import-tested under real
+GTK before shipping.
+
 ## v1.0.0.23 — the leash gets a second mode, and a promise it can keep
 
 Leashed had exactly one instruction, and a turn that promised a fetch could
