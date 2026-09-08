@@ -18,3 +18,10 @@ dist/
 .eggs/
 .venv/
 venv/
+
+# release artifacts - built, never committed
+*.deb
+*.pkg.tar.zst
+*.pkg.tar.xz
+SHA256SUMS
+PriestsBasilisk-*.zip
