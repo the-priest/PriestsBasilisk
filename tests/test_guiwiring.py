@@ -115,8 +115,18 @@ _wm = body("    def _build_chat_watermark(self):")
 ck("the watermark probe captured the method", "opacity" in _wm, str(len(_wm)))
 
 _ops = [float(x) for x in re.findall(r"opacity\s*=\s*([0-9.]+)", _wm)]
-ck("every watermark opacity is backdrop-strength (<= 0.20)",
-   bool(_ops) and all(o <= 0.20 for o in _ops), str(_ops))
+# The 0.20 ceiling here was written when the art was an overlay sitting
+# DIRECTLY behind the message text, so every visible pixel of it was a pixel
+# the reply had to be read through. OBSIDIAN GLASS moved the art behind the
+# whole window and put a tinted glass panel (gloss, hairline border, text
+# shadow) under every message, so the backdrop now shows through the GAPS
+# between panels instead of through the words - the legibility budget is paid
+# by the panels. Hence a backdrop-strength ceiling of 0.60, not 0.20. What
+# must NOT come back is a full-strength image: the scrim and this value
+# together are what stop the artwork's neon from competing with the UI, and
+# the "not half opacity" check below still holds the hard line at 0.5.
+ck("every backdrop opacity stays under half strength (<= 0.50)",
+   bool(_ops) and all(o <= 0.50 for o in _ops), str(_ops))
 ck("the PNG path is not left at half opacity",
    all(o < 0.5 for o in _ops), str(_ops))
 ck("it COVERs the pane instead of letterboxing a band across it",

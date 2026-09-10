@@ -2604,6 +2604,1013 @@ menubutton.glyph-btn > button { min-width: 42px; min-height: 38px; }
 /* close button leans red on hover; minimise/expand stay neutral-red */
 .winctl-close:hover { border-color: rgba(255, 80, 80, 0.85); }
 .winctl-close:hover .glyph-btn-label { color: #ff8a7a; }
+
+/* =====================================================================
+   OBSIDIAN GLASS  -  Aero-over-obsidian theme overlay
+   =====================================================================
+   Appended LAST so every rule here wins the cascade over the base theme
+   and over the HELLFIRE ember overlay above it.  ASCII-only, like the
+   rest of this bytes literal.
+
+   The idea: the app is a sheet of dark glass laid over the dragon-ring
+   artwork.  The WINDOW is opaque (nothing punches through to the
+   desktop); everything INSIDE it - bubbles, sidebar, header, composer,
+   cards, tables, popovers - is translucent, so the same backdrop shows
+   through all of them and they read as one pane of glass instead of a
+   stack of separate slabs.
+
+   Every glass surface is built from the same four layers, in this order,
+   which is what keeps them looking like the same material:
+
+     1. background-color : rgba tint  - the smoke in the glass
+     2. background-image : a top-down gloss ramp  - the Aero highlight,
+        bright at the top edge, dead flat by the 52% line, faintly dark
+        below it.  This is the single most recognisable Windows 7 cue
+        and it is why these panels read as glass rather than as flat
+        transparency.
+     3. border          : a hairline of warm near-white at low alpha  -
+        the polished edge that catches light
+     4. box-shadow      : inset white top line (the bevel), an inset
+        ambient darkening, then OUTER shadow + a red bloom picked from
+        the artwork's neon.
+
+   Do not "simplify" a panel by dropping layer 2 or 4: without the gloss
+   the surface goes muddy, and without the bloom it detaches from the
+   backdrop and floats.
+
+   EVERY TINT IS WARM ON PURPOSE.  The first cut of this theme used a
+   neutral steel rgba(226, 234, 246) for the highlights and a blue-black
+   rgba(14, 18, 27) for the smoke, and the result read GREY - the glass
+   went the colour of a stainless-steel appliance and fought the red art
+   behind it.  The whites here are pushed towards #fff0f2 and the smoke
+   towards a red-black #140a0f, so the glass takes its colour FROM the
+   backdrop instead of arguing with it.  If a surface ever looks grey,
+   that is the bug, and the fix is to warm its tint - not to darken it.
+
+   Palette lifted off the backdrop art:
+     neon red   #ff1f34 / #e01020      deep blood  #6d0710
+     smoke      rgba(20, 10, 15, a)    lit edge    rgba(255, 238, 240, a)
+     text       #f6eef0   dim #bda8ad  code #ffe3e6
+   ===================================================================== */
+
+/* ---- Base plate ------------------------------------------------------
+   Sits UNDER the backdrop picture, so it is what the artwork's own dark
+   areas resolve to.  Near-black, with red pools so the corners of the
+   window never go dead flat where the art has fallen off.
+   ---------------------------------------------------------------------- */
+window, .background {
+    background-color: #070406;
+    background-image:
+        radial-gradient(circle at 50% 38%, rgba(150, 12, 28, 0.14), rgba(150, 12, 28, 0.0) 58%),
+        linear-gradient(180deg, #0a0407, #070406 60%, #040205);
+    color: #f6eef0;
+}
+
+/* ---- Let the artwork reach every corner -----------------------------
+   libadwaita paints AdwOverlaySplitView's two halves itself:
+       .sidebar-pane { background-color: @sidebar_bg_color; }
+       .content-pane { background-color: @secondary_sidebar_bg_color; }
+   Those are OPAQUE, and they sit above the backdrop overlay, which is
+   why the first pass of this theme showed the art in the chat pane and
+   nowhere else - the sidebar was a black slab with a translucent box
+   painted on top of it.  Knocking both panes out to transparent is what
+   makes the glass work at all; the visible tint comes from .sidebar and
+   the panels themselves.  Do not put a colour back on these.
+   ---------------------------------------------------------------------- */
+.sidebar-pane, .content-pane, toastoverlay, overlay {
+    background-color: transparent;
+    background-image: none;
+}
+
+/* The scrim is the brightness control's surface: _apply_backdrop_brightness
+   rewrites its background-COLOR alpha live, so only ever give it an IMAGE
+   here.  These pools are what stop a low brightness setting from flattening
+   the whole app into black - they re-light it in the artwork's own red. */
+.chat-scrim {
+    background-image:
+        radial-gradient(circle at 50% 42%, rgba(160, 16, 34, 0.16), rgba(160, 16, 34, 0.0) 62%),
+        linear-gradient(180deg, rgba(0, 0, 0, 0.22) 0%, rgba(0, 0, 0, 0.0) 22%,
+                        rgba(0, 0, 0, 0.0) 76%, rgba(0, 0, 0, 0.30) 100%);
+}
+.chat-watermark { background: transparent; }
+
+/* ---- Header: a glass rail with a lit bottom edge --------------------- */
+headerbar {
+    background-color: rgba(22, 10, 15, 0.46);
+    background-image:
+        linear-gradient(180deg,
+            rgba(255, 240, 242, 0.16) 0%,
+            rgba(255, 240, 242, 0.05) 46%,
+            rgba(255, 240, 242, 0.0) 52%,
+            rgba(0, 0, 0, 0.18) 100%);
+    border-bottom: 1px solid rgba(255, 47, 68, 0.42);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.22),
+        inset 0 -16px 28px rgba(180, 14, 32, 0.16),
+        0 6px 20px rgba(0, 0, 0, 0.45);
+}
+
+/* ---- Sidebar: the same glass, one shade smokier so depth still reads - */
+.sidebar {
+    background-color: rgba(16, 7, 11, 0.44);
+    background-image:
+        linear-gradient(180deg,
+            rgba(255, 240, 242, 0.10) 0%,
+            rgba(255, 240, 242, 0.03) 42%,
+            rgba(255, 240, 242, 0.0) 52%,
+            rgba(0, 0, 0, 0.22) 100%);
+    border-right: 1px solid rgba(255, 47, 68, 0.32);
+    box-shadow:
+        inset -1px 0 0 rgba(255, 255, 255, 0.07),
+        6px 0 22px rgba(0, 0, 0, 0.40);
+}
+.sidebar headerbar {
+    background-color: rgba(22, 10, 15, 0.34);
+    border-bottom: 1px solid rgba(255, 47, 68, 0.26);
+}
+
+/* ---- Sidebar chat rows: glass chips ---------------------------------- */
+.chat-row {
+    border-radius: 14px;
+    border-left: 3px solid transparent;
+    background-color: rgba(34, 16, 22, 0.26);
+    background-image:
+        linear-gradient(180deg,
+            rgba(255, 240, 242, 0.10) 0%,
+            rgba(255, 240, 242, 0.02) 48%,
+            rgba(255, 240, 242, 0.0) 52%,
+            rgba(0, 0, 0, 0.10) 100%);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.11);
+}
+.chat-row:hover {
+    background-color: rgba(60, 24, 32, 0.40);
+    border-left-color: rgba(255, 60, 78, 0.60);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.18),
+        0 0 16px rgba(226, 24, 44, 0.24);
+}
+.chat-row.selected, .chat-row:selected {
+    background-color: rgba(138, 14, 32, 0.34);
+    background-image:
+        linear-gradient(180deg,
+            rgba(255, 235, 238, 0.20) 0%,
+            rgba(255, 120, 138, 0.07) 48%,
+            rgba(255, 60, 80, 0.0) 52%,
+            rgba(0, 0, 0, 0.16) 100%);
+    border-left: 3px solid #ff2f44;
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.30),
+        inset 0 0 26px rgba(255, 40, 60, 0.16),
+        0 0 22px rgba(226, 24, 44, 0.36);
+}
+.chat-row .title-line { color: #fdf3f5; }
+.chat-row .meta-line  { color: #b39aa1; }
+
+/* ---- MESSAGE BUBBLES  -  the point of the whole theme ----------------
+   Real glass: you can see the artwork through both of them.  The user's
+   bubble is red-tinted glass (it belongs to the operator, and red is the
+   backdrop's own light); the assistant's is smoked obsidian with a lit
+   warm edge, so the two are told apart by MATERIAL and not just by which
+   side of the pane they sit on.  Neither is grey.
+
+   Alpha budget: the tint stays at or below 0.36 or the glass turns into
+   paint, and at or above 0.26 or the artwork's bright neon lines start
+   cutting through the text on top of it.  Both sit inside that band, and
+   the text-shadow underneath every line is what buys the lower end.
+   ---------------------------------------------------------------------- */
+.msg-user, .msg-assistant {
+    transition: box-shadow 200ms ease, border-color 200ms ease,
+                background-color 200ms ease;
+}
+.msg-user {
+    color: #fff1f3;
+    border-radius: 18px 18px 6px 18px;
+    padding: 18px 22px;
+    margin: 8px 12px;
+    background-color: rgba(126, 12, 28, 0.32);
+    background-image:
+        linear-gradient(180deg,
+            rgba(255, 236, 240, 0.22) 0%,
+            rgba(255, 150, 165, 0.08) 46%,
+            rgba(255, 60, 80, 0.0) 52%,
+            rgba(44, 0, 8, 0.22) 100%);
+    border: 1px solid rgba(255, 104, 124, 0.58);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.38),
+        inset 0 0 30px rgba(255, 40, 62, 0.14),
+        inset 0 -18px 30px rgba(96, 4, 16, 0.22),
+        0 10px 26px rgba(0, 0, 0, 0.46),
+        0 0 24px rgba(226, 24, 44, 0.30);
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.75);
+}
+.msg-assistant {
+    color: #fbf1f3;
+    border-radius: 6px 18px 18px 18px;
+    padding: 16px 20px;
+    margin: 8px 12px;
+    background-color: rgba(26, 12, 18, 0.34);
+    background-image:
+        linear-gradient(180deg,
+            rgba(255, 238, 240, 0.18) 0%,
+            rgba(255, 200, 208, 0.05) 46%,
+            rgba(255, 200, 208, 0.0) 52%,
+            rgba(0, 0, 0, 0.24) 100%);
+    border: 1px solid rgba(255, 214, 220, 0.34);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.34),
+        inset 0 0 30px rgba(255, 90, 110, 0.07),
+        inset 0 -18px 30px rgba(0, 0, 0, 0.24),
+        0 10px 26px rgba(0, 0, 0, 0.48),
+        0 0 22px rgba(226, 24, 44, 0.20);
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.72);
+}
+.msg-user:hover {
+    background-color: rgba(140, 14, 32, 0.36);
+    border-color: rgba(255, 132, 150, 0.76);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.44),
+        inset 0 0 34px rgba(255, 50, 72, 0.18),
+        inset 0 -18px 30px rgba(96, 4, 16, 0.24),
+        0 12px 30px rgba(0, 0, 0, 0.48),
+        0 0 32px rgba(255, 40, 62, 0.44);
+}
+.msg-assistant:hover {
+    background-color: rgba(34, 15, 22, 0.38);
+    border-color: rgba(255, 226, 230, 0.50);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.40),
+        inset 0 0 34px rgba(255, 110, 130, 0.10),
+        inset 0 -18px 30px rgba(0, 0, 0, 0.26),
+        0 12px 30px rgba(0, 0, 0, 0.50),
+        0 0 30px rgba(226, 24, 44, 0.32);
+}
+.msg-system-notice {
+    background-color: rgba(26, 12, 18, 0.32);
+    background-image:
+        linear-gradient(180deg, rgba(255, 240, 242, 0.10) 0%,
+                        rgba(255, 240, 242, 0.0) 52%,
+                        rgba(0, 0, 0, 0.14) 100%);
+    border: 1px solid rgba(255, 214, 220, 0.24);
+    border-radius: 12px;
+    color: #e0cbd0;
+}
+.role-label            { color: #ad939a; }
+.role-label.user       { color: #ff6474; }
+.role-label.basilisk   { color: #ffd4d9; }
+.msg-footer            { margin-top: 6px; }
+.avatar {
+    border-radius: 10px;
+    background-color: rgba(34, 16, 22, 0.36);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18),
+                0 0 14px rgba(226, 24, 44, 0.24);
+}
+
+/* ---- Links inside bubbles: readable on glass ------------------------- */
+.msg-assistant *:link, .msg-user *:link, link, *:link {
+    color: #ff9aa6;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.72);
+}
+.msg-assistant *:link:hover, .msg-user *:link:hover {
+    color: #ffc8ce;
+}
+
+/* ---- Code: dark glass with a red-lit edge.  The TEXTVIEW itself stays
+        transparent so the artwork carries on through the code, and the
+        monospace metrics are untouched - only colour changes here. ----- */
+.code-block {
+    background-color: rgba(12, 5, 9, 0.62);
+    background-image:
+        linear-gradient(180deg, rgba(255, 240, 242, 0.09) 0%,
+                        rgba(255, 240, 242, 0.0) 52%,
+                        rgba(0, 0, 0, 0.20) 100%);
+    border: 1px solid rgba(255, 60, 80, 0.36);
+    border-radius: 12px;
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.16),
+        0 6px 18px rgba(0, 0, 0, 0.42);
+}
+.code-block-header {
+    background-color: rgba(138, 14, 32, 0.30);
+    color: #ffc2c9;
+    border-bottom: 1px solid rgba(255, 60, 80, 0.34);
+    border-radius: 12px 12px 0 0;
+}
+.code-block textview       { background-color: transparent; color: #ffe3e6; }
+.code-block textview text  { background-color: transparent; color: #ffe3e6; }
+.cmd-text {
+    background-color: rgba(12, 5, 9, 0.48);
+    border: 1px solid rgba(255, 60, 80, 0.36);
+    border-radius: 8px;
+    color: #ff9aa6;
+}
+.confirm-cmd {
+    background-color: rgba(12, 5, 9, 0.48);
+    border: 1px solid rgba(255, 60, 80, 0.36);
+    border-radius: 8px;
+    color: #ffc2c9;
+}
+
+/* ---- Markdown blocks -------------------------------------------------
+   Colour only.  Every padding, margin, min-width and font-size that the
+   table/heading/list builders depend on is left exactly as the base
+   stylesheet set it, because those numbers are what the width and
+   height-for-width measurements are tuned against - restyling a table by
+   changing its padding here is how you get text drawn outside its own
+   background again. ---------------------------------------------------- */
+.md-heading-text {
+    color: #ffe4e7;
+    text-shadow: 0 0 12px rgba(255, 40, 62, 0.40), 0 1px 2px rgba(0, 0, 0, 0.72);
+}
+.md-heading-rule { background-color: rgba(255, 60, 80, 0.40); }
+.md-rule         { background-color: rgba(255, 214, 220, 0.18); }
+.md-list-marker  { color: #ff6474; }
+.md-list-text    { color: #f4e8ea; }
+.md-quote {
+    background-color: rgba(34, 14, 20, 0.32);
+    background-image:
+        linear-gradient(180deg, rgba(255, 240, 242, 0.09) 0%,
+                        rgba(255, 240, 242, 0.0) 52%,
+                        rgba(0, 0, 0, 0.14) 100%);
+    border: 1px solid rgba(255, 214, 220, 0.22);
+    border-radius: 10px;
+}
+.md-quote-rail { background-color: #ff2f44; }
+.md-quote-body { color: #e6d3d7; }
+
+/* Tables: sheet glass, header strip lit like the ring in the artwork */
+.md-table {
+    background-color: rgba(20, 9, 14, 0.42);
+    background-image:
+        linear-gradient(180deg, rgba(255, 240, 242, 0.10) 0%,
+                        rgba(255, 240, 242, 0.0) 52%,
+                        rgba(0, 0, 0, 0.18) 100%);
+    border: 1px solid rgba(255, 214, 220, 0.28);
+    border-radius: 12px;
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.18),
+        0 6px 18px rgba(0, 0, 0, 0.40);
+}
+.md-table scrolledwindow { background-color: transparent; }
+.md-table-grid           { background-color: transparent; }
+.md-th {
+    background-color: rgba(138, 14, 32, 0.40);
+    border-bottom: 2px solid rgba(255, 60, 80, 0.52);
+    border-right: 1px solid rgba(255, 214, 220, 0.16);
+}
+.md-th label { color: #ffe4e7; }
+.md-td {
+    border-top: 1px solid rgba(255, 214, 220, 0.12);
+    border-right: 1px solid rgba(255, 214, 220, 0.09);
+}
+.md-td.odd   { background-color: rgba(255, 214, 220, 0.05); }
+.md-td label { color: #f4e8ea; }
+.md-table-more { color: #b39aa1; }
+
+/* ---- Composer -------------------------------------------------------- */
+.input-frame {
+    background-color: rgba(24, 11, 16, 0.46);
+    background-image:
+        linear-gradient(180deg,
+            rgba(255, 240, 242, 0.18) 0%,
+            rgba(255, 240, 242, 0.05) 46%,
+            rgba(255, 240, 242, 0.0) 52%,
+            rgba(0, 0, 0, 0.22) 100%);
+    border: 1px solid rgba(255, 214, 220, 0.32);
+    border-radius: 22px;
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.30),
+        0 8px 22px rgba(0, 0, 0, 0.44),
+        0 0 18px rgba(226, 24, 44, 0.18);
+}
+.input-frame:focus-within {
+    background-color: rgba(38, 12, 20, 0.52);
+    border-color: rgba(255, 70, 90, 0.76);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.36),
+        0 8px 24px rgba(0, 0, 0, 0.46),
+        0 0 28px rgba(255, 40, 62, 0.44);
+}
+
+/* ---- Cards, chips, badges ------------------------------------------- */
+.card, .cmd-card {
+    background-color: rgba(24, 11, 16, 0.42);
+    background-image:
+        linear-gradient(180deg, rgba(255, 240, 242, 0.11) 0%,
+                        rgba(255, 240, 242, 0.0) 52%,
+                        rgba(0, 0, 0, 0.20) 100%);
+    border: 1px solid rgba(255, 214, 220, 0.28);
+    border-left: 4px solid rgba(255, 47, 68, 0.85);
+    border-radius: 14px;
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.20),
+        0 8px 22px rgba(0, 0, 0, 0.44);
+}
+.cmd-card-title { color: #ff8b98; }
+.cmd-explain    { color: #e0cbd0; }
+.card-warn {
+    background-color: rgba(229, 72, 77, 0.16);
+    background-image:
+        linear-gradient(180deg, rgba(255, 240, 242, 0.12) 0%,
+                        rgba(255, 240, 242, 0.0) 52%,
+                        rgba(0, 0, 0, 0.14) 100%);
+    border: 1px solid rgba(255, 96, 106, 0.56);
+    border-radius: 12px;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+.quick-chip, .attach-chip, .effort-pill, .status-pill, .risk-badge,
+.notif-badge, .autorun-note, .watcher-banner, .media-panel,
+.media-placeholder, .attach-tray, .model-pick-row, .model-group-header {
+    background-image:
+        linear-gradient(180deg, rgba(255, 240, 242, 0.15) 0%,
+                        rgba(255, 240, 242, 0.0) 52%,
+                        rgba(0, 0, 0, 0.16) 100%);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.20);
+}
+.quick-chip, .attach-chip {
+    background-color: rgba(34, 16, 22, 0.40);
+    border: 1px solid rgba(255, 214, 220, 0.28);
+    border-radius: 999px;
+}
+.quick-chip:hover, .attach-chip:hover {
+    background-color: rgba(138, 14, 32, 0.36);
+    border-color: rgba(255, 80, 100, 0.60);
+}
+.effort-pill {
+    background-color: rgba(34, 16, 22, 0.40);
+    border: 1px solid rgba(255, 214, 220, 0.26);
+    border-radius: 999px;
+}
+.effort-seg:checked {
+    background-color: rgba(170, 14, 34, 0.56);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.30),
+                0 0 14px rgba(255, 40, 62, 0.38);
+}
+.media-panel, .media-placeholder, .attach-tray {
+    background-color: rgba(24, 11, 16, 0.40);
+    border: 1px solid rgba(255, 214, 220, 0.24);
+    border-radius: 14px;
+}
+
+/* ---- The activity feed / dock --------------------------------------- */
+.activity-feed, .activity-dock {
+    background-color: rgba(22, 10, 16, 0.42);
+    background-image:
+        linear-gradient(180deg, rgba(255, 240, 242, 0.11) 0%,
+                        rgba(255, 240, 242, 0.0) 52%,
+                        rgba(0, 0, 0, 0.20) 100%);
+    border: 1px solid rgba(255, 214, 220, 0.28);
+    border-radius: 16px;
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.20),
+        0 8px 22px rgba(0, 0, 0, 0.44),
+        0 0 16px rgba(226, 24, 44, 0.16);
+}
+.activity-title   { color: #fdf3f5; }
+.activity-meta    { color: #b39aa1; }
+.activity-preview-box {
+    background-color: rgba(12, 5, 9, 0.46);
+    border: 1px solid rgba(255, 214, 220, 0.18);
+    border-radius: 10px;
+}
+
+/* ---- Terminal panel -------------------------------------------------- */
+/* The log panel is the one glass surface that has to carry dense
+   monospace machine output, and shell output has no text-shadow to lean
+   on - so it is deliberately the thickest in-window tint of the set.
+   Any lower and stderr becomes unreadable over the artwork's neon. */
+.terminal-panel {
+    background-color: rgba(10, 4, 7, 0.80);
+    border-top: 1px solid rgba(255, 60, 80, 0.40);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.11);
+}
+.terminal-panel-header {
+    background-color: rgba(138, 14, 32, 0.28);
+    background-image:
+        linear-gradient(180deg, rgba(255, 240, 242, 0.13) 0%,
+                        rgba(255, 240, 242, 0.0) 52%,
+                        rgba(0, 0, 0, 0.16) 100%);
+    border-bottom: 1px solid rgba(255, 60, 80, 0.34);
+}
+.terminal-panel-title { color: #ff8b98; }
+.terminal-log-view, .terminal-log-view text {
+    background-color: transparent;
+    color: #f0dfe2;
+}
+
+/* ---- Buttons: small panes of the same glass -------------------------- */
+button, .icon-button, .header-icon-button, .glyph-btn,
+menubutton.glyph-btn > button, .model-switch-btn, .terminal-toggle-btn,
+.menu-button, .wordmark-btn, .msg-speak-btn, .cmd-copy-btn, .mic-button {
+    background-color: rgba(38, 18, 24, 0.42);
+    background-image:
+        linear-gradient(180deg,
+            rgba(255, 240, 242, 0.18) 0%,
+            rgba(255, 240, 242, 0.05) 46%,
+            rgba(255, 240, 242, 0.0) 52%,
+            rgba(0, 0, 0, 0.22) 100%);
+    border: 1px solid rgba(255, 214, 220, 0.30);
+    color: #fbeef0;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.24);
+}
+button:hover, .icon-button:hover, .header-icon-button:hover,
+.glyph-btn:hover, menubutton.glyph-btn > button:hover,
+.model-switch-btn:hover, .terminal-toggle-btn:hover,
+.msg-speak-btn:hover, .cmd-copy-btn:hover, .mic-button:hover {
+    background-color: rgba(160, 14, 34, 0.46);
+    border-color: rgba(255, 80, 100, 0.68);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.34),
+        0 0 18px rgba(255, 40, 62, 0.38);
+}
+button:active, .glyph-btn:active, .icon-button:active {
+    background-color: rgba(104, 8, 22, 0.56);
+    box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.50);
+}
+button:disabled {
+    background-color: rgba(38, 18, 24, 0.22);
+    border-color: rgba(255, 214, 220, 0.14);
+    color: #8a7378;
+}
+button.flat {
+    background-color: transparent;
+    background-image: none;
+    border-color: transparent;
+    box-shadow: none;
+}
+button.flat:hover {
+    background-color: rgba(160, 14, 34, 0.36);
+    border-color: rgba(255, 80, 100, 0.50);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.24);
+}
+button.suggested-action, .primary-action, .cmd-run-btn {
+    background-color: rgba(180, 16, 38, 0.64);
+    background-image:
+        linear-gradient(180deg,
+            rgba(255, 236, 240, 0.32) 0%,
+            rgba(255, 120, 140, 0.11) 46%,
+            rgba(255, 60, 80, 0.0) 52%,
+            rgba(54, 0, 10, 0.28) 100%);
+    border: 1px solid rgba(255, 116, 134, 0.78);
+    color: #fff5f6;
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.46),
+        0 0 20px rgba(255, 40, 62, 0.38);
+}
+button.suggested-action:hover, .primary-action:hover, .cmd-run-btn:hover {
+    background-color: rgba(208, 20, 46, 0.72);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.54),
+        0 0 28px rgba(255, 40, 62, 0.56);
+}
+/* The send button is pure PNG art - give it a lit glass pad, never a
+   fill that would box the artwork in. */
+.send-button {
+    background-color: rgba(138, 14, 32, 0.28);
+    background-image:
+        linear-gradient(180deg, rgba(255, 236, 240, 0.22) 0%,
+                        rgba(255, 60, 80, 0.0) 52%,
+                        rgba(0, 0, 0, 0.16) 100%);
+    border: 1px solid rgba(255, 90, 110, 0.50);
+    border-radius: 16px;
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.30),
+        0 0 16px rgba(226, 24, 44, 0.30);
+}
+.send-button:hover {
+    background-color: rgba(180, 16, 38, 0.42);
+    border-color: rgba(255, 120, 140, 0.76);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.40),
+        0 0 26px rgba(255, 40, 62, 0.54);
+}
+.unleash-button {
+    background-color: rgba(34, 16, 22, 0.36);
+    border: 1px solid rgba(255, 214, 220, 0.26);
+    border-radius: 999px;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22);
+}
+.unleash-button.toggled {
+    background-color: rgba(190, 16, 40, 0.54);
+    border-color: rgba(255, 116, 134, 0.84);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.40),
+        0 0 24px rgba(255, 40, 62, 0.56);
+}
+
+/* ---- Entries, search, switches -------------------------------------- */
+entry, searchentry, searchentry text, .sidebar-search, passwordentry,
+spinbutton entry {
+    background-color: rgba(18, 8, 12, 0.46);
+    background-image:
+        linear-gradient(180deg, rgba(0, 0, 0, 0.24) 0%,
+                        rgba(0, 0, 0, 0.0) 40%);
+    border: 1px solid rgba(255, 214, 220, 0.28);
+    border-radius: 12px;
+    color: #f6eef0;
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.42);
+}
+entry:focus-within, searchentry:focus-within, .sidebar-search:focus-within {
+    border-color: rgba(255, 70, 90, 0.74);
+    box-shadow:
+        inset 0 1px 3px rgba(0, 0, 0, 0.42),
+        0 0 18px rgba(255, 40, 62, 0.36);
+}
+switch {
+    background-color: rgba(34, 16, 22, 0.52);
+    border: 1px solid rgba(255, 214, 220, 0.28);
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.42);
+}
+switch:checked {
+    background-color: rgba(190, 16, 40, 0.68);
+    border-color: rgba(255, 116, 134, 0.76);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28),
+                0 0 14px rgba(255, 40, 62, 0.40);
+}
+switch > slider {
+    background-image: linear-gradient(180deg, #ffffff, #e6ccd2);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.50);
+}
+
+/* ---- Popovers, menus, dialogs, preference rows -----------------------
+   These float ABOVE the window on their own surfaces, so they get a much
+   higher alpha than the in-window panels: at 0.42 a dropdown was
+   unreadable over the artwork.  Still glass, just thicker glass. ------- */
+popover > contents, popover > arrow, .popover-menu, menu, .menu {
+    background-color: rgba(20, 9, 14, 0.90);
+    background-image:
+        linear-gradient(180deg, rgba(255, 240, 242, 0.13) 0%,
+                        rgba(255, 240, 242, 0.0) 52%,
+                        rgba(0, 0, 0, 0.22) 100%);
+    border: 1px solid rgba(255, 214, 220, 0.30);
+    border-radius: 14px;
+    color: #f6eef0;
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.22),
+        0 14px 34px rgba(0, 0, 0, 0.58);
+}
+popover row:selected, dropdown listview > row:selected,
+.model-pick-active {
+    background-color: rgba(190, 16, 40, 0.58);
+    color: #ffffff;
+}
+/* A dialog sits over the conversation, not over the artwork, so it gets
+   the thickest glass in the theme: enough to read a settings page through,
+   with the gloss and the lit rim kept so it still belongs to the set. */
+window.dialog, dialog, .messagedialog, .dialog-content, .splash-window {
+    background-color: rgba(16, 7, 11, 0.90);
+    background-image:
+        linear-gradient(180deg, rgba(255, 240, 242, 0.10) 0%,
+                        rgba(255, 240, 242, 0.0) 52%,
+                        rgba(0, 0, 0, 0.20) 100%);
+    border: 1px solid rgba(255, 214, 220, 0.26);
+    border-radius: 18px;
+    color: #f6eef0;
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.20),
+        0 18px 44px rgba(0, 0, 0, 0.62);
+}
+preferencespage, preferencesgroup {
+    background-color: transparent;
+    background-image: none;
+    color: #f6eef0;
+}
+list.boxed-list, list.boxed-list > row, row, comborow, .row {
+    background-color: rgba(38, 18, 24, 0.40);
+    color: #f6eef0;
+}
+list.boxed-list {
+    border: 1px solid rgba(255, 214, 220, 0.24);
+    border-radius: 14px;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16);
+}
+row:hover { background-color: rgba(160, 14, 34, 0.30); }
+.settings-section-title { color: #ff8b98; }
+dropdown > button {
+    background-color: rgba(38, 18, 24, 0.44);
+    border: 1px solid rgba(255, 214, 220, 0.28);
+    border-radius: 10px;
+}
+
+/* ---- Scrollbars: slivers of red glass -------------------------------- */
+scrollbar { background-color: transparent; }
+scrollbar slider {
+    background-color: rgba(255, 214, 220, 0.28);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 999px;
+}
+scrollbar slider:hover  { background-color: rgba(255, 80, 100, 0.56); }
+scrollbar slider:active { background-color: rgba(255, 47, 68, 0.80); }
+
+/* ---- Type: keep it legible on top of a photograph -------------------- */
+.chat-title, .app-title    { color: #fdf3f5; }
+.chat-subtitle, .app-subtitle, .empty-state-body, .tool-indicator-label {
+    color: #bda8ad;
+}
+.empty-state-title { color: #fdf3f5; }
+.tao-quote         { color: #b39aa1; }
+.thoughts-text     { color: #ddc9ce; }
+.working-label     { color: #ffd4d9; }
+.online-dot.online { color: #ff2f44; text-shadow: 0 0 9px rgba(255, 40, 62, 0.80); }
+
+/* ---- Text views: the last opaque rectangles ---------------------------
+   A Gtk.TextView paints its own `text` node with the theme's view colour,
+   which is OPAQUE. The composer, the code blocks and the terminal log are
+   all TextViews, so until these knock the node out they sit inside a
+   translucent frame as solid black cut-outs - the one detail that made the
+   glass look like a sticker album. Colour and transparency only: no
+   margins, no font metrics, nothing the wrap/measure code reads. -------- */
+.input-frame textview,
+.input-frame textview text,
+.input-frame scrolledwindow,
+.input-frame viewport {
+    background-color: transparent;
+    background-image: none;
+    color: #f8eff1;
+}
+.input-frame textview text selection {
+    background-color: rgba(200, 20, 46, 0.55);
+    color: #ffffff;
+}
+.code-block scrolledwindow,
+.code-block viewport,
+.terminal-panel scrolledwindow,
+.terminal-panel viewport,
+.chat-scroll,
+.chat-scroll viewport,
+.thoughts-expander,
+.thoughts-expander > title {
+    background-color: transparent;
+    background-image: none;
+}
+textview.terminal-log-view text { background-color: transparent; }
+
+/* ---- Table strip contrast -------------------------------------------
+   On a busy photograph a 0.05 zebra stripe is invisible and the header row
+   stops reading as a header. Nudged up until the grid survives the art
+   behind it. Colour only - the cell padding stays exactly where the width
+   measurement expects it. ---------------------------------------------- */
+.md-th     { background-color: rgba(150, 14, 34, 0.52); }
+.md-td.odd { background-color: rgba(255, 226, 230, 0.08); }
+
+/* ---- The burning status bar, cooled into the same glass -------------- */
+.working-row {
+    background-color: rgba(104, 8, 22, 0.36);
+    border: 1px solid rgba(255, 80, 100, 0.44);
+    border-radius: 12px;
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.24),
+        0 0 18px rgba(255, 40, 62, 0.32);
+}
+
+/* =====================================================================
+   OBSIDIAN GLASS - PASS 2: the nameplate, the pill, the cut edges
+   =====================================================================
+   Appended after pass 1 so it wins where the two overlap.  ASCII only.
+
+   Pass 1 made every surface translucent.  This pass gives the set its
+   SHAPE.  Two rules carry it:
+
+     - a CUT EDGE.  The reference look is armour plate, not a soft app
+       card: the frame is a bright hairline with the corner radius kept
+       small and uneven (a big radius on one corner, a small one on the
+       next) so a panel reads as something machined rather than something
+       rounded off.  GTK CSS has no clip-path, so the chamfer is faked
+       with an asymmetric border-radius plus a second, brighter inset
+       ring drawn 1px inside the first - which is what actually sells the
+       bevel at a glance.
+
+     - a LIT RIM.  Every framed panel carries a red bloom whose strength
+       tracks how important the panel is: the hero card and an armed
+       Unleash burn, an inactive button barely glows.  Nothing here is
+       an animation - the app must stay perfectly still while idle.
+   ===================================================================== */
+
+/* ---- The nameplate a new chat opens on ------------------------------- */
+.hero-card {
+    padding: 34px 44px 30px 44px;
+    margin: 0 12px;
+    border-radius: 26px 6px 26px 6px;
+    background-color: rgba(20, 9, 14, 0.44);
+    background-image:
+        linear-gradient(180deg,
+            rgba(255, 240, 242, 0.16) 0%,
+            rgba(255, 240, 242, 0.04) 46%,
+            rgba(255, 240, 242, 0.0) 52%,
+            rgba(0, 0, 0, 0.26) 100%);
+    border: 1px solid rgba(255, 214, 220, 0.34);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.34),
+        inset 0 0 0 1px rgba(255, 90, 110, 0.12),
+        inset 0 -30px 50px rgba(0, 0, 0, 0.28),
+        0 18px 44px rgba(0, 0, 0, 0.56),
+        0 0 34px rgba(226, 24, 44, 0.26);
+}
+.hero-emblem { margin-bottom: 12px; }
+.hero-eyebrow {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 6px;
+    color: #d9b3ba;
+    margin-bottom: 2px;
+}
+.hero-title {
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 46px;
+    font-weight: 900;
+    letter-spacing: 8px;
+    color: #fff2f4;
+    text-shadow:
+        0 0 26px rgba(255, 40, 62, 0.60),
+        0 0 60px rgba(255, 20, 44, 0.30),
+        0 2px 3px rgba(0, 0, 0, 0.86);
+}
+/* The hairline under the wordmark. A Gtk.Box with no child has no natural
+   height, so it needs both, or the rule silently does not draw. */
+.hero-rule {
+    /* WHY THIS IS NOT A 1px LINE WITH A GRADIENT.
+       That is what it was, and on a 0.70 UI scale over a photographic
+       backdrop it drew about four barely-tinted pixels and read as
+       nothing at all. A divider either separates two things or it is
+       noise. Three real pixels, a bright core, transparent ends (so NO
+       background-color - a flat colour underneath would defeat the fade),
+       and a glow that does most of the actual work of being seen. */
+    min-height: 3px;
+    min-width: 260px;
+    margin: 15px 0 13px 0;
+    background-image: linear-gradient(90deg,
+        rgba(255, 60, 84, 0.0) 0%,
+        rgba(255, 96, 118, 0.70) 26%,
+        rgba(255, 226, 232, 0.95) 50%,
+        rgba(255, 96, 118, 0.70) 74%,
+        rgba(255, 60, 84, 0.0) 100%);
+    box-shadow: 0 0 14px rgba(255, 47, 68, 0.75);
+}
+.hero-subtitle {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 4px;
+    color: #bda8ad;
+    margin-bottom: 18px;
+}
+.hero-chip {
+    padding: 8px 20px;
+    border-radius: 999px;
+    background-color: rgba(138, 14, 32, 0.36);
+    background-image:
+        linear-gradient(180deg, rgba(255, 236, 240, 0.24) 0%,
+                        rgba(255, 60, 80, 0.0) 52%,
+                        rgba(0, 0, 0, 0.18) 100%);
+    border: 1px solid rgba(255, 104, 124, 0.60);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.34),
+        0 0 20px rgba(255, 40, 62, 0.34);
+    margin-bottom: 20px;
+}
+.hero-chip-dot {
+    font-size: 13px;
+    color: #ff2f44;
+    text-shadow: 0 0 10px rgba(255, 40, 62, 0.90);
+}
+.hero-chip-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: 0.6px;
+    color: #fff2f4;
+}
+.hero-specs { margin-bottom: 18px; }
+.hero-spec-key {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 15px;
+    letter-spacing: 1.4px;
+    color: #a59197;
+}
+.hero-spec-val {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 15px;
+    font-weight: 700;
+    color: #f2e4e7;
+}
+.hero-hint {
+    font-size: 14px;
+    color: #918086;
+    font-style: italic;
+}
+
+/* ---- UNLEASH: a labelled pill, built from the same parts as the rest --
+   Disarmed it is one more glass control and does not shout.  Armed it is
+   the loudest thing in the window, because what it turns on is an agent
+   that will keep running without asking. ------------------------------- */
+.unleash-button {
+    padding: 7px 18px 7px 14px;
+    border-radius: 999px;
+    min-height: 0;
+    background-color: rgba(38, 18, 24, 0.44);
+    background-image:
+        linear-gradient(180deg,
+            rgba(255, 240, 242, 0.18) 0%,
+            rgba(255, 240, 242, 0.05) 46%,
+            rgba(255, 240, 242, 0.0) 52%,
+            rgba(0, 0, 0, 0.22) 100%);
+    border: 1px solid rgba(255, 214, 220, 0.32);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.24);
+}
+.unleash-button:hover {
+    background-color: rgba(160, 14, 34, 0.44);
+    border-color: rgba(255, 96, 116, 0.68);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.32),
+        0 0 20px rgba(255, 40, 62, 0.40);
+}
+.unleash-button.toggled {
+    background-color: rgba(196, 16, 42, 0.62);
+    background-image:
+        linear-gradient(180deg,
+            rgba(255, 240, 244, 0.38) 0%,
+            rgba(255, 130, 150, 0.12) 46%,
+            rgba(255, 60, 80, 0.0) 52%,
+            rgba(58, 0, 10, 0.30) 100%);
+    border-color: rgba(255, 150, 166, 0.90);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.56),
+        inset 0 -10px 20px rgba(120, 0, 16, 0.34),
+        0 0 30px rgba(255, 40, 62, 0.66);
+}
+.unleash-button.toggled:hover {
+    background-color: rgba(222, 20, 50, 0.70);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.64),
+        0 0 40px rgba(255, 40, 62, 0.80);
+}
+.unleash-glyph { font-size: 19px; }
+.unleash-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14px;
+    font-weight: 800;
+    letter-spacing: 2.2px;
+    color: #e3ccd1;
+}
+.unleash-button:hover .unleash-label { color: #fff0f2; }
+.unleash-button.toggled .unleash-label {
+    color: #ffffff;
+    text-shadow: 0 0 12px rgba(255, 190, 200, 0.80);
+}
+
+/* ---- Cut edges on the big surfaces ----------------------------------
+   Same trick everywhere: uneven radius + a second inset ring 1px inside
+   the border.  Applied only to panels big enough to read as plate; on a
+   small chip it just looks like a mistake. -------------------------- */
+.msg-assistant {
+    border-radius: 4px 20px 20px 20px;
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.34),
+        inset 0 0 0 1px rgba(255, 214, 220, 0.09),
+        inset 0 0 30px rgba(255, 90, 110, 0.07),
+        inset 0 -18px 30px rgba(0, 0, 0, 0.24),
+        0 10px 26px rgba(0, 0, 0, 0.48),
+        0 0 22px rgba(226, 24, 44, 0.20);
+}
+.msg-user {
+    border-radius: 20px 20px 4px 20px;
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.38),
+        inset 0 0 0 1px rgba(255, 190, 200, 0.14),
+        inset 0 0 30px rgba(255, 40, 62, 0.14),
+        inset 0 -18px 30px rgba(96, 4, 16, 0.22),
+        0 10px 26px rgba(0, 0, 0, 0.46),
+        0 0 24px rgba(226, 24, 44, 0.30);
+}
+.input-frame {
+    border-radius: 24px 8px 24px 8px;
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.30),
+        inset 0 0 0 1px rgba(255, 214, 220, 0.10),
+        0 8px 22px rgba(0, 0, 0, 0.44),
+        0 0 18px rgba(226, 24, 44, 0.18);
+}
+.code-block, .md-table, .activity-feed, .activity-dock,
+.card, .cmd-card, .md-quote {
+    border-radius: 14px 4px 14px 4px;
+}
+.chat-row {
+    border-radius: 14px 4px 14px 4px;
+}
+window.dialog, dialog, .messagedialog, .dialog-content {
+    border-radius: 22px 8px 22px 8px;
+}
+
+/* ---- Sidebar type ---------------------------------------------------- */
+.chat-row .title-line {
+    font-weight: 700;
+    letter-spacing: 0.2px;
+}
+.tao-quote {
+    font-size: 15px;
+    line-height: 1.5;
+    color: #a59197;
+}
 """
 
 
@@ -2713,9 +3720,15 @@ def _pango_inline(t: str) -> str:
     """Bold / italic / inline-code, on text that carries no links."""
     t = BOLD_RE.sub(r"<b>\1</b>", t)
     t = ITALIC_RE.sub(r"<i>\1</i>", t)
+    # Inline code gets a GLASS chip, not a black one. Pango cannot take an
+    # rgba() colour, but background_alpha (0-65535) is exactly the knob for
+    # this: a near-opaque black rectangle inside a translucent bubble was the
+    # one element that still read as a sticker pasted onto the glass. ~0.62
+    # keeps the monospace legible while the artwork carries on behind it.
     t = INLINE_CODE_RE.sub(
         r'<span font_family="JetBrains Mono" '
-        r'background="#0a0c0f" foreground="#d6ffdf"> \1 </span>',
+        r'background="#2b0a12" background_alpha="40000" '
+        r'foreground="#ffd9dd"> \1 </span>',
         t)
     return t
 
@@ -4142,6 +5155,24 @@ def _find_avatar_png() -> Optional[str]:
 
 
 _AVATAR_PNG_PATH = _find_avatar_png()
+
+
+def _find_emblem_png() -> Optional[str]:
+    """The round sigil for the hero card.
+
+    Cut from the SAME artwork that hangs behind the window, so the nameplate
+    and the backdrop are visibly one design rather than two pieces of art that
+    happen to share a palette. Falls back to the framed avatar, which is what
+    the card used before and still reads correctly - just less like the room
+    it is standing in."""
+    for name in ("basilisk-emblem.png", "basilisk-avatar.png"):
+        for p in _asset_paths(name):
+            if os.path.isfile(p):
+                return p
+    return None
+
+
+_EMBLEM_PNG_PATH = _find_emblem_png()
 
 
 def _find_logo_png() -> Optional[str]:
@@ -6083,6 +7114,31 @@ class SettingsDialog(Adw.PreferencesDialog):
                                      int(r.get_value())))
         rg.add(self.answer_budget_row)
 
+        # ── Reasoning depth: chosen HERE, before the chat starts ──
+        # This used to be a segmented pill sitting in the composer, changeable
+        # mid-conversation. That is not how a reasoning dial works: the
+        # thinking budget is part of how the whole conversation was produced,
+        # so flipping it at message nine gives you a transcript half of which
+        # was reasoned one way and half the other, and no way to tell which
+        # reply came from which. It now belongs to the chat: pick it before
+        # the first message, and it is fixed for that chat's lifetime. A new
+        # chat is how you change your mind.
+        self.effort_row = Adw.ComboRow()
+        self.effort_row.set_title("Reasoning depth")
+        self.effort_row.set_model(
+            Gtk.StringList.new(["Low \u00b7 fastest", "Medium",
+                                "High \u00b7 thinks hardest"]))
+        _lvls = list(_REASONING_EFFORT_LEVELS)
+        _cur = parent._effective_effort()
+        self.effort_row.set_selected(
+            _lvls.index(_cur) if _cur in _lvls else 0)
+        self.effort_row.connect(
+            "notify::selected",
+            lambda r, *_a: self._set_effort(_lvls[min(int(r.get_selected()),
+                                                      len(_lvls) - 1)]))
+        self._sync_effort_row(parent)
+        rg.add(self.effort_row)
+
         self.adaptive_effort_row = Adw.SwitchRow()
         self.adaptive_effort_row.set_title("Adaptive effort")
         self.adaptive_effort_row.set_subtitle(
@@ -7002,6 +8058,39 @@ class SettingsDialog(Adw.PreferencesDialog):
         self.win.settings[key] = value
         save_settings(self.win.settings)
 
+    # ── Reasoning depth is a per-chat, start-of-chat decision ──
+    def _set_effort(self, level):
+        if self.win._effort_locked():
+            # Belt and braces: the row is insensitive, but a combo can still
+            # be driven from code, and silently accepting the change would
+            # mean the transcript no longer matches the dial it shows.
+            self._sync_effort_row(self.win)
+            return
+        self._set("reasoning_effort", level)
+
+    def _sync_effort_row(self, parent):
+        """Show the depth the CURRENT chat is running at, and lock the row
+        once that chat has started."""
+        row = getattr(self, "effort_row", None)
+        if row is None:
+            return
+        model_has_dial = supports_reasoning_effort(parent._active_model_id())
+        row.set_visible(model_has_dial)
+        if not model_has_dial:
+            return
+        locked = parent._effort_locked()
+        row.set_sensitive(not locked)
+        if locked:
+            row.set_subtitle(
+                "Locked for this chat \u2014 it was set to "
+                f"{parent._effective_effort().upper()} when the conversation "
+                "started. Start a new chat to choose a different depth.")
+        else:
+            row.set_subtitle(
+                "How hard the model thinks on every turn of this chat. Fixed "
+                "as soon as you send the first message \u2014 start a new chat "
+                "to change it.")
+
     def _on_agent_mode_setting(self, row, _ps):
         # Drive the (now-hidden) toolbar toggle so every existing agent-mode side
         # effect fires — per-chat persistence, subtitle, and the internal state.
@@ -7510,12 +8599,14 @@ class MainWindow(Adw.ApplicationWindow):
         # OFF → answer once and stop. No autonomous grind, ever.
         # Unleash implies agent mode (it needs the tools + the mission loop), so
         # arming it forces current_agent_mode on and syncs the agent toggle.
-        self._unleashed: bool = bool(self.settings.get("unleashed", False))
+        # NOT read from settings any more: Unleash is per-chat (see
+        # _SESSION_FIELDS) and every chat opens stood down. A saved global
+        # "unleashed": true meant a relaunch came up armed, and the operator
+        # had no chat context in front of them when it did.
+        self._unleashed: bool = False
         # One-shot: set when Unleash is armed so the very next turn confirms the
         # target (or asks for it once if none is set yet) before going full send.
         self._unleash_kickoff_pending: bool = False
-        if self._unleashed:
-            self.current_agent_mode = True
         self.streaming_thread: Optional[threading.Thread] = None
         # Bumped once per stream. A callback carrying an older value belongs
         # to a turn that has been replaced and is ignored -- see the block
@@ -7534,6 +8625,27 @@ class MainWindow(Adw.ApplicationWindow):
         # started the turn — not whichever chat happens to be displayed
         # when the background work completes.
         self.streaming_chat_id: Optional[int] = None
+        # ── ONE SESSION PER CHAT ──
+        # Everything in _SESSION_FIELDS below used to be a single set of
+        # window-wide attributes, which meant a chat switch carried the
+        # previous conversation's session across with it: an armed Unleash,
+        # a latched mission and its objective, the tool-chain depth, the
+        # retry counters, the loop-detection history. Open a fresh chat off
+        # the back of a mission and the very first message inherited "keep
+        # going until the objective is complete" from a conversation it had
+        # nothing to do with - which is what "it keeps talking when I change
+        # chats" is. Each chat now owns its own copy: snapshotted on the way
+        # out of a chat, restored on the way in, and started clean for a new
+        # one. Keyed by chat id; entries are dropped when a chat is deleted.
+        self._sessions: Dict[int, Dict[str, Any]] = {}
+        # The open Settings dialog, or None. Only used to re-sync the
+        # reasoning-depth row when the chat or model changes under it.
+        self._settings_dialog = None
+        # True only while _load_chat is pushing restored state back into the
+        # widgets. The toggles fire their handlers on set_active(), and those
+        # handlers write settings, toast and stand down a mission - none of
+        # which may happen when we are merely REDRAWING a session.
+        self._restoring_session: bool = False
         self._tool_chain_depth: int = 0
         # Set once per turn when the tool-step budget is exhausted: the next
         # turn ignores any tool calls and just answers, so we never dead-end.
@@ -7640,6 +8752,11 @@ class MainWindow(Adw.ApplicationWindow):
         self._boot()
         GLib.idle_add(self._initial_chat_load)
         GLib.idle_add(self._refresh_sidebar)
+        # Open with the cursor in the composer. Every other chat application
+        # does this, and without it the first thing the operator has to do on
+        # launch is find and click a text box that is the only place they were
+        # ever going to type.
+        GLib.idle_add(self._focus_composer)
 
     def _initial_chat_load(self):
         """At launch: tidy up per the history policy, then either open a
@@ -7826,10 +8943,38 @@ class MainWindow(Adw.ApplicationWindow):
         self.split.set_min_sidebar_width(280)
         self.split.set_max_sidebar_width(360)
         self.split.set_sidebar_width_fraction(0.28)
-        self.toast_overlay.set_child(self.split)
 
         self.split.set_sidebar(self._build_sidebar())
         self.split.set_content(self._build_main())
+
+        # ── OBSIDIAN GLASS: the artwork is the APP's backdrop, not the chat's ──
+        # It used to live inside _build_main, behind the message scroller only,
+        # which is why the sidebar, the header and the composer were flat slabs
+        # bolted onto a picture: three different surfaces that never agreed on
+        # what was behind them. Now one Gtk.Overlay carries the art across the
+        # entire window and the split view floats ON it, so every panel that
+        # went translucent in the stylesheet shows the SAME backdrop through
+        # itself and the glass reads as one sheet instead of five patches.
+        # The window itself stays opaque - nothing here punches through to the
+        # desktop; the transparency is entirely internal.
+        backdrop = self._build_chat_watermark()
+        if backdrop is not None:
+            scrim = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+            scrim.add_css_class("chat-scrim")
+            scrim.set_hexpand(True)
+            scrim.set_vexpand(True)
+            scrim.append(backdrop)
+            # Same handle the Display page's brightness slider re-tints live.
+            self._chat_scrim = scrim
+            self._apply_backdrop_brightness()
+            app_overlay = Gtk.Overlay()
+            app_overlay.set_hexpand(True)
+            app_overlay.set_vexpand(True)
+            app_overlay.set_child(scrim)
+            app_overlay.add_overlay(self.split)
+            self.toast_overlay.set_child(app_overlay)
+        else:
+            self.toast_overlay.set_child(self.split)
 
         # On narrow screens (phones, split-view tablets) the 280-360 px
         # sidebar eats the whole window, leaving no room for the chat
@@ -8088,7 +9233,9 @@ class MainWindow(Adw.ApplicationWindow):
         # symbolic icon, so set_icon_name rendered a blank button. A bell glyph
         # renders in any font.
         self.notif_btn = Gtk.MenuButton()
-        _bell = Gtk.Label(label="\U0001F514")   # bell
+        # Geometric, not emoji: a colour-font bell renders bright yellow
+        # and ignores every colour rule in the stylesheet.
+        _bell = Gtk.Label(label="\u25c9")   # ringed dot
         _bell.add_css_class("glyph-btn-label")
         self.notif_btn.set_child(_bell)
         self.notif_btn.add_css_class("glyph-btn")
@@ -8200,32 +9347,12 @@ class MainWindow(Adw.ApplicationWindow):
         self.msg_scroll.add_css_class("chat-scroll")
         self._wire_scroll_stickiness()
 
-        # A faint menacing-penguin watermark sits BEHIND the conversation.
-        # Gtk.Overlay draws its main child at the back and overlays on top, so
-        # the watermark is the main child and the (transparent) scroller is the
-        # overlay — messages render over the penguin.  Falls back to just the
-        # scroller if the watermark SVG isn't on disk.
-        wm = self._build_chat_watermark()
-        if wm is not None:
-            # Darken the backdrop behind the dragon (brightness only, same hue)
-            # so the brighter watermark reads clearly against it. The scrim box
-            # sits behind the (transparent-background) watermark picture.
-            scrim = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-            scrim.add_css_class("chat-scrim")
-            scrim.set_hexpand(True)
-            scrim.set_vexpand(True)
-            scrim.append(wm)
-            # Keep a handle so the Display settings can re-tint it live: the
-            # brightness slider adjusts THIS box's scrim opacity at runtime.
-            self._chat_scrim = scrim
-            self._apply_backdrop_brightness()
-            chat_overlay = Gtk.Overlay()
-            chat_overlay.set_vexpand(True)
-            chat_overlay.set_child(scrim)
-            chat_overlay.add_overlay(self.msg_scroll)
-            main.append(chat_overlay)
-        else:
-            main.append(self.msg_scroll)
+        # The backdrop art is NOT built here any more. It used to be an
+        # overlay wrapped around this scroller alone, which stopped the
+        # artwork dead at the chat pane's edges; _build_ui now hangs it
+        # behind the whole window instead, so the sidebar and header sit on
+        # the same image. This scroller just draws on top of it, transparent.
+        main.append(self.msg_scroll)
 
         main.append(self._build_input_area())
 
@@ -8296,12 +9423,21 @@ class MainWindow(Adw.ApplicationWindow):
                         from gi.repository import Gio
                         tex = Gdk.Texture.new_from_file(
                             Gio.File.new_for_path(path))
-                # 0.5 on a bright, photographic 2MB PNG is not a watermark,
-                # it is a picture with text on top: it read as a lava scene
-                # pasted into the middle of the conversation and it fought
-                # every line of the reply. A watermark has to be felt, not
-                # read.
-                opacity = 0.10
+                # WHY THIS IS NO LONGER A WATERMARK'S 0.10.
+                # It used to be, and it had to be: the art was an overlay
+                # directly behind the MESSAGE TEXT, so anything you could
+                # actually see was something the reply had to be read
+                # through, and it lost. The OBSIDIAN GLASS theme changed
+                # what sits between the two - every message now lands on a
+                # tinted glass panel with its own gloss, border and text
+                # shadow, and the art shows through the GAPS between those
+                # panels rather than through the words. So the ceiling that
+                # protected legibility is being paid by the panels instead,
+                # and the backdrop is allowed to be a backdrop.
+                # Still not 1.0: the scrim above (brightness slider) and
+                # this value together are what keep the neon lines in the
+                # art from competing with the UI's own red.
+                opacity = 0.48
             else:
                 tex = _svg_texture(path, 720)
                 opacity = 0.2
@@ -8407,29 +9543,93 @@ class MainWindow(Adw.ApplicationWindow):
         key = self.settings.get("active_provider", "siliconflow")
         return (self.settings.get(f"{key}_model", "") or "").strip()
 
-    def _refresh_effort_pill(self):
-        """Show the reasoning-effort pill only when the active model has the
-        dial (GLM-5.x), and keep its selected segment in sync with settings —
-        so switching to a model without the knob hides a control that would do
-        nothing, and switching back restores the operator's last choice."""
-        pill = getattr(self, "effort_pill", None)
-        if pill is None:
-            return
-        pill.set_visible(supports_reasoning_effort(self._active_model_id()))
-        cur = (self.settings.get("reasoning_effort", "low") or "low").strip().lower()
-        if cur not in _REASONING_EFFORT_LEVELS:
-            cur = "low"
-        for lvl, b in getattr(self, "_effort_btns", {}).items():
-            if b.get_active() != (lvl == cur):
-                b.set_active(lvl == cur)
+    # ══════════════════════════════════════════════════════════════
+    # REASONING DEPTH BELONGS TO THE CHAT, NOT TO THE MOMENT
+    # ══════════════════════════════════════════════════════════════
+    # The level is chosen in Settings while a chat is still empty, LATCHED on
+    # to that chat the instant its first message is sent, and read back for
+    # the rest of the chat's life - including after a relaunch, which is why
+    # it is persisted rather than kept on the session record. settings[
+    # "reasoning_effort"] stays what it always was, the value the backend
+    # reads; opening a chat points it at that chat's latched level, so no
+    # change to basilisk_core was needed.
 
-    def _on_effort_pick(self, btn, level):
-        # Grouped toggles fire for both the button switched off and the one
-        # switched on; only act on the activation.
-        if not btn.get_active():
+    def _chat_effort_map(self) -> Dict[str, str]:
+        m = self.settings.get("chat_effort")
+        if not isinstance(m, dict):
+            m = {}
+            self.settings["chat_effort"] = m
+        return m
+
+    def _effective_effort(self) -> str:
+        """The depth the current chat runs at: its latched level if it has
+        started, otherwise the level the next chat would start from."""
+        cid = self.current_chat_id
+        if cid is not None:
+            lvl = self._chat_effort_map().get(str(cid))
+            if lvl in _REASONING_EFFORT_LEVELS:
+                return lvl
+        lvl = (self.settings.get("reasoning_effort", "low") or "low").strip().lower()
+        return lvl if lvl in _REASONING_EFFORT_LEVELS else "low"
+
+    def _effort_locked(self) -> bool:
+        """True once the current chat has started. A chat with no messages is
+        still choosable; one message in, the dial is part of the transcript."""
+        cid = self.current_chat_id
+        if cid is None:
+            return False
+        if str(cid) in self._chat_effort_map():
+            return True
+        try:
+            return self.store.count_messages(cid) > 0
+        except Exception:
+            return False
+
+    def _latch_effort(self, chat_id):
+        """Freeze the current depth on to this chat. Called from the send path
+        on the first message; a no-op every time after that."""
+        if chat_id is None:
             return
-        self.settings["reasoning_effort"] = level
-        save_settings(self.settings)
+        m = self._chat_effort_map()
+        if str(chat_id) in m:
+            return
+        m[str(chat_id)] = self._effective_effort()
+        try:
+            save_settings(self.settings)
+        except Exception:
+            pass
+
+    def _apply_chat_effort(self, chat_id):
+        """Point the backend's dial at this chat's latched level."""
+        if chat_id is None:
+            return
+        lvl = self._chat_effort_map().get(str(chat_id))
+        if lvl in _REASONING_EFFORT_LEVELS:
+            self.settings["reasoning_effort"] = lvl
+
+    def _forget_chat_effort(self, chat_id):
+        if self._chat_effort_map().pop(str(chat_id), None) is not None:
+            try:
+                save_settings(self.settings)
+            except Exception:
+                pass
+
+    def _refresh_effort_pill(self):
+        """Re-sync whatever is currently displaying the reasoning depth.
+
+        The composer pill this was named for is gone - a dial that changes how
+        the model thinks does not belong on a control the operator can nudge
+        between two messages of the same conversation. The depth now lives in
+        Settings and is fixed per chat, so all this has left to do is keep an
+        OPEN Settings dialog honest when the chat or the model changes under
+        it. Kept under the old name because several call sites fire it as
+        "the model or chat changed, refresh the depth display"."""
+        dlg = getattr(self, "_settings_dialog", None)
+        if dlg is not None:
+            try:
+                dlg._sync_effort_row(self)
+            except Exception:
+                pass
 
     def _provider_has_key(self, key: str) -> bool:
         return bool((self.settings.get(f"{key}_api_key", "") or "").strip())
@@ -8636,63 +9836,46 @@ class MainWindow(Adw.ApplicationWindow):
         # confirms the target and runs relentlessly until the mission is done.
         # Disarmed → one answer per message, then stop. Rendered a touch larger
         # than the other toolbar icons so the emblem reads, with its own glow.
+        # It was a round PNG plaque - a red sticker sitting next to a row of
+        # chamfered glass buttons, in nobody's visual language but its own,
+        # and with the mode it controls written nowhere on it. Now it is a
+        # labelled pill built from the same parts as every other control:
+        # glyph + word, one glass frame, and a state you can read across the
+        # room. The word is the point - a toggle whose entire job is arming
+        # an autonomous agent should say what it is.
         self.unleash_toggle = Gtk.ToggleButton()
-        _ulart = _btn_art(_BTN_UNLEASH, px=40)
-        if _ulart is not None:
-            self.unleash_toggle.set_child(_ulart)
-            self.unleash_toggle.add_css_class("art-button")
-        else:
-            self.unleash_toggle.set_child(Gtk.Label(label="\U0001F409"))  # dragon
-            self.unleash_toggle.add_css_class("icon-button")
+        _ul_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        _ul_box.set_valign(Gtk.Align.CENTER)
+        # NOT an emoji. The dragon codepoint renders from the system colour
+        # font, so it arrived as a bright green-and-orange sticker sitting in
+        # the middle of a red-and-black control - the one thing on the bar
+        # that could not be themed. A geometric glyph takes the CSS colour
+        # and lights up with the rest of the button when it arms.
+        _ul_glyph = Gtk.Label(label="\u25c6")          # solid diamond
+        _ul_glyph.add_css_class("unleash-glyph")
+        _ul_box.append(_ul_glyph)
+        _ul_label = Gtk.Label(label="UNLEASH")
+        _ul_label.add_css_class("unleash-label")
+        _ul_box.append(_ul_label)
+        self.unleash_toggle.set_child(_ul_box)
+        # _paint_unleash rewrites this label on arm/disarm and on every chat
+        # switch, so it has to be reachable from the button itself.
+        self.unleash_toggle._unleash_label = _ul_label
         self.unleash_toggle.add_css_class("unleash-button")
         self.unleash_toggle.set_active(self._unleashed)
-        if self._unleashed:
-            self.unleash_toggle.add_css_class("toggled")
-            self.unleash_toggle.set_tooltip_text(
-                "UNLEASHED — full autonomous, will not stop until the mission is "
-                "complete. Click to stand down.")
-        else:
-            self.unleash_toggle.set_tooltip_text(
-                "Unleash — confirm the target and go full autonomous (never "
-                "stops). While off, Basilisk answers once and stops.")
+        self._paint_unleash(self.unleash_toggle, self._unleashed)
         self.unleash_toggle.connect("toggled", self._on_unleash_toggled)
         actions.append(self.unleash_toggle)
 
-        # ── Reasoning-effort pill (Low | Med | High) ──
-        # GLM-5.x defaults to its DEEPEST reasoning, which is the lag and token
-        # burn on ordinary turns. This lets the operator dial it down for speed
-        # and cost, or up for a genuinely hard target, without opening Settings.
-        # A grouped (radio) segmented control; only shown when the active model
-        # actually exposes the dial (see _refresh_effort_pill).
-        self.effort_pill = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
-                                   spacing=0)
-        self.effort_pill.add_css_class("linked")
-        self.effort_pill.add_css_class("effort-pill")
-        self.effort_pill.set_valign(Gtk.Align.CENTER)
-        self._effort_btns = {}
-        _cur_effort = (self.settings.get("reasoning_effort", "low")
-                       or "low").strip().lower()
-        if _cur_effort not in _REASONING_EFFORT_LEVELS:
-            _cur_effort = "low"
-        _grp = None
-        for _lvl, _lbl in (("low", "Low"), ("medium", "Med"), ("high", "High")):
-            _b = Gtk.ToggleButton(label=_lbl)
-            _b.add_css_class("effort-seg")
-            if _grp is None:
-                _grp = _b
-            else:
-                _b.set_group(_grp)      # radio behaviour: one active at a time
-            _b.set_active(_lvl == _cur_effort)
-            _b.connect("toggled", self._on_effort_pick, _lvl)
-            self._effort_btns[_lvl] = _b
-            self.effort_pill.append(_b)
-        self.effort_pill.set_tooltip_text(
-            "Reasoning depth (GLM-5.x): Low is fastest and cheapest, High "
-            "thinks hardest. Takes effect on your next message.")
-        actions.append(self.effort_pill)
+        # (The Low|Med|High reasoning pill used to sit here. It moved to
+        # Settings and became a per-chat, start-of-chat decision - see
+        # _effective_effort / _effort_locked. A dial that changes how the model
+        # reasons cannot be a mid-conversation control: half the transcript
+        # would come from one setting and half from another with nothing on
+        # screen to say which. The composer is for composing.)
 
         # Attach — a clean paperclip glyph on the glass frame (no PNG plaque).
-        attach_btn = _glyph_button("\U0001F4CE", "Attach file")
+        attach_btn = _glyph_button("+", "Attach a file")
         attach_btn.connect("clicked", lambda *_: self._pick_attachment())
         actions.append(attach_btn)
 
@@ -8706,7 +9889,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.tts_toggle = None
         if self.tts is not None and self.tts.available():
             self.tts_toggle = _glyph_button(
-                "\U0001F509", f"Read replies aloud — {self.tts.engine_name()}",
+                "\u25b6", f"Read replies aloud — {self.tts.engine_name()}",
                 toggle=True)
             on = bool(self.settings.get("tts_enabled"))
             self.tts_toggle.set_active(on)
@@ -8844,8 +10027,120 @@ class MainWindow(Adw.ApplicationWindow):
         add("rename-chat", self._rename_current_chat)
         add("delete-chat", self._delete_current_chat)
         add("pin-chat", self._toggle_pin_current)
+        add("new-chat", self._new_chat)
+        add("focus-composer", self._focus_composer)
+        add("toggle-sidebar", self._toggle_sidebar)
+        add("stop", self._stop_if_busy)
+        self._wire_shortcuts()
         GLib.timeout_add_seconds(10, self._poll_status)
         self._poll_status()
+
+    # ══════════════════════════════════════════════════════════════
+    # KEYBOARD: the part every desktop app has and this one did not
+    # ══════════════════════════════════════════════════════════════
+    # Five actions were registered and NONE of them had an accelerator, so
+    # settings, rename, delete and pin were mouse-only - and "new chat" was
+    # not even an action, just a click handler on the wordmark. Escape was
+    # wired to the composer's own key controller, which means it stopped a
+    # running turn only while the cursor happened to be in the text box;
+    # click a message first and the app had no stop key at all.
+    #
+    # These are the standard bindings, not invented ones: an operator who
+    # has used any other desktop app already knows them.
+    _ACCELS = (
+        ("win.new-chat",       ("<Primary>n",)),
+        ("win.settings",       ("<Primary>comma",)),
+        ("win.focus-composer", ("<Primary>l",)),
+        ("win.toggle-sidebar", ("F9",)),
+        ("win.rename-chat",    ("F2",)),
+    )
+
+    def _wire_shortcuts(self):
+        app = self.get_application()
+        if app is not None:
+            for action, keys in self._ACCELS:
+                try:
+                    app.set_accels_for_action(action, list(keys))
+                except Exception as e:
+                    log(f"accel {action} failed: {e}")
+        # Escape is NOT in the table above on purpose. An application-level
+        # accelerator would swallow it before dialogs and popovers get it,
+        # and Escape closing the Settings dialog matters more than Escape
+        # stopping a turn. A BUBBLE-phase controller on the window is the
+        # correct place: everything that wants Escape has already had it by
+        # the time this runs, so it only fires when nothing else claimed it.
+        try:
+            kc = Gtk.EventControllerKey()
+            kc.set_propagation_phase(Gtk.PropagationPhase.BUBBLE)
+            kc.connect("key-pressed", self._on_window_key)
+            self.add_controller(kc)
+        except Exception as e:
+            log(f"window key controller failed: {e}")
+
+    def _on_window_key(self, controller, keyval, keycode, state):
+        """The shortcut handler of last resort.
+
+        The accelerators registered above go through GtkApplication, and
+        GtkApplication only dispatches them to the window it considers ACTIVE
+        - which on X11 means a window manager has sent it a focus-in. Run
+        Basilisk on a bare X server, a kiosk session, or anything else without
+        a WM and every one of those bindings silently does nothing, while
+        typing still works because key delivery to the focused widget is a
+        different path entirely.
+
+        So the same combinations are handled here as well. There is no
+        double-fire: if the accelerator did dispatch, it consumed the event
+        and this controller is never reached. BUBBLE phase is deliberate -
+        the focused widget and any open dialog get first refusal, which is
+        what keeps Escape closing a dialog instead of stopping a turn behind
+        it, and keeps Ctrl+A selecting text inside the composer."""
+        ctrl = bool(state & Gdk.ModifierType.CONTROL_MASK)
+        alt = bool(state & Gdk.ModifierType.ALT_MASK)
+        if keyval == Gdk.KEY_Escape:
+            if self._is_busy():
+                self._request_stop()
+                return True
+            return False
+        if ctrl and not alt:
+            if keyval in (Gdk.KEY_n, Gdk.KEY_N):
+                self._new_chat()
+                return True
+            if keyval in (Gdk.KEY_l, Gdk.KEY_L):
+                self._focus_composer()
+                return True
+            if keyval in (Gdk.KEY_comma,):
+                self._open_settings()
+                return True
+        if keyval == Gdk.KEY_F9:
+            self._toggle_sidebar()
+            return True
+        if keyval == Gdk.KEY_F2:
+            self._rename_current_chat()
+            return True
+        return False
+
+    def _stop_if_busy(self):
+        """Escape, from anywhere in the window.
+
+        Deliberately a no-op when idle rather than closing the window: this
+        app runs long autonomous jobs, and a stop key that sometimes quits
+        instead is a stop key nobody will trust enough to press."""
+        if self._is_busy():
+            self._request_stop()
+
+    def _focus_composer(self):
+        view = getattr(self, "input_view", None)
+        if view is not None:
+            view.grab_focus()
+
+    def _toggle_sidebar(self):
+        split = getattr(self, "split", None)
+        if split is None:
+            return
+        try:
+            split.set_show_sidebar(not split.get_show_sidebar())
+        except Exception as e:
+            log(f"sidebar toggle failed: {e}")
 
     def _poll_status(self):
         def _bg():
@@ -8940,6 +10235,103 @@ class MainWindow(Adw.ApplicationWindow):
 
     # ── chat load / new ─────────────────────────────────────────
 
+    # ══════════════════════════════════════════════════════════════
+    # PER-CHAT SESSION STATE
+    # ══════════════════════════════════════════════════════════════
+    # The name of every field that belongs to ONE conversation rather than
+    # to the window, with the value a brand-new chat starts from. A callable
+    # default is called (so no two chats can end up sharing one list).
+    #
+    # Unleash is deliberately in here and deliberately starts OFF. It used to
+    # be a global read from settings at startup, so arming it for one target
+    # left it armed for every chat opened afterwards, including chats opened
+    # days later. Arming is a decision about THIS engagement; a new chat is a
+    # new engagement and starts stood down.
+    _SESSION_FIELDS = (
+        ("_unleashed",                 False),
+        ("_mission_active",            False),
+        ("_mission_objective",         ""),
+        ("_mission_kicks",             0),
+        ("_mission_directive",         ""),
+        ("_mission_verify_pending",    False),
+        ("_mission_no_action_streak",  0),
+        ("_mission_ever_acted",        False),
+        ("_recent_commands",           list),
+        ("_tool_chain_depth",          0),
+        ("_tools_locked",              False),
+        ("_error_retries",             0),
+        ("_bad_propose_retries",       0),
+        ("_promise_pushes",            0),
+        ("_forced_fetch_done",         False),
+        ("_leash_work_turn",           False),
+        ("_fabricated_this_turn",      0),
+        ("_tools_used_this_request",   frozenset),
+        ("_stop_requested",            False),
+    )
+
+    def _session_defaults(self) -> Dict[str, Any]:
+        return {name: (dflt() if callable(dflt) else dflt)
+                for name, dflt in self._SESSION_FIELDS}
+
+    def _session_snapshot(self) -> Dict[str, Any]:
+        out = {}
+        for name, dflt in self._SESSION_FIELDS:
+            val = getattr(self, name, dflt() if callable(dflt) else dflt)
+            # Copy the containers. Handing the live list to the snapshot
+            # would let the next chat's loop-detection append into the
+            # previous chat's history.
+            if isinstance(val, list):
+                val = list(val)
+            elif isinstance(val, (set, frozenset)):
+                val = frozenset(val)
+            out[name] = val
+        return out
+
+    def _session_restore(self, state: Dict[str, Any]):
+        """Put a chat's session back on the window, then re-sync the two
+        widgets that display it. Guarded so the toggles' own handlers - which
+        save settings, toast, and stand a mission down - do not fire for what
+        is only a redraw."""
+        self._restoring_session = True
+        try:
+            for name, dflt in self._SESSION_FIELDS:
+                setattr(self, name, state.get(
+                    name, dflt() if callable(dflt) else dflt))
+            btn = getattr(self, "unleash_toggle", None)
+            if btn is not None and btn.get_active() != self._unleashed:
+                btn.set_active(self._unleashed)
+            if btn is not None:
+                self._paint_unleash(btn, self._unleashed)
+        finally:
+            self._restoring_session = False
+
+    def _switch_session(self, new_chat_id):
+        """Leave the current chat's session and enter another's.
+
+        A turn in flight belongs to the chat that started it, so leaving that
+        chat ENDS it rather than letting it run on into a conversation the
+        operator is no longer looking at. That is the whole point: two chats
+        are two sessions, and only the one on screen is live."""
+        prev = self.current_chat_id
+        if prev == new_chat_id:
+            return
+        if prev is not None:
+            if self._is_busy():
+                # _request_stop tears the turn down through the normal path
+                # (partial reply committed to the chat it belongs to), so
+                # nothing is lost - it just stops here instead of following
+                # the operator into the next chat.
+                self._request_stop()
+                self._show_toast(
+                    "Stopped the run in the chat you left - each chat is its "
+                    "own session.", timeout=4)
+            self._sessions[prev] = self._session_snapshot()
+        self._session_restore(
+            self._sessions.get(new_chat_id) or self._session_defaults())
+
+    def _forget_session(self, chat_id):
+        self._sessions.pop(chat_id, None)
+
     def _new_chat(self):
         # Don't leave an unused 'New chat' behind when starting another.
         if (self.settings.get("discard_empty_chats", True)
@@ -8947,6 +10339,8 @@ class MainWindow(Adw.ApplicationWindow):
             try:
                 if self.store.count_messages(self.current_chat_id) == 0:
                     self.store.delete_chat(self.current_chat_id)
+                    self._forget_session(self.current_chat_id)
+                    self._forget_chat_effort(self.current_chat_id)
             except Exception:
                 pass
         backend, model = self.router.pick()
@@ -8963,7 +10357,14 @@ class MainWindow(Adw.ApplicationWindow):
         return False
 
     def _load_chat(self, chat_id: int):
+        # Sessions swap BEFORE anything else: _switch_session may stop a turn
+        # that is still holding self.streaming_msg_widget, and that widget is
+        # one of the children the clear-out below unparents.
+        self._switch_session(chat_id)
         self.current_chat_id = chat_id
+        # The dial the backend reads follows the chat, so a chat latched at
+        # HIGH keeps thinking at HIGH when you come back to it tomorrow.
+        self._apply_chat_effort(chat_id)
         chat = self.store.get_chat(chat_id)
         if not chat:
             return
@@ -8974,6 +10375,14 @@ class MainWindow(Adw.ApplicationWindow):
         else:
             self.agent_toggle.remove_css_class("toggled")
         self.chat_title_lbl.set_text(chat.title)
+        # The window title said "Basilisk" and nothing else, for every chat,
+        # forever - so the taskbar, the alt-tab switcher and a screenshot all
+        # showed the same thing whichever conversation was open. Every other
+        # document-shaped app puts the document in the title.
+        try:
+            self.set_title(f"{chat.title} - {APP_NAME}")
+        except Exception:
+            pass
         self._refresh_subtitle()
 
         child = self.msg_box.get_first_child()
@@ -9005,6 +10414,10 @@ class MainWindow(Adw.ApplicationWindow):
         # not clear it — it has to be emptied explicitly or the previous
         # conversation's status strip stays pinned over the new one.
         self._clear_activity_dock()
+        # Selecting a chat in the sidebar leaves focus on the sidebar row, so
+        # the next thing typed went nowhere. Opening a conversation means you
+        # are about to type in it.
+        GLib.idle_add(self._focus_composer)
 
         msgs = self.store.list_messages(chat_id)
 
@@ -9106,10 +10519,117 @@ class MainWindow(Adw.ApplicationWindow):
         GLib.idle_add(self._force_scroll_to_bottom)
 
     def _show_empty_state(self):
-        # Intentionally blank: a new chat just shows the dragon watermark.
-        # No greeting text, no suggestion chips (those actions live in the
-        # composer toolbar already).
-        return
+        """The hero card a new chat opens on.
+
+        This was deliberately blank for a long time, on the reasoning that the
+        backdrop art said enough. It did not: an empty chat pane gives the
+        operator no confirmation of the four things they are about to commit a
+        conversation to - which model is answering, whether the tools are
+        armed, how hard it is going to think, and how much context it has.
+        Those were each two clicks away in different places. The card puts
+        them on the page they are already looking at, and disappears the
+        moment the first message lands.
+
+        Everything here is READ-ONLY. It is a nameplate, not a control panel:
+        the moment you can change the model from it, it becomes another place
+        that has to be kept in sync with Settings and the switcher."""
+        key = self.settings.get("active_provider", "siliconflow")
+        spec = PROVIDERS_BY_KEY.get(key)
+        model_id = self._active_model_id()
+        info = spec.info(model_id) if spec else None
+        short = (info.label if info
+                 else (model_id.split("/")[-1] if model_id else "not set"))
+
+        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        card.add_css_class("hero-card")
+        card.set_halign(Gtk.Align.CENTER)
+        card.set_valign(Gtk.Align.CENTER)
+
+        # Emblem
+        if _EMBLEM_PNG_PATH:
+            try:
+                tex = _cached_texture(_EMBLEM_PNG_PATH, 232)
+                if tex is not None:
+                    pic = Gtk.Picture.new_for_paintable(tex)
+                    pic.set_can_target(False)
+                    pic.set_size_request(_scaled(104, floor=72),
+                                         _scaled(104, floor=72))
+                    pic.set_content_fit(Gtk.ContentFit.CONTAIN)
+                    pic.add_css_class("hero-emblem")
+                    pic.set_halign(Gtk.Align.CENTER)
+                    card.append(pic)
+            except Exception as e:
+                log(f"hero emblem failed: {e}")
+
+        eyebrow = Gtk.Label(label="THE PRIEST'S")
+        eyebrow.add_css_class("hero-eyebrow")
+        card.append(eyebrow)
+
+        title = Gtk.Label(label="BASILISK")
+        title.add_css_class("hero-title")
+        card.append(title)
+
+        rule = Gtk.Box()
+        rule.add_css_class("hero-rule")
+        rule.set_halign(Gtk.Align.CENTER)
+        rule.set_size_request(_scaled(300, floor=180), _scaled(3, floor=3))
+        card.append(rule)
+
+        sub = Gtk.Label(label="AUTONOMOUS SECURITY ASSISTANT")
+        sub.add_css_class("hero-subtitle")
+        card.append(sub)
+
+        # Live model chip
+        chip = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=9)
+        chip.add_css_class("hero-chip")
+        chip.set_halign(Gtk.Align.CENTER)
+        dot = Gtk.Label(label="\u25cf")
+        dot.add_css_class("hero-chip-dot")
+        chip.append(dot)
+        chip_lbl = Gtk.Label(label=short)
+        chip_lbl.add_css_class("hero-chip-label")
+        chip.append(chip_lbl)
+        card.append(chip)
+
+        # ── The four facts ──
+        # Read off the same places the turn will read them from, so the card
+        # cannot drift from what actually happens when you press send.
+        rows = [("Model", short),
+                ("Provider", spec.label if spec else key)]
+        rows.append(("Mode", "Agent \u00b7 system tools"
+                     if self.current_agent_mode else "Chat \u00b7 no tools"))
+        if supports_reasoning_effort(model_id):
+            rows.append(("Reasoning", self._effective_effort().capitalize()))
+        if info is not None and getattr(info, "ctx_k", 0):
+            rows.append(("Context", f"{info.ctx_k}K tokens"))
+
+        grid = Gtk.Grid()
+        grid.add_css_class("hero-specs")
+        grid.set_row_spacing(_scaled(6, floor=3))
+        grid.set_column_spacing(_scaled(18, floor=10))
+        for r, (k, v) in enumerate(rows):
+            kl = Gtk.Label(label=k)
+            kl.add_css_class("hero-spec-key")
+            kl.set_xalign(0.0)
+            grid.attach(kl, 0, r, 1, 1)
+            vl = Gtk.Label(label=v)
+            vl.add_css_class("hero-spec-val")
+            vl.set_xalign(0.0)
+            grid.attach(vl, 1, r, 1, 1)
+        card.append(grid)
+
+        hint = Gtk.Label(label="Type below to begin. Enter sends.")
+        hint.add_css_class("hero-hint")
+        card.append(hint)
+
+        # NOT vexpand-centred. self.msg_box is valign=START on purpose (see
+        # the long note where it is built: a FILL column hands its last child
+        # the leftover viewport height, which is the "bubble is five screens
+        # tall" bug). So the card is placed with a margin instead of asking
+        # for vertical space the column is deliberately not giving out.
+        card.set_margin_top(_scaled(46, floor=20))
+        card.set_margin_bottom(_scaled(24, floor=10))
+        self.msg_box.append(card)
 
     def _refresh_subtitle(self):
         # Model + agent indicator removed from the header by request: the model
@@ -9656,6 +11176,10 @@ class MainWindow(Adw.ApplicationWindow):
         if self.current_chat_id is None:
             self._new_chat()
         cid = self.current_chat_id
+        # First message of this chat freezes its reasoning depth. Done BEFORE
+        # the message is stored, so _effort_locked (which counts messages) is
+        # still answering for an unstarted chat when the level is read.
+        self._latch_effort(cid)
         self.store.add_message(cid, "user", text)
         self._append_message_widget("user", text)
         # ONE feed for this whole turn, however many round-trips it takes.
@@ -15207,12 +16731,22 @@ class MainWindow(Adw.ApplicationWindow):
             self.store.rename_chat(chat_id, title)
             if chat_id == self.current_chat_id:
                 self.chat_title_lbl.set_text(title)
+                # Auto-titling from the first message renames the open
+                # document, so the window title has to follow it too.
+                try:
+                    self.set_title(f"{title} - {APP_NAME}")
+                except Exception:
+                    pass
             self._refresh_sidebar()
 
     def _inject_user_request(self, text: str):
         if self.current_chat_id is None:
             self._new_chat()
         cid = self.current_chat_id
+        # First message of this chat freezes its reasoning depth. Done BEFORE
+        # the message is stored, so _effort_locked (which counts messages) is
+        # still answering for an unstarted chat when the level is read.
+        self._latch_effort(cid)
         self.store.add_message(cid, "user", text)
         self._append_message_widget("user", text)
         # ONE feed for this whole turn, however many round-trips it takes.
@@ -15636,19 +17170,38 @@ class MainWindow(Adw.ApplicationWindow):
                                        self.current_agent_mode)
         self._refresh_subtitle()
 
+    def _paint_unleash(self, btn, armed: bool):
+        """The LOOK of the Unleash control, and nothing else.
+
+        Split out of the toggle handler so restoring a chat's session can put
+        the button back into the right state without also re-running the arm
+        side effects (saving settings, forcing agent mode, toasting, standing
+        a mission down). Redrawing is not arming."""
+        lbl = getattr(btn, "_unleash_label", None)
+        if armed:
+            btn.add_css_class("toggled")
+            if lbl is not None:
+                lbl.set_text("UNLEASHED")
+            btn.set_tooltip_text(
+                "UNLEASHED \u2014 offensive suite armed and full autonomous. "
+                "Send an objective and it runs until complete. Click to stand "
+                "down. Applies to THIS chat only.")
+        else:
+            btn.remove_css_class("toggled")
+            if lbl is not None:
+                lbl.set_text("UNLEASH")
+            btn.set_tooltip_text(
+                "Unleash \u2014 arm the offensive suite and go full autonomous "
+                "for this chat. While off, Basilisk answers once and stops.")
+
     def _on_unleash_toggled(self, btn):
         """Arm/disarm Unleash — the master go-full-send switch."""
+        if self._restoring_session:
+            # A chat switch is repainting the button, not arming it.
+            return
         self._unleashed = btn.get_active()
-        self.settings["unleashed"] = self._unleashed
-        try:
-            save_settings(self.settings)
-        except Exception:
-            pass
+        self._paint_unleash(btn, self._unleashed)
         if self._unleashed:
-            btn.add_css_class("toggled")
-            btn.set_tooltip_text(
-                "UNLEASHED — offensive suite armed and full autonomous. Send an "
-                "objective and it runs until complete. Click to stand down.")
             # Unleash needs the tools and the mission loop → force agent mode on.
             if not self.current_agent_mode:
                 self.agent_toggle.set_active(True)   # fires _on_agent_toggled
@@ -15670,10 +17223,6 @@ class MainWindow(Adw.ApplicationWindow):
             # latch a mission onto stale history the operator never re-issued.
             self._unleash_kickoff_pending = False
         else:
-            btn.remove_css_class("toggled")
-            btn.set_tooltip_text(
-                "Unleash — confirm the target and go full autonomous (never "
-                "stops). While off, Basilisk answers once and stops.")
             self._unleash_kickoff_pending = False
             # Stand down: halt any running mission immediately.
             self._stop_requested = True
@@ -15685,7 +17234,17 @@ class MainWindow(Adw.ApplicationWindow):
     # ── menu ────────────────────────────────────────────────────
 
     def _open_settings(self):
-        SettingsDialog(self).present(self)
+        # Held so _refresh_effort_pill can keep an OPEN dialog's reasoning-depth
+        # row honest when the model or the chat changes behind it. Dropped on
+        # close so a stale dialog is never poked.
+        dlg = SettingsDialog(self)
+        self._settings_dialog = dlg
+        try:
+            dlg.connect("closed", lambda *_a: setattr(
+                self, "_settings_dialog", None))
+        except Exception:
+            pass
+        dlg.present(self)
 
     def _open_about(self):
         about = Adw.AboutDialog()
@@ -15750,6 +17309,8 @@ class MainWindow(Adw.ApplicationWindow):
                 self._set_send_mode(False)
 
             self.store.delete_chat(deleted_id)
+            self._forget_session(deleted_id)
+            self._forget_chat_effort(deleted_id)
             self.current_chat_id = None
 
             # Pick the next-most-recent chat to display, if any.  Only
@@ -15966,6 +17527,8 @@ class MainWindow(Adw.ApplicationWindow):
             try:
                 if self.store.count_messages(self.current_chat_id) == 0:
                     self.store.delete_chat(self.current_chat_id)
+                    self._forget_session(self.current_chat_id)
+                    self._forget_chat_effort(self.current_chat_id)
             except Exception:
                 pass
         try:
