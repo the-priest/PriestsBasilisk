@@ -296,13 +296,20 @@ try:
     # 2000 tokens arriving at 1ms of virtual time apart = 2 seconds of stream.
     w = _widget()
     _strip_calls = [0]
-    _real_strip = Bk.strip_tool_calls
+    # Count the FULL-BUFFER transform the renderer actually calls.  That used
+    # to be strip_tool_calls directly; it is now stream_visible_text, which
+    # wraps it with the in-flight marker hold (see basilisk_core).  The
+    # property under test is unchanged — how many times per second the whole
+    # buffer is re-scanned — but it has to be counted where the renderer
+    # reaches for it, or this asserts on a function nobody calls and reads
+    # zero for a renderer that is working perfectly.
+    _real_strip = Bk.stream_visible_text
 
     def _counting(t):
         _strip_calls[0] += 1
         return _real_strip(t)
 
-    Bk.strip_tool_calls = _counting
+    Bk.stream_visible_text = _counting
     for i in range(2000):
         _clock.t += 0.001
         w.append_streaming("tok ")

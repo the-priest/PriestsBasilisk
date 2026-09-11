@@ -34,6 +34,6 @@
     <path d="M276 96 L276 452"/>
   </g>
   <!-- subtle red core gem at the crossing -->
-  <circle cx="256" cy="228" r="13" fill="#ff2d3a" stroke="#7a0010" stroke-width="2"/>
-  <circle cx="252" cy="224" r="4" fill="#ffd0d4" opacity="0.8"/>
+  <circle cx="256" cy="228" r="13" fill="#3aacf2" stroke="#074773" stroke-width="2"/>
+  <circle cx="252" cy="224" r="4" fill="#d3ecfc" opacity="0.8"/>
 </svg>

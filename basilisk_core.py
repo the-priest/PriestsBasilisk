@@ -11087,6 +11087,98 @@ def _strip_tool_calls_span(text: str) -> str:
     return out
 
 
+# ═══════════════════════════════════════════════════════════════
+#  THE STREAMING DISPLAY BOUNDARY
+# ═══════════════════════════════════════════════════════════════
+#
+# Every stripper above answers the question "is this text a tool call?".  A
+# STREAM asks a different question: "could this text still BECOME one?"  The
+# difference is three characters wide and it is the whole bug.
+#
+# strip_tool_calls hides a marker from the moment it is RECOGNISABLE.  Until
+# then the characters are ordinary text and it renders them, which is correct
+# for a finished message and wrong for a growing one.  Measured across every
+# dialect this app supports, the reply
+#
+#     "Let me look that up.\n\n<tool name=\"web_search\">{...}</tool>"
+#
+# paints `<`, `<t`, `<to`, `<too` on screen — one character per frame — and then
+# DELETES them the instant `<tool ` completes and TOOL_PARTIAL_RE engages.
+# `<invok`, `<fun`, `<thin` and `<|` all do the same.  That is exactly what the
+# operator reports as "when it searches it types in chat and it gets deleted".
+#
+# It also costs a second symptom that looks unrelated.  The chat bubble is
+# attached lazily on the first token carrying visible TEXT, precisely so a
+# tool-only step never draws an empty bubble — but a leaked `<too` IS visible
+# text by that test, so the bubble pops IN for a step that will never say
+# anything, then pops OUT again when the finished reply is judged a bare tool
+# step.  One leak, three symptoms.
+#
+# The rule is the one every incremental parser uses: never emit a tail that
+# could still turn into markup.  Hold it back; the next token either completes
+# the marker (it is stripped) or proves it was prose (it is released, one frame
+# later, which no reader can perceive).
+#
+# This is STREAM-ONLY on purpose.  A FINISHED message ending in "<t" is text
+# and must be shown, so the hold must never be folded into strip_tool_calls
+# itself.  Both paths still share one stripper, so a new dialect is taught to
+# the app in one place and this function inherits it.
+
+# Every marker opener the strippers downstream know how to recognise, lowercased.
+# A tail that is a PREFIX of any of these has not finished arriving yet.
+# Keep in step with TOOL_PARTIAL_RE, _ALT_OPEN_RE, _FUNC_OPEN_RE, _DS_OPENER_RE
+# and the think-block openers — tests/test_streamhold.py asserts the agreement.
+_STREAM_MARKER_OPENERS = (
+    "<tool", "<tool_call", "<toolcall", "<tool_calls",
+    "<function", "<function=", "<function_call", "<functions",
+    "<invoke", "<invoke",
+    "<think", "<thinking", "<thought",
+    "<parameter", "<parameters",
+    "<|", "<||", "<||dsml||",
+    "<" + _DS_PIPE,
+)
+
+# How far back to look for an unterminated '<'.  An opener is short; a '<' any
+# further back than this is either already closed or ordinary prose, and
+# scanning the whole buffer per frame is the O(n²) shape this file has been
+# bitten by twice (see _ALT_PARTIAL_RE and TOOL_PARTIAL_RE above).
+_STREAM_HOLD_WINDOW = 32
+
+
+def hold_partial_marker(text: str) -> str:
+    """Drop a trailing fragment that could still become a tool/think marker.
+
+    Looks only at the last `_STREAM_HOLD_WINDOW` characters, so the cost is
+    constant per frame rather than growing with the reply.
+    """
+    if not text:
+        return text
+    tail_start = max(0, len(text) - _STREAM_HOLD_WINDOW)
+    lt = text.rfind("<", tail_start)
+    if lt < 0:
+        return text
+    # A '>' after the '<' means the tag already closed; nothing is in flight.
+    if ">" in text[lt:]:
+        return text
+    frag = text[lt:].lower()
+    for op in _STREAM_MARKER_OPENERS:
+        if op.startswith(frag):
+            return text[:lt]
+    return text
+
+
+def stream_visible_text(buf: str) -> str:
+    """The ONE transform from a live stream buffer to what the operator sees.
+
+    Mirrors the finished-message display chain (strip think → strip tool calls)
+    and then applies the in-flight hold that only a stream needs.  Every
+    consumer that renders or judges a PARTIAL reply must go through here, so
+    "is there anything to show yet?" has exactly one answer.
+    """
+    return hold_partial_marker(
+        strip_tool_calls(strip_think_blocks(buf or "")))
+
+
 # ── Reasoning / "thoughts" blocks ──
 # Some models (DeepSeek reasoners) put their chain-of-thought inline as
 # <think>...</think> in the content stream.  These regexes pull it out so

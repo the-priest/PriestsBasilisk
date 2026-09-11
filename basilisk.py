@@ -120,6 +120,7 @@ from basilisk_core import (
     contains_tool_markup,
     _normalise_tool_syntax,
     extract_think_blocks, strip_think_blocks, speakable_text,
+    stream_visible_text,
     is_online, is_sensitive_path, command_needs_sudo, is_catastrophic_command,
     command_tampers_self, Watcher,
     PROVIDERS, PROVIDERS_BY_KEY,
@@ -185,7 +186,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.basilisk"
 APP_NAME = "Basilisk"
-VERSION = "1.1.0.0"
+VERSION = "1.1.1.0"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -211,7 +212,26 @@ _WEB_TOOL_NAMES = frozenset({
 # not going to act, so the turn ends rather than burning round-trips on
 # narration.  The mission loop has always had this recovery; answer mode had
 # none, which is how a research question ended on a promise instead of a report.
+# THE COUNTER IS CONSECUTIVE, NOT CUMULATIVE — and that distinction is the
+# whole difference between "it stops before it's finished" and an agent.
+#
+# The cap exists to stop a model that ONLY narrates. A model that narrates,
+# gets pushed, then goes and RUNS SOMETHING is not that model — it is a model
+# that recovered. Counting those pushes cumulatively meant a job of any real
+# length spent its whole budget early and then died silently at the first
+# stall after it: a repo task that stalls at step 3 and again at step 40 had
+# already used both nudges on step 3, so step 40 ended the turn with the work
+# half done and nothing said about it. The doubling for work turns below was a
+# patch on that arithmetic rather than a fix for it.
+#
+# So _feed_tool_result — the one choke point every real tool result passes
+# through — resets this to zero. Real progress clears the stall record.
 ANSWER_STALL_NUDGE_MAX = 2
+# …and an absolute ceiling still bounds the pathological case: a model that
+# alternates one cheap tool call with one narration forever would otherwise
+# never trip the consecutive cap. This is the hard stop, counted per operator
+# request and never reset by progress.
+ANSWER_STALL_NUDGE_TOTAL_MAX = 12
 # Foresight: how long the (optional) consequence-prediction model pass may take
 # before the turn stops waiting for it.  A model pass is a full network round
 # trip; without a deadline a hung one wedged the whole turn forever, because
@@ -329,7 +349,7 @@ MAX_CHAT_ROWS = 20
 CSS = b"""
 /* =====================================================================
    BASILISK THEME - modelled on the official Kali Linux desktop palette:
-   near-black surfaces, the Basilisk dragon-blue accent (#4a0a11 / #7d121b),
+   near-black surfaces, the Basilisk dragon-blue accent (#0e3046 / #185277),
    red for danger, monospace for headers and machine output.  Built to
    read like a first-party Basilisk tool, not a pastel toy.
    GTK CSS has no variables across rules, so the palette is inlined.
@@ -337,7 +357,7 @@ CSS = b"""
    Palette:
      bg base    #08090b   surfaces  #0d0f12 / #12151a   line  #1b1f26
      text       #d6dbe2   dim       #7d8794
-     accent     #4a0a11   accent-hi #7d121b   accent-dim rgba(125, 18, 27,.15)
+     accent     #0e3046   accent-hi #185277   accent-dim rgba(24, 82, 119, .15)
      ok/green   #2ecc71   warn      #f0a500   danger #e5484d
    ===================================================================== */
 
@@ -348,8 +368,8 @@ CSS = b"""
    the user's Plasma accent - which is exactly what made the UI look
    inconsistent.  Retint them ALL to the Basilisk palette in one place. */
 
-@define-color accent_color              #7d121b;
-@define-color accent_bg_color           #4a0a11;
+@define-color accent_color              #185277;
+@define-color accent_bg_color           #0e3046;
 @define-color accent_fg_color           #ffffff;
 
 @define-color destructive_color         #e5484d;
@@ -413,7 +433,7 @@ headerbar {
     font-family: 'JetBrains Mono', 'Fira Code', monospace;
     color: #dfe4ea;
     letter-spacing: 3px;
-    text-shadow: 0 2px 3px rgba(0, 0, 0, 0.9), 0 0 11px rgba(150, 162, 178, 0.32);
+    text-shadow: 0 2px 3px rgba(0, 0, 0, 0.9), 0 0 11px rgba(150, 162, 178, 0.166);
 }
 /* Connectivity dot beside BASILISK: green online, red offline */
 .online-dot {
@@ -421,8 +441,8 @@ headerbar {
     margin-top: 2px;
 }
 .online-dot.online {
-    color: #7d121b;
-    text-shadow: 0 0 7px rgba(125, 18, 27, 0.7);
+    color: #185277;
+    text-shadow: 0 0 7px rgba(24, 82, 119, 0.26);
 }
 .online-dot.offline {
     color: #6b737d;
@@ -450,7 +470,7 @@ headerbar {
     margin-bottom: 8px;
 }
 .input-frame:focus-within {
-    border-color: #7d121b;
+    border-color: #185277;
     background-color: #161b21;
 }
 .chat-subtitle {
@@ -471,7 +491,7 @@ headerbar {
 }
 .chat-row:hover {
     background-color: #0d0f12;
-    border-left-color: rgba(125, 18, 27, 0.55);
+    border-left-color: rgba(24, 82, 119, 0.55);
 }
 .chat-row.selected, .chat-row:selected {
     background: linear-gradient(90deg, rgba(200, 210, 222, 0.10),
@@ -485,7 +505,7 @@ headerbar {
        app "feels laggy" when nothing is happening. The lit state is now
        static; the animated ones that remain are all gated behind a state
        class (.working, .live, .busy) and stop when the work does. */
-    box-shadow: inset 0 0 0 1px rgba(232, 238, 244, 0.16),
+    box-shadow: inset 0 0 0 1px rgba(232, 238, 244, 0.083),
                 -2px 0 15px rgba(205, 215, 230, 0.22);
 }
 @keyframes metalglow {
@@ -548,14 +568,14 @@ headerbar {
 /* Assistant: left-aligned, translucent SILVER bubble (matches Basilisk's icon;
    contrasts the user's green) */
 .msg-assistant {
-    background-color: rgba(125, 18, 27, 0.13);
+    background-color: rgba(24, 82, 119, 0.13);
     color: #eef1f5;
     padding: 16px 20px;
     margin: 8px 12px;
     font-size: 30px;
     line-height: 1.55;
     border-radius: 12px 12px 12px 4px;
-    border: 1px solid rgba(125, 18, 27, 0.36);
+    border: 1px solid rgba(24, 82, 119, 0.36);
 }
 
 /* ---- WHY THE 60px INSET LIVES HERE AND NOT ON THE BUBBLE ----
@@ -640,10 +660,10 @@ headerbar {
     color: #d6dbe2;
 }
 .avatar-basilisk {
-    background: linear-gradient(135deg, #8b0010, #ff2d3a);
+    background: linear-gradient(135deg, #085183, #3aacf2);
     color: #08090b;
-    border: 1px solid #ff5566;
-    box-shadow: 0 0 10px rgba(255, 45, 58, 0.55);
+    border: 1px solid #5fbaf5;
+    box-shadow: 0 0 10px rgba(58, 172, 242, 0.26);
 }
 
 .role-label {
@@ -655,7 +675,7 @@ headerbar {
     text-transform: uppercase;
     margin: 0 0 5px 0;
 }
-.role-label.user { color: #7d121b; }
+.role-label.user { color: #185277; }
 .role-label.basilisk { color: #c4cad4; }
 
 /* ===== Code blocks ===== */
@@ -712,13 +732,13 @@ headerbar {
 .status-pill.online   { background-color: #2ecc71; color: #08090b; }
 .status-pill.offline  { background-color: #1b1f26; color: #d6dbe2; }
 .status-pill.error    { background-color: #e5484d; color: #ffffff; }
-.status-pill.groq     { background: linear-gradient(135deg, #4a0a11, #7d121b);
+.status-pill.groq     { background: linear-gradient(135deg, #0e3046, #185277);
                         color: #ffffff; }
 
 /* ===== Settings ===== */
 
 .settings-section-title {
-    color: #7d121b;
+    color: #185277;
     font-weight: bold;
     font-size: 17px;
     font-family: 'JetBrains Mono', monospace;
@@ -731,7 +751,7 @@ headerbar {
 
 .confirm-cmd {
     background-color: #0a0c0f;
-    color: #7d121b;
+    color: #185277;
     font-family: 'JetBrains Mono', monospace;
     font-size: 20px;
     padding: 16px;
@@ -749,7 +769,7 @@ scrollbar slider {
     min-height: 50px;
 }
 scrollbar slider:hover { background-color: #3d4651; }
-scrollbar slider:active { background-color: #4a0a11; }
+scrollbar slider:active { background-color: #0e3046; }
 
 /* ===== Entry ===== */
 
@@ -761,7 +781,7 @@ entry {
     border: 1px solid #1b1f26;
     font-size: 20px;
 }
-entry:focus-within { outline: 2px solid #4a0a11; border-color: #4a0a11; }
+entry:focus-within { outline: 2px solid #0e3046; border-color: #0e3046; }
 
 passwordentry {
     background-color: #12151a;
@@ -785,8 +805,8 @@ passwordentry {
 }
 .quick-chip:hover {
     background-color: #1f2530;
-    color: #7d121b;
-    border-color: #4a0a11;
+    color: #185277;
+    border-color: #0e3046;
 }
 
 /* ===== Terminal log panel ===== */
@@ -804,7 +824,7 @@ passwordentry {
 }
 
 .terminal-panel-title {
-    color: #7d121b;
+    color: #185277;
     font-family: 'JetBrains Mono', monospace;
     font-size: 14px;
     font-weight: bold;
@@ -862,8 +882,8 @@ passwordentry {
     font-style: italic;
 }
 .status-pill.busy {
-    border-color: #7d121b;
-    background-color: #140a0c;
+    border-color: #185277;
+    background-color: #0b1013;
 }
 .status-pill.busy .status-pill-label {
     color: #d1434f;
@@ -872,16 +892,16 @@ passwordentry {
 .status-pill-spinner {
     min-width: 12px;
     min-height: 12px;
-    color: #7d121b;
+    color: #185277;
 }
 .terminal-toggle-btn:hover {
     background-color: #12151a;
-    color: #7d121b;
+    color: #185277;
 }
 .terminal-toggle-btn.active {
     background-color: #0a0c0f;
-    color: #7d121b;
-    border: 1px solid #4a0a11;
+    color: #185277;
+    border: 1px solid #0e3046;
 }
 
 /* ===== Banner for watcher events ===== */
@@ -897,19 +917,19 @@ passwordentry {
 }
 
 .working-row {
-    background-color: rgba(125, 18, 27, 0.15);
+    background-color: rgba(24, 82, 119, 0.15);
     border-radius: 8px;
     padding: 10px 22px;
 }
 .working-label {
-    color: #7d121b;
+    color: #185277;
     font-size: 18px;
     font-style: italic;
     font-weight: bold;
     letter-spacing: 0.5px;
 }
 .working-spinner {
-    color: #7d121b;
+    color: #185277;
     min-width: 24px;
     min-height: 24px;
 }
@@ -919,7 +939,7 @@ passwordentry {
 .cmd-card {
     background-color: #0d0f12;
     border: 1px solid #1b1f26;
-    border-left: 4px solid #4a0a11;
+    border-left: 4px solid #0e3046;
     border-radius: 8px;
     padding: 14px 16px;
     margin: 8px 0;
@@ -928,7 +948,7 @@ passwordentry {
     margin-bottom: 8px;
 }
 .cmd-card-title {
-    color: #7d121b;
+    color: #185277;
     font-weight: bold;
     font-size: 15px;
     font-family: 'JetBrains Mono', monospace;
@@ -947,7 +967,7 @@ passwordentry {
 .risk-badge.high   { background-color: #e5484d; color: #ffffff; }
 .cmd-text {
     background-color: #0a0c0f;
-    color: #7d121b;
+    color: #185277;
     font-family: 'JetBrains Mono', monospace;
     font-size: 18px;
     padding: 12px 14px;
@@ -964,20 +984,20 @@ passwordentry {
     background-color: rgba(229, 72, 77, 0.10);
     border: 1px solid rgba(229, 72, 77, 0.45);
     border-radius: 8px;
-    color: #f3b0b2;
+    color: #b4d9ef;
     font-size: 15px;
     padding: 10px 14px;
     margin: 6px 0;
 }
 .cmd-run-btn {
-    background: linear-gradient(135deg, #4a0a11, #7d121b);
+    background: linear-gradient(135deg, #0e3046, #185277);
     color: #ffffff;
     border-radius: 6px;
     padding: 10px 22px;
     font-weight: bold;
     font-size: 16px;
 }
-.cmd-run-btn:hover { background: linear-gradient(135deg, #7d121b, #4a0a11); }
+.cmd-run-btn:hover { background: linear-gradient(135deg, #185277, #0e3046); }
 .cmd-run-btn:disabled { background: #1b1f26; color: #5a626d; }
 .cmd-copy-btn {
     background-color: #12151a;
@@ -987,7 +1007,7 @@ passwordentry {
     font-size: 16px;
     border: 1px solid #1b1f26;
 }
-.cmd-copy-btn:hover { background-color: #1f2530; border-color: #4a0a11; }
+.cmd-copy-btn:hover { background-color: #1f2530; border-color: #0e3046; }
 
 /* ===== libadwaita rows / settings / dialogs =====
    Force the Basilisk surfaces on the built-in widgets so Settings and
@@ -1015,7 +1035,7 @@ switch {
     border-radius: 14px;
 }
 switch:checked {
-    background-color: #4a0a11;
+    background-color: #0e3046;
 }
 switch > slider {
     background-color: #d6dbe2;
@@ -1030,7 +1050,7 @@ spinbutton, spinbutton entry {
 }
 spinbutton button {
     background-color: #12151a;
-    color: #7d121b;
+    color: #185277;
 }
 spinbutton button:hover { background-color: #1b1f26; }
 
@@ -1050,7 +1070,7 @@ popover > contents, popover > arrow {
     border: 1px solid #1b1f26;
 }
 popover row:selected, dropdown listview > row:selected {
-    background-color: #4a0a11;
+    background-color: #0e3046;
     color: #ffffff;
 }
 
@@ -1066,7 +1086,7 @@ window.dialog, dialog, .messagedialog, .dialog-content {
     margin: 4px;
 }
 .messagedialog .response-area button.suggested-action {
-    background: linear-gradient(135deg, #4a0a11, #7d121b);
+    background: linear-gradient(135deg, #0e3046, #185277);
     color: #ffffff;
 }
 .messagedialog .response-area button.destructive-action {
@@ -1081,7 +1101,7 @@ window.dialog, dialog, .messagedialog, .dialog-content {
     border-radius: 6px;
     border: 1px solid #1b1f26;
 }
-searchentry:focus-within { border-color: #4a0a11; }
+searchentry:focus-within { border-color: #0e3046; }
 
 /* Menu button / popover menu */
 menubutton > button, .menu-button {
@@ -1099,11 +1119,11 @@ button {
     border: 1px solid #1b1f26;
     border-radius: 11px;
 }
-button:hover { background-color: #1f2530; border-color: #4a0a11; }
+button:hover { background-color: #1f2530; border-color: #0e3046; }
 button.flat { background-color: transparent; border: none; }
 button.flat:hover { background-color: #12151a; }
 button.suggested-action {
-    background: linear-gradient(135deg, #4a0a11, #7d121b);
+    background: linear-gradient(135deg, #0e3046, #185277);
     color: #ffffff;
     border: none;
 }
@@ -1112,17 +1132,17 @@ button.suggested-action {
 .avatar-dragon {
     border-radius: 8px;
     background-color: #000000;
-    box-shadow: 0 0 10px rgba(255, 45, 58, 0.5), 0 0 4px rgba(125, 18, 27, 0.4);
+    box-shadow: 0 0 10px rgba(58, 172, 242, 0.26), 0 0 4px rgba(24, 82, 119, 0.208);
 }
 .avatar-cross {
     border-radius: 8px;
     background-color: #0a0c0e;
-    box-shadow: 0 0 8px rgba(125, 18, 27, 0.35);
+    box-shadow: 0 0 8px rgba(24, 82, 119, 0.182);
 }
 .avatar-priest {
     border-radius: 10px;
     background-color: #0a0c0e;
-    box-shadow: 0 0 10px rgba(64, 20, 96, 0.45), 0 0 4px rgba(64, 20, 96, 0.35);
+    box-shadow: 0 0 10px rgba(64, 20, 96, 0.234), 0 0 4px rgba(64, 20, 96, 0.182);
 }
 /* let the penguin watermark show through the chat */
 .chat-scroll,
@@ -1139,14 +1159,14 @@ button.suggested-action {
 
 /* Tao Te Ching line under the chat list (sidebar) - quiet, muted, out of the way */
 .tao-quote {
-    color: #c2b28a;
+    color: #8dbcbf;
     font-size: 19px;
     font-style: italic;
     line-height: 1.5;
 }
 
 /* Links (e.g. 'Get an API key') in Basilisk blue */
-link, button.link, *:link { color: #7d121b; }
+link, button.link, *:link { color: #185277; }
 
 /* Voice: mic button + active recording state */
 .mic-button {
@@ -1155,16 +1175,16 @@ link, button.link, *:link { color: #7d121b; }
     border: 1px solid #1b1f26;
     border-radius: 11px;
 }
-.mic-button:hover { background-color: #1f2530; border-color: #4a0a11; }
+.mic-button:hover { background-color: #1f2530; border-color: #0e3046; }
 .mic-recording {
-    background: linear-gradient(135deg, #e5484d, #ff5c61);
+    background: linear-gradient(135deg, #e5484d, #66c1f5);
     color: #ffffff;
-    border: 1px solid #ff5c61;
-    box-shadow: 0 0 10px rgba(229, 72, 77, 0.6);
+    border: 1px solid #66c1f5;
+    box-shadow: 0 0 10px rgba(229, 72, 77, 0.26);
 }
 .mic-recording:hover {
-    background: linear-gradient(135deg, #ff5c61, #ff6f73);
-    border-color: #ff6f73;
+    background: linear-gradient(135deg, #66c1f5, #78c8f6);
+    border-color: #78c8f6;
 }
 
 /* Per-message read-aloud button - sits under the reply, clearly tappable */
@@ -1173,8 +1193,8 @@ link, button.link, *:link { color: #7d121b; }
     padding: 5px 14px;
     margin: 2px 0 0 2px;
     color: #8a8f97;
-    background-color: rgba(20, 16, 14, 0.72);
-    border: 1px solid rgba(120, 72, 58, 0.34);
+    background-color: rgba(14, 19, 20, 0.72);
+    border: 1px solid rgba(62, 102, 116, 0.34);
     border-radius: 11px;
     /* 12px against 30px body copy was a speck. This is a control the
        operator has to be able to hit on a phone. */
@@ -1185,13 +1205,13 @@ link, button.link, *:link { color: #7d121b; }
 .msg-speak-btn:hover { opacity: 1.0; }
 .msg-speak-btn:hover {
     background-color: #1b2128;
-    color: #7d121b;
-    border-color: #4a0a11;
+    color: #185277;
+    border-color: #0e3046;
 }
 .msg-speak-btn.speaking {
-    color: #7d121b;
-    border-color: #4a0a11;
-    background-color: rgba(125, 18, 27, 0.12);
+    color: #185277;
+    border-color: #0e3046;
+    background-color: rgba(24, 82, 119, 0.12);
 }
 
 /* Composer action icons (attach, audit, scan, mic) - subtle + rounded */
@@ -1199,17 +1219,17 @@ link, button.link, *:link { color: #7d121b; }
    not flat gray squares. Hover awakens the ember; press sinks it into the
    stone. ASCII-only (this is a bytes-literal stylesheet). ===== */
 .icon-button {
-    background-color: #0b0708;
+    background-color: #07090b;
     background-image:
-        radial-gradient(ellipse at 50% 118%, rgba(170, 34, 20, 0.30), rgba(170, 34, 20, 0) 70%),
-        linear-gradient(180deg, rgba(64, 22, 16, 0.28), rgba(10, 6, 6, 0) 62%);
-    border: 1px solid rgba(125, 18, 27, 0.48);
+        radial-gradient(ellipse at 50% 118%, rgba(29, 120, 161, 0.30), rgba(29, 120, 161, 0) 70%),
+        linear-gradient(180deg, rgba(19, 48, 61, 0.28), rgba(6, 9, 10, 0) 62%);
+    border: 1px solid rgba(24, 82, 119, 0.48);
     border-radius: 12px;
-    color: #d9b3a1;
+    color: #a4cbd6;
     padding: 7px;
-    box-shadow: inset 0 1px 0 rgba(210, 90, 48, 0.10),
-                inset 0 -6px 12px rgba(120, 26, 14, 0.16),
-                0 0 8px rgba(125, 18, 27, 0.22);
+    box-shadow: inset 0 1px 0 rgba(58, 166, 200, 0.10),
+                inset 0 -6px 12px rgba(20, 85, 114, 0.16),
+                0 0 8px rgba(24, 82, 119, 0.114);
     transition: all 160ms ease;
 }
 .notif-badge {
@@ -1232,28 +1252,28 @@ link, button.link, *:link { color: #7d121b; }
 .notif-time { color: #6b737d; font-size: 11px; }
 .icon-button:hover {
     background-image:
-        radial-gradient(ellipse at 50% 118%, rgba(225, 54, 26, 0.44), rgba(225, 54, 26, 0) 72%),
-        linear-gradient(180deg, rgba(92, 30, 20, 0.36), rgba(10, 6, 6, 0) 60%);
-    color: #ffd7bf;
-    border-color: rgba(205, 64, 32, 0.90);
-    box-shadow: inset 0 1px 0 rgba(255, 130, 66, 0.16),
-                inset 0 -7px 14px rgba(185, 44, 22, 0.24),
-                0 0 17px rgba(205, 54, 28, 0.52);
+        radial-gradient(ellipse at 50% 118%, rgba(38, 162, 213, 0.44), rgba(38, 162, 213, 0) 72%),
+        linear-gradient(180deg, rgba(24, 69, 88, 0.36), rgba(6, 9, 10, 0) 60%);
+    color: #c3f0fb;
+    border-color: rgba(42, 153, 195, 0.90);
+    box-shadow: inset 0 1px 0 rgba(77, 209, 244, 0.16),
+                inset 0 -7px 14px rgba(32, 133, 175, 0.24),
+                0 0 17px rgba(39, 149, 194, 0.26);
 }
 .icon-button:active {
-    background-color: #070505;
+    background-color: #050607;
     box-shadow: inset 0 3px 10px rgba(0, 0, 0, 0.62),
-                inset 0 0 12px rgba(165, 32, 20, 0.32),
-                0 0 7px rgba(125, 18, 27, 0.26);
+                inset 0 0 12px rgba(29, 116, 156, 0.166),
+                0 0 7px rgba(24, 82, 119, 0.135);
 }
 .icon-button.toggled {
-    color: #ffcaa8;
-    border-color: rgba(220, 70, 36, 0.95);
+    color: #adebfa;
+    border-color: rgba(47, 165, 209, 0.95);
     background-image:
-        radial-gradient(ellipse at 50% 118%, rgba(220, 54, 26, 0.50), rgba(220, 54, 26, 0) 74%),
-        linear-gradient(180deg, rgba(100, 32, 22, 0.40), rgba(10, 6, 6, 0) 60%);
-    box-shadow: inset 0 -7px 14px rgba(190, 46, 22, 0.30),
-                0 0 16px rgba(210, 56, 28, 0.55);
+        radial-gradient(ellipse at 50% 118%, rgba(38, 159, 208, 0.50), rgba(38, 159, 208, 0) 74%),
+        linear-gradient(180deg, rgba(27, 75, 95, 0.40), rgba(6, 9, 10, 0) 60%);
+    box-shadow: inset 0 -7px 14px rgba(32, 137, 180, 0.30),
+                0 0 16px rgba(39, 153, 199, 0.26);
 }
 /* Send button - blends into the background; only the silver dragon pops.
    Glows softly while working; still acts as Stop when pressed. */
@@ -1268,7 +1288,7 @@ link, button.link, *:link { color: #7d121b; }
 }
 .send-button:hover {
     background-color: #08090b;
-    box-shadow: 0 0 14px rgba(205, 54, 28, 0.5);
+    box-shadow: 0 0 14px rgba(39, 149, 194, 0.26);
 }
 .send-button:active {
     background-color: #0a0c0f;
@@ -1280,9 +1300,9 @@ link, button.link, *:link { color: #7d121b; }
     animation: none;
 }
 @keyframes sendglow {
-    0%   { box-shadow: 0 0 6px rgba(200, 208, 216, 0.25); border-color: #2a323b; }
-    50%  { box-shadow: 0 0 20px rgba(224, 232, 240, 0.75); border-color: #c8d0d8; }
-    100% { box-shadow: 0 0 6px rgba(200, 208, 216, 0.25); border-color: #2a323b; }
+    0%   { box-shadow: 0 0 6px rgba(200, 208, 216, 0.13); border-color: #2a323b; }
+    50%  { box-shadow: 0 0 20px rgba(224, 232, 240, 0.26); border-color: #c8d0d8; }
+    100% { box-shadow: 0 0 6px rgba(200, 208, 216, 0.13); border-color: #2a323b; }
 }
 /* Header buttons (sidebar toggle, new chat) - blend into the header, with a
    quiet dragon-green accent only on hover so they don't draw the eye. */
@@ -1296,7 +1316,7 @@ link, button.link, *:link { color: #7d121b; }
     min-width: 0;
 }
 .wordmark-btn:hover {
-    background-color: rgba(125, 18, 27, 0.16);
+    background-color: rgba(24, 82, 119, 0.16);
     box-shadow: none;
 }
 .logo-toggle { padding: 3px; }
@@ -1308,36 +1328,36 @@ link, button.link, *:link { color: #7d121b; }
        bright bevel on the upper edge, so the button reads as a pane of red
        glass rather than carved stone. Kept translucent (low alphas) so the
        ember backdrop shows through. */
-    background-color: rgba(30, 16, 18, 0.28);
+    background-color: rgba(17, 24, 29, 0.28);
     background-image: linear-gradient(180deg,
-                      rgba(255, 210, 200, 0.16) 0%,
-                      rgba(150, 40, 46, 0.12) 46%,
-                      rgba(20, 10, 12, 0.10) 54%,
-                      rgba(70, 20, 24, 0.14) 100%);
-    border: 1px solid rgba(255, 120, 120, 0.28);
+                      rgba(203, 238, 252, 0.16) 0%,
+                      rgba(47, 107, 143, 0.12) 46%,
+                      rgba(11, 16, 19, 0.10) 54%,
+                      rgba(23, 50, 67, 0.14) 100%);
+    border: 1px solid rgba(128, 205, 247, 0.28);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.30),
                 inset 0 -1px 0 rgba(0, 0, 0, 0.30),
-                0 0 8px rgba(125, 18, 27, 0.22);
+                0 0 8px rgba(24, 82, 119, 0.114);
     padding: 3px;
     border-radius: 12px;
     transition: all 150ms ease;
 }
 .art-button:hover {
-    background-color: rgba(150, 40, 46, 0.30);
+    background-color: rgba(47, 107, 143, 0.30);
     background-image: linear-gradient(180deg,
-                      rgba(255, 220, 210, 0.24) 0%,
-                      rgba(190, 50, 56, 0.18) 46%,
-                      rgba(60, 16, 20, 0.14) 54%,
-                      rgba(120, 26, 32, 0.20) 100%);
-    border-color: rgba(255, 130, 130, 0.55);
+                      rgba(213, 242, 252, 0.24) 0%,
+                      rgba(58, 136, 182, 0.18) 46%,
+                      rgba(19, 42, 57, 0.14) 54%,
+                      rgba(32, 83, 114, 0.20) 100%);
+    border-color: rgba(138, 209, 247, 0.55);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.40),
-                0 0 16px rgba(230, 60, 40, 0.55);
+                0 0 16px rgba(51, 167, 219, 0.26);
 }
 .art-button:active {
-    background-color: rgba(90, 20, 24, 0.40);
+    background-color: rgba(24, 63, 86, 0.40);
     box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.45),
                 inset 0 1px 0 rgba(255, 255, 255, 0.10),
-                0 0 8px rgba(205, 54, 28, 0.40);
+                0 0 8px rgba(39, 149, 194, 0.208);
 }
 /* UNLEASH -- the big red dragon. A quiet ember when idle, a hot red glow when
    armed so it's unmistakable that Basilisk is off the leash. */
@@ -1346,17 +1366,17 @@ link, button.link, *:link { color: #7d121b; }
     background-image: none;
     border: none;
     border-radius: 999px;
-    box-shadow: 0 0 6px rgba(205, 54, 28, 0.28);
+    box-shadow: 0 0 6px rgba(39, 149, 194, 0.146);
 }
 .unleash-button:hover {
-    box-shadow: 0 0 16px rgba(230, 60, 30, 0.65);
+    box-shadow: 0 0 16px rgba(42, 167, 218, 0.26);
 }
 .unleash-button.toggled {
-    background-color: rgba(150, 20, 24, 0.30);
-    box-shadow: 0 0 22px rgba(235, 45, 30, 0.95), inset 0 0 9px rgba(255, 95, 60, 0.55);
+    background-color: rgba(28, 100, 142, 0.30);
+    box-shadow: 0 0 22px rgba(42, 165, 223, 0.26), inset 0 0 9px rgba(72, 196, 243, 0.26);
 }
 .unleash-button.toggled:hover {
-    box-shadow: 0 0 30px rgba(255, 60, 40, 1.0), inset 0 0 11px rgba(255, 120, 80, 0.65);
+    box-shadow: 0 0 30px rgba(53, 183, 242, 0.26), inset 0 0 11px rgba(90, 205, 244, 0.26);
 }
 
 /* Reasoning-effort pill: a compact Low/Med/High segmented control. Ember
@@ -1369,21 +1389,21 @@ link, button.link, *:link { color: #7d121b; }
 .effort-seg {
     background: transparent;
     background-image: none;
-    color: rgba(228, 210, 196, 0.75);
+    color: rgba(198, 221, 226, 0.75);
     padding: 2px 9px;
     min-height: 22px;
     font-size: 12px;
     font-weight: 600;
-    border: 1px solid rgba(205, 120, 60, 0.28);
+    border: 1px solid rgba(69, 174, 196, 0.28);
 }
 .effort-seg:hover {
-    color: rgba(255, 236, 220, 0.95);
-    background-color: rgba(205, 90, 40, 0.14);
+    color: rgba(222, 248, 253, 0.95);
+    background-color: rgba(50, 163, 195, 0.14);
 }
 .effort-seg:checked {
-    color: #1a1108;
-    background-image: linear-gradient(160deg, rgba(240, 170, 70, 0.95), rgba(200, 90, 30, 0.95));
-    border-color: rgba(240, 150, 60, 0.7);
+    color: #091719;
+    background-image: linear-gradient(160deg, rgba(80, 214, 230, 0.95), rgba(40, 159, 190, 0.95));
+    border-color: rgba(71, 207, 229, 0.7);
 }
 /* A Gtk.MenuButton (settings, notifications) wraps its child in an inner
    > button that keeps GTK's default flat-grey styling -- that's the grey box
@@ -1391,32 +1411,32 @@ link, button.link, *:link { color: #7d121b; }
    inner button too: fully transparent, no border/shadow, ember glow on hover to
    match the plain art buttons. */
 menubutton.art-button > button {
-    background-color: rgba(30, 16, 18, 0.28);
+    background-color: rgba(17, 24, 29, 0.28);
     background-image: linear-gradient(180deg,
-                      rgba(255, 210, 200, 0.16) 0%,
-                      rgba(150, 40, 46, 0.12) 46%,
-                      rgba(20, 10, 12, 0.10) 54%,
-                      rgba(70, 20, 24, 0.14) 100%);
-    border: 1px solid rgba(255, 120, 120, 0.28);
+                      rgba(203, 238, 252, 0.16) 0%,
+                      rgba(47, 107, 143, 0.12) 46%,
+                      rgba(11, 16, 19, 0.10) 54%,
+                      rgba(23, 50, 67, 0.14) 100%);
+    border: 1px solid rgba(128, 205, 247, 0.28);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.30),
                 inset 0 -1px 0 rgba(0, 0, 0, 0.30),
-                0 0 8px rgba(125, 18, 27, 0.22);
+                0 0 8px rgba(24, 82, 119, 0.114);
     padding: 3px;
     min-width: 0;
     min-height: 0;
     border-radius: 12px;
 }
 menubutton.art-button > button:hover {
-    background-color: rgba(150, 40, 46, 0.30);
-    border-color: rgba(255, 130, 130, 0.55);
+    background-color: rgba(47, 107, 143, 0.30);
+    border-color: rgba(138, 209, 247, 0.55);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.40),
-                0 0 16px rgba(230, 60, 40, 0.55);
+                0 0 16px rgba(51, 167, 219, 0.26);
 }
 menubutton.art-button > button:active {
-    background-color: rgba(90, 20, 24, 0.40);
+    background-color: rgba(24, 63, 86, 0.40);
     box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.45),
                 inset 0 1px 0 rgba(255, 255, 255, 0.10),
-                0 0 8px rgba(205, 54, 28, 0.40);
+                0 0 8px rgba(39, 149, 194, 0.208);
 }
 /* Startup splash window -- dark backdrop behind the igniting-dragon animation
    (the DrawingArea paints over this; it just avoids a white flash on the very
@@ -1434,64 +1454,64 @@ menubutton.art-button > button:active {
     padding: 6px;
 }
 .header-icon-button:hover {
-    background-color: rgba(125, 18, 27, 0.10);
-    color: #7d121b;
+    background-color: rgba(24, 82, 119, 0.10);
+    color: #185277;
     box-shadow: none;
 }
 .header-icon-button:active {
-    background-color: rgba(125, 18, 27, 0.16);
+    background-color: rgba(24, 82, 119, 0.16);
 }
 /* Model / provider switcher in the composer */
 .model-switch-btn {
-    background-color: #0b0708;
+    background-color: #07090b;
     background-image:
-        radial-gradient(ellipse at 50% 130%, rgba(170, 34, 20, 0.22), rgba(170, 34, 20, 0) 72%),
-        linear-gradient(180deg, rgba(64, 22, 16, 0.22), rgba(10, 6, 6, 0) 62%);
-    border: 1px solid rgba(125, 18, 27, 0.42);
+        radial-gradient(ellipse at 50% 130%, rgba(29, 120, 161, 0.22), rgba(29, 120, 161, 0) 72%),
+        linear-gradient(180deg, rgba(19, 48, 61, 0.22), rgba(6, 9, 10, 0) 62%);
+    border: 1px solid rgba(24, 82, 119, 0.42);
     border-radius: 11px;
-    color: #cbb0a4;
+    color: #a6c1c9;
     padding: 5px 12px;
     font-size: 10.5px;
     font-weight: 600;
-    box-shadow: inset 0 -5px 10px rgba(120, 26, 14, 0.14),
-                0 0 7px rgba(125, 18, 27, 0.18);
+    box-shadow: inset 0 -5px 10px rgba(20, 85, 114, 0.14),
+                0 0 7px rgba(24, 82, 119, 0.094);
     transition: all 160ms ease;
 }
 .model-switch-btn:hover {
-    color: #ffd7bf;
-    border-color: rgba(205, 64, 32, 0.85);
-    box-shadow: inset 0 -6px 12px rgba(185, 44, 22, 0.22),
-                0 0 14px rgba(205, 54, 28, 0.45);
+    color: #c3f0fb;
+    border-color: rgba(42, 153, 195, 0.85);
+    box-shadow: inset 0 -6px 12px rgba(32, 133, 175, 0.22),
+                0 0 14px rgba(39, 149, 194, 0.234);
 }
 /* Window controls (close / minimise): the same summoned-stone look, and the
    close sigil flares blood-red when you reach for it. */
 windowcontrols > button,
 .titlebutton {
-    background-color: #0b0708;
-    background-image: radial-gradient(ellipse at 50% 120%, rgba(150, 30, 18, 0.24), rgba(150, 30, 18, 0) 72%);
-    border: 1px solid rgba(125, 18, 27, 0.40);
+    background-color: #07090b;
+    background-image: radial-gradient(ellipse at 50% 120%, rgba(26, 106, 142, 0.24), rgba(26, 106, 142, 0) 72%);
+    border: 1px solid rgba(24, 82, 119, 0.40);
     border-radius: 10px;
-    color: #c4a99c;
-    box-shadow: inset 0 -5px 10px rgba(120, 26, 14, 0.14),
-                0 0 6px rgba(125, 18, 27, 0.18);
+    color: #9ebac2;
+    box-shadow: inset 0 -5px 10px rgba(20, 85, 114, 0.14),
+                0 0 6px rgba(24, 82, 119, 0.094);
     transition: all 150ms ease;
 }
 windowcontrols > button:hover,
 .titlebutton:hover {
-    color: #ffd7bf;
-    border-color: rgba(205, 64, 32, 0.85);
-    box-shadow: inset 0 -6px 12px rgba(185, 44, 22, 0.22),
-                0 0 14px rgba(205, 54, 28, 0.45);
+    color: #c3f0fb;
+    border-color: rgba(42, 153, 195, 0.85);
+    box-shadow: inset 0 -6px 12px rgba(32, 133, 175, 0.22),
+                0 0 14px rgba(39, 149, 194, 0.234);
 }
 windowcontrols > button.close:hover,
 .titlebutton.close:hover {
     background-image: radial-gradient(ellipse at 50% 120%, rgba(229, 72, 77, 0.50), rgba(229, 72, 77, 0) 74%);
     border-color: rgba(229, 72, 77, 0.95);
     color: #ffffff;
-    box-shadow: 0 0 16px rgba(229, 72, 77, 0.60);
+    box-shadow: 0 0 16px rgba(229, 72, 77, 0.26);
 }
 .model-group-header {
-    color: #ff3a47;
+    color: #46b1f3;
     font-size: 15px;
     font-weight: 800;
     letter-spacing: 1px;
@@ -1509,12 +1529,12 @@ windowcontrols > button.close:hover,
     font-weight: 500;
 }
 .model-pick-row:hover {
-    background-color: rgba(125, 18, 27, 0.10);
-    color: #7d121b;
+    background-color: rgba(24, 82, 119, 0.10);
+    color: #185277;
 }
 .model-pick-active {
-    background-color: rgba(125, 18, 27, 0.16);
-    color: #7d121b;
+    background-color: rgba(24, 82, 119, 0.16);
+    color: #185277;
     font-weight: 700;
 }
 
@@ -1563,27 +1583,27 @@ button:disabled {
     opacity: 0.55;
 }
 button:focus-visible {
-    outline: 2px solid rgba(125, 18, 27,0.65);
+    outline: 2px solid rgba(24, 82, 119, 0.65);
     outline-offset: 1px;
 }
 button.suggested-action {
-    box-shadow: 0 2px 8px rgba(125, 18, 27,0.35),
+    box-shadow: 0 2px 8px rgba(24, 82, 119, 0.35),
                 inset 0 1px 0 rgba(255,255,255,0.15);
 }
 button.suggested-action:hover {
-    box-shadow: 0 3px 14px rgba(125, 18, 27,0.45),
+    box-shadow: 0 3px 14px rgba(24, 82, 119, 0.45),
                 inset 0 1px 0 rgba(255,255,255,0.20);
 }
 
 /* ---- Primary action buttons (Run / Apply) ---- */
 .cmd-run-btn {
-    box-shadow: 0 2px 10px rgba(125, 18, 27,0.40),
+    box-shadow: 0 2px 10px rgba(24, 82, 119, 0.40),
                 inset 0 1px 0 rgba(255,255,255,0.18);
     padding: 11px 26px;
     letter-spacing: 0.2px;
 }
 .cmd-run-btn:hover {
-    box-shadow: 0 4px 16px rgba(125, 18, 27,0.50),
+    box-shadow: 0 4px 16px rgba(24, 82, 119, 0.50),
                 inset 0 1px 0 rgba(255,255,255,0.22);
 }
 .cmd-run-btn:active {
@@ -1614,12 +1634,12 @@ entry {
 }
 entry:focus-within {
     box-shadow: inset 0 1px 3px rgba(0,0,0,0.35),
-                0 0 0 3px rgba(125, 18, 27,0.22);
+                0 0 0 3px rgba(24, 82, 119, 0.114);
 }
 
 /* ---- Message bubbles: quiet depth so they sit above the canvas ---- */
 .msg-user {
-    box-shadow: 0 2px 10px rgba(125, 18, 27,0.18);
+    box-shadow: 0 2px 10px rgba(24, 82, 119, 0.18);
 }
 .msg-assistant {
     box-shadow: 0 2px 10px rgba(0,0,0,0.28);
@@ -1638,7 +1658,7 @@ entry:focus-within {
     padding: 7px 15px;
 }
 .quick-chip:hover {
-    box-shadow: 0 2px 8px rgba(125, 18, 27,0.25);
+    box-shadow: 0 2px 8px rgba(24, 82, 119, 0.25);
 }
 
 /* ---- Mic recording: gentle pulse-ready glow already set; deepen it ---- */
@@ -1650,8 +1670,8 @@ entry:focus-within {
 /* ---- Working row: a soft active surface ---- */
 .working-row {
     background-image: linear-gradient(90deg,
-                      rgba(125, 18, 27,0.10), rgba(125, 18, 27,0.0));
-    box-shadow: inset 0 0 0 1px rgba(125, 18, 27,0.15);
+                      rgba(24, 82, 119, 0.10), rgba(24, 82, 119, 0.0));
+    box-shadow: inset 0 0 0 1px rgba(24, 82, 119, 0.078);
 }
 
 /* ---- Slim, themed scrollbars ---- */
@@ -1663,7 +1683,7 @@ scrollbar slider {
     min-height: 7px;
 }
 scrollbar slider:hover { background-color: #3a4250; }
-scrollbar slider:active { background-color: #7d121b; }
+scrollbar slider:active { background-color: #185277; }
 
 /* ---- Boxed settings lists: a touch of depth ---- */
 list.boxed-list {
@@ -1692,46 +1712,46 @@ list.boxed-list {
         engine the base color still lands, so panels never fall back to a
         flat slab. ---- */
 window, .background {
-    background-color: #070506;
+    background-color: #050607;
     background-image:
-        radial-gradient(circle at 15% 12%, rgba(46,42,40,0.55), rgba(46,42,40,0.0) 40%),
-        radial-gradient(circle at 82% 20%, rgba(34,30,29,0.55), rgba(34,30,29,0.0) 42%),
-        radial-gradient(circle at 42% 66%, rgba(26,23,23,0.60), rgba(26,23,23,0.0) 46%),
-        radial-gradient(circle at 90% 84%, rgba(150,45,18,0.06), rgba(150,45,18,0.0) 40%),
-        radial-gradient(circle at 8% 88%, rgba(180,60,20,0.05), rgba(180,60,20,0.0) 38%),
-        linear-gradient(0deg, rgba(120,30,12,0.07) 0%, rgba(10,7,6,0.0) 28%),
-        linear-gradient(180deg, #0b0807, #070506 55%, #050303);
+        radial-gradient(circle at 15% 12%, rgba(40, 45, 46, 0.55), rgba(40, 45, 46, 0.0) 40%),
+        radial-gradient(circle at 82% 20%, rgba(29, 33, 34, 0.55), rgba(29, 33, 34, 0.0) 42%),
+        radial-gradient(circle at 42% 66%, rgba(23, 25, 26, 0.60), rgba(23, 25, 26, 0.0) 46%),
+        radial-gradient(circle at 90% 84%, rgba(26, 111, 142, 0.06), rgba(26, 111, 142, 0.0) 40%),
+        radial-gradient(circle at 8% 88%, rgba(30, 136, 170, 0.05), rgba(30, 136, 170, 0.0) 38%),
+        linear-gradient(0deg, rgba(18, 87, 114, 0.07) 0%, rgba(6, 9, 10, 0.0) 28%),
+        linear-gradient(180deg, #070a0b, #050607 55%, #030405);
 }
 
 /* ---- Structural panels: same charred base, a hair lighter than the
         window so depth still reads, with a low ember bloom baked in. ---- */
 headerbar {
-    background-color: #0a0807;
+    background-color: #07090a;
     background-image:
-        radial-gradient(circle at 20% 40%, rgba(60,26,16,0.30), rgba(60,26,16,0.0) 55%),
-        radial-gradient(circle at 85% 60%, rgba(40,20,16,0.35), rgba(40,20,16,0.0) 55%),
-        linear-gradient(180deg, #100b09, #0a0706);
-    border-bottom: 1px solid #2a1712;
-    box-shadow: inset 0 -6px 14px rgba(120,35,12,0.10);
+        radial-gradient(circle at 20% 40%, rgba(19, 47, 57, 0.30), rgba(19, 47, 57, 0.0) 55%),
+        radial-gradient(circle at 85% 60%, rgba(17, 33, 39, 0.35), rgba(17, 33, 39, 0.0) 55%),
+        linear-gradient(180deg, #090e10, #06090a);
+    border-bottom: 1px solid #132329;
+    box-shadow: inset 0 -6px 14px rgba(18, 89, 114, 0.10);
 }
 .sidebar {
-    background-color: #080605;
+    background-color: #050708;
     background-image:
-        radial-gradient(circle at 30% 20%, rgba(44,38,36,0.40), rgba(44,38,36,0.0) 45%),
-        radial-gradient(circle at 60% 80%, rgba(90,28,12,0.10), rgba(90,28,12,0.0) 45%),
-        linear-gradient(180deg, #0b0908, #070505);
-    border-right: 1px solid #241410;
+        radial-gradient(circle at 30% 20%, rgba(36, 42, 44, 0.40), rgba(36, 42, 44, 0.0) 45%),
+        radial-gradient(circle at 60% 80%, rgba(17, 67, 85, 0.10), rgba(17, 67, 85, 0.0) 45%),
+        linear-gradient(180deg, #080a0b, #050607);
+    border-right: 1px solid #111e23;
 }
 .input-frame {
-    background-color: #0c0908;
-    background-image: linear-gradient(180deg, rgba(60,26,16,0.16), rgba(12,9,8,0.0) 60%);
-    border: 1px solid #3a2016;
-    box-shadow: inset 0 -5px 14px rgba(140,45,16,0.10);
+    background-color: #080b0c;
+    background-image: linear-gradient(180deg, rgba(19, 47, 57, 0.16), rgba(8, 11, 12, 0.0) 60%);
+    border: 1px solid #183038;
+    box-shadow: inset 0 -5px 14px rgba(23, 105, 133, 0.10);
 }
 .input-frame:focus-within {
-    border-color: #c8501a;
-    background-color: #140d0a;
-    box-shadow: inset 0 -6px 16px rgba(200,70,20,0.22), 0 0 14px rgba(200,70,20,0.18);
+    border-color: #249cbe;
+    background-color: #0b1113;
+    box-shadow: inset 0 -6px 16px rgba(31, 152, 189, 0.22), 0 0 14px rgba(31, 152, 189, 0.094);
 }
 
 /* ---- Chat bubbles: charred body plus a breathing ember halo.  User and
@@ -1740,60 +1760,60 @@ headerbar {
     transition: box-shadow 240ms ease, border-color 240ms ease;
 }
 .msg-user {
-    color: #f5e9df;
+    color: #e0f1f4;
     border-radius: 16px 16px 4px 16px;
-    background-color: #0d0806;
+    background-color: #060b0d;
     background-image:
-        radial-gradient(ellipse at 92% -12%, rgba(226, 96, 34, 0.16), rgba(226, 96, 34, 0) 48%),
-        radial-gradient(ellipse at 4% 126%, rgba(150, 44, 14, 0.20), rgba(150, 44, 14, 0) 56%),
-        linear-gradient(0deg, rgba(150, 50, 16, 0.12), rgba(60, 18, 8, 0.05) 42%, rgba(0, 0, 0, 0.0) 74%);
-    border: 1px solid rgba(196, 78, 30, 0.54);
+        radial-gradient(ellipse at 92% -12%, rgba(46, 178, 214, 0.16), rgba(46, 178, 214, 0) 48%),
+        radial-gradient(ellipse at 4% 126%, rgba(22, 111, 142, 0.20), rgba(22, 111, 142, 0) 56%),
+        linear-gradient(0deg, rgba(24, 113, 142, 0.12), rgba(11, 44, 57, 0.05) 42%, rgba(0, 0, 0, 0.0) 74%);
+    border: 1px solid rgba(40, 152, 186, 0.54);
     box-shadow:
-        inset 0 1px 0 rgba(240, 150, 90, 0.12),
-        inset 0 0 26px rgba(150, 46, 18, 0.16),
-        inset 0 -7px 18px rgba(170, 52, 16, 0.18),
+        inset 0 1px 0 rgba(99, 207, 231, 0.12),
+        inset 0 0 26px rgba(26, 112, 142, 0.083),
+        inset 0 -7px 18px rgba(25, 126, 161, 0.18),
         0 0 0 1px rgba(0, 0, 0, 0.40),
         0 8px 22px rgba(0, 0, 0, 0.50),
-        0 0 14px rgba(210, 72, 24, 0.30);
-    text-shadow: 0 0 9px rgba(220, 84, 34, 0.26), 0 1px 1px rgba(0, 0, 0, 0.55);
+        0 0 14px rgba(35, 159, 199, 0.156);
+    text-shadow: 0 0 9px rgba(45, 170, 209, 0.135), 0 1px 1px rgba(0, 0, 0, 0.55);
 }
 .msg-assistant {
-    color: #f2e7de;
+    color: #dfeef1;
     border-radius: 4px 16px 16px 16px;
-    background-color: #0b0706;
+    background-color: #060a0b;
     background-image:
-        radial-gradient(ellipse at 6% -12%, rgba(206, 58, 28, 0.16), rgba(206, 58, 28, 0) 46%),
-        radial-gradient(ellipse at 104% 128%, rgba(130, 24, 26, 0.20), rgba(130, 24, 26, 0) 56%),
-        linear-gradient(0deg, rgba(170, 55, 16, 0.11), rgba(70, 20, 8, 0.05) 42%, rgba(0, 0, 0, 0.0) 74%);
-    border: 1px solid rgba(182, 58, 30, 0.52);
+        radial-gradient(ellipse at 6% -12%, rgba(39, 151, 195, 0.16), rgba(39, 151, 195, 0) 46%),
+        radial-gradient(ellipse at 104% 128%, rgba(30, 90, 124, 0.20), rgba(30, 90, 124, 0) 56%),
+        linear-gradient(0deg, rgba(25, 128, 161, 0.11), rgba(12, 52, 66, 0.05) 42%, rgba(0, 0, 0, 0.0) 74%);
+    border: 1px solid rgba(39, 136, 173, 0.52);
     box-shadow:
-        inset 0 1px 0 rgba(232, 132, 80, 0.11),
-        inset 0 0 28px rgba(150, 40, 22, 0.16),
-        inset 0 -7px 18px rgba(160, 48, 15, 0.17),
+        inset 0 1px 0 rgba(89, 195, 223, 0.11),
+        inset 0 0 28px rgba(30, 109, 142, 0.083),
+        inset 0 -7px 18px rgba(24, 119, 151, 0.17),
         0 0 0 1px rgba(0, 0, 0, 0.40),
         0 8px 22px rgba(0, 0, 0, 0.50),
-        0 0 14px rgba(196, 60, 26, 0.28);
-    text-shadow: 0 0 9px rgba(202, 62, 34, 0.25), 0 1px 1px rgba(0, 0, 0, 0.55);
+        0 0 14px rgba(36, 146, 186, 0.146);
+    text-shadow: 0 0 9px rgba(44, 150, 192, 0.13), 0 1px 1px rgba(0, 0, 0, 0.55);
 }
 .msg-user:hover {
-    border-color: rgba(226, 96, 40, 0.72);
+    border-color: rgba(51, 178, 215, 0.72);
     box-shadow:
-        inset 0 1px 0 rgba(240, 150, 90, 0.14),
-        inset 0 0 30px rgba(160, 50, 20, 0.20),
-        inset 0 -7px 18px rgba(180, 56, 18, 0.20),
+        inset 0 1px 0 rgba(99, 207, 231, 0.14),
+        inset 0 0 30px rgba(28, 119, 152, 0.104),
+        inset 0 -7px 18px rgba(28, 134, 170, 0.20),
         0 0 0 1px rgba(0, 0, 0, 0.40),
         0 10px 26px rgba(0, 0, 0, 0.52),
-        0 0 24px rgba(226, 84, 30, 0.48);
+        0 0 24px rgba(42, 174, 214, 0.25);
 }
 .msg-assistant:hover {
-    border-color: rgba(210, 66, 34, 0.72);
+    border-color: rgba(45, 157, 199, 0.72);
     box-shadow:
-        inset 0 1px 0 rgba(232, 132, 80, 0.13),
-        inset 0 0 32px rgba(160, 44, 24, 0.20),
-        inset 0 -7px 18px rgba(170, 52, 18, 0.19),
+        inset 0 1px 0 rgba(89, 195, 223, 0.13),
+        inset 0 0 32px rgba(32, 117, 152, 0.104),
+        inset 0 -7px 18px rgba(27, 126, 161, 0.19),
         0 0 0 1px rgba(0, 0, 0, 0.40),
         0 10px 26px rgba(0, 0, 0, 0.52),
-        0 0 24px rgba(212, 66, 30, 0.46);
+        0 0 24px rgba(41, 158, 201, 0.239);
 }
 
 /* ---- The status line, reborn as a burning bar.  A flame gradient taller
@@ -1801,41 +1821,41 @@ headerbar {
         the same keyframes flicker the glow.  Placed just above the Send
         button by the layout change in _build_input_area. ---- */
 .working-row {
-    background-color: #0a0605;
+    background-color: #05090a;
     background-image: linear-gradient(0deg,
-        rgba(255,190,60,0.0) 0%,
-        rgba(255,140,30,0.34) 18%,
-        rgba(214,60,14,0.46) 44%,
-        rgba(120,26,10,0.32) 68%,
-        rgba(20,7,5,0.0) 100%);
+        rgba(72, 231, 243, 0.0) 0%,
+        rgba(43, 213, 242, 0.34) 18%,
+        rgba(26, 157, 202, 0.46) 44%,
+        rgba(17, 85, 113, 0.32) 68%,
+        rgba(6, 15, 19, 0.0) 100%);
     background-size: 100% 280%;
     background-position: 0% 100%;
-    border: 1px solid rgba(210,80,26,0.50);
+    border: 1px solid rgba(37, 162, 199, 0.50);
     border-radius: 10px;
     padding: 10px 22px;
     animation: fireScroll 1.15s linear infinite;
 }
 @keyframes fireScroll {
-    0%   { background-position: 0% 100%; box-shadow: 0 0 12px rgba(220,72,20,0.30), inset 0 -6px 16px rgba(255,120,30,0.20); }
-    50%  { background-position: 0% 40%;  box-shadow: 0 0 24px rgba(255,110,30,0.58), inset 0 -9px 22px rgba(255,150,44,0.36); }
-    100% { background-position: 0% 0%;   box-shadow: 0 0 12px rgba(220,72,20,0.30), inset 0 -6px 16px rgba(255,120,30,0.20); }
+    0%   { background-position: 0% 100%; box-shadow: 0 0 12px rgba(32, 165, 208, 0.156), inset 0 -6px 16px rgba(43, 205, 242, 0.20); }
+    50%  { background-position: 0% 40%;  box-shadow: 0 0 24px rgba(43, 202, 242, 0.26), inset 0 -9px 22px rgba(57, 217, 242, 0.36); }
+    100% { background-position: 0% 0%;   box-shadow: 0 0 12px rgba(32, 165, 208, 0.156), inset 0 -6px 16px rgba(43, 205, 242, 0.20); }
 }
 .working-label {
-    color: #ffd27a;
+    color: #82eff7;
     font-size: 18px;
     font-style: normal;
     font-weight: 800;
     letter-spacing: 0.6px;
-    text-shadow: 0 0 8px rgba(255,150,44,0.9), 0 0 16px rgba(255,90,22,0.6);
+    text-shadow: 0 0 8px rgba(57, 217, 242, 0.26), 0 0 16px rgba(36, 194, 241, 0.26);
     animation: emberText 0.85s ease-in-out infinite;
 }
 @keyframes emberText {
-    0%   { color: #ffcf6e; text-shadow: 0 0 6px rgba(255,150,44,0.8), 0 0 14px rgba(255,90,22,0.5); }
-    50%  { color: #fff1c6; text-shadow: 0 0 13px rgba(255,182,64,1.0), 0 0 24px rgba(255,110,30,0.8); }
-    100% { color: #ffcf6e; text-shadow: 0 0 6px rgba(255,150,44,0.8), 0 0 14px rgba(255,90,22,0.5); }
+    0%   { color: #ffcf6e; text-shadow: 0 0 6px rgba(57, 217, 242, 0.26), 0 0 14px rgba(36, 194, 241, 0.26); }
+    50%  { color: #fff1c6; text-shadow: 0 0 13px rgba(75, 228, 244, 0.26), 0 0 24px rgba(43, 202, 242, 0.26); }
+    100% { color: #ffcf6e; text-shadow: 0 0 6px rgba(57, 217, 242, 0.26), 0 0 14px rgba(36, 194, 241, 0.26); }
 }
 .working-spinner {
-    color: #ff9030;
+    color: #3cd6f3;
     min-width: 24px;
     min-height: 24px;
 }
@@ -1845,9 +1865,9 @@ headerbar {
     animation: sendFire 1.2s ease-in-out infinite;
 }
 @keyframes sendFire {
-    0%   { box-shadow: 0 0 6px rgba(255,120,30,0.30); border-color: #3a2016; }
-    50%  { box-shadow: 0 0 22px rgba(255,120,30,0.82); border-color: #ff7a2a; }
-    100% { box-shadow: 0 0 6px rgba(255,120,30,0.30); border-color: #3a2016; }
+    0%   { box-shadow: 0 0 6px rgba(43, 205, 242, 0.156); border-color: #183038; }
+    50%  { box-shadow: 0 0 22px rgba(43, 205, 242, 0.26); border-color: #37cef2; }
+    100% { box-shadow: 0 0 6px rgba(43, 205, 242, 0.156); border-color: #183038; }
 }
 
 /* =====================================================================
@@ -1865,14 +1885,14 @@ headerbar {
 .activity-feed {
     margin: 6px 60px 10px 12px;
     border-radius: 14px;
-    background-color: #0a0807;
+    background-color: #07090a;
     background-image: linear-gradient(180deg,
-        rgba(255, 150, 60, 0.055) 0%,
-        rgba(255, 120, 40, 0.018) 34%,
+        rgba(72, 216, 243, 0.055) 0%,
+        rgba(53, 205, 242, 0.018) 34%,
         rgba(0, 0, 0, 0.0) 100%);
-    border: 1px solid rgba(150, 52, 22, 0.34);
+    border: 1px solid rgba(30, 114, 142, 0.34);
     box-shadow:
-        inset 0 1px 0 rgba(255, 170, 110, 0.07),
+        inset 0 1px 0 rgba(119, 224, 246, 0.07),
         0 0 0 1px rgba(0, 0, 0, 0.40),
         0 8px 22px rgba(0, 0, 0, 0.46);
 }
@@ -1881,17 +1901,17 @@ headerbar {
    animated element in the panel -- a per-row animation would be dozens of
    clocks running at once during a mission, for no extra information. */
 .activity-feed.live {
-    border-color: rgba(226, 96, 34, 0.50);
-    border-left: 3px solid #e2601f;
+    border-color: rgba(46, 178, 214, 0.50);
+    border-left: 3px solid #2bb2d6;
     animation: activityRail 1.6s ease-in-out infinite;
 }
 @keyframes activityRail {
-    0%   { border-left-color: #8a2f12; box-shadow: inset 0 1px 0 rgba(255,170,110,0.07), 0 0 0 1px rgba(0,0,0,0.40), 0 8px 22px rgba(0,0,0,0.46), -1px 0 12px rgba(226,96,34,0.20); }
-    50%  { border-left-color: #ff9a44; box-shadow: inset 0 1px 0 rgba(255,170,110,0.10), 0 0 0 1px rgba(0,0,0,0.40), 0 8px 22px rgba(0,0,0,0.46), -1px 0 22px rgba(255,140,50,0.55); }
-    100% { border-left-color: #8a2f12; box-shadow: inset 0 1px 0 rgba(255,170,110,0.07), 0 0 0 1px rgba(0,0,0,0.40), 0 8px 22px rgba(0,0,0,0.46), -1px 0 12px rgba(226,96,34,0.20); }
+    0%   { border-left-color: #196883; box-shadow: inset 0 1px 0 rgba(119, 224, 246, 0.07), 0 0 0 1px rgba(0,0,0,0.40), 0 8px 22px rgba(0,0,0,0.46), -1px 0 12px rgba(46, 178, 214, 0.20); }
+    50%  { border-left-color: #4fdaf4; box-shadow: inset 0 1px 0 rgba(119, 224, 246, 0.10), 0 0 0 1px rgba(0,0,0,0.40), 0 8px 22px rgba(0,0,0,0.46), -1px 0 22px rgba(62, 213, 243, 0.55); }
+    100% { border-left-color: #196883; box-shadow: inset 0 1px 0 rgba(119, 224, 246, 0.07), 0 0 0 1px rgba(0,0,0,0.40), 0 8px 22px rgba(0,0,0,0.46), -1px 0 12px rgba(46, 178, 214, 0.20); }
 }
 .activity-feed.done {
-    border-left: 3px solid rgba(120, 44, 20, 0.55);
+    border-left: 3px solid rgba(26, 92, 114, 0.55);
 }
 .activity-feed.collapsed {
     background-image: none;
@@ -1908,14 +1928,14 @@ headerbar {
     border-radius: 14px;
 }
 .activity-header:hover {
-    background-color: rgba(255, 140, 60, 0.06);
+    background-color: rgba(72, 213, 243, 0.06);
 }
 .activity-header:active {
-    background-color: rgba(255, 140, 60, 0.10);
+    background-color: rgba(72, 213, 243, 0.10);
 }
 
 .activity-spinner {
-    color: #ff9a44;
+    color: #4fdaf4;
     min-width: 18px;
     min-height: 18px;
 }
@@ -1926,16 +1946,16 @@ headerbar {
     min-width: 18px;
     color: #7d8794;
 }
-.activity-verdict.ok   { color: #35c46f; text-shadow: 0 0 10px rgba(46, 204, 113, 0.45); }
-.activity-verdict.fail { color: #e5484d; text-shadow: 0 0 10px rgba(229, 72, 77, 0.45); }
+.activity-verdict.ok   { color: #35c46f; text-shadow: 0 0 10px rgba(46, 204, 113, 0.234); }
+.activity-verdict.fail { color: #e5484d; text-shadow: 0 0 10px rgba(229, 72, 77, 0.234); }
 
 .activity-title {
-    color: #ffcf8e;
+    color: #95edf8;
     font-family: 'JetBrains Mono', monospace;
     font-size: 19px;
     font-weight: 700;
     letter-spacing: 0.3px;
-    text-shadow: 0 0 9px rgba(255, 150, 60, 0.30);
+    text-shadow: 0 0 9px rgba(72, 216, 243, 0.156);
 }
 .activity-feed.done .activity-title {
     color: #b9c0cb;
@@ -1953,7 +1973,7 @@ headerbar {
     font-weight: 700;
     min-width: 14px;
 }
-.activity-header:hover .activity-chevron { color: #ffab5e; }
+.activity-header:hover .activity-chevron { color: #68e0f5; }
 
 /* ---- Body: the stream ---- */
 .activity-body {
@@ -1965,7 +1985,7 @@ headerbar {
     border-radius: 7px;
 }
 .activity-step.run {
-    background-color: rgba(255, 140, 50, 0.055);
+    background-color: rgba(62, 213, 243, 0.055);
 }
 
 .activity-glyph {
@@ -1975,10 +1995,10 @@ headerbar {
     min-width: 15px;
     color: #6f7885;
 }
-.activity-step.run  .activity-glyph { color: #ff9a44; }
+.activity-step.run  .activity-glyph { color: #4fdaf4; }
 .activity-step.ok   .activity-glyph { color: #35c46f; }
 .activity-step.fail .activity-glyph { color: #e5484d; }
-.activity-step.stop .activity-glyph { color: #b0873a; }
+.activity-step.stop .activity-glyph { color: #41a1a9; }
 .activity-step.gate .activity-glyph { color: #e5484d; }
 
 .activity-step-name {
@@ -1988,13 +2008,13 @@ headerbar {
     font-weight: 700;
     letter-spacing: 0.2px;
 }
-.activity-step.run .activity-step-name { color: #ffe0b4; }
+.activity-step.run .activity-step-name { color: #b9f4fa; }
 .activity-step.note .activity-step-name,
 .activity-step.gate .activity-step-name {
     font-weight: 500;
     color: #9aa3b0;
 }
-.activity-step.gate .activity-step-name { color: #e8a2a4; }
+.activity-step.gate .activity-step-name { color: #a6cde4; }
 
 .activity-step-detail {
     color: #838c99;
@@ -2007,7 +2027,7 @@ headerbar {
     font-size: 14px;
     letter-spacing: 0.3px;
 }
-.activity-step.run .activity-step-time { color: #c98a44; }
+.activity-step.run .activity-step-time { color: #4cb2c1; }
 
 .activity-step.past {
     padding: 4px 6px 4px 4px;
@@ -2018,7 +2038,7 @@ headerbar {
     color: #aab2be;
 }
 
-/* ---- Links inside a reply.  The base rule paints them #7d121b, which is
+/* ---- Links inside a reply.  The base rule paints them #185277, which is
         the deep accent -- fine on a light chrome surface, but inside a
         charred bubble it is barely separable from the body text, and a
         citation the operator cannot SEE is a citation he will not click.
@@ -2028,17 +2048,17 @@ headerbar {
 .msg-assistant *:link,
 .msg-user link,
 .msg-user *:link {
-    color: #ff9a44;
-    text-decoration-color: rgba(255, 154, 68, 0.45);
+    color: #4fdaf4;
+    text-decoration-color: rgba(79, 218, 244, 0.45);
 }
 .msg-assistant *:link:hover,
 .msg-user *:link:hover {
-    color: #ffc27a;
-    text-decoration-color: rgba(255, 194, 122, 0.85);
+    color: #82e9f7;
+    text-decoration-color: rgba(130, 233, 247, 0.85);
 }
 .msg-assistant *:visited,
 .msg-user *:visited {
-    color: #d8894a;
+    color: #53bbcf;
 }
 
 .activity-preview-box {
@@ -2065,7 +2085,7 @@ headerbar {
     margin: 10px 0 12px 0;
     border-radius: 10px;
     background-color: #0a0b0d;
-    border: 1px solid rgba(150, 60, 30, 0.36);
+    border: 1px solid rgba(37, 117, 143, 0.36);
     box-shadow: 0 3px 12px rgba(0, 0, 0, 0.34);
 }
 .md-table scrolledwindow { border-radius: 10px; }
@@ -2073,13 +2093,13 @@ headerbar {
 
 .md-th {
     padding: 10px 14px;
-    background-color: #150e0b;
-    border-bottom: 2px solid rgba(196, 88, 40, 0.55);
-    border-right: 1px solid rgba(120, 60, 40, 0.24);
+    background-color: #0c1214;
+    border-bottom: 2px solid rgba(49, 156, 187, 0.55);
+    border-right: 1px solid rgba(45, 98, 115, 0.24);
 }
 .md-th.lastcol { border-right: none; }
 .md-th label {
-    color: #ffcf9c;
+    color: #a2edf9;
     font-family: 'JetBrains Mono', monospace;
     font-size: 21px;
     font-weight: 800;
@@ -2088,11 +2108,11 @@ headerbar {
 
 .md-td {
     padding: 9px 14px;
-    border-top: 1px solid rgba(120, 70, 50, 0.16);
-    border-right: 1px solid rgba(120, 60, 40, 0.16);
+    border-top: 1px solid rgba(54, 102, 116, 0.16);
+    border-right: 1px solid rgba(45, 98, 115, 0.16);
 }
 .md-td.lastcol { border-right: none; }
-.md-td.odd { background-color: rgba(255, 165, 95, 0.055); }
+.md-td.odd { background-color: rgba(105, 222, 245, 0.055); }
 .md-td label {
     color: #e2e6ec;
     font-size: 26px;
@@ -2100,21 +2120,21 @@ headerbar {
 }
 .md-table-more {
     padding: 8px 14px;
-    color: #8a8377;
+    color: #788789;
     font-family: 'JetBrains Mono', monospace;
     font-size: 19px;
-    border-top: 1px solid rgba(120, 70, 50, 0.20);
+    border-top: 1px solid rgba(54, 102, 116, 0.20);
 }
 
 /* ---- Blockquote: an accent rail and an inset panel ---- */
 .md-quote {
     margin: 9px 0;
     border-radius: 8px;
-    background-color: rgba(255, 150, 70, 0.045);
+    background-color: rgba(81, 216, 244, 0.045);
 }
 .md-quote-rail {
     min-width: 3px;
-    background-color: #c4551f;
+    background-color: #299bba;
     border-radius: 3px;
 }
 .md-quote-body {
@@ -2129,30 +2149,30 @@ headerbar {
 .md-heading { margin: 14px 0 6px 0; }
 .md-heading:first-child { margin-top: 2px; }
 .md-heading-text {
-    color: #ffd9ab;
+    color: #b0f1fa;
     font-weight: 800;
     letter-spacing: 0.3px;
 }
 .md-heading.h1 .md-heading-text { font-size: 40px; }
 .md-heading.h2 .md-heading-text { font-size: 35px; }
-.md-heading.h3 .md-heading-text { font-size: 31px; color: #f5c99a; }
+.md-heading.h3 .md-heading-text { font-size: 31px; color: #9fe5f0; }
 .md-heading.h4 .md-heading-text,
 .md-heading.h5 .md-heading-text,
 .md-heading.h6 .md-heading-text {
     font-size: 28px;
-    color: #e2bc9a;
+    color: #9ed4de;
     letter-spacing: 0.6px;
 }
 .md-heading-rule {
     min-height: 1px;
     margin-top: 5px;
-    background-color: rgba(196, 88, 40, 0.34);
+    background-color: rgba(49, 156, 187, 0.34);
 }
 
 .md-rule {
     min-height: 1px;
     margin: 13px 6px;
-    background-color: rgba(150, 90, 60, 0.32);
+    background-color: rgba(65, 128, 145, 0.32);
 }
 
 /* ---- Lists: a real hanging indent ---- */
@@ -2160,7 +2180,7 @@ headerbar {
     margin: 5px 0 7px 0;
 }
 .md-list-marker {
-    color: #d9853f;
+    color: #48bad0;
     font-weight: 800;
     font-size: 26px;
     padding: 2px 11px 2px 4px;
@@ -2209,20 +2229,20 @@ headerbar {
     padding: 6px 8px 6px 10px;
     margin: 2px 3px;
     border-radius: 11px;
-    background-color: #120c09;
+    background-color: #0a1011;
     background-image: linear-gradient(180deg,
-        rgba(255, 150, 60, 0.07), rgba(255, 120, 40, 0.015));
-    border: 1px solid rgba(180, 66, 26, 0.46);
+        rgba(72, 216, 243, 0.07), rgba(53, 205, 242, 0.015));
+    border: 1px solid rgba(35, 138, 171, 0.46);
     box-shadow:
-        inset 0 1px 0 rgba(255, 175, 120, 0.09),
+        inset 0 1px 0 rgba(128, 226, 247, 0.09),
         0 2px 8px rgba(0, 0, 0, 0.40);
 }
 .attach-chip:hover {
-    border-color: rgba(226, 96, 40, 0.72);
+    border-color: rgba(51, 178, 215, 0.72);
     box-shadow:
-        inset 0 1px 0 rgba(255, 175, 120, 0.12),
+        inset 0 1px 0 rgba(128, 226, 247, 0.12),
         0 3px 12px rgba(0, 0, 0, 0.46),
-        0 0 14px rgba(226, 84, 30, 0.26);
+        0 0 14px rgba(42, 174, 214, 0.135);
 }
 
 .attach-chip-kind {
@@ -2232,25 +2252,25 @@ headerbar {
     letter-spacing: 0.8px;
     padding: 2px 6px;
     border-radius: 5px;
-    color: #0a0605;
-    background-color: #c97a3c;
+    color: #05090a;
+    background-color: #44acc1;
 }
-.attach-chip.image .attach-chip-kind { background-color: #b8683a; }
+.attach-chip.image .attach-chip-kind { background-color: #429bb0; }
 .attach-chip.file  .attach-chip-kind { background-color: #8d8f96; }
 
 .attach-chip-name {
-    color: #e6dbd1;
+    color: #d2e2e5;
     font-family: 'JetBrains Mono', monospace;
     font-size: 16px;
     font-weight: 600;
 }
 .attach-chip-size {
-    color: #8a8377;
+    color: #788789;
     font-family: 'JetBrains Mono', monospace;
     font-size: 14px;
 }
 .attach-chip-remove {
-    color: #99908a;
+    color: #8b9698;
     font-size: 17px;
     font-weight: 800;
     min-width: 22px;
@@ -2295,14 +2315,14 @@ headerbar {
 }
 
 .msg-user {
-    color: #f2ece7;
+    color: #e8f0f1;
     margin: 7px 12px 7px 64px;
     line-height: 1.45;
     border-radius: 16px 16px 5px 16px;
-    background-color: #17100c;
-    border: 1px solid rgba(176, 82, 40, 0.42);
+    background-color: #0d1416;
+    border: 1px solid rgba(48, 141, 168, 0.42);
     box-shadow:
-        inset 0 1px 0 rgba(255, 190, 140, 0.06),
+        inset 0 1px 0 rgba(147, 231, 248, 0.06),
         0 2px 10px rgba(0, 0, 0, 0.42);
 }
 .msg-assistant {
@@ -2311,22 +2331,22 @@ headerbar {
     line-height: 1.5;
     border-radius: 5px 16px 16px 16px;
     background-color: #101215;
-    border: 1px solid rgba(120, 72, 58, 0.38);
+    border: 1px solid rgba(62, 102, 116, 0.38);
     box-shadow:
-        inset 0 1px 0 rgba(220, 190, 170, 0.05),
+        inset 0 1px 0 rgba(173, 209, 217, 0.05),
         0 2px 10px rgba(0, 0, 0, 0.42);
 }
 
 .msg-user:hover {
-    border-color: rgba(206, 100, 52, 0.62);
+    border-color: rgba(61, 167, 197, 0.62);
     box-shadow:
-        inset 0 1px 0 rgba(255, 190, 140, 0.08),
+        inset 0 1px 0 rgba(147, 231, 248, 0.08),
         0 4px 16px rgba(0, 0, 0, 0.48);
 }
 .msg-assistant:hover {
-    border-color: rgba(158, 96, 74, 0.58);
+    border-color: rgba(79, 135, 153, 0.58);
     box-shadow:
-        inset 0 1px 0 rgba(220, 190, 170, 0.07),
+        inset 0 1px 0 rgba(173, 209, 217, 0.07),
         0 4px 16px rgba(0, 0, 0, 0.48);
 }
 
@@ -2338,8 +2358,8 @@ headerbar {
     opacity: 0.62;
     margin: 0 4px 4px 4px;
 }
-.role-label.user     { color: #c26c39; }
-.role-label.basilisk { color: #b9a08c; }
+.role-label.user     { color: #41a2ba; }
+.role-label.basilisk { color: #8fb0b6; }
 
 /* The seal is atmosphere, not information -- at full strength it sat behind
    the last line of every reply. */
@@ -2356,7 +2376,7 @@ headerbar {
     opacity: 0.78;
 }
 
-/* ---- Links inside a reply. The base rule paints them #7d121b, which is
+/* ---- Links inside a reply. The base rule paints them #185277, which is
         nearly inseparable from body text inside a dark bubble -- and ANSWER
         MODE makes one of these the last line of nearly every leashed reply,
         so it earns a colour that reads. ---- */
@@ -2364,16 +2384,16 @@ headerbar {
 .msg-assistant *:link,
 .msg-user link,
 .msg-user *:link {
-    color: #e8944e;
-    text-decoration-color: rgba(232, 148, 78, 0.42);
+    color: #57c9df;
+    text-decoration-color: rgba(87, 201, 223, 0.42);
 }
 .msg-assistant *:link:hover,
 .msg-user *:link:hover {
-    color: #ffb877;
-    text-decoration-color: rgba(255, 184, 119, 0.85);
+    color: #7fe5f7;
+    text-decoration-color: rgba(127, 229, 247, 0.85);
 }
 .msg-assistant *:visited,
-.msg-user *:visited { color: #c4855a; }
+.msg-user *:visited { color: #60adbe; }
 
 /* =====================================================================
    AERO GLASS LAYER  --  Windows 7 "Aero" styling laid OVER the base
@@ -2381,7 +2401,7 @@ headerbar {
    deleting any base rule (revert = delete this block).  The look:
    glossy top-lit gradients, a bright 1px inner highlight on the upper
    edge (the Aero bevel), soft rounded corners, and outer glow.  The
-   accent stays RED (#7d121b / #8b0010 / #ff2d3a), not Aero's stock
+   accent stays RED (#185277 / #085183 / #3aacf2), not Aero's stock
    blue -- the "red shine" is kept, just made glassy.
    ASCII only, per the CSS invariant.
    ===================================================================== */
@@ -2396,7 +2416,7 @@ headerbar {
                 rgba(13, 15, 18, 0.85) 100%);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.20),
                 inset 0 -1px 0 rgba(0, 0, 0, 0.55);
-    border-bottom: 1px solid rgba(125, 18, 27, 0.45);
+    border-bottom: 1px solid rgba(24, 82, 119, 0.45);
 }
 .sidebar {
     background: linear-gradient(180deg,
@@ -2410,13 +2430,13 @@ headerbar {
                 rgba(16, 18, 22, 0.92) 100%);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18),
                 inset 0 0 0 1px rgba(0, 0, 0, 0.30);
-    border: 1px solid rgba(125, 18, 27, 0.40);
+    border: 1px solid rgba(24, 82, 119, 0.40);
     border-radius: 18px;
 }
 .input-frame:focus-within {
-    border-color: #ff2d3a;
+    border-color: #3aacf2;
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28),
-                0 0 12px rgba(255, 45, 58, 0.45);
+                0 0 12px rgba(58, 172, 242, 0.234);
 }
 
 /* Buttons: the signature Aero glass pill -- top-lit gradient, bright
@@ -2437,14 +2457,14 @@ button {
 }
 button:hover {
     background: linear-gradient(180deg,
-                rgba(150, 40, 48, 0.60) 0%,
-                rgba(110, 22, 30, 0.66) 48%,
-                rgba(70, 12, 18, 0.80) 55%,
-                rgba(95, 18, 26, 0.72) 100%);
+                rgba(47, 106, 143, 0.60) 0%,
+                rgba(27, 74, 105, 0.66) 48%,
+                rgba(15, 46, 67, 0.80) 55%,
+                rgba(23, 63, 90, 0.72) 100%);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.30),
                 inset 0 -1px 0 rgba(0, 0, 0, 0.50),
-                0 0 12px rgba(255, 45, 58, 0.45);
-    border-color: rgba(255, 85, 102, 0.55);
+                0 0 12px rgba(58, 172, 242, 0.234);
+    border-color: rgba(95, 186, 245, 0.55);
 }
 button:active {
     background: linear-gradient(180deg,
@@ -2458,19 +2478,19 @@ button:active {
    they still read as the accent, now with the Aero sheen. */
 .cmd-run-btn, .send-button, .primary-action {
     background: linear-gradient(180deg,
-                #d3283a 0%, #a81020 46%, #7d0c16 54%, #9a1622 100%);
+                #328dc9 0%, #196a9f 46%, #134f76 54%, #1e6592 100%);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35),
                 inset 0 -1px 0 rgba(0, 0, 0, 0.40),
-                0 0 10px rgba(229, 40, 58, 0.40);
-    border: 1px solid rgba(255, 90, 106, 0.60);
+                0 0 10px rgba(229, 40, 58, 0.208);
+    border: 1px solid rgba(100, 188, 245, 0.60);
     color: #fff;
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
 }
 .cmd-run-btn:hover, .send-button:hover, .primary-action:hover {
     background: linear-gradient(180deg,
-                #ff3446 0%, #c81428 46%, #920f1c 54%, #b31a28 100%);
+                #40adf3 0%, #1f7ebd 46%, #175d8a 54%, #2375aa 100%);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45),
-                0 0 16px rgba(255, 45, 58, 0.60);
+                0 0 16px rgba(58, 172, 242, 0.26);
 }
 
 /* Chat bubbles: a light glass sheen on top, so they look like Aero panes
@@ -2483,20 +2503,20 @@ button:active {
 }
 .msg-user {
     background: linear-gradient(180deg,
-                rgba(150, 40, 48, 0.30) 0%,
-                rgba(90, 20, 28, 0.22) 100%);
+                rgba(47, 106, 143, 0.30) 0%,
+                rgba(24, 61, 86, 0.22) 100%);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16),
                 0 2px 8px rgba(0, 0, 0, 0.45);
-    border: 1px solid rgba(255, 85, 102, 0.28);
+    border: 1px solid rgba(95, 186, 245, 0.28);
 }
 
 /* Selected chat row: an Aero-blue-style wash, kept red, with a lit edge. */
 .chat-row.selected, .chat-row:selected {
     background: linear-gradient(180deg,
-                rgba(150, 40, 48, 0.34) 0%,
-                rgba(90, 18, 26, 0.20) 100%);
+                rgba(47, 106, 143, 0.34) 0%,
+                rgba(22, 60, 86, 0.20) 100%);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14);
-    border-left: 3px solid #ff2d3a;
+    border-left: 3px solid #3aacf2;
 }
 
 /* Status pills + cards: glass sheen so chrome matches the new surfaces. */
@@ -2514,8 +2534,8 @@ button:active {
 window {
     border-radius: 14px;
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14),
-                inset 0 0 0 1px rgba(255, 120, 120, 0.10),
-                0 0 22px rgba(125, 18, 27, 0.30);
+                inset 0 0 0 1px rgba(128, 205, 247, 0.052),
+                0 0 22px rgba(24, 82, 119, 0.156);
 }
 window > contents,
 window.csd,
@@ -2526,8 +2546,8 @@ window.csd,
    Aero "light source above" cue, sitting under the header. */
 window > contents > box {
     background-image: linear-gradient(180deg,
-                      rgba(255, 235, 230, 0.05) 0%,
-                      rgba(255, 235, 230, 0.0) 90px);
+                      rgba(231, 248, 254, 0.05) 0%,
+                      rgba(231, 248, 254, 0.0) 90px);
 }
 /* The header's bottom edge gets a thin lit line so the glass panels below it
    read as separate sheets of glass, not one flat wall. */
@@ -2553,16 +2573,16 @@ headerbar {
    toolbar/header reads as one glass set without any PNG plaques. Red ember
    text with a faint glow; brighter on hover; lit when toggled/active. ---- */
 .glyph-btn, menubutton.glyph-btn > button {
-    background-color: rgba(30, 16, 18, 0.30);
+    background-color: rgba(17, 24, 29, 0.30);
     background-image: linear-gradient(180deg,
-                      rgba(255, 210, 200, 0.14) 0%,
-                      rgba(150, 40, 46, 0.10) 46%,
-                      rgba(20, 10, 12, 0.08) 54%,
-                      rgba(70, 20, 24, 0.12) 100%);
-    border: 1px solid rgba(255, 120, 120, 0.26);
+                      rgba(203, 238, 252, 0.14) 0%,
+                      rgba(47, 107, 143, 0.10) 46%,
+                      rgba(11, 16, 19, 0.08) 54%,
+                      rgba(23, 50, 67, 0.12) 100%);
+    border: 1px solid rgba(128, 205, 247, 0.26);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.26),
                 inset 0 -1px 0 rgba(0, 0, 0, 0.28),
-                0 0 7px rgba(125, 18, 27, 0.20);
+                0 0 7px rgba(24, 82, 119, 0.104);
     border-radius: 11px;
     min-width: 42px;
     min-height: 38px;
@@ -2575,35 +2595,35 @@ menubutton.glyph-btn > button { min-width: 42px; min-height: 38px; }
     font-family: 'JetBrains Mono', 'Fira Code', 'DejaVu Sans Mono', monospace;
     font-size: 19px;
     font-weight: 700;
-    color: #ff6b5a;
-    text-shadow: 0 0 6px rgba(229, 40, 58, 0.45), 0 1px 1px rgba(0,0,0,0.7);
+    color: #64c8f5;
+    text-shadow: 0 0 6px rgba(229, 40, 58, 0.234), 0 1px 1px rgba(0,0,0,0.7);
 }
 .glyph-btn:hover, menubutton.glyph-btn > button:hover {
-    background-color: rgba(150, 40, 46, 0.32);
-    border-color: rgba(255, 130, 130, 0.55);
+    background-color: rgba(47, 107, 143, 0.32);
+    border-color: rgba(138, 209, 247, 0.55);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.36),
-                0 0 14px rgba(230, 60, 40, 0.50);
+                0 0 14px rgba(51, 167, 219, 0.26);
 }
 .glyph-btn:active, menubutton.glyph-btn > button:active {
-    background-color: rgba(90, 20, 24, 0.42);
+    background-color: rgba(24, 63, 86, 0.42);
     box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.45),
                 inset 0 1px 0 rgba(255, 255, 255, 0.10);
 }
 .glyph-btn.toggled, .glyph-btn.active {
-    background-color: rgba(170, 30, 38, 0.45);
-    border-color: rgba(255, 90, 100, 0.70);
+    background-color: rgba(38, 115, 162, 0.45);
+    border-color: rgba(100, 190, 245, 0.70);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.30),
-                0 0 14px rgba(255, 45, 58, 0.55);
+                0 0 14px rgba(58, 172, 242, 0.26);
 }
 .glyph-btn.toggled .glyph-btn-label,
 .glyph-btn.active .glyph-btn-label {
-    color: #ffd0c8;
-    text-shadow: 0 0 9px rgba(255, 80, 90, 0.75);
+    color: #cbeefc;
+    text-shadow: 0 0 9px rgba(90, 186, 244, 0.26);
 }
 .term-glyph .glyph-btn-label { font-size: 20px; letter-spacing: 1px; }
 /* close button leans red on hover; minimise/expand stay neutral-red */
-.winctl-close:hover { border-color: rgba(255, 80, 80, 0.85); }
-.winctl-close:hover .glyph-btn-label { color: #ff8a7a; }
+.winctl-close:hover { border-color: rgba(90, 190, 244, 0.85); }
+.winctl-close:hover .glyph-btn-label { color: #82d4f7; }
 
 /* =====================================================================
    OBSIDIAN GLASS  -  Aero-over-obsidian theme overlay
@@ -2642,15 +2662,15 @@ menubutton.glyph-btn > button { min-width: 42px; min-height: 38px; }
    neutral steel rgba(226, 234, 246) for the highlights and a blue-black
    rgba(14, 18, 27) for the smoke, and the result read GREY - the glass
    went the colour of a stainless-steel appliance and fought the red art
-   behind it.  The whites here are pushed towards #fff0f2 and the smoke
-   towards a red-black #140a0f, so the glass takes its colour FROM the
+   behind it.  The whites here are pushed towards #f1f9fe and the smoke
+   towards a red-black #0b0e13, so the glass takes its colour FROM the
    backdrop instead of arguing with it.  If a surface ever looks grey,
    that is the bug, and the fix is to warm its tint - not to darken it.
 
    Palette lifted off the backdrop art:
-     neon red   #ff1f34 / #e01020      deep blood  #6d0710
+     neon red   #2ca4f2 / #1c8dd4      deep blood  #0d4467
      smoke      rgba(20, 10, 15, a)    lit edge    rgba(255, 238, 240, a)
-     text       #f6eef0   dim #bda8ad  code #ffe3e6
+     text       #eef2f6   dim #a9b3bc  code #e5f3fd
    ===================================================================== */
 
 /* ---- Base plate ------------------------------------------------------
@@ -2661,9 +2681,9 @@ menubutton.glyph-btn > button { min-width: 42px; min-height: 38px; }
 window, .background {
     background-color: #070406;
     background-image:
-        radial-gradient(circle at 50% 38%, rgba(150, 12, 28, 0.14), rgba(150, 12, 28, 0.0) 58%),
-        linear-gradient(180deg, #0a0407, #070406 60%, #040205);
-    color: #f6eef0;
+        radial-gradient(circle at 50% 38%, rgba(20, 93, 142, 0.14), rgba(20, 93, 142, 0.0) 58%),
+        linear-gradient(180deg, #04070a, #070406 60%, #040205);
+    color: #eef2f6;
 }
 
 /* ---- Let the artwork reach every corner -----------------------------
@@ -2688,7 +2708,7 @@ window, .background {
    the whole app into black - they re-light it in the artwork's own red. */
 .chat-scrim {
     background-image:
-        radial-gradient(circle at 50% 42%, rgba(160, 16, 34, 0.16), rgba(160, 16, 34, 0.0) 62%),
+        radial-gradient(circle at 50% 42%, rgba(25, 100, 151, 0.16), rgba(25, 100, 151, 0.0) 62%),
         linear-gradient(180deg, rgba(0, 0, 0, 0.22) 0%, rgba(0, 0, 0, 0.0) 22%,
                         rgba(0, 0, 0, 0.0) 76%, rgba(0, 0, 0, 0.30) 100%);
 }
@@ -2696,75 +2716,75 @@ window, .background {
 
 /* ---- Header: a glass rail with a lit bottom edge --------------------- */
 headerbar {
-    background-color: rgba(22, 10, 15, 0.46);
+    background-color: rgba(11, 16, 21, 0.46);
     background-image:
         linear-gradient(180deg,
-            rgba(255, 240, 242, 0.16) 0%,
-            rgba(255, 240, 242, 0.05) 46%,
-            rgba(255, 240, 242, 0.0) 52%,
+            rgba(241, 249, 254, 0.16) 0%,
+            rgba(241, 249, 254, 0.05) 46%,
+            rgba(241, 249, 254, 0.0) 52%,
             rgba(0, 0, 0, 0.18) 100%);
-    border-bottom: 1px solid rgba(255, 47, 68, 0.42);
+    border-bottom: 1px solid rgba(59, 170, 243, 0.42);
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.22),
-        inset 0 -16px 28px rgba(180, 14, 32, 0.16),
+        inset 0 -16px 28px rgba(24, 112, 170, 0.16),
         0 6px 20px rgba(0, 0, 0, 0.45);
 }
 
 /* ---- Sidebar: the same glass, one shade smokier so depth still reads - */
 .sidebar {
-    background-color: rgba(16, 7, 11, 0.44);
+    background-color: rgba(8, 11, 15, 0.44);
     background-image:
         linear-gradient(180deg,
-            rgba(255, 240, 242, 0.10) 0%,
-            rgba(255, 240, 242, 0.03) 42%,
-            rgba(255, 240, 242, 0.0) 52%,
+            rgba(241, 249, 254, 0.10) 0%,
+            rgba(241, 249, 254, 0.03) 42%,
+            rgba(241, 249, 254, 0.0) 52%,
             rgba(0, 0, 0, 0.22) 100%);
-    border-right: 1px solid rgba(255, 47, 68, 0.32);
+    border-right: 1px solid rgba(59, 170, 243, 0.32);
     box-shadow:
         inset -1px 0 0 rgba(255, 255, 255, 0.07),
         6px 0 22px rgba(0, 0, 0, 0.40);
 }
 .sidebar headerbar {
-    background-color: rgba(22, 10, 15, 0.34);
-    border-bottom: 1px solid rgba(255, 47, 68, 0.26);
+    background-color: rgba(11, 16, 21, 0.34);
+    border-bottom: 1px solid rgba(59, 170, 243, 0.26);
 }
 
 /* ---- Sidebar chat rows: glass chips ---------------------------------- */
 .chat-row {
     border-radius: 14px;
     border-left: 3px solid transparent;
-    background-color: rgba(34, 16, 22, 0.26);
+    background-color: rgba(17, 25, 33, 0.26);
     background-image:
         linear-gradient(180deg,
-            rgba(255, 240, 242, 0.10) 0%,
-            rgba(255, 240, 242, 0.02) 48%,
-            rgba(255, 240, 242, 0.0) 52%,
+            rgba(241, 249, 254, 0.10) 0%,
+            rgba(241, 249, 254, 0.02) 48%,
+            rgba(241, 249, 254, 0.0) 52%,
             rgba(0, 0, 0, 0.10) 100%);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.11);
 }
 .chat-row:hover {
-    background-color: rgba(60, 24, 32, 0.40);
-    border-left-color: rgba(255, 60, 78, 0.60);
+    background-color: rgba(26, 44, 58, 0.40);
+    border-left-color: rgba(72, 176, 243, 0.60);
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.18),
-        0 0 16px rgba(226, 24, 44, 0.24);
+        0 0 16px rgba(36, 144, 214, 0.125);
 }
 .chat-row.selected, .chat-row:selected {
-    background-color: rgba(138, 14, 32, 0.34);
+    background-color: rgba(21, 85, 131, 0.34);
     background-image:
         linear-gradient(180deg,
-            rgba(255, 235, 238, 0.20) 0%,
-            rgba(255, 120, 138, 0.07) 48%,
-            rgba(255, 60, 80, 0.0) 52%,
+            rgba(236, 246, 254, 0.20) 0%,
+            rgba(128, 198, 247, 0.07) 48%,
+            rgba(72, 175, 243, 0.0) 52%,
             rgba(0, 0, 0, 0.16) 100%);
-    border-left: 3px solid #ff2f44;
+    border-left: 3px solid #3baaf3;
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.30),
-        inset 0 0 26px rgba(255, 40, 60, 0.16),
-        0 0 22px rgba(226, 24, 44, 0.36);
+        inset 0 0 26px rgba(53, 168, 242, 0.083),
+        0 0 22px rgba(36, 144, 214, 0.187);
 }
-.chat-row .title-line { color: #fdf3f5; }
-.chat-row .meta-line  { color: #b39aa1; }
+.chat-row .title-line { color: #f4f9fc; }
+.chat-row .meta-line  { color: #9ba7b2; }
 
 /* ---- MESSAGE BUBBLES  -  the point of the whole theme ----------------
    Real glass: you can see the artwork through both of them.  The user's
@@ -2783,95 +2803,95 @@ headerbar {
                 background-color 200ms ease;
 }
 .msg-user {
-    color: #fff1f3;
+    color: #f2f9fe;
     border-radius: 18px 18px 6px 18px;
     padding: 18px 22px;
     margin: 8px 12px;
-    background-color: rgba(126, 12, 28, 0.32);
+    background-color: rgba(19, 78, 119, 0.32);
     background-image:
         linear-gradient(180deg,
-            rgba(255, 236, 240, 0.22) 0%,
-            rgba(255, 150, 165, 0.08) 46%,
-            rgba(255, 60, 80, 0.0) 52%,
-            rgba(44, 0, 8, 0.22) 100%);
-    border: 1px solid rgba(255, 104, 124, 0.58);
+            rgba(237, 246, 254, 0.22) 0%,
+            rgba(156, 210, 249, 0.08) 46%,
+            rgba(72, 175, 243, 0.0) 52%,
+            rgba(3, 25, 41, 0.22) 100%);
+    border: 1px solid rgba(113, 191, 246, 0.58);
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.38),
-        inset 0 0 30px rgba(255, 40, 62, 0.14),
-        inset 0 -18px 30px rgba(96, 4, 16, 0.22),
+        inset 0 0 30px rgba(53, 167, 242, 0.073),
+        inset 0 -18px 30px rgba(10, 57, 90, 0.22),
         0 10px 26px rgba(0, 0, 0, 0.46),
-        0 0 24px rgba(226, 24, 44, 0.30);
+        0 0 24px rgba(36, 144, 214, 0.156);
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.75);
 }
 .msg-assistant {
-    color: #fbf1f3;
+    color: #f2f7fa;
     border-radius: 6px 18px 18px 18px;
     padding: 16px 20px;
     margin: 8px 12px;
-    background-color: rgba(26, 12, 18, 0.34);
+    background-color: rgba(13, 19, 25, 0.34);
     background-image:
         linear-gradient(180deg,
-            rgba(255, 238, 240, 0.18) 0%,
-            rgba(255, 200, 208, 0.05) 46%,
-            rgba(255, 200, 208, 0.0) 52%,
+            rgba(239, 248, 254, 0.18) 0%,
+            rgba(203, 232, 252, 0.05) 46%,
+            rgba(203, 232, 252, 0.0) 52%,
             rgba(0, 0, 0, 0.24) 100%);
-    border: 1px solid rgba(255, 214, 220, 0.34);
+    border: 1px solid rgba(216, 238, 253, 0.34);
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.34),
-        inset 0 0 30px rgba(255, 90, 110, 0.07),
+        inset 0 0 30px rgba(100, 186, 245, 0.036),
         inset 0 -18px 30px rgba(0, 0, 0, 0.24),
         0 10px 26px rgba(0, 0, 0, 0.48),
-        0 0 22px rgba(226, 24, 44, 0.20);
+        0 0 22px rgba(36, 144, 214, 0.104);
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.72);
 }
 .msg-user:hover {
-    background-color: rgba(140, 14, 32, 0.36);
-    border-color: rgba(255, 132, 150, 0.76);
+    background-color: rgba(22, 87, 132, 0.36);
+    border-color: rgba(139, 203, 248, 0.76);
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.44),
-        inset 0 0 34px rgba(255, 50, 72, 0.18),
-        inset 0 -18px 30px rgba(96, 4, 16, 0.24),
+        inset 0 0 34px rgba(62, 171, 243, 0.094),
+        inset 0 -18px 30px rgba(10, 57, 90, 0.24),
         0 12px 30px rgba(0, 0, 0, 0.48),
-        0 0 32px rgba(255, 40, 62, 0.44);
+        0 0 32px rgba(53, 167, 242, 0.229);
 }
 .msg-assistant:hover {
-    background-color: rgba(34, 15, 22, 0.38);
-    border-color: rgba(255, 226, 230, 0.50);
+    background-color: rgba(16, 24, 33, 0.38);
+    border-color: rgba(228, 243, 253, 0.50);
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.40),
-        inset 0 0 34px rgba(255, 110, 130, 0.10),
+        inset 0 0 34px rgba(119, 194, 246, 0.052),
         inset 0 -18px 30px rgba(0, 0, 0, 0.26),
         0 12px 30px rgba(0, 0, 0, 0.50),
-        0 0 30px rgba(226, 24, 44, 0.32);
+        0 0 30px rgba(36, 144, 214, 0.166);
 }
 .msg-system-notice {
-    background-color: rgba(26, 12, 18, 0.32);
+    background-color: rgba(13, 19, 25, 0.32);
     background-image:
-        linear-gradient(180deg, rgba(255, 240, 242, 0.10) 0%,
-                        rgba(255, 240, 242, 0.0) 52%,
+        linear-gradient(180deg, rgba(241, 249, 254, 0.10) 0%,
+                        rgba(241, 249, 254, 0.0) 52%,
                         rgba(0, 0, 0, 0.14) 100%);
-    border: 1px solid rgba(255, 214, 220, 0.24);
+    border: 1px solid rgba(216, 238, 253, 0.24);
     border-radius: 12px;
-    color: #e0cbd0;
+    color: #ccd6df;
 }
-.role-label            { color: #ad939a; }
-.role-label.user       { color: #ff6474; }
-.role-label.basilisk   { color: #ffd4d9; }
+.role-label            { color: #95a1ab; }
+.role-label.user       { color: #6dbff6; }
+.role-label.basilisk   { color: #d7edfc; }
 .msg-footer            { margin-top: 6px; }
 .avatar {
     border-radius: 10px;
-    background-color: rgba(34, 16, 22, 0.36);
+    background-color: rgba(17, 25, 33, 0.36);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18),
-                0 0 14px rgba(226, 24, 44, 0.24);
+                0 0 14px rgba(36, 144, 214, 0.125);
 }
 
 /* ---- Links inside bubbles: readable on glass ------------------------- */
 .msg-assistant *:link, .msg-user *:link, link, *:link {
-    color: #ff9aa6;
+    color: #a0d5f9;
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.72);
 }
 .msg-assistant *:link:hover, .msg-user *:link:hover {
-    color: #ffc8ce;
+    color: #cbe8fc;
 }
 
 /* ---- Code: dark glass with a red-lit edge.  The TEXTVIEW itself stays
@@ -2880,34 +2900,34 @@ headerbar {
 .code-block {
     background-color: rgba(12, 5, 9, 0.62);
     background-image:
-        linear-gradient(180deg, rgba(255, 240, 242, 0.09) 0%,
-                        rgba(255, 240, 242, 0.0) 52%,
+        linear-gradient(180deg, rgba(241, 249, 254, 0.09) 0%,
+                        rgba(241, 249, 254, 0.0) 52%,
                         rgba(0, 0, 0, 0.20) 100%);
-    border: 1px solid rgba(255, 60, 80, 0.36);
+    border: 1px solid rgba(72, 175, 243, 0.36);
     border-radius: 12px;
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.16),
         0 6px 18px rgba(0, 0, 0, 0.42);
 }
 .code-block-header {
-    background-color: rgba(138, 14, 32, 0.30);
-    color: #ffc2c9;
-    border-bottom: 1px solid rgba(255, 60, 80, 0.34);
+    background-color: rgba(21, 85, 131, 0.30);
+    color: #c6e6fb;
+    border-bottom: 1px solid rgba(72, 175, 243, 0.34);
     border-radius: 12px 12px 0 0;
 }
-.code-block textview       { background-color: transparent; color: #ffe3e6; }
-.code-block textview text  { background-color: transparent; color: #ffe3e6; }
+.code-block textview       { background-color: transparent; color: #e5f3fd; }
+.code-block textview text  { background-color: transparent; color: #e5f3fd; }
 .cmd-text {
     background-color: rgba(12, 5, 9, 0.48);
-    border: 1px solid rgba(255, 60, 80, 0.36);
+    border: 1px solid rgba(72, 175, 243, 0.36);
     border-radius: 8px;
-    color: #ff9aa6;
+    color: #a0d5f9;
 }
 .confirm-cmd {
     background-color: rgba(12, 5, 9, 0.48);
-    border: 1px solid rgba(255, 60, 80, 0.36);
+    border: 1px solid rgba(72, 175, 243, 0.36);
     border-radius: 8px;
-    color: #ffc2c9;
+    color: #c6e6fb;
 }
 
 /* ---- Markdown blocks -------------------------------------------------
@@ -2918,33 +2938,33 @@ headerbar {
    changing its padding here is how you get text drawn outside its own
    background again. ---------------------------------------------------- */
 .md-heading-text {
-    color: #ffe4e7;
-    text-shadow: 0 0 12px rgba(255, 40, 62, 0.40), 0 1px 2px rgba(0, 0, 0, 0.72);
+    color: #e6f4fd;
+    text-shadow: 0 0 12px rgba(53, 167, 242, 0.208), 0 1px 2px rgba(0, 0, 0, 0.72);
 }
-.md-heading-rule { background-color: rgba(255, 60, 80, 0.40); }
-.md-rule         { background-color: rgba(255, 214, 220, 0.18); }
-.md-list-marker  { color: #ff6474; }
-.md-list-text    { color: #f4e8ea; }
+.md-heading-rule { background-color: rgba(72, 175, 243, 0.40); }
+.md-rule         { background-color: rgba(216, 238, 253, 0.18); }
+.md-list-marker  { color: #6dbff6; }
+.md-list-text    { color: #e9eff3; }
 .md-quote {
-    background-color: rgba(34, 14, 20, 0.32);
+    background-color: rgba(15, 24, 33, 0.32);
     background-image:
-        linear-gradient(180deg, rgba(255, 240, 242, 0.09) 0%,
-                        rgba(255, 240, 242, 0.0) 52%,
+        linear-gradient(180deg, rgba(241, 249, 254, 0.09) 0%,
+                        rgba(241, 249, 254, 0.0) 52%,
                         rgba(0, 0, 0, 0.14) 100%);
-    border: 1px solid rgba(255, 214, 220, 0.22);
+    border: 1px solid rgba(216, 238, 253, 0.22);
     border-radius: 10px;
 }
-.md-quote-rail { background-color: #ff2f44; }
-.md-quote-body { color: #e6d3d7; }
+.md-quote-rail { background-color: #3baaf3; }
+.md-quote-body { color: #d4dde5; }
 
 /* Tables: sheet glass, header strip lit like the ring in the artwork */
 .md-table {
-    background-color: rgba(20, 9, 14, 0.42);
+    background-color: rgba(10, 14, 19, 0.42);
     background-image:
-        linear-gradient(180deg, rgba(255, 240, 242, 0.10) 0%,
-                        rgba(255, 240, 242, 0.0) 52%,
+        linear-gradient(180deg, rgba(241, 249, 254, 0.10) 0%,
+                        rgba(241, 249, 254, 0.0) 52%,
                         rgba(0, 0, 0, 0.18) 100%);
-    border: 1px solid rgba(255, 214, 220, 0.28);
+    border: 1px solid rgba(216, 238, 253, 0.28);
     border-radius: 12px;
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.18),
@@ -2953,67 +2973,67 @@ headerbar {
 .md-table scrolledwindow { background-color: transparent; }
 .md-table-grid           { background-color: transparent; }
 .md-th {
-    background-color: rgba(138, 14, 32, 0.40);
-    border-bottom: 2px solid rgba(255, 60, 80, 0.52);
-    border-right: 1px solid rgba(255, 214, 220, 0.16);
+    background-color: rgba(21, 85, 131, 0.40);
+    border-bottom: 2px solid rgba(72, 175, 243, 0.52);
+    border-right: 1px solid rgba(216, 238, 253, 0.16);
 }
-.md-th label { color: #ffe4e7; }
+.md-th label { color: #e6f4fd; }
 .md-td {
-    border-top: 1px solid rgba(255, 214, 220, 0.12);
-    border-right: 1px solid rgba(255, 214, 220, 0.09);
+    border-top: 1px solid rgba(216, 238, 253, 0.12);
+    border-right: 1px solid rgba(216, 238, 253, 0.09);
 }
-.md-td.odd   { background-color: rgba(255, 214, 220, 0.05); }
-.md-td label { color: #f4e8ea; }
-.md-table-more { color: #b39aa1; }
+.md-td.odd   { background-color: rgba(216, 238, 253, 0.05); }
+.md-td label { color: #e9eff3; }
+.md-table-more { color: #9ba7b2; }
 
 /* ---- Composer -------------------------------------------------------- */
 .input-frame {
-    background-color: rgba(24, 11, 16, 0.46);
+    background-color: rgba(12, 17, 23, 0.46);
     background-image:
         linear-gradient(180deg,
-            rgba(255, 240, 242, 0.18) 0%,
-            rgba(255, 240, 242, 0.05) 46%,
-            rgba(255, 240, 242, 0.0) 52%,
+            rgba(241, 249, 254, 0.18) 0%,
+            rgba(241, 249, 254, 0.05) 46%,
+            rgba(241, 249, 254, 0.0) 52%,
             rgba(0, 0, 0, 0.22) 100%);
-    border: 1px solid rgba(255, 214, 220, 0.32);
+    border: 1px solid rgba(216, 238, 253, 0.32);
     border-radius: 22px;
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.30),
         0 8px 22px rgba(0, 0, 0, 0.44),
-        0 0 18px rgba(226, 24, 44, 0.18);
+        0 0 18px rgba(36, 144, 214, 0.094);
 }
 .input-frame:focus-within {
-    background-color: rgba(38, 12, 20, 0.52);
-    border-color: rgba(255, 70, 90, 0.76);
+    background-color: rgba(14, 25, 36, 0.52);
+    border-color: rgba(81, 179, 244, 0.76);
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.36),
         0 8px 24px rgba(0, 0, 0, 0.46),
-        0 0 28px rgba(255, 40, 62, 0.44);
+        0 0 28px rgba(53, 167, 242, 0.229);
 }
 
 /* ---- Cards, chips, badges ------------------------------------------- */
 .card, .cmd-card {
-    background-color: rgba(24, 11, 16, 0.42);
+    background-color: rgba(12, 17, 23, 0.42);
     background-image:
-        linear-gradient(180deg, rgba(255, 240, 242, 0.11) 0%,
-                        rgba(255, 240, 242, 0.0) 52%,
+        linear-gradient(180deg, rgba(241, 249, 254, 0.11) 0%,
+                        rgba(241, 249, 254, 0.0) 52%,
                         rgba(0, 0, 0, 0.20) 100%);
-    border: 1px solid rgba(255, 214, 220, 0.28);
-    border-left: 4px solid rgba(255, 47, 68, 0.85);
+    border: 1px solid rgba(216, 238, 253, 0.28);
+    border-left: 4px solid rgba(59, 170, 243, 0.85);
     border-radius: 14px;
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.20),
         0 8px 22px rgba(0, 0, 0, 0.44);
 }
-.cmd-card-title { color: #ff8b98; }
-.cmd-explain    { color: #e0cbd0; }
+.cmd-card-title { color: #92cff8; }
+.cmd-explain    { color: #ccd6df; }
 .card-warn {
     background-color: rgba(229, 72, 77, 0.16);
     background-image:
-        linear-gradient(180deg, rgba(255, 240, 242, 0.12) 0%,
-                        rgba(255, 240, 242, 0.0) 52%,
+        linear-gradient(180deg, rgba(241, 249, 254, 0.12) 0%,
+                        rgba(241, 249, 254, 0.0) 52%,
                         rgba(0, 0, 0, 0.14) 100%);
-    border: 1px solid rgba(255, 96, 106, 0.56);
+    border: 1px solid rgba(106, 192, 245, 0.56);
     border-radius: 12px;
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18);
 }
@@ -3021,55 +3041,55 @@ headerbar {
 .notif-badge, .autorun-note, .watcher-banner, .media-panel,
 .media-placeholder, .attach-tray, .model-pick-row, .model-group-header {
     background-image:
-        linear-gradient(180deg, rgba(255, 240, 242, 0.15) 0%,
-                        rgba(255, 240, 242, 0.0) 52%,
+        linear-gradient(180deg, rgba(241, 249, 254, 0.15) 0%,
+                        rgba(241, 249, 254, 0.0) 52%,
                         rgba(0, 0, 0, 0.16) 100%);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.20);
 }
 .quick-chip, .attach-chip {
-    background-color: rgba(34, 16, 22, 0.40);
-    border: 1px solid rgba(255, 214, 220, 0.28);
+    background-color: rgba(17, 25, 33, 0.40);
+    border: 1px solid rgba(216, 238, 253, 0.28);
     border-radius: 999px;
 }
 .quick-chip:hover, .attach-chip:hover {
-    background-color: rgba(138, 14, 32, 0.36);
-    border-color: rgba(255, 80, 100, 0.60);
+    background-color: rgba(21, 85, 131, 0.36);
+    border-color: rgba(90, 183, 244, 0.60);
 }
 .effort-pill {
-    background-color: rgba(34, 16, 22, 0.40);
-    border: 1px solid rgba(255, 214, 220, 0.26);
+    background-color: rgba(17, 25, 33, 0.40);
+    border: 1px solid rgba(216, 238, 253, 0.26);
     border-radius: 999px;
 }
 .effort-seg:checked {
-    background-color: rgba(170, 14, 34, 0.56);
+    background-color: rgba(23, 105, 161, 0.56);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.30),
-                0 0 14px rgba(255, 40, 62, 0.38);
+                0 0 14px rgba(53, 167, 242, 0.198);
 }
 .media-panel, .media-placeholder, .attach-tray {
-    background-color: rgba(24, 11, 16, 0.40);
-    border: 1px solid rgba(255, 214, 220, 0.24);
+    background-color: rgba(12, 17, 23, 0.40);
+    border: 1px solid rgba(216, 238, 253, 0.24);
     border-radius: 14px;
 }
 
 /* ---- The activity feed / dock --------------------------------------- */
 .activity-feed, .activity-dock {
-    background-color: rgba(22, 10, 16, 0.42);
+    background-color: rgba(11, 15, 21, 0.42);
     background-image:
-        linear-gradient(180deg, rgba(255, 240, 242, 0.11) 0%,
-                        rgba(255, 240, 242, 0.0) 52%,
+        linear-gradient(180deg, rgba(241, 249, 254, 0.11) 0%,
+                        rgba(241, 249, 254, 0.0) 52%,
                         rgba(0, 0, 0, 0.20) 100%);
-    border: 1px solid rgba(255, 214, 220, 0.28);
+    border: 1px solid rgba(216, 238, 253, 0.28);
     border-radius: 16px;
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.20),
         0 8px 22px rgba(0, 0, 0, 0.44),
-        0 0 16px rgba(226, 24, 44, 0.16);
+        0 0 16px rgba(36, 144, 214, 0.083);
 }
-.activity-title   { color: #fdf3f5; }
-.activity-meta    { color: #b39aa1; }
+.activity-title   { color: #f4f9fc; }
+.activity-meta    { color: #9ba7b2; }
 .activity-preview-box {
     background-color: rgba(12, 5, 9, 0.46);
-    border: 1px solid rgba(255, 214, 220, 0.18);
+    border: 1px solid rgba(216, 238, 253, 0.18);
     border-radius: 10px;
 }
 
@@ -3079,57 +3099,57 @@ headerbar {
    on - so it is deliberately the thickest in-window tint of the set.
    Any lower and stderr becomes unreadable over the artwork's neon. */
 .terminal-panel {
-    background-color: rgba(10, 4, 7, 0.80);
-    border-top: 1px solid rgba(255, 60, 80, 0.40);
+    background-color: rgba(4, 7, 10, 0.80);
+    border-top: 1px solid rgba(72, 175, 243, 0.40);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.11);
 }
 .terminal-panel-header {
-    background-color: rgba(138, 14, 32, 0.28);
+    background-color: rgba(21, 85, 131, 0.28);
     background-image:
-        linear-gradient(180deg, rgba(255, 240, 242, 0.13) 0%,
-                        rgba(255, 240, 242, 0.0) 52%,
+        linear-gradient(180deg, rgba(241, 249, 254, 0.13) 0%,
+                        rgba(241, 249, 254, 0.0) 52%,
                         rgba(0, 0, 0, 0.16) 100%);
-    border-bottom: 1px solid rgba(255, 60, 80, 0.34);
+    border-bottom: 1px solid rgba(72, 175, 243, 0.34);
 }
-.terminal-panel-title { color: #ff8b98; }
+.terminal-panel-title { color: #92cff8; }
 .terminal-log-view, .terminal-log-view text {
     background-color: transparent;
-    color: #f0dfe2;
+    color: #e0e9ef;
 }
 
 /* ---- Buttons: small panes of the same glass -------------------------- */
 button, .icon-button, .header-icon-button, .glyph-btn,
 menubutton.glyph-btn > button, .model-switch-btn, .terminal-toggle-btn,
 .menu-button, .wordmark-btn, .msg-speak-btn, .cmd-copy-btn, .mic-button {
-    background-color: rgba(38, 18, 24, 0.42);
+    background-color: rgba(19, 28, 37, 0.42);
     background-image:
         linear-gradient(180deg,
-            rgba(255, 240, 242, 0.18) 0%,
-            rgba(255, 240, 242, 0.05) 46%,
-            rgba(255, 240, 242, 0.0) 52%,
+            rgba(241, 249, 254, 0.18) 0%,
+            rgba(241, 249, 254, 0.05) 46%,
+            rgba(241, 249, 254, 0.0) 52%,
             rgba(0, 0, 0, 0.22) 100%);
-    border: 1px solid rgba(255, 214, 220, 0.30);
-    color: #fbeef0;
+    border: 1px solid rgba(216, 238, 253, 0.30);
+    color: #eff5fa;
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.24);
 }
 button:hover, .icon-button:hover, .header-icon-button:hover,
 .glyph-btn:hover, menubutton.glyph-btn > button:hover,
 .model-switch-btn:hover, .terminal-toggle-btn:hover,
 .msg-speak-btn:hover, .cmd-copy-btn:hover, .mic-button:hover {
-    background-color: rgba(160, 14, 34, 0.46);
-    border-color: rgba(255, 80, 100, 0.68);
+    background-color: rgba(23, 98, 151, 0.46);
+    border-color: rgba(90, 183, 244, 0.68);
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.34),
-        0 0 18px rgba(255, 40, 62, 0.38);
+        0 0 18px rgba(53, 167, 242, 0.198);
 }
 button:active, .glyph-btn:active, .icon-button:active {
-    background-color: rgba(104, 8, 22, 0.56);
+    background-color: rgba(14, 63, 98, 0.56);
     box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.50);
 }
 button:disabled {
-    background-color: rgba(38, 18, 24, 0.22);
-    border-color: rgba(255, 214, 220, 0.14);
-    color: #8a7378;
+    background-color: rgba(19, 28, 37, 0.22);
+    border-color: rgba(216, 238, 253, 0.14);
+    color: #748089;
 }
 button.flat {
     background-color: transparent;
@@ -3138,96 +3158,96 @@ button.flat {
     box-shadow: none;
 }
 button.flat:hover {
-    background-color: rgba(160, 14, 34, 0.36);
-    border-color: rgba(255, 80, 100, 0.50);
+    background-color: rgba(23, 98, 151, 0.36);
+    border-color: rgba(90, 183, 244, 0.50);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.24);
 }
 button.suggested-action, .primary-action, .cmd-run-btn {
-    background-color: rgba(180, 16, 38, 0.64);
+    background-color: rgba(26, 111, 170, 0.64);
     background-image:
         linear-gradient(180deg,
-            rgba(255, 236, 240, 0.32) 0%,
-            rgba(255, 120, 140, 0.11) 46%,
-            rgba(255, 60, 80, 0.0) 52%,
-            rgba(54, 0, 10, 0.28) 100%);
-    border: 1px solid rgba(255, 116, 134, 0.78);
-    color: #fff5f6;
+            rgba(237, 246, 254, 0.32) 0%,
+            rgba(128, 197, 247, 0.11) 46%,
+            rgba(72, 175, 243, 0.0) 52%,
+            rgba(3, 30, 51, 0.28) 100%);
+    border: 1px solid rgba(124, 197, 247, 0.78);
+    color: #f6fbfe;
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.46),
-        0 0 20px rgba(255, 40, 62, 0.38);
+        0 0 20px rgba(53, 167, 242, 0.198);
 }
 button.suggested-action:hover, .primary-action:hover, .cmd-run-btn:hover {
-    background-color: rgba(208, 20, 46, 0.72);
+    background-color: rgba(31, 129, 197, 0.72);
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.54),
-        0 0 28px rgba(255, 40, 62, 0.56);
+        0 0 28px rgba(53, 167, 242, 0.26);
 }
 /* The send button is pure PNG art - give it a lit glass pad, never a
    fill that would box the artwork in. */
 .send-button {
-    background-color: rgba(138, 14, 32, 0.28);
+    background-color: rgba(21, 85, 131, 0.28);
     background-image:
-        linear-gradient(180deg, rgba(255, 236, 240, 0.22) 0%,
-                        rgba(255, 60, 80, 0.0) 52%,
+        linear-gradient(180deg, rgba(237, 246, 254, 0.22) 0%,
+                        rgba(72, 175, 243, 0.0) 52%,
                         rgba(0, 0, 0, 0.16) 100%);
-    border: 1px solid rgba(255, 90, 110, 0.50);
+    border: 1px solid rgba(100, 186, 245, 0.50);
     border-radius: 16px;
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.30),
-        0 0 16px rgba(226, 24, 44, 0.30);
+        0 0 16px rgba(36, 144, 214, 0.156);
 }
 .send-button:hover {
-    background-color: rgba(180, 16, 38, 0.42);
-    border-color: rgba(255, 120, 140, 0.76);
+    background-color: rgba(26, 111, 170, 0.42);
+    border-color: rgba(128, 197, 247, 0.76);
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.40),
-        0 0 26px rgba(255, 40, 62, 0.54);
+        0 0 26px rgba(53, 167, 242, 0.26);
 }
 .unleash-button {
-    background-color: rgba(34, 16, 22, 0.36);
-    border: 1px solid rgba(255, 214, 220, 0.26);
+    background-color: rgba(17, 25, 33, 0.36);
+    border: 1px solid rgba(216, 238, 253, 0.26);
     border-radius: 999px;
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22);
 }
 .unleash-button.toggled {
-    background-color: rgba(190, 16, 40, 0.54);
-    border-color: rgba(255, 116, 134, 0.84);
+    background-color: rgba(26, 116, 180, 0.54);
+    border-color: rgba(124, 197, 247, 0.84);
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.40),
-        0 0 24px rgba(255, 40, 62, 0.56);
+        0 0 24px rgba(53, 167, 242, 0.26);
 }
 
 /* ---- Entries, search, switches -------------------------------------- */
 entry, searchentry, searchentry text, .sidebar-search, passwordentry,
 spinbutton entry {
-    background-color: rgba(18, 8, 12, 0.46);
+    background-color: rgba(9, 13, 17, 0.46);
     background-image:
         linear-gradient(180deg, rgba(0, 0, 0, 0.24) 0%,
                         rgba(0, 0, 0, 0.0) 40%);
-    border: 1px solid rgba(255, 214, 220, 0.28);
+    border: 1px solid rgba(216, 238, 253, 0.28);
     border-radius: 12px;
-    color: #f6eef0;
+    color: #eef2f6;
     box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.42);
 }
 entry:focus-within, searchentry:focus-within, .sidebar-search:focus-within {
-    border-color: rgba(255, 70, 90, 0.74);
+    border-color: rgba(81, 179, 244, 0.74);
     box-shadow:
         inset 0 1px 3px rgba(0, 0, 0, 0.42),
-        0 0 18px rgba(255, 40, 62, 0.36);
+        0 0 18px rgba(53, 167, 242, 0.187);
 }
 switch {
-    background-color: rgba(34, 16, 22, 0.52);
-    border: 1px solid rgba(255, 214, 220, 0.28);
+    background-color: rgba(17, 25, 33, 0.52);
+    border: 1px solid rgba(216, 238, 253, 0.28);
     box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.42);
 }
 switch:checked {
-    background-color: rgba(190, 16, 40, 0.68);
-    border-color: rgba(255, 116, 134, 0.76);
+    background-color: rgba(26, 116, 180, 0.68);
+    border-color: rgba(124, 197, 247, 0.76);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28),
-                0 0 14px rgba(255, 40, 62, 0.40);
+                0 0 14px rgba(53, 167, 242, 0.208);
 }
 switch > slider {
-    background-image: linear-gradient(180deg, #ffffff, #e6ccd2);
+    background-image: linear-gradient(180deg, #ffffff, #cedae4);
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.50);
 }
 
@@ -3236,35 +3256,35 @@ switch > slider {
    higher alpha than the in-window panels: at 0.42 a dropdown was
    unreadable over the artwork.  Still glass, just thicker glass. ------- */
 popover > contents, popover > arrow, .popover-menu, menu, .menu {
-    background-color: rgba(20, 9, 14, 0.90);
+    background-color: rgba(10, 14, 19, 0.90);
     background-image:
-        linear-gradient(180deg, rgba(255, 240, 242, 0.13) 0%,
-                        rgba(255, 240, 242, 0.0) 52%,
+        linear-gradient(180deg, rgba(241, 249, 254, 0.13) 0%,
+                        rgba(241, 249, 254, 0.0) 52%,
                         rgba(0, 0, 0, 0.22) 100%);
-    border: 1px solid rgba(255, 214, 220, 0.30);
+    border: 1px solid rgba(216, 238, 253, 0.30);
     border-radius: 14px;
-    color: #f6eef0;
+    color: #eef2f6;
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.22),
         0 14px 34px rgba(0, 0, 0, 0.58);
 }
 popover row:selected, dropdown listview > row:selected,
 .model-pick-active {
-    background-color: rgba(190, 16, 40, 0.58);
+    background-color: rgba(26, 116, 180, 0.58);
     color: #ffffff;
 }
 /* A dialog sits over the conversation, not over the artwork, so it gets
    the thickest glass in the theme: enough to read a settings page through,
    with the gloss and the lit rim kept so it still belongs to the set. */
 window.dialog, dialog, .messagedialog, .dialog-content, .splash-window {
-    background-color: rgba(16, 7, 11, 0.90);
+    background-color: rgba(8, 11, 15, 0.90);
     background-image:
-        linear-gradient(180deg, rgba(255, 240, 242, 0.10) 0%,
-                        rgba(255, 240, 242, 0.0) 52%,
+        linear-gradient(180deg, rgba(241, 249, 254, 0.10) 0%,
+                        rgba(241, 249, 254, 0.0) 52%,
                         rgba(0, 0, 0, 0.20) 100%);
-    border: 1px solid rgba(255, 214, 220, 0.26);
+    border: 1px solid rgba(216, 238, 253, 0.26);
     border-radius: 18px;
-    color: #f6eef0;
+    color: #eef2f6;
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.20),
         0 18px 44px rgba(0, 0, 0, 0.62);
@@ -3272,45 +3292,45 @@ window.dialog, dialog, .messagedialog, .dialog-content, .splash-window {
 preferencespage, preferencesgroup {
     background-color: transparent;
     background-image: none;
-    color: #f6eef0;
+    color: #eef2f6;
 }
 list.boxed-list, list.boxed-list > row, row, comborow, .row {
-    background-color: rgba(38, 18, 24, 0.40);
-    color: #f6eef0;
+    background-color: rgba(19, 28, 37, 0.40);
+    color: #eef2f6;
 }
 list.boxed-list {
-    border: 1px solid rgba(255, 214, 220, 0.24);
+    border: 1px solid rgba(216, 238, 253, 0.24);
     border-radius: 14px;
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16);
 }
-row:hover { background-color: rgba(160, 14, 34, 0.30); }
-.settings-section-title { color: #ff8b98; }
+row:hover { background-color: rgba(23, 98, 151, 0.30); }
+.settings-section-title { color: #92cff8; }
 dropdown > button {
-    background-color: rgba(38, 18, 24, 0.44);
-    border: 1px solid rgba(255, 214, 220, 0.28);
+    background-color: rgba(19, 28, 37, 0.44);
+    border: 1px solid rgba(216, 238, 253, 0.28);
     border-radius: 10px;
 }
 
 /* ---- Scrollbars: slivers of red glass -------------------------------- */
 scrollbar { background-color: transparent; }
 scrollbar slider {
-    background-color: rgba(255, 214, 220, 0.28);
+    background-color: rgba(216, 238, 253, 0.28);
     border: 1px solid rgba(255, 255, 255, 0.16);
     border-radius: 999px;
 }
-scrollbar slider:hover  { background-color: rgba(255, 80, 100, 0.56); }
-scrollbar slider:active { background-color: rgba(255, 47, 68, 0.80); }
+scrollbar slider:hover  { background-color: rgba(90, 183, 244, 0.56); }
+scrollbar slider:active { background-color: rgba(59, 170, 243, 0.80); }
 
 /* ---- Type: keep it legible on top of a photograph -------------------- */
-.chat-title, .app-title    { color: #fdf3f5; }
+.chat-title, .app-title    { color: #f4f9fc; }
 .chat-subtitle, .app-subtitle, .empty-state-body, .tool-indicator-label {
-    color: #bda8ad;
+    color: #a9b3bc;
 }
-.empty-state-title { color: #fdf3f5; }
-.tao-quote         { color: #b39aa1; }
-.thoughts-text     { color: #ddc9ce; }
-.working-label     { color: #ffd4d9; }
-.online-dot.online { color: #ff2f44; text-shadow: 0 0 9px rgba(255, 40, 62, 0.80); }
+.empty-state-title { color: #f4f9fc; }
+.tao-quote         { color: #9ba7b2; }
+.thoughts-text     { color: #cad4dc; }
+.working-label     { color: #d7edfc; }
+.online-dot.online { color: #3baaf3; text-shadow: 0 0 9px rgba(53, 167, 242, 0.26); }
 
 /* ---- Text views: the last opaque rectangles ---------------------------
    A Gtk.TextView paints its own `text` node with the theme's view colour,
@@ -3325,10 +3345,10 @@ scrollbar slider:active { background-color: rgba(255, 47, 68, 0.80); }
 .input-frame viewport {
     background-color: transparent;
     background-image: none;
-    color: #f8eff1;
+    color: #f0f4f7;
 }
 .input-frame textview text selection {
-    background-color: rgba(200, 20, 46, 0.55);
+    background-color: rgba(31, 123, 189, 0.55);
     color: #ffffff;
 }
 .code-block scrolledwindow,
@@ -3349,17 +3369,17 @@ textview.terminal-log-view text { background-color: transparent; }
    stops reading as a header. Nudged up until the grid survives the art
    behind it. Colour only - the cell padding stays exactly where the width
    measurement expects it. ---------------------------------------------- */
-.md-th     { background-color: rgba(150, 14, 34, 0.52); }
-.md-td.odd { background-color: rgba(255, 226, 230, 0.08); }
+.md-th     { background-color: rgba(22, 92, 142, 0.52); }
+.md-td.odd { background-color: rgba(228, 243, 253, 0.08); }
 
 /* ---- The burning status bar, cooled into the same glass -------------- */
 .working-row {
-    background-color: rgba(104, 8, 22, 0.36);
-    border: 1px solid rgba(255, 80, 100, 0.44);
+    background-color: rgba(14, 63, 98, 0.36);
+    border: 1px solid rgba(90, 183, 244, 0.44);
     border-radius: 12px;
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.24),
-        0 0 18px rgba(255, 40, 62, 0.32);
+        0 0 18px rgba(53, 167, 242, 0.166);
 }
 
 /* =====================================================================
@@ -3390,20 +3410,20 @@ textview.terminal-log-view text { background-color: transparent; }
     padding: 34px 44px 30px 44px;
     margin: 0 12px;
     border-radius: 26px 6px 26px 6px;
-    background-color: rgba(20, 9, 14, 0.44);
+    background-color: rgba(10, 14, 19, 0.44);
     background-image:
         linear-gradient(180deg,
-            rgba(255, 240, 242, 0.16) 0%,
-            rgba(255, 240, 242, 0.04) 46%,
-            rgba(255, 240, 242, 0.0) 52%,
+            rgba(241, 249, 254, 0.16) 0%,
+            rgba(241, 249, 254, 0.04) 46%,
+            rgba(241, 249, 254, 0.0) 52%,
             rgba(0, 0, 0, 0.26) 100%);
-    border: 1px solid rgba(255, 214, 220, 0.34);
+    border: 1px solid rgba(216, 238, 253, 0.34);
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.34),
-        inset 0 0 0 1px rgba(255, 90, 110, 0.12),
+        inset 0 0 0 1px rgba(100, 186, 245, 0.062),
         inset 0 -30px 50px rgba(0, 0, 0, 0.28),
         0 18px 44px rgba(0, 0, 0, 0.56),
-        0 0 34px rgba(226, 24, 44, 0.26);
+        0 0 34px rgba(36, 144, 214, 0.135);
 }
 .hero-emblem { margin-bottom: 12px; }
 .hero-eyebrow {
@@ -3411,7 +3431,7 @@ textview.terminal-log-view text { background-color: transparent; }
     font-size: 15px;
     font-weight: 700;
     letter-spacing: 6px;
-    color: #d9b3ba;
+    color: #b5c8d7;
     margin-bottom: 2px;
 }
 .hero-title {
@@ -3419,10 +3439,10 @@ textview.terminal-log-view text { background-color: transparent; }
     font-size: 46px;
     font-weight: 900;
     letter-spacing: 8px;
-    color: #fff2f4;
+    color: #f3f9fe;
     text-shadow:
-        0 0 26px rgba(255, 40, 62, 0.60),
-        0 0 60px rgba(255, 20, 44, 0.30),
+        0 0 26px rgba(53, 167, 242, 0.26),
+        0 0 60px rgba(34, 159, 241, 0.156),
         0 2px 3px rgba(0, 0, 0, 0.86);
 }
 /* The hairline under the wordmark. A Gtk.Box with no child has no natural
@@ -3439,63 +3459,63 @@ textview.terminal-log-view text { background-color: transparent; }
     min-width: 260px;
     margin: 15px 0 13px 0;
     background-image: linear-gradient(90deg,
-        rgba(255, 60, 84, 0.0) 0%,
-        rgba(255, 96, 118, 0.70) 26%,
-        rgba(255, 226, 232, 0.95) 50%,
-        rgba(255, 96, 118, 0.70) 74%,
-        rgba(255, 60, 84, 0.0) 100%);
-    box-shadow: 0 0 14px rgba(255, 47, 68, 0.75);
+        rgba(72, 174, 243, 0.0) 0%,
+        rgba(106, 188, 245, 0.70) 26%,
+        rgba(228, 242, 253, 0.95) 50%,
+        rgba(106, 188, 245, 0.70) 74%,
+        rgba(72, 174, 243, 0.0) 100%);
+    box-shadow: 0 0 14px rgba(59, 170, 243, 0.26);
 }
 .hero-subtitle {
     font-family: 'JetBrains Mono', monospace;
     font-size: 14px;
     font-weight: 700;
     letter-spacing: 4px;
-    color: #bda8ad;
+    color: #a9b3bc;
     margin-bottom: 18px;
 }
 .hero-chip {
     padding: 8px 20px;
     border-radius: 999px;
-    background-color: rgba(138, 14, 32, 0.36);
+    background-color: rgba(21, 85, 131, 0.36);
     background-image:
-        linear-gradient(180deg, rgba(255, 236, 240, 0.24) 0%,
-                        rgba(255, 60, 80, 0.0) 52%,
+        linear-gradient(180deg, rgba(237, 246, 254, 0.24) 0%,
+                        rgba(72, 175, 243, 0.0) 52%,
                         rgba(0, 0, 0, 0.18) 100%);
-    border: 1px solid rgba(255, 104, 124, 0.60);
+    border: 1px solid rgba(113, 191, 246, 0.60);
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.34),
-        0 0 20px rgba(255, 40, 62, 0.34);
+        0 0 20px rgba(53, 167, 242, 0.177);
     margin-bottom: 20px;
 }
 .hero-chip-dot {
     font-size: 13px;
-    color: #ff2f44;
-    text-shadow: 0 0 10px rgba(255, 40, 62, 0.90);
+    color: #3baaf3;
+    text-shadow: 0 0 10px rgba(53, 167, 242, 0.26);
 }
 .hero-chip-label {
     font-family: 'JetBrains Mono', monospace;
     font-size: 18px;
     font-weight: 700;
     letter-spacing: 0.6px;
-    color: #fff2f4;
+    color: #f3f9fe;
 }
 .hero-specs { margin-bottom: 18px; }
 .hero-spec-key {
     font-family: 'JetBrains Mono', monospace;
     font-size: 15px;
     letter-spacing: 1.4px;
-    color: #a59197;
+    color: #929ba4;
 }
 .hero-spec-val {
     font-family: 'JetBrains Mono', monospace;
     font-size: 15px;
     font-weight: 700;
-    color: #f2e4e7;
+    color: #e5ecf1;
 }
 .hero-hint {
     font-size: 14px;
-    color: #918086;
+    color: #818890;
     font-style: italic;
 }
 
@@ -3507,42 +3527,42 @@ textview.terminal-log-view text { background-color: transparent; }
     padding: 7px 18px 7px 14px;
     border-radius: 999px;
     min-height: 0;
-    background-color: rgba(38, 18, 24, 0.44);
+    background-color: rgba(19, 28, 37, 0.44);
     background-image:
         linear-gradient(180deg,
-            rgba(255, 240, 242, 0.18) 0%,
-            rgba(255, 240, 242, 0.05) 46%,
-            rgba(255, 240, 242, 0.0) 52%,
+            rgba(241, 249, 254, 0.18) 0%,
+            rgba(241, 249, 254, 0.05) 46%,
+            rgba(241, 249, 254, 0.0) 52%,
             rgba(0, 0, 0, 0.22) 100%);
-    border: 1px solid rgba(255, 214, 220, 0.32);
+    border: 1px solid rgba(216, 238, 253, 0.32);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.24);
 }
 .unleash-button:hover {
-    background-color: rgba(160, 14, 34, 0.44);
-    border-color: rgba(255, 96, 116, 0.68);
+    background-color: rgba(23, 98, 151, 0.44);
+    border-color: rgba(106, 189, 245, 0.68);
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.32),
-        0 0 20px rgba(255, 40, 62, 0.40);
+        0 0 20px rgba(53, 167, 242, 0.208);
 }
 .unleash-button.toggled {
-    background-color: rgba(196, 16, 42, 0.62);
+    background-color: rgba(27, 119, 185, 0.62);
     background-image:
         linear-gradient(180deg,
-            rgba(255, 240, 244, 0.38) 0%,
-            rgba(255, 130, 150, 0.12) 46%,
-            rgba(255, 60, 80, 0.0) 52%,
-            rgba(58, 0, 10, 0.30) 100%);
-    border-color: rgba(255, 150, 166, 0.90);
+            rgba(241, 248, 254, 0.38) 0%,
+            rgba(138, 201, 247, 0.12) 46%,
+            rgba(72, 175, 243, 0.0) 52%,
+            rgba(3, 33, 55, 0.30) 100%);
+    border-color: rgba(156, 210, 249, 0.90);
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.56),
-        inset 0 -10px 20px rgba(120, 0, 16, 0.34),
-        0 0 30px rgba(255, 40, 62, 0.66);
+        inset 0 -10px 20px rgba(7, 69, 113, 0.34),
+        0 0 30px rgba(53, 167, 242, 0.26);
 }
 .unleash-button.toggled:hover {
-    background-color: rgba(222, 20, 50, 0.70);
+    background-color: rgba(32, 136, 210, 0.70);
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.64),
-        0 0 40px rgba(255, 40, 62, 0.80);
+        0 0 40px rgba(53, 167, 242, 0.26);
 }
 .unleash-glyph { font-size: 19px; }
 .unleash-label {
@@ -3550,12 +3570,12 @@ textview.terminal-log-view text { background-color: transparent; }
     font-size: 14px;
     font-weight: 800;
     letter-spacing: 2.2px;
-    color: #e3ccd1;
+    color: #cdd9e2;
 }
-.unleash-button:hover .unleash-label { color: #fff0f2; }
+.unleash-button:hover .unleash-label { color: #f1f9fe; }
 .unleash-button.toggled .unleash-label {
     color: #ffffff;
-    text-shadow: 0 0 12px rgba(255, 190, 200, 0.80);
+    text-shadow: 0 0 12px rgba(194, 227, 251, 0.26);
 }
 
 /* ---- Cut edges on the big surfaces ----------------------------------
@@ -3566,29 +3586,29 @@ textview.terminal-log-view text { background-color: transparent; }
     border-radius: 4px 20px 20px 20px;
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.34),
-        inset 0 0 0 1px rgba(255, 214, 220, 0.09),
-        inset 0 0 30px rgba(255, 90, 110, 0.07),
+        inset 0 0 0 1px rgba(216, 238, 253, 0.047),
+        inset 0 0 30px rgba(100, 186, 245, 0.036),
         inset 0 -18px 30px rgba(0, 0, 0, 0.24),
         0 10px 26px rgba(0, 0, 0, 0.48),
-        0 0 22px rgba(226, 24, 44, 0.20);
+        0 0 22px rgba(36, 144, 214, 0.104);
 }
 .msg-user {
     border-radius: 20px 20px 4px 20px;
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.38),
-        inset 0 0 0 1px rgba(255, 190, 200, 0.14),
-        inset 0 0 30px rgba(255, 40, 62, 0.14),
-        inset 0 -18px 30px rgba(96, 4, 16, 0.22),
+        inset 0 0 0 1px rgba(194, 227, 251, 0.073),
+        inset 0 0 30px rgba(53, 167, 242, 0.073),
+        inset 0 -18px 30px rgba(10, 57, 90, 0.22),
         0 10px 26px rgba(0, 0, 0, 0.46),
-        0 0 24px rgba(226, 24, 44, 0.30);
+        0 0 24px rgba(36, 144, 214, 0.156);
 }
 .input-frame {
     border-radius: 24px 8px 24px 8px;
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.30),
-        inset 0 0 0 1px rgba(255, 214, 220, 0.10),
+        inset 0 0 0 1px rgba(216, 238, 253, 0.052),
         0 8px 22px rgba(0, 0, 0, 0.44),
-        0 0 18px rgba(226, 24, 44, 0.18);
+        0 0 18px rgba(36, 144, 214, 0.094);
 }
 .code-block, .md-table, .activity-feed, .activity-dock,
 .card, .cmd-card, .md-quote {
@@ -3609,7 +3629,173 @@ window.dialog, dialog, .messagedialog, .dialog-content {
 .tao-quote {
     font-size: 15px;
     line-height: 1.5;
-    color: #a59197;
+    color: #929ba4;
+}
+
+/* =====================================================================
+   COMPOSURE PASS - appended LAST, so it wins the cascade over every
+   block above it.  ASCII-only, like the rest of this bytes literal.
+
+   Everything here is about the difference between a UI that is DARK and
+   one that looks EXPENSIVE.  Three things separate them, and the glass
+   recipe above already gets the hard one (material) right:
+
+     1. ONE LIT EDGE PER SURFACE, not a rim all the way round.  A closed
+        loop of bright colour is a gaming bezel; light falls from one
+        direction, so the bevel goes on the TOP edge and the rest of the
+        outline stays a low-alpha hairline.  The outer accent blooms were
+        damped for the same reason.
+     2. CHROME RECEDES, CONTENT DOES NOT.  Labels, counters, timings and
+        rules step back to the dim end of the ramp; the model's words,
+        tables and code keep full contrast.  Before this, a step count
+        and a finding were painted at the same weight.
+     3. NO NESTED BOXES.  A card inside a card inside a panel is the
+        single most common way a dense UI turns to mush - each border is
+        another line competing with the text.  Depth is carried by tint
+        and by one hairline rule instead.
+   ===================================================================== */
+
+/* ---- The live feed, joined to the composer it sits on ----------------
+   It was a free-floating card: its own 16px radius, its own outer drop
+   shadow and its own bloom, hovering in the gap between the last message
+   and the box you type in.  Three separate glass slabs stacked with air
+   between them is what "it doesn't fit together" looks like.
+
+   Now it is the TOP of one control surface: square where it meets the
+   composer stack, no drop shadow of its own, and a shared hairline.  The
+   conversation floats; the controls are a single fixed pane.
+   -------------------------------------------------------------------- */
+.activity-dock {
+    margin: 6px 4px 2px 4px;
+}
+.activity-feed, .activity-dock {
+    border-radius: 14px 14px 4px 4px;
+    background-color: rgba(11, 15, 21, 0.50);
+    border: 1px solid rgba(216, 238, 253, 0.14);
+    border-top-color: rgba(228, 244, 255, 0.26);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.14),
+        0 6px 18px rgba(0, 0, 0, 0.36);
+}
+.activity-dock .activity-feed {
+    border-radius: 14px 14px 4px 4px;
+}
+.activity-dock .activity-header {
+    border-radius: 13px 13px 0 0;
+}
+
+/* Header: status first, arithmetic last. */
+.activity-title  { color: #dfe9f2; font-weight: 600; letter-spacing: 0.2px; }
+.activity-meta   { color: #77828e; font-size: 14px; letter-spacing: 0.3px; }
+.activity-chevron{ color: #6c7783; }
+
+/* Steps: one hairline rail down the left, so the list reads as a sequence
+   instead of as a stack of tiles. */
+.activity-body {
+    border-top: 1px solid rgba(216, 238, 253, 0.10);
+    padding-top: 6px;
+}
+.activity-step-name   { letter-spacing: 0.2px; }
+.activity-step-detail { color: #8391a0; }
+.activity-step-time   { color: #69747f; font-size: 13px; }
+
+/* THE NESTED BOX, REMOVED.  A tool result preview was drawn inside its own
+   bordered, tinted, rounded panel INSIDE the feed panel INSIDE the docked
+   surface - three outlines deep for one line of dim monospace.  It is a
+   continuation of the row above it, so it is now indented under that row
+   against a single hairline rule and nothing else. */
+.activity-preview-box {
+    background-color: transparent;
+    background-image: none;
+    border: none;
+    border-left: 1px solid rgba(216, 238, 253, 0.16);
+    border-radius: 0;
+    margin: 0 0 2px 16px;
+    padding: 0 0 2px 10px;
+}
+.activity-preview {
+    color: #79858f;
+    font-size: 14px;
+}
+
+/* ---- Composer: calm at rest, lit on focus ---------------------------
+   The composer holds focus from the moment the app opens, so whatever the
+   focus state looks like IS what the app looks like.  A 0.76-alpha accent
+   outline plus a 28px bloom on all four sides made "ready for input" the
+   loudest thing on screen.  Focus now reads as the top edge catching
+   light and a soft lift - present, once you look for it.
+   -------------------------------------------------------------------- */
+.input-frame {
+    border-color: rgba(216, 238, 253, 0.18);
+    border-top-color: rgba(228, 244, 255, 0.30);
+}
+.input-frame:focus-within {
+    border-color: rgba(129, 196, 240, 0.34);
+    border-top-color: rgba(168, 220, 255, 0.52);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.26),
+        0 8px 24px rgba(0, 0, 0, 0.46),
+        0 0 22px rgba(53, 167, 242, 0.14);
+}
+
+/* ---- Sidebar rows --------------------------------------------------- */
+/* The agent marker takes the palette because it is a geometric glyph, not
+   an emoji - see the comment at its construction site. */
+.chat-row .pin-icon   { color: #7f8b97; font-size: 12px; }
+.chat-row .agent-icon { color: #4fc3f7; }
+.chat-row .meta-line  { color: #6b7681; }
+
+/* ---- The two speakers ------------------------------------------------
+   The operator's bubble was the most saturated object in the window - a
+   0.32 tint of accent blue behind a 0.58-alpha accent border - so the
+   loudest thing on any screen was a sentence the operator had already
+   read.  Attention should fall on the ANSWER.
+
+   The two are still unmistakably different, just not by volume: the
+   operator's side is the LIGHTER, cooler pane (light falls on it) and
+   Basilisk's is smoked obsidian.  Same material, two depths - which is
+   also how the asymmetric corners already distinguish them.
+   -------------------------------------------------------------------- */
+.msg-user {
+    background-color: rgba(26, 46, 63, 0.34);
+    background-image:
+        linear-gradient(180deg,
+            rgba(237, 246, 254, 0.16) 0%,
+            rgba(186, 216, 240, 0.05) 46%,
+            rgba(72, 175, 243, 0.0) 52%,
+            rgba(3, 14, 22, 0.24) 100%);
+    border: 1px solid rgba(216, 238, 253, 0.20);
+    border-top-color: rgba(232, 246, 255, 0.34);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.24),
+        inset 0 -18px 30px rgba(6, 20, 30, 0.20),
+        0 8px 22px rgba(0, 0, 0, 0.42);
+}
+.msg-user:hover {
+    background-color: rgba(30, 54, 73, 0.38);
+    border-color: rgba(216, 238, 253, 0.28);
+    border-top-color: rgba(232, 246, 255, 0.42);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.28),
+        inset 0 -18px 30px rgba(6, 20, 30, 0.22),
+        0 10px 26px rgba(0, 0, 0, 0.44);
+}
+.msg-assistant {
+    border-color: rgba(216, 238, 253, 0.16);
+    border-top-color: rgba(228, 244, 255, 0.26);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.16),
+        inset 0 -18px 30px rgba(0, 0, 0, 0.24),
+        0 8px 22px rgba(0, 0, 0, 0.44);
+}
+
+/* ---- Type ramp ------------------------------------------------------
+   Machine chrome sits one step dimmer than prose everywhere, in one
+   place, so a later rule cannot quietly promote a label to the weight of
+   an answer. */
+.chat-subtitle, .app-subtitle, .md-table-more, .code-lang {
+    color: #78838f;
+    letter-spacing: 0.4px;
 }
 """
 
@@ -3727,8 +3913,8 @@ def _pango_inline(t: str) -> str:
     # keeps the monospace legible while the artwork carries on behind it.
     t = INLINE_CODE_RE.sub(
         r'<span font_family="JetBrains Mono" '
-        r'background="#2b0a12" background_alpha="40000" '
-        r'foreground="#ffd9dd"> \1 </span>',
+        r'background="#0c1c29" background_alpha="40000" '
+        r'foreground="#dbeffd"> \1 </span>',
         t)
     return t
 
@@ -6824,8 +7010,11 @@ class MessageWidget(Gtk.Box):
         # Hide both tool XML and any inline <think> reasoning from the live
         # reply.  The reasoning (if any) gets captured at finish_streaming /
         # set_content and shown in the collapsible thoughts panel.
-        display = strip_tool_calls(strip_think_blocks(self._content))
-        self._streaming_label.set_text(display)
+        # ONE transform, shared with the attach decision in _on_stream_token —
+        # see stream_visible_text's docstring. It is the finished-message chain
+        # plus the in-flight hold, so a half-arrived `<too` / `<invok` / `<|`
+        # is never painted and then deleted a frame later.
+        self._streaming_label.set_text(stream_visible_text(self._content))
 
     def _flush_stream_render(self):
         self._stream_render_pending = False
@@ -6886,7 +7075,7 @@ class MessageWidget(Gtk.Box):
         if not text or self._thoughts_container is None or not self._show_thoughts:
             return
         if self._thoughts_label is None:
-            expander = Gtk.Expander(label="💭  Thoughts")
+            expander = Gtk.Expander(label="Thoughts")
             expander.set_expanded(False)          # click to open
             expander.add_css_class("thoughts-expander")
             lbl = _make_wrap_label()
@@ -6916,13 +7105,19 @@ class ChatRow(Gtk.ListBoxRow):
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
 
         title_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        # MONOCHROME GLYPHS, NOT EMOJI — same rule the activity feed already
+        # follows. An emoji codepoint is rendered by the emoji face, which
+        # ignores the row's CSS colour AND its metrics: a pinned row came out
+        # with a full-colour sticker on it and sat a pixel taller than its
+        # neighbours. These two take the palette like everything else.
         if chat.pinned:
-            pin = Gtk.Label(label="📌")
+            pin = Gtk.Label(label="\u25c6")          # BLACK DIAMOND
             pin.add_css_class("pin-icon")
             title_row.append(pin)
         if chat.agent_mode:
-            mode = Gtk.Label(label="⚡")
+            mode = Gtk.Label(label="\u25b8")         # BLACK RIGHT SMALL TRIANGLE
             mode.add_css_class("pin-icon")
+            mode.add_css_class("agent-icon")
             title_row.append(mode)
 
         title = Gtk.Label(label=chat.title, xalign=0.0)
@@ -8666,6 +8861,8 @@ class MainWindow(Adw.ApplicationWindow):
         # Answer-mode stall pushes spent on the current request. See
         # ANSWER_STALL_NUDGE_MAX.
         self._answer_stall_nudges: int = 0
+        # Absolute per-request ceiling — see ANSWER_STALL_NUDGE_TOTAL_MAX.
+        self._answer_stall_total: int = 0
         # Whether a tool has ACTUALLY RUN this request. The continuation
         # directives ("you already read a source, don't re-read") key off
         # this, NOT off _tool_chain_depth — because the answer-mode stall
@@ -9511,10 +9708,10 @@ class MainWindow(Adw.ApplicationWindow):
         self.terminal_log_buf = self.terminal_log_view.get_buffer()
 
         # Colour tags
-        self.terminal_log_buf.create_tag("cmd",    foreground="#d51f2e", weight=700)
+        self.terminal_log_buf.create_tag("cmd",    foreground="#2a8cca", weight=700)
         self.terminal_log_buf.create_tag("stdout", foreground="#9aa3ad")
         self.terminal_log_buf.create_tag("stderr", foreground="#e5484d")
-        self.terminal_log_buf.create_tag("info",   foreground="#7d121b")
+        self.terminal_log_buf.create_tag("info",   foreground="#185277")
         self.terminal_log_buf.create_tag("error",  foreground="#e5484d", weight=700)
         self.terminal_log_buf.create_tag("ok",     foreground="#2ecc71", weight=700)
         self.terminal_log_buf.create_tag("dim",    foreground="#7d8794")
@@ -11043,7 +11240,18 @@ class MainWindow(Adw.ApplicationWindow):
                         or "").strip()
             except Exception:
                 body = ""
-            if body:
+            # ...and only if it will actually be SEEN. A bare tool step also
+            # has a non-empty body (the tool markup itself) but set_content has
+            # already hidden it, so attaching it here would put an invisible
+            # widget in the chat for every step of a chain. A propose turn is
+            # the case this branch exists for: its display text is empty too,
+            # but its approval card is drawn into that same bubble and the
+            # operator has to be able to click it.
+            try:
+                _will_show = self.streaming_msg_widget.get_visible()
+            except Exception:
+                _will_show = True
+            if body and _will_show:
                 self._attach_streaming_bubble()
         self.streaming_msg_widget = None
         self.streaming_msg_db_id = None
@@ -11953,6 +12161,7 @@ class MainWindow(Adw.ApplicationWindow):
             # Per-request, like the counters above: a stall on the LAST question
             # must not spend this question's nudges.
             self._answer_stall_nudges = 0
+            self._answer_stall_total = 0
             self._tool_ran_this_request = False
             self._tools_used_this_request = set()
             self._promise_pushes = 0
@@ -12768,12 +12977,22 @@ class MainWindow(Adw.ApplicationWindow):
             return False
         self._mark_turn_progress()
         if self.streaming_msg_widget:
-            # First real text token → bring the bubble into the chat now. Until
-            # this point the turn may have only run tool calls (web search etc.)
-            # with no text, and the bubble stayed out of view so it wouldn't
-            # flicker in and back out.
-            self._attach_streaming_bubble()
             self.streaming_msg_widget.append_streaming(tok)
+            # ── ATTACH ON VISIBLE TEXT, NOT ON ANY TOKEN ──
+            # The bubble is deferred so a tool-only step never draws an empty
+            # one. That test used to be "a token arrived", which is true of the
+            # FIRST token of a tool call as much as of a word — so a search step
+            # attached a bubble, painted the fragment of its opening tag, lost
+            # it to the stripper, and then hid itself as a bare tool step.
+            # Popped in, typed, deleted, popped out; all for a turn that was
+            # never going to say anything.
+            #
+            # Ask the renderer instead: attach the first time there is something
+            # to READ. append_streaming runs first so the judgement is made on
+            # the buffer this token is already part of.
+            if stream_visible_text(
+                    self.streaming_msg_widget._content or "").strip():
+                self._attach_streaming_bubble()
             # Only scroll if user is on the chat that owns this stream
             if self.streaming_chat_id == self.current_chat_id:
                 self._scroll_to_bottom()
@@ -13704,9 +13923,13 @@ class MainWindow(Adw.ApplicationWindow):
                     and not self._tools_locked
                     and not looks_degraded(final)
                     and reply_is_bare_stall(final)
-                    and getattr(self, "_answer_stall_nudges", 0) < _nudge_cap):
+                    and getattr(self, "_answer_stall_nudges", 0) < _nudge_cap
+                    and getattr(self, "_answer_stall_total", 0)
+                        < ANSWER_STALL_NUDGE_TOTAL_MAX):
                 self._answer_stall_nudges = getattr(
                     self, "_answer_stall_nudges", 0) + 1
+                self._answer_stall_total = getattr(
+                    self, "_answer_stall_total", 0) + 1
                 self.terminal_log(
                     "↻ you said you'd do something but called no tool "
                     f"— nudging ({self._answer_stall_nudges}/"
@@ -15380,6 +15603,12 @@ class MainWindow(Adw.ApplicationWindow):
         # _kick_assistant_turn's _continuation. Setting it anywhere upstream
         # of a real result would let a dropped/blocked call count as a run.
         self._tool_ran_this_request = True
+        # PROGRESS CLEARS THE STALL RECORD. See ANSWER_STALL_NUDGE_MAX: the
+        # consecutive-stall counter is what stops a model that only ever
+        # narrates, and a tool result is proof this one is not that. Resetting
+        # here (rather than per request) is what lets a long job stall, recover
+        # and keep going instead of dying quietly forty steps in.
+        self._answer_stall_nudges = 0
         # Carry any "these calls did not run" note into the SAME result, so the
         # model reads it at exactly the moment it is wondering where the other
         # answers went. See the deferred branch in _on_stream_done_body.
@@ -17670,7 +17899,7 @@ class DragonSplash(Gtk.Window):
                 cr.clip()
                 blit(1.0)
                 cr.set_operator(cairo.OPERATOR_ADD)
-                cr.set_source_rgba(0.55, 0.06, 0.03, 0.15)
+                cr.set_source_rgba(0.06, 0.36, 0.55, 0.15)
                 cr.rectangle(ox, flash_y, dw, lit_h)
                 cr.fill()
                 cr.set_operator(cairo.OPERATOR_OVER)

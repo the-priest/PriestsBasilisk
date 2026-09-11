@@ -1,3 +1,131 @@
+## v1.1.1.0 — obsidian glass, and the stream that painted text it was about to delete
+
+### One parser bug wearing three costumes
+
+Reported as *"when it searches it types in chat and it gets deleted, bubble
+pops in and out"*.
+
+Every stripper in `basilisk_core` answers **"is this text a tool call?"**. A
+stream asks a different question: **"could this text still become one?"** The
+difference is three characters wide and it was the whole bug. Until a marker is
+long enough to be *recognised*, its characters are ordinary text — so the live
+renderer painted `<`, `<t`, `<to`, `<too`, one frame at a time, and then deleted
+them the instant `<tool ` completed and `TOOL_PARTIAL_RE` engaged.
+
+Character-by-character replay over every dialect the app supports — canonical,
+DSML on both the fullwidth and the ASCII pipe, `<invoke>`, `<tool_call>`,
+`<function=>`, `<think>` — found a leak in **all of them**. The canonical form
+leaked at character 23 of a 70-character reply.
+
+The third symptom was downstream of the same leak and looked unrelated. The
+chat bubble is attached lazily on the first token carrying visible TEXT, so a
+tool-only step never draws an empty bubble — but a leaked `<too` *is* visible
+text by that test. A search step therefore attached a bubble, painted a
+fragment of its own opening tag, lost it to the stripper, and then hid itself
+as a bare tool step. Popped in, typed, deleted, popped out, for a turn that was
+never going to say anything.
+
+**Fix**: the rule every incremental parser uses — never emit a tail that could
+still turn into markup; hold it one frame. The next token either completes the
+marker (it is stripped) or proves it was prose (it is released, one frame later,
+which no reader can perceive). `stream_visible_text()` is now the single
+transform BOTH the renderer and the attach decision go through, so the two
+cannot drift apart again — the same "one rule, two consumers, only one wired"
+shape as the speech path and the batch repeat guard before it.
+
+It is **stream-only on purpose**. A finished message ending in `<t` is text and
+must be shown, so the hold is deliberately not folded into `strip_tool_calls`
+itself; a test asserts it stays out of there.
+
+Counter-property asserted as hard as the property: ten prose strings containing
+`<` (`compare a < b`, `if (a<b)`, `cat < input.txt`, `use <p> tags`) pass
+through byte-identical, and every held fragment is released the moment the next
+character disproves it. Cost is constant in reply length (the window is 32
+chars, not the buffer), and 4000 unterminated openers — the shape that has
+frozen this file's regexes twice — clears in 20ms.
+
+New `tests/test_streamhold.py`, 64 assertions, including a check that the suite
+is not vacuous: it asserts the OLD transform still leaks on the same input.
+
+### A long job stopped before it was finished
+
+`_answer_stall_nudges` counted CUMULATIVE stalls per request. The cap exists to
+stop a model that only ever narrates — but a model that narrates, gets pushed,
+and then goes and runs something is not that model, it is one that recovered.
+Counting those pushes cumulatively meant a 40-step repo job spent its whole
+budget on an early stall and then died silently at the first stall after it,
+with the work half done and nothing said about it. The `* 2 if _work_turn`
+doubling was a patch on that arithmetic rather than a fix for it.
+
+The counter is now CONSECUTIVE and is cleared at `_feed_tool_result` — the one
+choke point every real tool result already passes through, the same hook ACTION
+RECALL and the activity feed hang off. A separate `ANSWER_STALL_NUDGE_TOTAL_MAX`
+bounds the pathological narrate-run-narrate-run case that a consecutive counter
+alone would never trip.
+
+### The theme: red out, obsidian glass in
+
+The four-layer glass recipe (tint / gloss ramp / hairline / bloom) was already
+right; it was just red. So this is a migration, not a rewrite:
+
+- **1,274 colour tokens** in the stylesheet mapped hue-by-hue from the warm band
+  (-30..+45 deg) onto a cool one (214..182 deg), linearly, so the theme's two
+  related warm hues stay two related cool hues instead of collapsing to one flat
+  blue. **Lightness is preserved exactly**, which is what keeps the whole
+  contrast structure intact. Saturation eased 12%.
+- **The brand art moved with it.** 20 PNGs, 5 SVGs and the 11 embedded base64
+  button images went through the identical curve, per pixel, preserving
+  lightness and alpha — so the dragon-ring emblem sits in the same light as the
+  panels around it. The embedded art matters: it is the fallback when the assets
+  directory is absent, so leaving it red would have shipped red buttons on a blue
+  theme to every remote-fetch install.
+- **Red is now semantic and nothing else.** Destructive, error and warning
+  colours were explicitly protected from the migration.
+- **124 chromatic outer glows damped** (factor 0.52, cap 0.26). A closed loop of
+  bright colour is a gaming bezel; light falls from one direction, so the bevel
+  goes on the top edge and the rest of the outline stays a low-alpha hairline.
+  Inset bevels and black drop shadows are untouched — soften those and the glass
+  goes muddy.
+
+### The live feed, joined to the thing it sits on
+
+It was a free-floating card: its own radius, its own drop shadow, its own bloom,
+hovering in the gap between the last message and the composer. Three glass slabs
+stacked with air between them is what "it doesn't fit together" looks like. It
+is now the top of ONE control surface — square where it meets the composer
+stack, no drop shadow of its own, shared hairline. The conversation floats; the
+controls are a single fixed pane.
+
+Tool-result previews lost their nested box: a dim monospace line was being drawn
+inside its own bordered, tinted, rounded panel, inside the feed panel, inside the
+docked surface — three outlines deep for one line of text. It is a continuation
+of the row above it, so it is indented under that row against a single hairline
+rule and nothing else.
+
+### Smaller
+
+- **The composer is calm at rest.** It holds focus from the moment the app opens,
+  so whatever its focus state looks like IS what the app looks like. A 0.76-alpha
+  accent outline plus a 28px bloom on all four sides made "ready for input" the
+  loudest thing on screen.
+- **The operator's bubble stopped shouting.** It was the most saturated object in
+  the window, so the loudest thing on any screen was a sentence the operator had
+  already read. The two speakers are still unmistakably different — lighter cool
+  pane versus smoked obsidian, plus the asymmetric corners — just not by volume.
+- **Monochrome glyphs in the sidebar.** The pinned and agent-mode markers were
+  emoji codepoints, which the emoji face renders in its own colour AND its own
+  metrics, so a pinned row carried a full-colour sticker and sat a pixel taller
+  than its neighbours. Same rule the activity feed's glyphs already follow.
+- **`.gitignore` excludes `settings.json`** — it holds API keys, and nothing was
+  stopping it being committed. Its own suite had been saying so.
+
+Verified against real GTK 4.14 + libadwaita under Xvfb: stylesheet parses with
+zero errors, and the empty state, a live feed mid-chain, a settled feed, the
+terminal panel and the settings dialog were all rendered and reviewed.
+
+4,367 assertions across 71 stdlib-only suites, zero red, verified from a clean
+extract of the shipped zip. `basilisk_persona.py` byte-identical.
+
 ## v1.1.0.0 — the debug pass on v1.0.0.23, and native packages
 
 Four adversarial probe suites written against everything v1.0.0.23 changed.

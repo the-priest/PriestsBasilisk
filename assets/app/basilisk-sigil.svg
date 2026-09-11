@@ -11,20 +11,20 @@
     </filter>
   </defs>
   <!-- ===== SIGIL RING (ember red, matches basilisk-sigil style) ===== -->
-  <g fill="none" stroke="#d2551b" stroke-width="4" stroke-linejoin="round" opacity="0.92">
+  <g fill="none" stroke="#26a4c7" stroke-width="4" stroke-linejoin="round" opacity="0.92">
     <circle cx="256" cy="256" r="248"/>
     <circle cx="256" cy="256" r="212"/>
     <polygon points="256,40 443,364 69,364"/>
     <polygon points="256,472 443,148 69,148"/>
   </g>
   <!-- cardinal + ordinal nodes -->
-  <g fill="#8c1620">
+  <g fill="#1d5c85">
     <circle cx="256" cy="14"  r="9"/>
     <circle cx="256" cy="498" r="9"/>
     <circle cx="14"  cy="256" r="9"/>
     <circle cx="498" cy="256" r="9"/>
   </g>
-  <g fill="none" stroke="#8c1620" stroke-width="3" opacity="0.7">
+  <g fill="none" stroke="#1d5c85" stroke-width="3" opacity="0.7">
     <circle cx="256" cy="256" r="188"/>
   </g>
   <!-- ===== DRAGON, centered and scaled inside the ring ===== -->

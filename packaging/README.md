@@ -7,7 +7,7 @@ model or a key — Basilisk is the harness, you bring the brain.
 ## Kali / Debian / Ubuntu — `.deb`
 
 ```
-sudo apt install ./priestsbasilisk_1.1.0.0-1_all.deb
+sudo apt install ./priestsbasilisk_1.1.1.0-1_all.deb
 ```
 
 apt resolves the GTK stack itself (`python3-gi`, `python3-gi-cairo`,
@@ -31,7 +31,7 @@ in `~/.local/share/basilisk` and `~/.config/basilisk` and are **not** touched.
 ## CachyOS / Arch — `.pkg.tar.zst`
 
 ```
-sudo pacman -U priestsbasilisk-1.1.0.0-1-any.pkg.tar.zst
+sudo pacman -U priestsbasilisk-1.1.1.0-1-any.pkg.tar.zst
 ```
 
 Or build it yourself from the `PKGBUILD` beside this file, which is the

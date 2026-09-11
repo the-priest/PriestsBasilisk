@@ -247,5 +247,36 @@ ck("work turns get a bigger stall budget than answer turns",
    re.search(r"ANSWER_STALL_NUDGE_MAX \* 2 if _work_turn", SRC) is not None)
 
 
+# ── the stall counter is CONSECUTIVE, so a long job can recover ──────
+# A cumulative counter is why a job of any real length stopped before it was
+# finished: two stalls early in a 40-step task spent the whole budget, and the
+# next stall — at step 40, with the work half done — ended the turn silently.
+# The cap is there to stop a model that ONLY narrates; a model that narrates,
+# gets pushed and then RUNS something is not that model.
+print("\n== progress clears the stall record ==")
+ck("a real tool result resets the consecutive counter",
+   re.search(r"self\._tool_ran_this_request = True\n(?:\s*#[^\n]*\n)+"
+             r"\s*self\._answer_stall_nudges = 0", SRC) is not None,
+   "the reset is not on the tool-result choke point")
+ck("…and it resets at the ONE place every tool result passes through",
+   SRC.count("self._answer_stall_nudges = 0") == 2,
+   "expected exactly two: the per-request reset and the progress reset")
+ck("an absolute ceiling still bounds narrate-run-narrate-run",
+   "ANSWER_STALL_NUDGE_TOTAL_MAX" in SRC)
+ck("…and the ceiling is counted separately from the consecutive one",
+   re.search(r"self\._answer_stall_total = getattr\(\s*\n?\s*self, "
+             r"\"_answer_stall_total\", 0\) \+ 1", SRC) is not None)
+ck("…is checked in the stall branch",
+   re.search(r"getattr\(self, \"_answer_stall_total\", 0\)\s*\n?\s*"
+             r"< ANSWER_STALL_NUDGE_TOTAL_MAX", SRC) is not None)
+ck("…and is reset per operator request, not per turn",
+   re.search(r"self\._answer_stall_nudges = 0\n\s*"
+             r"self\._answer_stall_total = 0", SRC) is not None)
+_tot = re.search(r"ANSWER_STALL_NUDGE_TOTAL_MAX = (\d+)", SRC)
+ck("the ceiling is generous enough for a real job but finite",
+   _tot is not None and 6 <= int(_tot.group(1)) <= 40,
+   _tot.group(1) if _tot else "absent")
+
+
 print(f"\npromise_gate: {_p} passed, {_f} failed")
 sys.exit(1 if _f else 0)
