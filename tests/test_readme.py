@@ -181,7 +181,12 @@ for term in ("Roko", "White-Basilisk", "the-priest/PriestsBasilisk",
 print("\n== load-bearing facts ==")
 FACTS = [
     "87 / 113", "22 / 22", "Juice Shop", "Duck Store", "DeepSeek-V4-Flash",
-    "Cascade", "36 / 113", "23 / 113", "NODE_ENV=unsafe",
+    # The head-to-head rows against Cascade and a named frontier model were
+    # REMOVED at the operator's instruction: the README leads with what
+    # Basilisk itself scores and how to reproduce it, not with other people's
+    # numbers. The cost argument stays, because that one is the actual design
+    # claim - the scaffolding produces the score, not the price of the model.
+    "GLM-5.3-Flash", "black-box", "NODE_ENV=unsafe",
     "bkimminich/juice-shop", "juiceshop_report", "/api/Challenges",
     "14 OWASP", "F1 0.95", "CVE-2007-4559", "commonpath", "Zip slip",
     "Zip bombs", "Symlink entries", "bubblewrap", "workspace_baseline",
@@ -191,6 +196,10 @@ FACTS = [
     "install.sh", "alg:none", "RS256", "prototype pollution", "interactsh",
     "out-of-band", "memory_forget", "SQLite",
 ]
+for _gone in ("Cascade", "Opus 4.8", "2.4x Cascade", "3.8x a bare"):
+    ck(f"no competitor comparison: {_gone!r}", _gone not in README,
+       "removed on purpose - do not reintroduce")
+
 _missing = [f for f in FACTS if f not in README]
 for f in FACTS:
     if f in README:

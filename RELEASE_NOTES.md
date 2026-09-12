@@ -1,69 +1,69 @@
-# v1.1.1.0
+# v1.1.3.0
 
-**Obsidian glass, and a stream that stops lying about itself.** This release is
-a theme and a runtime pass: the whole app moves off the red palette onto a cool
-glass one, and three streaming symptoms that all looked cosmetic turn out to
-have been one parser bug.
+**"Not done until verified" stops being a request and becomes a gate.**
 
-## The streaming bug
+This release applies Anthropic's published agent-engineering guidance to the
+half of Basilisk that needed it most: knowing when the work is actually
+finished.
 
-Reported as *"when it searches it types in chat and it gets deleted, bubble
-pops in and out"*. Three symptoms, one cause.
+## The verification gate
 
-Every stripper in `basilisk_core` answers **"is this text a tool call?"**. A
-stream asks a different question: **"could this text still become one?"** Until
-a marker is long enough to be recognised, its characters are ordinary text — so
-the renderer painted `<`, `<t`, `<to`, `<too` one frame at a time and then
-deleted them the instant `<tool ` completed. Measured across every dialect the
-app supports: canonical, DSML (both pipe forms), `<invoke>`, `<tool_call>`,
-`<function=>`, and `<think>`. All of them leaked.
+Work mode already tells the model, at length, to run something that proves its
+change — *"VERIFY, DON'T ASSUME"*, *"ITERATE UNTIL IT ACTUALLY PASSES"*. That is
+advice, and advice is what a model drops on step forty of a long job.
+Anthropic's own write-up names both the failure and the split:
 
-The third symptom followed from it. The chat bubble is attached lazily on the
-first token carrying visible text, precisely so a tool-only step never draws an
-empty bubble — but a leaked `<too` *is* visible text by that test. So a search
-step attached a bubble, painted a fragment, lost it to the stripper, then hid
-itself as a bare tool step. Popped in, typed, deleted, popped out.
+> Claude stops when the work looks done. Without a check it can run, "looks
+> done" is the only signal available, and you become the verification loop.
 
-Fixed with the rule every incremental parser uses: never emit a tail that could
-still turn into markup — hold it one frame. `stream_visible_text()` is now the
-one transform both the renderer and the attach decision go through, so they
-cannot disagree again. It is stream-only by design: a *finished* message ending
-in `<t` is text and still shows.
+…and separates the mechanisms: a prompt instruction is advisory, a Stop hook is
+deterministic and *"blocks the turn from ending until it passes."*
 
-## Turns that run to completion
+Basilisk already **had** the check. `workspace_verify` re-runs the repo's tests
+and classifies the result against a baseline, so it reports what you fixed *and
+what you broke*. The gap was never the check — it was that nothing made the
+turn go through it.
 
-The answer-mode stall counter was cumulative, which is why a long job stopped
-before it was finished: two stalls early in a 40-step task spent the whole
-budget, and the next stall — at step 40, with the work half done — ended the
-turn silently. The cap exists to stop a model that *only* narrates; a model
-that narrates, gets pushed and then runs something is not that model. The
-counter is now consecutive and is cleared by any real tool result, with a
-separate absolute ceiling for the pathological narrate-run-narrate case.
+So there is a gate now, built on the same architecture as the existing promise
+gate and inheriting the property that made that one hold up: **it does not read
+the reply.** Two facts decide it — files were written this request, and nothing
+was ever run to check them. If both hold when the turn is about to end,
+Basilisk runs the check itself and hands the model the result, with regressions
+named as its own to fix. Once per request, never a loop.
 
-## Obsidian glass
+## Budget ground truth
 
-- **No brand red anywhere.** Every colour in the stylesheet, the brand art, the
-  embedded button art and the SVGs was migrated hue-by-hue onto a cool band,
-  keeping each colour's lightness exactly so the four-layer glass recipe kept
-  its internal contrast. Red now means one thing: danger. Error, destructive
-  and warning colours were deliberately left where they were.
-- **Ambient bloom, not a neon rim.** 124 chromatic outer glows damped. Light
-  falls from one direction, so the lit edge is the top edge and the rest of
-  each outline is a low-alpha hairline.
-- **The live feed is joined to the composer** instead of floating between the
-  conversation and the box you type in — one control surface, not three glass
-  slabs with air between them. Tool-result previews lost their nested box.
-- **The composer is calm at rest.** It holds focus from the moment the app
-  opens, so its focus state *is* what the app looks like; it no longer opens
-  with a 28px accent bloom on all four sides.
-- **Monochrome glyphs in the sidebar.** The pinned and agent-mode markers were
-  emoji, which the emoji font renders in its own colour and metrics; they take
-  the palette now, like the activity feed's glyphs already did.
+The model was told to iterate until green with a large tool budget, and never
+told where in that budget it was — so it either wrapped up far too early or
+walked into the cap mid-edit. Anthropic's multi-agent write-up puts explicit
+effort rules in the prompt for exactly this reason; the agent-loop guidance is
+that an agent should *"gain 'ground truth' from the environment at each step."*
+
+Work-mode continuations now carry the real step count in three bands: plenty
+left (**don't** rush or hand back a partial fix), enough to finish and verify
+(converge), and nearly out (land what you have).
+
+## Error messages are prompts
+
+> …prompt-engineer your error responses to clearly communicate specific and
+> actionable improvements.
+
+Audited the coding surface. Two real offenders fixed:
+
+- `workspace_verify` on a repo with no suite said *"no test command known"* —
+  what failed, nothing about what to do. It now names the repair, names the
+  fallback when there is genuinely no suite, and forbids reporting the change
+  as verified anyway.
+- `"no workspace open — import a repo zip first"` sent a model holding a
+  *directory* looking for a way to zip it. `workspace_import` has taken either
+  for several releases; the error string had never been updated.
+- `workspace_verify` with no repo open reported a missing **test command**,
+  which sent the model hunting for a test runner when the real problem was that
+  there was no repo.
 
 ## Also
 
-- `.gitignore` now excludes `settings.json` — it holds API keys.
-- New `tests/test_streamhold.py` (64 assertions), including the counter-property
-  that ordinary prose containing `<` survives untouched, and a scaling check
-  that the hold is constant-cost in reply length.
-- 4,367 assertions across 71 stdlib-only suites, zero red.
+- New `tests/test_verifygate.py` (52 assertions), including the counter-property
+  that a turn which *did* verify is never gated — a gate that fires on correct
+  behaviour is a gate that gets switched off.
+- 4,491 assertions across 73 stdlib-only suites, zero red.

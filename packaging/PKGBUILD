@@ -10,7 +10,7 @@
 # ImportError with nothing to point at. A fixed directory plus one explicit
 # sys.path entry in the launcher survives every python bump.
 pkgname=priestsbasilisk
-pkgver=1.1.1.0
+pkgver=1.1.3.0
 pkgrel=1
 pkgdesc="Autonomous AI pentesting agent and coding assistant - GTK4 desktop app"
 arch=('any')

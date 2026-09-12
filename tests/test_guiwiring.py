@@ -247,14 +247,35 @@ ck("CachyOS and Kali are named explicitly",
 # ═══════════════════════════════════════════════════════════════════════
 print("\n== the docked status strip ==")
 
-ck("the dock exists and lives in the composer area",
+# v1.1.1.1 moved the dock ONE LEVEL IN: it was a full-width panel with its
+# own margins sitting between the last message and the composer, so there was
+# a permanent gap there whether anything was running or not. The feed is a
+# status indicator, so it now rides ON the button tray at the size of the
+# other controls. The property being asserted is unchanged — it is still
+# outside the message list, so it still cannot scroll away.
+ck("the dock exists and is NOT in the message list",
    "self.activity_dock" in _SRC
-   and 'area.append(self.activity_dock)' in _SRC,
+   and "msg_box.append(self.activity_dock)" not in _SRC,
    "inside the message list it scrolled off the top after a few more "
    "messages, which is the one thing a status surface may not do")
-ck("the dock is placed ABOVE the action buttons",
-   _SRC.index("area.append(self.activity_dock)")
-   < _SRC.index("area.append(actions_row)"))
+ck("the dock rides on the button tray, not in a strip of its own",
+   "actions_row.insert_child_after(self.activity_dock, chips_scroll)" in _SRC,
+   "a panel of its own above the tray is what left a hole above the composer")
+ck("it sits AFTER the chip scroller, so the buttons never shift",
+   "insert_child_after(self.activity_dock, chips_scroll)" in _SRC,
+   "chips_scroll is the hexpand child; inserting before it would move "
+   "Unleash and attach sideways every time a turn starts")
+ck("the step list floats over the chat instead of reserving layout",
+   "self.chat_overlay = Gtk.Overlay()" in _SRC
+   and "ov.add_overlay(panel)" in body("    def _dock_feed(self, feed):"))
+ck("...and a retired feed's panel is removed from that overlay",
+   "self._undock_feed_panel(old)" in body("    def _dock_feed(self, feed):"),
+   "an orphaned panel would hang over the next chat with the old steps in it")
+ck("the floating panel is NOT a Gtk.Popover",
+   "Gtk.Popover()" not in body("    def _build(self):"),
+   "a popover is its own native surface and cannot be translucent on X11 "
+   "with no compositor - it would be the one surface that breaks while the "
+   "rest of the glass still works")
 ck("a new turn retires the previous feed through the dock",
    "self._dock_feed(feed)" in _SRC)
 ck("retiring a feed stops its clock",

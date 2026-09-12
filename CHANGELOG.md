@@ -1,3 +1,280 @@
+## v1.1.3.0 - "not done until verified" becomes a gate
+
+He asked for it to be better at knowing when to stop and when to keep working,
+and to use what Anthropic have published about this. So this pass is research
+first: `building-effective-agents`, `effective-context-engineering-for-ai-agents`,
+`writing-tools-for-agents`, `effective-harnesses-for-long-running-agents`, the
+multi-agent research system write-up, and the Claude Code best-practices guide.
+
+Several of their recommendations Basilisk ALREADY does, and it is worth writing
+down which so nobody "adds" them twice:
+
+- **Just-in-time context / progressive disclosure.** The "mise en place" prompt
+  design ships tool NAMES only and loads specialist specs on demand via
+  `load_tools`. That is their recommendation exactly.
+- **Compaction.** headroom + the rolling history trim.
+- **Rules-based feedback.** `workspace_verify` classifies a test run against a
+  baseline. They call rules-based feedback "the best form of feedback".
+- **Stopping conditions to maintain control.** MAX_TOOL_CHAIN, the answer and
+  work budgets, the stall caps.
+
+What was MISSING was the one they are most emphatic about.
+
+### The gate
+
+> "Claude stops when the work looks done. Without a check it can run, 'looks
+>  done' is the only signal available, and you become the verification loop."
+
+and, separating the two mechanisms: a prompt instruction is advisory; a Stop
+hook is deterministic and "blocks the turn from ending until it passes".
+
+WORK MODE's contract already says "VERIFY, DON'T ASSUME" and "ITERATE UNTIL IT
+ACTUALLY PASSES" - at length, every continuation. That is advice, and advice is
+what a model drops on step forty of a long job. Basilisk already HAD the check.
+The gap was never the check; it was that nothing made the turn go through it.
+
+`unverified_work_gap(tools_used, already_forced)` is the promise gate's exact
+architecture pointed at the other half of the product, and it inherits the
+property that made that one hold up: IT DOES NOT READ THE REPLY. Every earlier
+attempt at "did it really finish?" in this file was a better reader of the
+model's prose, and each was one phrasing away from failing. Two FACTS decide
+this one - a workspace write happened this request, and nothing in
+{workspace_verify, workspace_health, run, launch_app} ever ran. If both hold at
+the point the turn would end, the app runs `workspace_verify` itself and feeds
+the result back with regressions named as the model's own to fix.
+
+Design notes that are load-bearing:
+
+- **WORKSPACE writes only.** `workspace_write`/`workspace_replace` can only
+  succeed with a repo open, which is what makes `workspace_verify` applicable.
+  A bare `write_file` outside a workspace has nothing to re-run and is not
+  gated.
+- **`run` counts as a verifier.** A model that ran its own test command HAS
+  verified its work; insisting on our tool instead would be ceremony.
+- **Once per request** (`_forced_verify_done`), and after it fires a verifier
+  has run, so the condition cannot re-arm. A floor, not a loop.
+- **Pure and total.** Junk in, None out - a gate that raises is a gate that
+  fails open on exactly the turn it exists to catch. Including the string trap:
+  `set("workspace_write")` is a set of CHARACTERS, and the suite checks a bare
+  string argument cannot match a tool name.
+- **One round trip is the price.** If the change was a README, the suite runs,
+  passes, and the model says so - one wasted step. If it was code, this is the
+  difference between a verified fix and a plausible one. The deferred note
+  tells the model both branches so a doc-only change closes out honestly
+  instead of casting about.
+
+The counter-property is asserted as hard as the property: every tool in the
+verifier set must DISARM the gate, and a read-only turn, a pure research turn,
+a `write_file` turn and a `propose_edit` turn must all end silently. A gate that
+fires on correct behaviour is a gate that gets switched off.
+
+### Budget ground truth
+
+> "it's crucial for the agents to gain 'ground truth' from the environment at
+>  each step (such as tool call results or code execution) to assess its
+>  progress"
+
+and, from the multi-agent write-up, explicit effort rules in the prompt
+("simple fact-finding requires just 1 agent with 3-10 tool calls...") to stop
+both under- and over-investment.
+
+The model was told to iterate until green, given a 120-step budget to do it
+with, and never told where in that budget it was. So it could not pace itself:
+it either wrapped up far too early or walked into the cap mid-edit and had to
+"report" from a half-finished state. Work-mode continuations now carry the real
+number in three bands:
+
+- **plenty left** - "Do not rush the job or hand back a partial fix to save
+  steps." (This band matters most. A budget signal that only ever says HURRY
+  causes the exact early stop it was added to prevent, and the suite pins it.)
+- **enough to finish and verify** - converge.
+- **nearly out** - land what you have, run the check once, report.
+
+Continuations only: on turn 1 the number is always "1 of N" and says nothing,
+and the long-form contract is already the expensive part of that message (it
+rides the volatile trailing message, which the provider's prompt cache cannot
+reuse).
+
+### Error messages are prompts
+
+> "you can prompt-engineer your error responses to clearly communicate specific
+>  and actionable improvements"
+
+Audited `basilisk_core`: 240 literal `{"ok": False, "error": ...}` returns, of
+which THREE carried anything actionable. Rather than rewrite 240 strings blind,
+fixed the three on the coding path that a work turn actually hits:
+
+1. `workspace_verify` with no test command said "no test command known" - what
+   failed, nothing about what to do next, so the model either gave up on
+   verifying or guessed a command. It now names the repair (pass one
+   explicitly), names the fallback when the repo genuinely has no suite (prove
+   it another way and SAY there was no suite), and forbids reporting the change
+   as verified anyway.
+2. `"no workspace open - import a repo zip first"` sent a model holding a
+   DIRECTORY looking for a way to zip it. `tool_workspace_import`'s own
+   docstring records that friction as fixed - it has taken either shape for
+   releases - but the error string it leaks back through was never updated.
+3. `workspace_verify` with no repo open reported a missing TEST COMMAND,
+   because baseline_status returns empty and detect_test_command finds nothing.
+   It named the wrong problem, and a model reading it goes hunting for a test
+   runner instead of opening the workspace. It checks the real precondition
+   first now.
+
+The remaining 237 are reported, not touched: most are on tool surfaces a coding
+turn never reaches, and a blind sweep of error strings is how you break the ones
+tests assert on.
+
+### NOT done, and why
+
+- **Structured note-taking / a progress file** (their NOTES.md + feature-list
+  pattern, all features starting `"passes": false`) is the right next step for
+  multi-session work and is a real feature, not a patch. Flagged rather than
+  half-built.
+- **Tool consolidation.** Their rule is "if a human engineer can't definitively
+  say which tool should be used in a given situation, an AI agent can't be
+  expected to do better". Basilisk ships 162 specs. That audit is worth doing
+  and is its own pass; guessing at it now would break the tool contracts
+  test_toolargs parses.
+
+4,491 assertions across 73 stdlib-only suites, zero red, verified from a clean
+extract of the shipped zip. `basilisk_persona.py` byte-identical.
+
+## v1.1.2.0 - the feed joins the tray, and the web gate learns to say no
+
+### "there is a fucking hole between live feed and where i type"
+
+He was right, and the fix was to stop treating a status indicator as a panel.
+
+The feed had been moved out of the message list (where it scrolled away) into
+a dock of its own above the button row. That solved the scrolling and created
+a worse problem: a full-width surface with its own border, its own radius and
+its own margins, permanently between the last message and the composer, with a
+gap either side of it, present whether anything was running or not. Three
+glass slabs stacked with air between them.
+
+A status indicator belongs on the control bar, at the size of the other
+controls. So the widget is now a compact chip in `actions_row` next to Unleash
+and attach, and the step list opens OVER the conversation. The tray never
+changes height and there is no hole to leave behind.
+
+**Inserted AFTER `chips_scroll`, deliberately.** That is the hexpand child, so
+it holds the left edge and the buttons do not shift sideways every time a turn
+starts and the chip appears.
+
+**The panel is a Gtk.Overlay and NOT a Gtk.Popover, and that is correctness,
+not taste.** The popover version was built first and rendered as a hard black
+rectangle under Xvfb. It is not an Xvfb quirk: a popover is its own native
+surface, so with no compositing manager it cannot be translucent, and the whole
+glass system collapses on that one widget. Everything else in this app is
+translucent INSIDE an opaque window precisely so it never depends on a
+compositor. The feed has to keep that property like every other surface.
+
+Two smaller things fell out of the rewrite:
+
+- The step rows all ellipsize (a tool argument is a URL or a whole command
+  line), and an ellipsizing label asks for almost nothing - so a panel sized to
+  its child's minimum came out a few characters wide and showed a column of
+  "...". It needs a width REQUEST, not a min-content-width.
+- The floating panel is the one glass surface that sits over the model's own
+  WORDS rather than over artwork. At the 0.4-0.6 tint the rest of the theme
+  uses, the sentence underneath read straight through the step list and both
+  became unreadable. It is 0.965.
+
+### The web gate could only ever say yes
+
+`_needs_web_verification` is a marker list. Every marker it gained to stop a
+missed fetch also made it fire on ordinary work, and nothing anywhere said no.
+Measured against fourteen plain coding questions, THIRTEEN forced a fetch:
+
+    "explain the cost of a hash table lookup"            -> cost
+    "which python version does my pyproject require"     -> version
+    "refactor the price calculation in cart.py"          -> price
+    "why is worth() returning None in this file"         -> worth
+    "the news feed component in my react app is broken"  -> news
+
+BOTH HALVES OF HIS COMPLAINT ARE THIS ONE DEFECT. It searched when it plainly
+should not - and because `forced_search_url` reads the same predicate, the turn
+could not END where it should have either: the model answered, the app fetched
+anyway, and it came back with a second reply nobody asked for. "It searches
+when it shouldn't" and "it doesn't know when to stop" are one bug seen from two
+sides.
+
+`_verification_suppressed` now sits behind the marker scan. It needs POSITIVE
+EVIDENCE and may only ever downgrade a WEAK signal:
+
+  1. nothing STRONG matched - "latest", "today", "who won", "weather",
+     "ceo of", "out yet" name the live state of the world and are never
+     suppressed, whatever else the sentence says; and
+  2. the question has a LOCAL referent (their files, their code) or a
+     CONCEPTUAL one (a definition, a how-to, a thing to build).
+
+The asymmetry is deliberate: a question with neither still fetches on a weak
+marker alone ("did they release nmap 8 yet"), because a needless fetch costs a
+round trip and a missed one costs a wrong answer stated confidently.
+
+Result on the corpus: **24/24 ordinary questions answer directly, 24/24 world
+questions still get looked up.**
+
+### THREE BUGS I PUT IN WHILE WRITING THAT, all caught by the corpus
+
+1. **An identifier is not a sum.** The arithmetic guard was
+   `\d+\s*[-+*/^%]\s*\d+`, so "is CVE-2026-1234 patched yet" read as 2026
+   minus 1234, suppressed the fetch, and answered a live vulnerability question
+   from memory. That is the single worst thing this predicate can get wrong.
+   Subtraction now requires the spaces people actually type around it.
+2. **"in \<det\> \<any word\>" as a local referent** matched "in the news",
+   "in the world" and "in the ireland match" - the exact questions that must
+   never be suppressed. Removed; the noun list already covered "in my repo".
+3. **"how much is/does" was STRONG**, so it was immune - and "how much does
+   this function cost in memory" fetched. It is a market price AND a resource
+   question about their own code, and only the rest of the sentence tells them
+   apart, which is what the suppressor is for. Demoted.
+
+Each is a CLASS, not a string, and each is pinned individually in
+`tests/test_websense.py` (64 assertions). The suite also checks it is not
+vacuous: the RAW marker scan must still fire on the local corpus, or the
+suppressor is being credited for something it never did.
+
+### The card was overstating what was running
+
+The boot nameplate read **AUTONOMOUS SECURITY ASSISTANT**. That is the one
+thing Basilisk is NOT until you arm it. Out of the box it is a general and
+coding assistant that reads the live web, opens a repo, edits it and runs your
+tests; the autonomous pentest agent is a mode you switch on deliberately, with
+a target you confirm. It now reads **GENERAL & CODING ASSISTANT** with
+"Unleash arms the autonomous pentest agent." underneath, and the hint line says
+"Ask a question, or point it at a repo."
+
+### Off the comparison
+
+At his instruction, the Cascade and named-frontier-model rows are gone from the
+README, the site (table, both JSON-LD FAQ answers and both visible ones) and
+`llms.txt`. What replaces them is the argument that was underneath all along:
+every benchmark was produced driving a BUDGET open model, GLM-5.3-Flash holds
+its own against models costing many times more, and if you need a frontier
+model to get a result you have built a wrapper rather than an agent.
+`tests/test_readme.py` now asserts the comparison stays gone, so it cannot
+drift back in.
+
+### Quieter still
+
+- 125 chromatic `0 0 Npx` box glows damped again (factor 0.55, cap 0.12).
+  Forty rules had piled up against the previous pass's 0.26 cap - a cap that
+  most rules hit is not a cap, it is the new default.
+- 23 coloured TEXT halos damped for the first time (factor 0.45, cap 0.22). A
+  coloured halo behind a letterform is what makes type look like a
+  screensaver; the letterform carries the colour on its own.
+- The ARTWORK came down with the chrome. Once the glows were calm the emblem,
+  watermark and logo were the brightest, most saturated thing on screen, which
+  reads as the art and the app being from different products. Saturation is
+  trimmed on a curve above a knee, so deep modelling and near-neutral metal are
+  untouched and only the lit edges come down; lightness and alpha preserved.
+- The hero model chip was the one saturated block left on the card, which made
+  the model name the second most prominent thing after the wordmark.
+
+4,439 assertions across 72 stdlib-only suites, zero red, verified from a clean
+extract of the shipped zip. `basilisk_persona.py` byte-identical.
+
 ## v1.1.1.0 — obsidian glass, and the stream that painted text it was about to delete
 
 ### One parser bug wearing three costumes

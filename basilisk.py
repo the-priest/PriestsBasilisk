@@ -186,7 +186,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.basilisk"
 APP_NAME = "Basilisk"
-VERSION = "1.1.1.0"
+VERSION = "1.1.3.0"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -433,7 +433,7 @@ headerbar {
     font-family: 'JetBrains Mono', 'Fira Code', monospace;
     color: #dfe4ea;
     letter-spacing: 3px;
-    text-shadow: 0 2px 3px rgba(0, 0, 0, 0.9), 0 0 11px rgba(150, 162, 178, 0.166);
+    text-shadow: 0 2px 3px rgba(0, 0, 0, 0.9), 0 0 11px rgba(150, 162, 178, 0.041);
 }
 /* Connectivity dot beside BASILISK: green online, red offline */
 .online-dot {
@@ -442,7 +442,7 @@ headerbar {
 }
 .online-dot.online {
     color: #185277;
-    text-shadow: 0 0 7px rgba(24, 82, 119, 0.26);
+    text-shadow: 0 0 7px rgba(24, 82, 119, 0.054);
 }
 .online-dot.offline {
     color: #6b737d;
@@ -505,7 +505,7 @@ headerbar {
        app "feels laggy" when nothing is happening. The lit state is now
        static; the animated ones that remain are all gated behind a state
        class (.working, .live, .busy) and stop when the work does. */
-    box-shadow: inset 0 0 0 1px rgba(232, 238, 244, 0.083),
+    box-shadow: inset 0 0 0 1px rgba(232, 238, 244, 0.046),
                 -2px 0 15px rgba(205, 215, 230, 0.22);
 }
 @keyframes metalglow {
@@ -663,7 +663,7 @@ headerbar {
     background: linear-gradient(135deg, #085183, #3aacf2);
     color: #08090b;
     border: 1px solid #5fbaf5;
-    box-shadow: 0 0 10px rgba(58, 172, 242, 0.26);
+    box-shadow: 0 0 10px rgba(58, 172, 242, 0.12);
 }
 
 .role-label {
@@ -1132,17 +1132,17 @@ button.suggested-action {
 .avatar-dragon {
     border-radius: 8px;
     background-color: #000000;
-    box-shadow: 0 0 10px rgba(58, 172, 242, 0.26), 0 0 4px rgba(24, 82, 119, 0.208);
+    box-shadow: 0 0 10px rgba(58, 172, 242, 0.12), 0 0 4px rgba(24, 82, 119, 0.114);
 }
 .avatar-cross {
     border-radius: 8px;
     background-color: #0a0c0e;
-    box-shadow: 0 0 8px rgba(24, 82, 119, 0.182);
+    box-shadow: 0 0 8px rgba(24, 82, 119, 0.1);
 }
 .avatar-priest {
     border-radius: 10px;
     background-color: #0a0c0e;
-    box-shadow: 0 0 10px rgba(64, 20, 96, 0.234), 0 0 4px rgba(64, 20, 96, 0.182);
+    box-shadow: 0 0 10px rgba(64, 20, 96, 0.12), 0 0 4px rgba(64, 20, 96, 0.1);
 }
 /* let the penguin watermark show through the chat */
 .chat-scroll,
@@ -1180,7 +1180,7 @@ link, button.link, *:link { color: #185277; }
     background: linear-gradient(135deg, #e5484d, #66c1f5);
     color: #ffffff;
     border: 1px solid #66c1f5;
-    box-shadow: 0 0 10px rgba(229, 72, 77, 0.26);
+    box-shadow: 0 0 10px rgba(229, 72, 77, 0.12);
 }
 .mic-recording:hover {
     background: linear-gradient(135deg, #66c1f5, #78c8f6);
@@ -1229,7 +1229,7 @@ link, button.link, *:link { color: #185277; }
     padding: 7px;
     box-shadow: inset 0 1px 0 rgba(58, 166, 200, 0.10),
                 inset 0 -6px 12px rgba(20, 85, 114, 0.16),
-                0 0 8px rgba(24, 82, 119, 0.114);
+                0 0 8px rgba(24, 82, 119, 0.063);
     transition: all 160ms ease;
 }
 .notif-badge {
@@ -1258,13 +1258,13 @@ link, button.link, *:link { color: #185277; }
     border-color: rgba(42, 153, 195, 0.90);
     box-shadow: inset 0 1px 0 rgba(77, 209, 244, 0.16),
                 inset 0 -7px 14px rgba(32, 133, 175, 0.24),
-                0 0 17px rgba(39, 149, 194, 0.26);
+                0 0 17px rgba(39, 149, 194, 0.12);
 }
 .icon-button:active {
     background-color: #050607;
     box-shadow: inset 0 3px 10px rgba(0, 0, 0, 0.62),
-                inset 0 0 12px rgba(29, 116, 156, 0.166),
-                0 0 7px rgba(24, 82, 119, 0.135);
+                inset 0 0 12px rgba(29, 116, 156, 0.091),
+                0 0 7px rgba(24, 82, 119, 0.074);
 }
 .icon-button.toggled {
     color: #adebfa;
@@ -1273,7 +1273,7 @@ link, button.link, *:link { color: #185277; }
         radial-gradient(ellipse at 50% 118%, rgba(38, 159, 208, 0.50), rgba(38, 159, 208, 0) 74%),
         linear-gradient(180deg, rgba(27, 75, 95, 0.40), rgba(6, 9, 10, 0) 60%);
     box-shadow: inset 0 -7px 14px rgba(32, 137, 180, 0.30),
-                0 0 16px rgba(39, 153, 199, 0.26);
+                0 0 16px rgba(39, 153, 199, 0.12);
 }
 /* Send button - blends into the background; only the silver dragon pops.
    Glows softly while working; still acts as Stop when pressed. */
@@ -1288,7 +1288,7 @@ link, button.link, *:link { color: #185277; }
 }
 .send-button:hover {
     background-color: #08090b;
-    box-shadow: 0 0 14px rgba(39, 149, 194, 0.26);
+    box-shadow: 0 0 14px rgba(39, 149, 194, 0.12);
 }
 .send-button:active {
     background-color: #0a0c0f;
@@ -1300,9 +1300,9 @@ link, button.link, *:link { color: #185277; }
     animation: none;
 }
 @keyframes sendglow {
-    0%   { box-shadow: 0 0 6px rgba(200, 208, 216, 0.13); border-color: #2a323b; }
-    50%  { box-shadow: 0 0 20px rgba(224, 232, 240, 0.26); border-color: #c8d0d8; }
-    100% { box-shadow: 0 0 6px rgba(200, 208, 216, 0.13); border-color: #2a323b; }
+    0%   { box-shadow: 0 0 6px rgba(200, 208, 216, 0.072); border-color: #2a323b; }
+    50%  { box-shadow: 0 0 20px rgba(224, 232, 240, 0.12); border-color: #c8d0d8; }
+    100% { box-shadow: 0 0 6px rgba(200, 208, 216, 0.072); border-color: #2a323b; }
 }
 /* Header buttons (sidebar toggle, new chat) - blend into the header, with a
    quiet dragon-green accent only on hover so they don't draw the eye. */
@@ -1337,7 +1337,7 @@ link, button.link, *:link { color: #185277; }
     border: 1px solid rgba(128, 205, 247, 0.28);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.30),
                 inset 0 -1px 0 rgba(0, 0, 0, 0.30),
-                0 0 8px rgba(24, 82, 119, 0.114);
+                0 0 8px rgba(24, 82, 119, 0.063);
     padding: 3px;
     border-radius: 12px;
     transition: all 150ms ease;
@@ -1351,13 +1351,13 @@ link, button.link, *:link { color: #185277; }
                       rgba(32, 83, 114, 0.20) 100%);
     border-color: rgba(138, 209, 247, 0.55);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.40),
-                0 0 16px rgba(51, 167, 219, 0.26);
+                0 0 16px rgba(51, 167, 219, 0.12);
 }
 .art-button:active {
     background-color: rgba(24, 63, 86, 0.40);
     box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.45),
                 inset 0 1px 0 rgba(255, 255, 255, 0.10),
-                0 0 8px rgba(39, 149, 194, 0.208);
+                0 0 8px rgba(39, 149, 194, 0.114);
 }
 /* UNLEASH -- the big red dragon. A quiet ember when idle, a hot red glow when
    armed so it's unmistakable that Basilisk is off the leash. */
@@ -1366,17 +1366,17 @@ link, button.link, *:link { color: #185277; }
     background-image: none;
     border: none;
     border-radius: 999px;
-    box-shadow: 0 0 6px rgba(39, 149, 194, 0.146);
+    box-shadow: 0 0 6px rgba(39, 149, 194, 0.08);
 }
 .unleash-button:hover {
-    box-shadow: 0 0 16px rgba(42, 167, 218, 0.26);
+    box-shadow: 0 0 16px rgba(42, 167, 218, 0.12);
 }
 .unleash-button.toggled {
     background-color: rgba(28, 100, 142, 0.30);
-    box-shadow: 0 0 22px rgba(42, 165, 223, 0.26), inset 0 0 9px rgba(72, 196, 243, 0.26);
+    box-shadow: 0 0 22px rgba(42, 165, 223, 0.12), inset 0 0 9px rgba(72, 196, 243, 0.12);
 }
 .unleash-button.toggled:hover {
-    box-shadow: 0 0 30px rgba(53, 183, 242, 0.26), inset 0 0 11px rgba(90, 205, 244, 0.26);
+    box-shadow: 0 0 30px rgba(53, 183, 242, 0.12), inset 0 0 11px rgba(90, 205, 244, 0.12);
 }
 
 /* Reasoning-effort pill: a compact Low/Med/High segmented control. Ember
@@ -1420,7 +1420,7 @@ menubutton.art-button > button {
     border: 1px solid rgba(128, 205, 247, 0.28);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.30),
                 inset 0 -1px 0 rgba(0, 0, 0, 0.30),
-                0 0 8px rgba(24, 82, 119, 0.114);
+                0 0 8px rgba(24, 82, 119, 0.063);
     padding: 3px;
     min-width: 0;
     min-height: 0;
@@ -1430,13 +1430,13 @@ menubutton.art-button > button:hover {
     background-color: rgba(47, 107, 143, 0.30);
     border-color: rgba(138, 209, 247, 0.55);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.40),
-                0 0 16px rgba(51, 167, 219, 0.26);
+                0 0 16px rgba(51, 167, 219, 0.12);
 }
 menubutton.art-button > button:active {
     background-color: rgba(24, 63, 86, 0.40);
     box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.45),
                 inset 0 1px 0 rgba(255, 255, 255, 0.10),
-                0 0 8px rgba(39, 149, 194, 0.208);
+                0 0 8px rgba(39, 149, 194, 0.114);
 }
 /* Startup splash window -- dark backdrop behind the igniting-dragon animation
    (the DrawingArea paints over this; it just avoids a white flash on the very
@@ -1474,14 +1474,14 @@ menubutton.art-button > button:active {
     font-size: 10.5px;
     font-weight: 600;
     box-shadow: inset 0 -5px 10px rgba(20, 85, 114, 0.14),
-                0 0 7px rgba(24, 82, 119, 0.094);
+                0 0 7px rgba(24, 82, 119, 0.052);
     transition: all 160ms ease;
 }
 .model-switch-btn:hover {
     color: #c3f0fb;
     border-color: rgba(42, 153, 195, 0.85);
     box-shadow: inset 0 -6px 12px rgba(32, 133, 175, 0.22),
-                0 0 14px rgba(39, 149, 194, 0.234);
+                0 0 14px rgba(39, 149, 194, 0.12);
 }
 /* Window controls (close / minimise): the same summoned-stone look, and the
    close sigil flares blood-red when you reach for it. */
@@ -1493,7 +1493,7 @@ windowcontrols > button,
     border-radius: 10px;
     color: #9ebac2;
     box-shadow: inset 0 -5px 10px rgba(20, 85, 114, 0.14),
-                0 0 6px rgba(24, 82, 119, 0.094);
+                0 0 6px rgba(24, 82, 119, 0.052);
     transition: all 150ms ease;
 }
 windowcontrols > button:hover,
@@ -1501,14 +1501,14 @@ windowcontrols > button:hover,
     color: #c3f0fb;
     border-color: rgba(42, 153, 195, 0.85);
     box-shadow: inset 0 -6px 12px rgba(32, 133, 175, 0.22),
-                0 0 14px rgba(39, 149, 194, 0.234);
+                0 0 14px rgba(39, 149, 194, 0.12);
 }
 windowcontrols > button.close:hover,
 .titlebutton.close:hover {
     background-image: radial-gradient(ellipse at 50% 120%, rgba(229, 72, 77, 0.50), rgba(229, 72, 77, 0) 74%);
     border-color: rgba(229, 72, 77, 0.95);
     color: #ffffff;
-    box-shadow: 0 0 16px rgba(229, 72, 77, 0.26);
+    box-shadow: 0 0 16px rgba(229, 72, 77, 0.12);
 }
 .model-group-header {
     color: #46b1f3;
@@ -1634,7 +1634,7 @@ entry {
 }
 entry:focus-within {
     box-shadow: inset 0 1px 3px rgba(0,0,0,0.35),
-                0 0 0 3px rgba(24, 82, 119, 0.114);
+                0 0 0 3px rgba(24, 82, 119, 0.063);
 }
 
 /* ---- Message bubbles: quiet depth so they sit above the canvas ---- */
@@ -1671,7 +1671,7 @@ entry:focus-within {
 .working-row {
     background-image: linear-gradient(90deg,
                       rgba(24, 82, 119, 0.10), rgba(24, 82, 119, 0.0));
-    box-shadow: inset 0 0 0 1px rgba(24, 82, 119, 0.078);
+    box-shadow: inset 0 0 0 1px rgba(24, 82, 119, 0.043);
 }
 
 /* ---- Slim, themed scrollbars ---- */
@@ -1751,7 +1751,7 @@ headerbar {
 .input-frame:focus-within {
     border-color: #249cbe;
     background-color: #0b1113;
-    box-shadow: inset 0 -6px 16px rgba(31, 152, 189, 0.22), 0 0 14px rgba(31, 152, 189, 0.094);
+    box-shadow: inset 0 -6px 16px rgba(31, 152, 189, 0.22), 0 0 14px rgba(31, 152, 189, 0.052);
 }
 
 /* ---- Chat bubbles: charred body plus a breathing ember halo.  User and
@@ -1770,12 +1770,12 @@ headerbar {
     border: 1px solid rgba(40, 152, 186, 0.54);
     box-shadow:
         inset 0 1px 0 rgba(99, 207, 231, 0.12),
-        inset 0 0 26px rgba(26, 112, 142, 0.083),
+        inset 0 0 26px rgba(26, 112, 142, 0.046),
         inset 0 -7px 18px rgba(25, 126, 161, 0.18),
         0 0 0 1px rgba(0, 0, 0, 0.40),
         0 8px 22px rgba(0, 0, 0, 0.50),
-        0 0 14px rgba(35, 159, 199, 0.156);
-    text-shadow: 0 0 9px rgba(45, 170, 209, 0.135), 0 1px 1px rgba(0, 0, 0, 0.55);
+        0 0 14px rgba(35, 159, 199, 0.086);
+    text-shadow: 0 0 9px rgba(45, 170, 209, 0.033), 0 1px 1px rgba(0, 0, 0, 0.55);
 }
 .msg-assistant {
     color: #dfeef1;
@@ -1788,32 +1788,32 @@ headerbar {
     border: 1px solid rgba(39, 136, 173, 0.52);
     box-shadow:
         inset 0 1px 0 rgba(89, 195, 223, 0.11),
-        inset 0 0 28px rgba(30, 109, 142, 0.083),
+        inset 0 0 28px rgba(30, 109, 142, 0.046),
         inset 0 -7px 18px rgba(24, 119, 151, 0.17),
         0 0 0 1px rgba(0, 0, 0, 0.40),
         0 8px 22px rgba(0, 0, 0, 0.50),
-        0 0 14px rgba(36, 146, 186, 0.146);
-    text-shadow: 0 0 9px rgba(44, 150, 192, 0.13), 0 1px 1px rgba(0, 0, 0, 0.55);
+        0 0 14px rgba(36, 146, 186, 0.08);
+    text-shadow: 0 0 9px rgba(44, 150, 192, 0.032), 0 1px 1px rgba(0, 0, 0, 0.55);
 }
 .msg-user:hover {
     border-color: rgba(51, 178, 215, 0.72);
     box-shadow:
         inset 0 1px 0 rgba(99, 207, 231, 0.14),
-        inset 0 0 30px rgba(28, 119, 152, 0.104),
+        inset 0 0 30px rgba(28, 119, 152, 0.057),
         inset 0 -7px 18px rgba(28, 134, 170, 0.20),
         0 0 0 1px rgba(0, 0, 0, 0.40),
         0 10px 26px rgba(0, 0, 0, 0.52),
-        0 0 24px rgba(42, 174, 214, 0.25);
+        0 0 24px rgba(42, 174, 214, 0.12);
 }
 .msg-assistant:hover {
     border-color: rgba(45, 157, 199, 0.72);
     box-shadow:
         inset 0 1px 0 rgba(89, 195, 223, 0.13),
-        inset 0 0 32px rgba(32, 117, 152, 0.104),
+        inset 0 0 32px rgba(32, 117, 152, 0.057),
         inset 0 -7px 18px rgba(27, 126, 161, 0.19),
         0 0 0 1px rgba(0, 0, 0, 0.40),
         0 10px 26px rgba(0, 0, 0, 0.52),
-        0 0 24px rgba(41, 158, 201, 0.239);
+        0 0 24px rgba(41, 158, 201, 0.12);
 }
 
 /* ---- The status line, reborn as a burning bar.  A flame gradient taller
@@ -1836,9 +1836,9 @@ headerbar {
     animation: fireScroll 1.15s linear infinite;
 }
 @keyframes fireScroll {
-    0%   { background-position: 0% 100%; box-shadow: 0 0 12px rgba(32, 165, 208, 0.156), inset 0 -6px 16px rgba(43, 205, 242, 0.20); }
-    50%  { background-position: 0% 40%;  box-shadow: 0 0 24px rgba(43, 202, 242, 0.26), inset 0 -9px 22px rgba(57, 217, 242, 0.36); }
-    100% { background-position: 0% 0%;   box-shadow: 0 0 12px rgba(32, 165, 208, 0.156), inset 0 -6px 16px rgba(43, 205, 242, 0.20); }
+    0%   { background-position: 0% 100%; box-shadow: 0 0 12px rgba(32, 165, 208, 0.086), inset 0 -6px 16px rgba(43, 205, 242, 0.20); }
+    50%  { background-position: 0% 40%;  box-shadow: 0 0 24px rgba(43, 202, 242, 0.12), inset 0 -9px 22px rgba(57, 217, 242, 0.36); }
+    100% { background-position: 0% 0%;   box-shadow: 0 0 12px rgba(32, 165, 208, 0.086), inset 0 -6px 16px rgba(43, 205, 242, 0.20); }
 }
 .working-label {
     color: #82eff7;
@@ -1846,13 +1846,13 @@ headerbar {
     font-style: normal;
     font-weight: 800;
     letter-spacing: 0.6px;
-    text-shadow: 0 0 8px rgba(57, 217, 242, 0.26), 0 0 16px rgba(36, 194, 241, 0.26);
+    text-shadow: 0 0 8px rgba(57, 217, 242, 0.054), 0 0 16px rgba(36, 194, 241, 0.054);
     animation: emberText 0.85s ease-in-out infinite;
 }
 @keyframes emberText {
-    0%   { color: #ffcf6e; text-shadow: 0 0 6px rgba(57, 217, 242, 0.26), 0 0 14px rgba(36, 194, 241, 0.26); }
-    50%  { color: #fff1c6; text-shadow: 0 0 13px rgba(75, 228, 244, 0.26), 0 0 24px rgba(43, 202, 242, 0.26); }
-    100% { color: #ffcf6e; text-shadow: 0 0 6px rgba(57, 217, 242, 0.26), 0 0 14px rgba(36, 194, 241, 0.26); }
+    0%   { color: #ffcf6e; text-shadow: 0 0 6px rgba(57, 217, 242, 0.054), 0 0 14px rgba(36, 194, 241, 0.054); }
+    50%  { color: #fff1c6; text-shadow: 0 0 13px rgba(75, 228, 244, 0.054), 0 0 24px rgba(43, 202, 242, 0.054); }
+    100% { color: #ffcf6e; text-shadow: 0 0 6px rgba(57, 217, 242, 0.054), 0 0 14px rgba(36, 194, 241, 0.054); }
 }
 .working-spinner {
     color: #3cd6f3;
@@ -1865,9 +1865,9 @@ headerbar {
     animation: sendFire 1.2s ease-in-out infinite;
 }
 @keyframes sendFire {
-    0%   { box-shadow: 0 0 6px rgba(43, 205, 242, 0.156); border-color: #183038; }
-    50%  { box-shadow: 0 0 22px rgba(43, 205, 242, 0.26); border-color: #37cef2; }
-    100% { box-shadow: 0 0 6px rgba(43, 205, 242, 0.156); border-color: #183038; }
+    0%   { box-shadow: 0 0 6px rgba(43, 205, 242, 0.086); border-color: #183038; }
+    50%  { box-shadow: 0 0 22px rgba(43, 205, 242, 0.12); border-color: #37cef2; }
+    100% { box-shadow: 0 0 6px rgba(43, 205, 242, 0.086); border-color: #183038; }
 }
 
 /* =====================================================================
@@ -1946,8 +1946,8 @@ headerbar {
     min-width: 18px;
     color: #7d8794;
 }
-.activity-verdict.ok   { color: #35c46f; text-shadow: 0 0 10px rgba(46, 204, 113, 0.234); }
-.activity-verdict.fail { color: #e5484d; text-shadow: 0 0 10px rgba(229, 72, 77, 0.234); }
+.activity-verdict.ok   { color: #35c46f; text-shadow: 0 0 10px rgba(46, 204, 113, 0.054); }
+.activity-verdict.fail { color: #e5484d; text-shadow: 0 0 10px rgba(229, 72, 77, 0.054); }
 
 .activity-title {
     color: #95edf8;
@@ -1955,7 +1955,7 @@ headerbar {
     font-size: 19px;
     font-weight: 700;
     letter-spacing: 0.3px;
-    text-shadow: 0 0 9px rgba(72, 216, 243, 0.156);
+    text-shadow: 0 0 9px rgba(72, 216, 243, 0.039);
 }
 .activity-feed.done .activity-title {
     color: #b9c0cb;
@@ -2242,7 +2242,7 @@ headerbar {
     box-shadow:
         inset 0 1px 0 rgba(128, 226, 247, 0.12),
         0 3px 12px rgba(0, 0, 0, 0.46),
-        0 0 14px rgba(42, 174, 214, 0.135);
+        0 0 14px rgba(42, 174, 214, 0.074);
 }
 
 .attach-chip-kind {
@@ -2436,7 +2436,7 @@ headerbar {
 .input-frame:focus-within {
     border-color: #3aacf2;
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28),
-                0 0 12px rgba(58, 172, 242, 0.234);
+                0 0 12px rgba(58, 172, 242, 0.12);
 }
 
 /* Buttons: the signature Aero glass pill -- top-lit gradient, bright
@@ -2463,7 +2463,7 @@ button:hover {
                 rgba(23, 63, 90, 0.72) 100%);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.30),
                 inset 0 -1px 0 rgba(0, 0, 0, 0.50),
-                0 0 12px rgba(58, 172, 242, 0.234);
+                0 0 12px rgba(58, 172, 242, 0.12);
     border-color: rgba(95, 186, 245, 0.55);
 }
 button:active {
@@ -2481,7 +2481,7 @@ button:active {
                 #328dc9 0%, #196a9f 46%, #134f76 54%, #1e6592 100%);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35),
                 inset 0 -1px 0 rgba(0, 0, 0, 0.40),
-                0 0 10px rgba(229, 40, 58, 0.208);
+                0 0 10px rgba(229, 40, 58, 0.114);
     border: 1px solid rgba(100, 188, 245, 0.60);
     color: #fff;
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
@@ -2490,7 +2490,7 @@ button:active {
     background: linear-gradient(180deg,
                 #40adf3 0%, #1f7ebd 46%, #175d8a 54%, #2375aa 100%);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45),
-                0 0 16px rgba(58, 172, 242, 0.26);
+                0 0 16px rgba(58, 172, 242, 0.12);
 }
 
 /* Chat bubbles: a light glass sheen on top, so they look like Aero panes
@@ -2534,8 +2534,8 @@ button:active {
 window {
     border-radius: 14px;
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14),
-                inset 0 0 0 1px rgba(128, 205, 247, 0.052),
-                0 0 22px rgba(24, 82, 119, 0.156);
+                inset 0 0 0 1px rgba(128, 205, 247, 0.029),
+                0 0 22px rgba(24, 82, 119, 0.086);
 }
 window > contents,
 window.csd,
@@ -2582,7 +2582,7 @@ headerbar {
     border: 1px solid rgba(128, 205, 247, 0.26);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.26),
                 inset 0 -1px 0 rgba(0, 0, 0, 0.28),
-                0 0 7px rgba(24, 82, 119, 0.104);
+                0 0 7px rgba(24, 82, 119, 0.057);
     border-radius: 11px;
     min-width: 42px;
     min-height: 38px;
@@ -2596,13 +2596,13 @@ menubutton.glyph-btn > button { min-width: 42px; min-height: 38px; }
     font-size: 19px;
     font-weight: 700;
     color: #64c8f5;
-    text-shadow: 0 0 6px rgba(229, 40, 58, 0.234), 0 1px 1px rgba(0,0,0,0.7);
+    text-shadow: 0 0 6px rgba(229, 40, 58, 0.054), 0 1px 1px rgba(0,0,0,0.7);
 }
 .glyph-btn:hover, menubutton.glyph-btn > button:hover {
     background-color: rgba(47, 107, 143, 0.32);
     border-color: rgba(138, 209, 247, 0.55);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.36),
-                0 0 14px rgba(51, 167, 219, 0.26);
+                0 0 14px rgba(51, 167, 219, 0.12);
 }
 .glyph-btn:active, menubutton.glyph-btn > button:active {
     background-color: rgba(24, 63, 86, 0.42);
@@ -2613,12 +2613,12 @@ menubutton.glyph-btn > button { min-width: 42px; min-height: 38px; }
     background-color: rgba(38, 115, 162, 0.45);
     border-color: rgba(100, 190, 245, 0.70);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.30),
-                0 0 14px rgba(58, 172, 242, 0.26);
+                0 0 14px rgba(58, 172, 242, 0.12);
 }
 .glyph-btn.toggled .glyph-btn-label,
 .glyph-btn.active .glyph-btn-label {
     color: #cbeefc;
-    text-shadow: 0 0 9px rgba(90, 186, 244, 0.26);
+    text-shadow: 0 0 9px rgba(90, 186, 244, 0.054);
 }
 .term-glyph .glyph-btn-label { font-size: 20px; letter-spacing: 1px; }
 /* close button leans red on hover; minimise/expand stay neutral-red */
@@ -2767,7 +2767,7 @@ headerbar {
     border-left-color: rgba(72, 176, 243, 0.60);
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.18),
-        0 0 16px rgba(36, 144, 214, 0.125);
+        0 0 16px rgba(36, 144, 214, 0.069);
 }
 .chat-row.selected, .chat-row:selected {
     background-color: rgba(21, 85, 131, 0.34);
@@ -2780,8 +2780,8 @@ headerbar {
     border-left: 3px solid #3baaf3;
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.30),
-        inset 0 0 26px rgba(53, 168, 242, 0.083),
-        0 0 22px rgba(36, 144, 214, 0.187);
+        inset 0 0 26px rgba(53, 168, 242, 0.046),
+        0 0 22px rgba(36, 144, 214, 0.103);
 }
 .chat-row .title-line { color: #f4f9fc; }
 .chat-row .meta-line  { color: #9ba7b2; }
@@ -2817,10 +2817,10 @@ headerbar {
     border: 1px solid rgba(113, 191, 246, 0.58);
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.38),
-        inset 0 0 30px rgba(53, 167, 242, 0.073),
+        inset 0 0 30px rgba(53, 167, 242, 0.04),
         inset 0 -18px 30px rgba(10, 57, 90, 0.22),
         0 10px 26px rgba(0, 0, 0, 0.46),
-        0 0 24px rgba(36, 144, 214, 0.156);
+        0 0 24px rgba(36, 144, 214, 0.086);
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.75);
 }
 .msg-assistant {
@@ -2838,10 +2838,10 @@ headerbar {
     border: 1px solid rgba(216, 238, 253, 0.34);
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.34),
-        inset 0 0 30px rgba(100, 186, 245, 0.036),
+        inset 0 0 30px rgba(100, 186, 245, 0.02),
         inset 0 -18px 30px rgba(0, 0, 0, 0.24),
         0 10px 26px rgba(0, 0, 0, 0.48),
-        0 0 22px rgba(36, 144, 214, 0.104);
+        0 0 22px rgba(36, 144, 214, 0.057);
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.72);
 }
 .msg-user:hover {
@@ -2849,20 +2849,20 @@ headerbar {
     border-color: rgba(139, 203, 248, 0.76);
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.44),
-        inset 0 0 34px rgba(62, 171, 243, 0.094),
+        inset 0 0 34px rgba(62, 171, 243, 0.052),
         inset 0 -18px 30px rgba(10, 57, 90, 0.24),
         0 12px 30px rgba(0, 0, 0, 0.48),
-        0 0 32px rgba(53, 167, 242, 0.229);
+        0 0 32px rgba(53, 167, 242, 0.12);
 }
 .msg-assistant:hover {
     background-color: rgba(16, 24, 33, 0.38);
     border-color: rgba(228, 243, 253, 0.50);
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.40),
-        inset 0 0 34px rgba(119, 194, 246, 0.052),
+        inset 0 0 34px rgba(119, 194, 246, 0.029),
         inset 0 -18px 30px rgba(0, 0, 0, 0.26),
         0 12px 30px rgba(0, 0, 0, 0.50),
-        0 0 30px rgba(36, 144, 214, 0.166);
+        0 0 30px rgba(36, 144, 214, 0.091);
 }
 .msg-system-notice {
     background-color: rgba(13, 19, 25, 0.32);
@@ -2882,7 +2882,7 @@ headerbar {
     border-radius: 10px;
     background-color: rgba(17, 25, 33, 0.36);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18),
-                0 0 14px rgba(36, 144, 214, 0.125);
+                0 0 14px rgba(36, 144, 214, 0.069);
 }
 
 /* ---- Links inside bubbles: readable on glass ------------------------- */
@@ -2939,7 +2939,7 @@ headerbar {
    background again. ---------------------------------------------------- */
 .md-heading-text {
     color: #e6f4fd;
-    text-shadow: 0 0 12px rgba(53, 167, 242, 0.208), 0 1px 2px rgba(0, 0, 0, 0.72);
+    text-shadow: 0 0 12px rgba(53, 167, 242, 0.051), 0 1px 2px rgba(0, 0, 0, 0.72);
 }
 .md-heading-rule { background-color: rgba(72, 175, 243, 0.40); }
 .md-rule         { background-color: rgba(216, 238, 253, 0.18); }
@@ -3000,7 +3000,7 @@ headerbar {
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.30),
         0 8px 22px rgba(0, 0, 0, 0.44),
-        0 0 18px rgba(36, 144, 214, 0.094);
+        0 0 18px rgba(36, 144, 214, 0.052);
 }
 .input-frame:focus-within {
     background-color: rgba(14, 25, 36, 0.52);
@@ -3008,7 +3008,7 @@ headerbar {
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.36),
         0 8px 24px rgba(0, 0, 0, 0.46),
-        0 0 28px rgba(53, 167, 242, 0.229);
+        0 0 28px rgba(53, 167, 242, 0.12);
 }
 
 /* ---- Cards, chips, badges ------------------------------------------- */
@@ -3063,7 +3063,7 @@ headerbar {
 .effort-seg:checked {
     background-color: rgba(23, 105, 161, 0.56);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.30),
-                0 0 14px rgba(53, 167, 242, 0.198);
+                0 0 14px rgba(53, 167, 242, 0.109);
 }
 .media-panel, .media-placeholder, .attach-tray {
     background-color: rgba(12, 17, 23, 0.40);
@@ -3083,7 +3083,7 @@ headerbar {
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.20),
         0 8px 22px rgba(0, 0, 0, 0.44),
-        0 0 16px rgba(36, 144, 214, 0.083);
+        0 0 16px rgba(36, 144, 214, 0.046);
 }
 .activity-title   { color: #f4f9fc; }
 .activity-meta    { color: #9ba7b2; }
@@ -3140,7 +3140,7 @@ button:hover, .icon-button:hover, .header-icon-button:hover,
     border-color: rgba(90, 183, 244, 0.68);
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.34),
-        0 0 18px rgba(53, 167, 242, 0.198);
+        0 0 18px rgba(53, 167, 242, 0.109);
 }
 button:active, .glyph-btn:active, .icon-button:active {
     background-color: rgba(14, 63, 98, 0.56);
@@ -3174,13 +3174,13 @@ button.suggested-action, .primary-action, .cmd-run-btn {
     color: #f6fbfe;
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.46),
-        0 0 20px rgba(53, 167, 242, 0.198);
+        0 0 20px rgba(53, 167, 242, 0.109);
 }
 button.suggested-action:hover, .primary-action:hover, .cmd-run-btn:hover {
     background-color: rgba(31, 129, 197, 0.72);
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.54),
-        0 0 28px rgba(53, 167, 242, 0.26);
+        0 0 28px rgba(53, 167, 242, 0.12);
 }
 /* The send button is pure PNG art - give it a lit glass pad, never a
    fill that would box the artwork in. */
@@ -3194,14 +3194,14 @@ button.suggested-action:hover, .primary-action:hover, .cmd-run-btn:hover {
     border-radius: 16px;
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.30),
-        0 0 16px rgba(36, 144, 214, 0.156);
+        0 0 16px rgba(36, 144, 214, 0.086);
 }
 .send-button:hover {
     background-color: rgba(26, 111, 170, 0.42);
     border-color: rgba(128, 197, 247, 0.76);
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.40),
-        0 0 26px rgba(53, 167, 242, 0.26);
+        0 0 26px rgba(53, 167, 242, 0.12);
 }
 .unleash-button {
     background-color: rgba(17, 25, 33, 0.36);
@@ -3214,7 +3214,7 @@ button.suggested-action:hover, .primary-action:hover, .cmd-run-btn:hover {
     border-color: rgba(124, 197, 247, 0.84);
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.40),
-        0 0 24px rgba(53, 167, 242, 0.26);
+        0 0 24px rgba(53, 167, 242, 0.12);
 }
 
 /* ---- Entries, search, switches -------------------------------------- */
@@ -3233,7 +3233,7 @@ entry:focus-within, searchentry:focus-within, .sidebar-search:focus-within {
     border-color: rgba(81, 179, 244, 0.74);
     box-shadow:
         inset 0 1px 3px rgba(0, 0, 0, 0.42),
-        0 0 18px rgba(53, 167, 242, 0.187);
+        0 0 18px rgba(53, 167, 242, 0.103);
 }
 switch {
     background-color: rgba(17, 25, 33, 0.52);
@@ -3244,7 +3244,7 @@ switch:checked {
     background-color: rgba(26, 116, 180, 0.68);
     border-color: rgba(124, 197, 247, 0.76);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28),
-                0 0 14px rgba(53, 167, 242, 0.208);
+                0 0 14px rgba(53, 167, 242, 0.114);
 }
 switch > slider {
     background-image: linear-gradient(180deg, #ffffff, #cedae4);
@@ -3330,7 +3330,7 @@ scrollbar slider:active { background-color: rgba(59, 170, 243, 0.80); }
 .tao-quote         { color: #9ba7b2; }
 .thoughts-text     { color: #cad4dc; }
 .working-label     { color: #d7edfc; }
-.online-dot.online { color: #3baaf3; text-shadow: 0 0 9px rgba(53, 167, 242, 0.26); }
+.online-dot.online { color: #3baaf3; text-shadow: 0 0 9px rgba(53, 167, 242, 0.054); }
 
 /* ---- Text views: the last opaque rectangles ---------------------------
    A Gtk.TextView paints its own `text` node with the theme's view colour,
@@ -3379,7 +3379,7 @@ textview.terminal-log-view text { background-color: transparent; }
     border-radius: 12px;
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.24),
-        0 0 18px rgba(53, 167, 242, 0.166);
+        0 0 18px rgba(53, 167, 242, 0.091);
 }
 
 /* =====================================================================
@@ -3420,10 +3420,10 @@ textview.terminal-log-view text { background-color: transparent; }
     border: 1px solid rgba(216, 238, 253, 0.34);
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.34),
-        inset 0 0 0 1px rgba(100, 186, 245, 0.062),
+        inset 0 0 0 1px rgba(100, 186, 245, 0.034),
         inset 0 -30px 50px rgba(0, 0, 0, 0.28),
         0 18px 44px rgba(0, 0, 0, 0.56),
-        0 0 34px rgba(36, 144, 214, 0.135);
+        0 0 34px rgba(36, 144, 214, 0.074);
 }
 .hero-emblem { margin-bottom: 12px; }
 .hero-eyebrow {
@@ -3441,8 +3441,8 @@ textview.terminal-log-view text { background-color: transparent; }
     letter-spacing: 8px;
     color: #f3f9fe;
     text-shadow:
-        0 0 26px rgba(53, 167, 242, 0.26),
-        0 0 60px rgba(34, 159, 241, 0.156),
+        0 0 26px rgba(53, 167, 242, 0.054),
+        0 0 60px rgba(34, 159, 241, 0.039),
         0 2px 3px rgba(0, 0, 0, 0.86);
 }
 /* The hairline under the wordmark. A Gtk.Box with no child has no natural
@@ -3464,7 +3464,7 @@ textview.terminal-log-view text { background-color: transparent; }
         rgba(228, 242, 253, 0.95) 50%,
         rgba(106, 188, 245, 0.70) 74%,
         rgba(72, 174, 243, 0.0) 100%);
-    box-shadow: 0 0 14px rgba(59, 170, 243, 0.26);
+    box-shadow: 0 0 14px rgba(59, 170, 243, 0.12);
 }
 .hero-subtitle {
     font-family: 'JetBrains Mono', monospace;
@@ -3485,13 +3485,13 @@ textview.terminal-log-view text { background-color: transparent; }
     border: 1px solid rgba(113, 191, 246, 0.60);
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.34),
-        0 0 20px rgba(53, 167, 242, 0.177);
+        0 0 20px rgba(53, 167, 242, 0.097);
     margin-bottom: 20px;
 }
 .hero-chip-dot {
     font-size: 13px;
     color: #3baaf3;
-    text-shadow: 0 0 10px rgba(53, 167, 242, 0.26);
+    text-shadow: 0 0 10px rgba(53, 167, 242, 0.054);
 }
 .hero-chip-label {
     font-family: 'JetBrains Mono', monospace;
@@ -3542,7 +3542,7 @@ textview.terminal-log-view text { background-color: transparent; }
     border-color: rgba(106, 189, 245, 0.68);
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.32),
-        0 0 20px rgba(53, 167, 242, 0.208);
+        0 0 20px rgba(53, 167, 242, 0.114);
 }
 .unleash-button.toggled {
     background-color: rgba(27, 119, 185, 0.62);
@@ -3556,13 +3556,13 @@ textview.terminal-log-view text { background-color: transparent; }
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.56),
         inset 0 -10px 20px rgba(7, 69, 113, 0.34),
-        0 0 30px rgba(53, 167, 242, 0.26);
+        0 0 30px rgba(53, 167, 242, 0.12);
 }
 .unleash-button.toggled:hover {
     background-color: rgba(32, 136, 210, 0.70);
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.64),
-        0 0 40px rgba(53, 167, 242, 0.26);
+        0 0 40px rgba(53, 167, 242, 0.12);
 }
 .unleash-glyph { font-size: 19px; }
 .unleash-label {
@@ -3575,7 +3575,7 @@ textview.terminal-log-view text { background-color: transparent; }
 .unleash-button:hover .unleash-label { color: #f1f9fe; }
 .unleash-button.toggled .unleash-label {
     color: #ffffff;
-    text-shadow: 0 0 12px rgba(194, 227, 251, 0.26);
+    text-shadow: 0 0 12px rgba(194, 227, 251, 0.054);
 }
 
 /* ---- Cut edges on the big surfaces ----------------------------------
@@ -3586,29 +3586,29 @@ textview.terminal-log-view text { background-color: transparent; }
     border-radius: 4px 20px 20px 20px;
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.34),
-        inset 0 0 0 1px rgba(216, 238, 253, 0.047),
-        inset 0 0 30px rgba(100, 186, 245, 0.036),
+        inset 0 0 0 1px rgba(216, 238, 253, 0.026),
+        inset 0 0 30px rgba(100, 186, 245, 0.02),
         inset 0 -18px 30px rgba(0, 0, 0, 0.24),
         0 10px 26px rgba(0, 0, 0, 0.48),
-        0 0 22px rgba(36, 144, 214, 0.104);
+        0 0 22px rgba(36, 144, 214, 0.057);
 }
 .msg-user {
     border-radius: 20px 20px 4px 20px;
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.38),
-        inset 0 0 0 1px rgba(194, 227, 251, 0.073),
-        inset 0 0 30px rgba(53, 167, 242, 0.073),
+        inset 0 0 0 1px rgba(194, 227, 251, 0.04),
+        inset 0 0 30px rgba(53, 167, 242, 0.04),
         inset 0 -18px 30px rgba(10, 57, 90, 0.22),
         0 10px 26px rgba(0, 0, 0, 0.46),
-        0 0 24px rgba(36, 144, 214, 0.156);
+        0 0 24px rgba(36, 144, 214, 0.086);
 }
 .input-frame {
     border-radius: 24px 8px 24px 8px;
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.30),
-        inset 0 0 0 1px rgba(216, 238, 253, 0.052),
+        inset 0 0 0 1px rgba(216, 238, 253, 0.029),
         0 8px 22px rgba(0, 0, 0, 0.44),
-        0 0 18px rgba(36, 144, 214, 0.094);
+        0 0 18px rgba(36, 144, 214, 0.052);
 }
 .code-block, .md-table, .activity-feed, .activity-dock,
 .card, .cmd-card, .md-quote {
@@ -3655,46 +3655,94 @@ window.dialog, dialog, .messagedialog, .dialog-content {
         and by one hairline rule instead.
    ===================================================================== */
 
-/* ---- The live feed, joined to the composer it sits on ----------------
-   It was a free-floating card: its own 16px radius, its own outer drop
-   shadow and its own bloom, hovering in the gap between the last message
-   and the box you type in.  Three separate glass slabs stacked with air
-   between them is what "it doesn't fit together" looks like.
+/* ---- The live feed: a chip on the tray, a popover for the detail -----
+   It was a full-width panel in a dock of its own between the last message
+   and the composer, with a margin above AND below it - so there was a gap
+   sitting there whether anything was running or not, and the controls
+   read as three separate slabs stacked with air between them.
 
-   Now it is the TOP of one control surface: square where it meets the
-   composer stack, no drop shadow of its own, and a shared hairline.  The
-   conversation floats; the controls are a single fixed pane.
+   It is a STATUS INDICATOR, so it is now the size of the other controls
+   and lives on the same bar as them.  The detail opens over the
+   conversation instead of reserving layout forever, which means the tray
+   never changes height and there is no hole left behind when it closes.
    -------------------------------------------------------------------- */
 .activity-dock {
-    margin: 6px 4px 2px 4px;
+    margin: 0 6px 0 0;
 }
 .activity-feed, .activity-dock {
-    border-radius: 14px 14px 4px 4px;
-    background-color: rgba(11, 15, 21, 0.50);
-    border: 1px solid rgba(216, 238, 253, 0.14);
-    border-top-color: rgba(228, 244, 255, 0.26);
+    background-color: transparent;
+    background-image: none;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    padding: 0;
+    margin-top: 0;
+    margin-bottom: 0;
+}
+/* The chip itself carries the glass, at button scale. */
+.activity-header,
+.activity-dock .activity-header {
+    padding: 6px 12px;
+    border-radius: 999px;
+    min-height: 0;
+    background-color: rgba(14, 20, 28, 0.52);
+    background-image:
+        linear-gradient(180deg, rgba(241, 249, 254, 0.13) 0%,
+                        rgba(241, 249, 254, 0.0) 52%,
+                        rgba(0, 0, 0, 0.20) 100%);
+    border: 1px solid rgba(216, 238, 253, 0.16);
+    border-top-color: rgba(228, 244, 255, 0.28);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.13);
+}
+.activity-header:hover,
+.activity-dock .activity-header:hover {
+    background-color: rgba(20, 30, 41, 0.60);
+    border-color: rgba(216, 238, 253, 0.26);
+}
+.activity-feed.live .activity-header {
+    border-color: rgba(120, 190, 240, 0.30);
+    border-top-color: rgba(168, 220, 255, 0.44);
+}
+.activity-title  {
+    color: #dfe9f2;
+    font-weight: 600;
+    font-size: 14px;
+    letter-spacing: 0.2px;
+}
+.activity-meta   { color: #77828e; font-size: 13px; letter-spacing: 0.3px; }
+.activity-chevron{ color: #6c7783; font-size: 13px; }
+.activity-spinner { min-width: 13px; min-height: 13px; }
+.activity-verdict { font-size: 13px; }
+
+/* The floating step panel - an overlay INSIDE the window, not a popover.
+   A popover is its own native surface and cannot be translucent on X11
+   without a compositor, which would have made this the one surface in the
+   app that breaks when the rest still works. */
+.activity-panel {
+    /* NEARLY OPAQUE, and that is not a style choice. Every other glass
+       surface in this app sits over ARTWORK; this one floats over the
+       model's own words. At the 0.4-0.6 tint the rest of the theme uses,
+       the sentence underneath reads straight through the step list and
+       both become unreadable. A panel you can see through is only glass
+       when there is nothing behind it that matters. */
+    background-color: rgba(8, 11, 16, 0.965);
+    background-image:
+        linear-gradient(180deg, rgba(241, 249, 254, 0.12) 0%,
+                        rgba(241, 249, 254, 0.0) 44%,
+                        rgba(0, 0, 0, 0.24) 100%);
+    border: 1px solid rgba(216, 238, 253, 0.16);
+    border-top-color: rgba(228, 244, 255, 0.30);
+    border-radius: 14px;
+    padding: 6px 8px;
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.14),
-        0 6px 18px rgba(0, 0, 0, 0.36);
+        0 12px 32px rgba(0, 0, 0, 0.52);
 }
-.activity-dock .activity-feed {
-    border-radius: 14px 14px 4px 4px;
-}
-.activity-dock .activity-header {
-    border-radius: 13px 13px 0 0;
-}
-
-/* Header: status first, arithmetic last. */
-.activity-title  { color: #dfe9f2; font-weight: 600; letter-spacing: 0.2px; }
-.activity-meta   { color: #77828e; font-size: 14px; letter-spacing: 0.3px; }
-.activity-chevron{ color: #6c7783; }
-
-/* Steps: one hairline rail down the left, so the list reads as a sequence
-   instead of as a stack of tiles. */
 .activity-body {
-    border-top: 1px solid rgba(216, 238, 253, 0.10);
-    padding-top: 6px;
+    border-top: none;
+    padding: 2px 0;
 }
+.activity-step        { padding: 4px 6px 4px 4px; }
 .activity-step-name   { letter-spacing: 0.2px; }
 .activity-step-detail { color: #8391a0; }
 .activity-step-time   { color: #69747f; font-size: 13px; }
@@ -3735,7 +3783,7 @@ window.dialog, dialog, .messagedialog, .dialog-content {
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.26),
         0 8px 24px rgba(0, 0, 0, 0.46),
-        0 0 22px rgba(53, 167, 242, 0.14);
+        0 0 22px rgba(53, 167, 242, 0.077);
 }
 
 /* ---- Sidebar rows --------------------------------------------------- */
@@ -3744,6 +3792,26 @@ window.dialog, dialog, .messagedialog, .dialog-content {
 .chat-row .pin-icon   { color: #7f8b97; font-size: 12px; }
 .chat-row .agent-icon { color: #4fc3f7; }
 .chat-row .meta-line  { color: #6b7681; }
+
+/* ---- The hero nameplate ---------------------------------------------- */
+.hero-subtitle { margin-bottom: 6px; }
+/* The model chip is a fact, not a feature. It was the one saturated block
+   left on the card once the glows came down, which made "DeepSeek-V4-Flash"
+   the second most prominent thing after the wordmark. */
+.hero-chip {
+    background-color: rgba(20, 30, 41, 0.52);
+    border: 1px solid rgba(216, 238, 253, 0.18);
+    border-top-color: rgba(228, 244, 255, 0.30);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+.hero-chip-label { color: #cfdae6; }
+.hero-chip-dot   { color: #58a8dd; }
+.hero-armline {
+    font-size: 14px;
+    color: #7b8793;
+    letter-spacing: 0.2px;
+    margin-bottom: 16px;
+}
 
 /* ---- The two speakers ------------------------------------------------
    The operator's bubble was the most saturated object in the window - a
@@ -5507,6 +5575,141 @@ _VERIFY_WORD_RE = re.compile(
     + r")\b")
 
 
+# ══════════════════════════════════════════════════════════════════════
+#  ...AND WHEN NOT TO. THE SUPPRESSOR.
+# ══════════════════════════════════════════════════════════════════════
+# The marker list above only ever says YES. Every marker it gained to stop a
+# missed fetch also made it fire on ordinary work, and nothing ever said no —
+# so a question about the operator's own code went to DuckDuckGo. Measured on
+# a corpus of fourteen plain coding questions, THIRTEEN forced a web fetch:
+#
+#   "explain the cost of a hash table lookup"          -> cost
+#   "which python version does my pyproject require"   -> version
+#   "refactor the price calculation in cart.py"        -> price
+#   "why is worth() returning None in this file"       -> worth
+#   "the news feed component in my react app is broken"-> news
+#
+# That is both halves of the complaint at once. It searches when it obviously
+# should not, and because the promise gate then forces a fetch the turn cannot
+# end where it should have ended — it answers, fetches, and comes back.
+#
+# THE RULE. Suppression needs POSITIVE EVIDENCE and can only ever downgrade a
+# weak signal, never a strong one. It fires only when BOTH hold:
+#
+#   1. Nothing STRONG matched. "latest", "today", "who won", "weather",
+#      "ceo of", "out yet" name the live state of the world and are never
+#      suppressed, whatever else the sentence says.
+#   2. The question has a LOCAL or CONCEPTUAL referent — it is about the
+#      operator's own files, or it is a definition / how-to / build request.
+#
+# So the failure mode is asymmetric on purpose: a question with no local
+# referent and no conceptual framing still fetches on a weak marker alone
+# ("did they release nmap 8 yet"), because a needless fetch costs a round
+# trip and a missed one costs a wrong answer.
+
+# Unambiguously about the live world. Never suppressed.
+# NOTE bare "news" is NOT here: "the news feed component in my react app" is a
+# UI bug report. The news-shaped PHRASES are ("news today", "world news",
+# "breaking news", "in the news"), and they are.
+_STRONG_VERIFY_MARKERS = (
+    "latest", "newest", "most recent", "today", "yesterday", "right now",
+    "at the moment", "this week", "this month", "this year", "nowadays",
+    "these days", "currently", "as of",
+    "out yet", "released yet", "available yet", "is out", "came out",
+    "come out", "is there a new", "has there been", "any new",
+    "who won", "final score", "standings", "last night", "last game",
+    "last match", "this season", "who's winning", "whos winning",
+    "weather", "forecast", "stock", "exchange rate", "market cap",
+    "valuation", "ceo of", "president of", "prime minister", "leader of",
+    "who is the", "who's the",
+    # "how much is/does" is DELIBERATELY NOT STRONG. It is the market price of
+    # a thing in the world AND the memory cost of a function in their file,
+    # and only the rest of the sentence tells them apart - which is exactly
+    # what the suppressor is for. It stays in _VERIFY_MARKERS, so it still
+    # fires on its own; it is simply not immune.
+    "breaking news", "top stories", "current events", "world news",
+    "in the news", "news today", "headline",
+    "still alive", "still around",
+    "in the world today", "in the world right now", "going on in the world",
+    "happening in the world", "catch me up", "fill me in",
+    "give me the rundown", "happening today", "whats up today",
+    "what's up today", "whats going on today", "what's going on today",
+)
+_STRONG_VERIFY_PHRASES = tuple(m for m in _STRONG_VERIFY_MARKERS if " " in m)
+_STRONG_VERIFY_WORD_RE = re.compile(
+    r"\b(?:" + "|".join(
+        re.escape(m) for m in _STRONG_VERIFY_MARKERS if " " not in m)
+    + r")\b")
+
+# "This is about something on MY machine." A concrete referent is required —
+# a bare "my project" is not enough, because "the latest version of requests
+# for my project" is still a web question.
+_LOCAL_SCOPE_RE = re.compile(
+    r"(?:"
+    # `(?:\w+\s+)?` so "my SCORE function" and "the PRICE calculation" read as
+    # local. Without it the determiner had to sit directly against the noun,
+    # which is not how anyone writes about their own code.
+    r"\b(?:my|this|the)\s+(?:\w+\s+)?(?:code|repo|repository|project|file|"
+    r"files|script|scripts|app|branch|fork|function|class|method|module|"
+    r"package|test|tests|suite|build|config|folder|directory|dir|workspace|"
+    r"program|codebase|calculation|logic|handler|parser|component)\b"
+    # ("in my|this|the <any word>" used to be here. It matched "in the news",
+    #  "in the world" and "in the ireland match", which are the exact
+    #  questions this must never suppress. The noun list above already covers
+    #  "in my repo" / "in this file" without guessing.)
+    # Project files named without an extension.
+    r"|\b(?:pyproject|makefile|dockerfile|requirements|package\.json|"
+    r"cargo\.toml|go\.mod|gemfile|justfile|pipfile)\b"
+    r"|\blocalhost\b|\b127\.0\.0\.1\b"
+    r"|\b[\w./-]+\.(?:py|js|jsx|ts|tsx|go|rs|c|h|cpp|java|rb|php|sh|bash|"
+    r"zsh|json|ya?ml|toml|ini|cfg|md|txt|html|css|sql|lock)\b"
+    r"|(?:^|\s)(?:~/|\./|/(?:etc|usr|var|home|opt|tmp|srv)/)"
+    r"|\w+\(\)"                       # a function call: worth(), main()
+    r"|`[^`]+`"                          # inline code
+    r"|```"                              # a fenced block
+    r")", re.I)
+
+# "This is a definition, an explanation, or something to build." None of these
+# are answered by reading today's web.
+_CONCEPTUAL_RE = re.compile(
+    r"(?:"
+    r"^\s*(?:explain|write|generate|create|make|build|implement|refactor|fix|"
+    r"debug|rewrite|convert|translate|add|remove|rename|optimi[sz]e|review)\b"
+    r"|\bwhat\s+(?:does|do|would)\b[^?]*\bmean\b"
+    r"|\bwhat(?:'s|s| is| are)?\s+the\s+difference\s+between\b"
+    r"|\bhow\s+(?:do|does|would|can)\s+(?:i|you|it|we|they)\b"
+    r"|\bwhy\s+(?:is|are|does|do|did|would)\b"
+    r"|\btime\s+complexity\b|\bbig[- ]o\b|\bo\(\s*\w+\s*\)"
+    r"|\bpseudo ?code\b|\bfrom scratch\b"
+    r")", re.I)
+
+# Arithmetic is not a market price. "how much is 2 + 2" matched "how much is".
+# A BARE HYPHEN IS NOT A MINUS SIGN. The first draft used [-+*/^%] with
+# optional spaces, so "is CVE-2026-1234 patched yet" read as 2026 minus 1234,
+# suppressed the fetch, and answered a live vulnerability question from
+# memory - the single worst thing this app can do. Subtraction now requires
+# the spaces people actually type around it.
+_ARITHMETIC_RE = re.compile(r"\d+\s*[+*/^%]\s*\d+|\d+\s+-\s+\d+")
+
+
+def _verification_suppressed(t: str) -> bool:
+    """True when a marker fired but the question is plainly not about the web.
+
+    `t` is the space-padded lowercased text _needs_web_verification built."""
+    # ARITHMETIC FIRST, and deliberately ahead of the strong check: "how much
+    # is 2 + 2" matches the strong phrase "how much is", and no amount of
+    # market data answers it.
+    if _ARITHMETIC_RE.search(t):
+        return True
+    if _STRONG_VERIFY_WORD_RE.search(t):
+        return False
+    if any(m in t for m in _STRONG_VERIFY_PHRASES):
+        return False
+    if re.search(r"\b20(2[4-9]|[3-9]\d)\b", t):
+        return False                      # a current-era year is strong too
+    return bool(_LOCAL_SCOPE_RE.search(t) or _CONCEPTUAL_RE.search(t))
+
+
 def _needs_web_verification(text: str) -> bool:
     """True when a question's answer depends on the present state of the world
     and must be confirmed online rather than recalled from training."""
@@ -5539,6 +5742,24 @@ def _needs_web_verification(text: str) -> bool:
     return False
 
 
+# The public entry point keeps its name and its meaning; the raw marker scan
+# above is now the FIRST half of the decision and _verification_suppressed is
+# the second. Kept as two functions because they answer two different
+# questions and are worth being able to test apart.
+_needs_web_verification_raw = _needs_web_verification
+
+
+def _needs_web_verification(text: str) -> bool:      # noqa: F811
+    """True when a question's answer depends on the present state of the world.
+
+    A marker firing is necessary and no longer sufficient - see the suppressor
+    above for why, and for the corpus that made the case."""
+    if not _needs_web_verification_raw(text):
+        return False
+    t = " " + (text or "").lower().strip() + " "
+    return not _verification_suppressed(t)
+
+
 # ── THE PROMISE GATE, AS A PURE DECISION ─────────────────────────────
 # Kept out of the 300-line stream-completion callback on purpose: this is the
 # rule that decides whether the app goes and fetches something the model only
@@ -5556,6 +5777,74 @@ def _needs_web_verification(text: str) -> bool:
 # was a better reader of the reply — a stall-phrase list, a printed-URL
 # recovery — and each one was one unseen phrasing away from failing again.
 # This one does not read the reply at all.
+# ══════════════════════════════════════════════════════════════════════
+#  THE VERIFICATION GATE — the promise gate, pointed at the other half
+# ══════════════════════════════════════════════════════════════════════
+# WORK MODE's contract already tells the model, at some length, to run
+# something that proves its change: "VERIFY, DON'T ASSUME", "ITERATE UNTIL IT
+# ACTUALLY PASSES". That is advice, and advice is exactly what a model drops
+# on step forty of a long job. Anthropic's own write-up of this names the
+# failure and the fix in one line:
+#
+#     "Claude stops when the work looks done. Without a check it can run,
+#      'looks done' is the only signal available, and you become the
+#      verification loop."
+#
+# and separates the two mechanisms: a prompt instruction is advisory, a Stop
+# hook is deterministic and "blocks the turn from ending until it passes".
+#
+# Basilisk already HAS the check — `workspace_verify` re-runs the repo's tests
+# and classifies the result against a baseline, so it reports what you fixed
+# AND what you broke. The gap was never the check. It was that nothing made
+# the turn go through it.
+#
+# So this is the promise gate's exact architecture aimed at the other half of
+# the product. Same shape, same reasons:
+#
+#   · it does NOT read the reply. Every earlier attempt at "did it really
+#     finish?" was a better reader of the model's prose, and each was one
+#     phrasing away from failing. Two FACTS decide this: files were written
+#     this request, and nothing was ever run to check them.
+#   · it fires at most ONCE per request, and after it fires a verifier HAS
+#     run, so the condition cannot re-arm. A floor, not a loop.
+#   · it is pure and total. Junk in, None out - a gate that raises is a gate
+#     that fails open on exactly the turn it exists to catch.
+#
+# WORKSPACE writes only. `workspace_write`/`workspace_replace` can only
+# succeed with a repo open, which is what makes `workspace_verify` applicable;
+# a bare `write_file` outside a workspace has nothing to re-run.
+_WORKSPACE_WRITE_TOOLS = frozenset({
+    "workspace_write", "workspace_replace", "workspace_revert",
+})
+# Anything that produces GROUND TRUTH from the environment rather than from
+# the model. `run` counts: a model that ran its own test command has verified
+# its work, and insisting on our tool instead would be ceremony.
+_VERIFY_TOOLS = frozenset({
+    "workspace_verify", "workspace_health", "run", "launch_app",
+})
+
+
+def unverified_work_gap(tools_used, already_forced: bool = False):
+    """The verifier to run, or None to let the turn end.
+
+    True when this request CHANGED a repo and never once asked the environment
+    whether the change works."""
+    try:
+        if already_forced:
+            return None
+        try:
+            used = set(tools_used or ())
+        except Exception:
+            return None
+        if not (used & _WORKSPACE_WRITE_TOOLS):
+            return None                   # nothing was changed; nothing to prove
+        if used & _VERIFY_TOOLS:
+            return None                   # it already checked its own work
+        return "workspace_verify"
+    except Exception:
+        return None
+
+
 def forced_search_url(question: str, tools_used, already_forced: bool = False):
     """The URL the app should read ITSELF, or None to let the turn end.
 
@@ -6008,9 +6297,9 @@ class ActivityFeedWidget(Gtk.Box):
         self._header_btn = Gtk.Button()
         self._header_btn.add_css_class("activity-header")
         self._header_btn.set_has_frame(False)
-        self._header_btn.set_hexpand(True)
+        self._header_btn.set_valign(Gtk.Align.CENTER)
 
-        hbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        hbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=7)
 
         # Live indicator: a real spinner while working, a static verdict glyph
         # when settled.  Both live in the same slot so the header never reflows
@@ -6027,7 +6316,12 @@ class ActivityFeedWidget(Gtk.Box):
         self._title = Gtk.Label(label="thinking", xalign=0.0)
         self._title.add_css_class("activity-title")
         self._title.set_ellipsize(Pango.EllipsizeMode.END)
-        self._title.set_hexpand(True)
+        # BOUNDED, because this is a chip on a control bar now. The title is
+        # whatever the current step is called plus its argument, which for a
+        # run step is a whole command line - unbounded, it would push the
+        # model button off the end of the tray on every scan.
+        self._title.set_max_width_chars(28)
+        self._title.set_width_chars(10)
         hbox.append(self._title)
 
         self._meta = Gtk.Label(label="", xalign=1.0)
@@ -6042,19 +6336,67 @@ class ActivityFeedWidget(Gtk.Box):
         _track_connect(self, self._header_btn, "clicked", self._on_header_clicked)
         self.append(self._header_btn)
 
+        # ==============================================================
+        #  A CHIP ON THE TRAY, AND A POPOVER FOR THE DETAIL
+        # ==============================================================
+        # The step list used to be a Revealer directly under the header, in a
+        # dock of its own above the button row. That put THREE stacked
+        # surfaces between the last message and the box you type in - feed,
+        # buttons, composer - with air between each, and the gap sat there
+        # whether anything was running or not.
+        #
+        # The feed is a STATUS INDICATOR. A status indicator belongs on the
+        # control bar with the other controls, at the size of the other
+        # controls, and its detail belongs in something that opens ON DEMAND
+        # and OVER the content, rather than in something that permanently
+        # reserves layout for itself.
+        #
+        # So: the widget is now a compact chip that sits inline in the actions
+        # row, and the body hangs off it as a popover that opens UPWARD over
+        # the conversation. Nothing about the honesty rules or the step
+        # bookkeeping changes - only where the rows get drawn.
         self._body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self._body.add_css_class("activity-body")
-        self._revealer = Gtk.Revealer()
-        self._revealer.set_transition_type(
-            Gtk.RevealerTransitionType.SLIDE_DOWN)
-        self._revealer.set_transition_duration(180)
-        self._revealer.set_child(self._body)
-        # Collapsed by default — the operator opens it with a click when they
-        # want to watch. It no longer springs open on its own each turn; the
-        # header still shows the live one-line status, and clicking expands the
-        # step list (and pins that choice).
-        self._revealer.set_reveal_child(False)
-        self.append(self._revealer)
+
+        # The list is bounded and scrolls. A mission runs up to MAX_STEPS
+        # rows, and a popover tall enough for 160 of them is taller than the
+        # screen - GTK will try, and the top rows become unreachable.
+        self._body_scroll = Gtk.ScrolledWindow()
+        self._body_scroll.set_policy(Gtk.PolicyType.NEVER,
+                                     Gtk.PolicyType.AUTOMATIC)
+        self._body_scroll.set_propagate_natural_height(True)
+        self._body_scroll.set_max_content_height(_scaled(420, floor=260))
+        self._body_scroll.set_child(self._body)
+        # A WIDTH REQUEST, not just a min-content-width. Every row in the list
+        # ellipsizes (the tool argument is a URL or a whole command line), and
+        # an ellipsizing label asks for almost nothing - so a popover sized to
+        # its child's minimum came out a few characters wide and showed a
+        # column of "...". The list has to be told how wide it wants to be.
+        self._body_scroll.set_size_request(_scaled(460, floor=340), -1)
+
+        _frame = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        _frame.add_css_class("activity-panel")
+        _frame.append(self._body_scroll)
+
+        # The panel is handed to MainWindow, which floats it over the
+        # conversation just above the tray (see _dock_feed). The feed owns it
+        # and disposes it; the window only decides where it hangs.
+        self._panel = Gtk.Revealer()
+        self._panel.set_transition_type(
+            Gtk.RevealerTransitionType.SLIDE_UP)
+        self._panel.set_transition_duration(160)
+        self._panel.set_child(_frame)
+        self._panel.set_reveal_child(False)
+        self._panel.set_halign(Gtk.Align.END)
+        self._panel.set_valign(Gtk.Align.END)
+        self._panel.set_margin_end(14)
+        self._panel.set_margin_bottom(10)
+        self._panel.set_can_target(True)
+
+        # There is no in-flow Revealer under the header any more, and nothing
+        # may assume one.
+        self._revealer = None
+        self._expanded = False
         self.add_css_class("live")
         self.add_css_class("collapsed")
         self._chevron.set_text("\u203a")
@@ -6074,9 +6416,16 @@ class ActivityFeedWidget(Gtk.Box):
             except Exception:
                 pass
             self._collapse_src = None
+        try:
+            if getattr(self, "_panel", None) is not None:
+                self._panel.set_reveal_child(False)
+        except Exception:
+            pass
+        self._panel = None
         self._steps = {}
         self._order = []
         self._body = None
+        self._body_scroll = None
         self._revealer = None
 
     # ── the clock ───────────────────────────────────────────────
@@ -6138,12 +6487,17 @@ class ActivityFeedWidget(Gtk.Box):
         # An explicit click PINS the state.  Without this the auto-collapse
         # would slam shut a body the operator had just opened to read.
         self._pinned = True
-        self.set_expanded(not self._revealer.get_reveal_child())
+        self.set_expanded(not self._expanded)
 
     def set_expanded(self, on: bool):
-        if self._disposed or self._revealer is None:
+        if self._disposed or getattr(self, "_panel", None) is None:
             return
-        self._revealer.set_reveal_child(bool(on))
+        on = bool(on)
+        self._expanded = on
+        try:
+            self._panel.set_reveal_child(on)
+        except Exception:
+            pass
         if on:
             self._chevron.set_text("⌄")
             self.remove_css_class("collapsed")
@@ -8677,6 +9031,7 @@ class MainWindow(Adw.ApplicationWindow):
     _tools_used_this_request: set = frozenset()
     _promise_pushes: int = 0
     _forced_fetch_done: bool = False
+    _forced_verify_done: bool = False
 
     def __init__(self, app: "BasiliskApp"):
         super().__init__(application=app)
@@ -9549,7 +9904,24 @@ class MainWindow(Adw.ApplicationWindow):
         # artwork dead at the chat pane's edges; _build_ui now hangs it
         # behind the whole window instead, so the sidebar and header sit on
         # the same image. This scroller just draws on top of it, transparent.
-        main.append(self.msg_scroll)
+        # ── THE FLOATING-PANEL SLOT ──
+        # The activity feed's step list is drawn HERE, over the conversation,
+        # rather than in a panel that permanently reserves a strip of layout
+        # above the composer.
+        #
+        # It is an Overlay and NOT a Gtk.Popover, and that is a deliberate
+        # correctness choice, not a style one. A popover is its own native
+        # surface: on X11 with no compositing manager it cannot be
+        # translucent, so the whole glass system collapses and its shadow
+        # paints as a hard black rectangle. Everything else in this app is
+        # translucent INSIDE an opaque window precisely so it never depends on
+        # a compositor (see the OBSIDIAN GLASS notes in the stylesheet), and
+        # the feed has to keep that property like every other surface.
+        self.chat_overlay = Gtk.Overlay()
+        self.chat_overlay.set_hexpand(True)
+        self.chat_overlay.set_vexpand(True)
+        self.chat_overlay.set_child(self.msg_scroll)
+        main.append(self.chat_overlay)
 
         main.append(self._build_input_area())
 
@@ -10132,18 +10504,32 @@ class MainWindow(Adw.ApplicationWindow):
         self.status_pill_box.append(self.status_pill_spinner)
         self.status_pill_box.append(self.status_pill_label)
 
-        # ── THE ACTIVITY FEED IS DOCKED, NOT SCROLLED ──
-        # It used to be appended into the message list, which meant that after
-        # two or three more messages the one widget telling you what Basilisk
-        # is doing had scrolled off the top of the screen. A status surface
-        # that you have to go looking for is not a status surface. It sits
-        # above the action buttons now, pinned, always in view — and because
-        # it is outside the scroller it is also unaffected by the rolling trim.
-        self.activity_dock = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
+        # ── THE ACTIVITY FEED RIDES ON THE BUTTON TRAY ──
+        # It started inside the message list, where after two or three more
+        # messages the one widget telling you what Basilisk is doing had
+        # scrolled off the top of the screen; a status surface you have to go
+        # looking for is not a status surface. So it was pinned into a dock of
+        # its own above this row — which fixed that and introduced a worse
+        # problem: a full-width panel with its own border and its own margins
+        # sitting permanently between the last message and the composer, with
+        # a gap on either side of it, present whether anything was running or
+        # not.
+        #
+        # It belongs HERE, on the same tray as Unleash, attach and the speaker
+        # — the same size as them, in the same material, reading as one bar of
+        # controls. The detail opens in a popover over the conversation (see
+        # ActivityFeedWidget._build), so the tray never changes height and
+        # there is no hole to leave behind.
+        #
+        # It goes AFTER the chip scroller (which is hexpand, so it holds the
+        # left edge) and BEFORE the model button: that way the buttons on the
+        # left never shift when a turn starts and the chip appears.
+        self.activity_dock = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
                                      spacing=0)
         self.activity_dock.add_css_class("activity-dock")
+        self.activity_dock.set_valign(Gtk.Align.CENTER)
         self.activity_dock.set_visible(False)
-        area.append(self.activity_dock)
+        actions_row.insert_child_after(self.activity_dock, chips_scroll)
 
         area.append(actions_row)
 
@@ -10460,6 +10846,7 @@ class MainWindow(Adw.ApplicationWindow):
         ("_bad_propose_retries",       0),
         ("_promise_pushes",            0),
         ("_forced_fetch_done",         False),
+        ("_forced_verify_done",        False),
         ("_leash_work_turn",           False),
         ("_fabricated_this_turn",      0),
         ("_tools_used_this_request",   frozenset),
@@ -10772,9 +11159,20 @@ class MainWindow(Adw.ApplicationWindow):
         rule.set_size_request(_scaled(300, floor=180), _scaled(3, floor=3))
         card.append(rule)
 
-        sub = Gtk.Label(label="AUTONOMOUS SECURITY ASSISTANT")
+        # ── WHAT IT SAYS IT IS ──
+        # This used to read "AUTONOMOUS SECURITY ASSISTANT", which is the one
+        # thing Basilisk is NOT until you arm it. Out of the box it is a
+        # general and coding assistant: it reads the live web, opens a repo,
+        # edits it and runs your tests. The autonomous pentest agent is a MODE
+        # you switch on deliberately, with a target you confirm - and the
+        # first thing an operator sees should not overstate what is running.
+        sub = Gtk.Label(label="GENERAL & CODING ASSISTANT")
         sub.add_css_class("hero-subtitle")
         card.append(sub)
+
+        arm = Gtk.Label(label="Unleash arms the autonomous pentest agent.")
+        arm.add_css_class("hero-armline")
+        card.append(arm)
 
         # Live model chip
         chip = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=9)
@@ -10815,7 +11213,7 @@ class MainWindow(Adw.ApplicationWindow):
             grid.attach(vl, 1, r, 1, 1)
         card.append(grid)
 
-        hint = Gtk.Label(label="Type below to begin. Enter sends.")
+        hint = Gtk.Label(label="Ask a question, or point it at a repo. Enter sends.")
         hint.add_css_class("hero-hint")
         card.append(hint)
 
@@ -11668,7 +12066,13 @@ class MainWindow(Adw.ApplicationWindow):
             self._activity_feed = None
 
     def _dock_feed(self, feed):
-        """Put `feed` in the pinned dock, retiring whatever was there."""
+        """Put `feed`'s chip on the button tray and float its step panel over
+        the conversation, retiring whatever was there.
+
+        TWO widgets, one owner. The chip goes in the tray; the panel goes in
+        the chat overlay. Both have to be torn down together or a chat switch
+        leaves an orphaned panel hanging over the new conversation with the
+        old one's steps in it."""
         dock = getattr(self, "activity_dock", None)
         if dock is None:
             return
@@ -11679,6 +12083,10 @@ class MainWindow(Adw.ApplicationWindow):
             # leaves another timer running for the life of the process.
             if isinstance(old, ActivityFeedWidget):
                 try:
+                    self._undock_feed_panel(old)
+                except Exception:
+                    pass
+                try:
                     old.dispose_widget()
                 except Exception:
                     pass
@@ -11686,7 +12094,30 @@ class MainWindow(Adw.ApplicationWindow):
             old = nxt
         if feed is not None:
             dock.append(feed)
+            ov = getattr(self, "chat_overlay", None)
+            panel = getattr(feed, "_panel", None)
+            if ov is not None and panel is not None:
+                try:
+                    ov.add_overlay(panel)
+                except Exception as e:
+                    log(f"feed panel overlay failed: {e}")
         dock.set_visible(feed is not None)
+
+    def _undock_feed_panel(self, feed):
+        """Remove a retired feed's floating panel from the chat overlay.
+
+        Total, like every other feed hook: a panel that was never added, an
+        overlay that has gone, or a raise from GTK must all end as a no-op.
+        Display must never be able to strand a turn."""
+        ov = getattr(self, "chat_overlay", None)
+        panel = getattr(feed, "_panel", None)
+        if ov is None or panel is None:
+            return
+        try:
+            panel.set_reveal_child(False)
+            ov.remove_overlay(panel)
+        except Exception:
+            pass
 
     def _clear_activity_dock(self):
         self._dock_feed(None)
@@ -12166,6 +12597,7 @@ class MainWindow(Adw.ApplicationWindow):
             self._tools_used_this_request = set()
             self._promise_pushes = 0
             self._forced_fetch_done = False
+            self._forced_verify_done = False
 
         # Limit how many model round-trips a turn may chain.  Rather than
         # dead-ending with "chain too long" and no answer (annoying), once
@@ -12464,6 +12896,45 @@ class MainWindow(Adw.ApplicationWindow):
                 self.terminal_log(
                     "💬 answer mode: research, confirm, answer once", "dim")
         elif _leash_work:
+            # ── GROUND TRUTH ABOUT THE BUDGET ──
+            # The model is told to iterate until it passes and is given a
+            # large budget to do it with — and is never told where in that
+            # budget it actually is. So it cannot pace itself: it either wraps
+            # up far too early or walks into the cap mid-edit and has to
+            # "report" from a half-finished state.
+            #
+            # Anthropic's multi-agent write-up puts effort rules in the prompt
+            # for exactly this reason ("simple fact-finding requires just 1
+            # agent with 3-10 tool calls... complex research might use more
+            # than 10 subagents"), to stop both under- and over-investment.
+            # This is the same idea grounded in a real number rather than a
+            # guess: the step count is a fact the host already has, and the
+            # agent-loop guidance is explicit that the agent should "gain
+            # ground truth from the environment at each step".
+            #
+            # Only on continuations — on turn 1 the number is always "1 of N"
+            # and says nothing, and the long-form contract is already the
+            # expensive part of that message.
+            _budget_line = ""
+            if _continuation:
+                _used = int(getattr(self, "_tool_chain_depth", 0) or 0)
+                _left = max(0, _ans_cap - _used)
+                if _left <= 8:
+                    _budget_line = (
+                        "\n- BUDGET: step %d of %d — you are nearly out. Land "
+                        "what you have: finish the edit you are mid-way "
+                        "through, run the check once, and report. Do not start "
+                        "anything new." % (_used, _ans_cap))
+                elif _left <= 25:
+                    _budget_line = (
+                        "\n- BUDGET: step %d of %d. Enough left to finish and "
+                        "verify, not enough to explore. Converge."
+                        % (_used, _ans_cap))
+                else:
+                    _budget_line = (
+                        "\n- BUDGET: step %d of %d — plenty. Do not rush the "
+                        "job or hand back a partial fix to save steps."
+                        % (_used, _ans_cap))
             # ── WORK MODE (leashed) ──
             # Same leash — no offensive posture, no mission latch, no
             # never-stop directive — but the turn is a JOB, so the model is
@@ -12498,7 +12969,7 @@ class MainWindow(Adw.ApplicationWindow):
                     "- You stop when the change is made AND something you ran "
                     "proves it, or when you are genuinely blocked — and then "
                     "you say exactly what blocked you. If it is not verified, "
-                    "say so rather than claiming done.]").strip()
+                    "say so rather than claiming done.%s]" % _budget_line).strip()
             else:
                 addendum = (addendum + "\n\n[WORK MODE (leashed) — THIS turn is a "
                     "piece of WORK, not a question. The operator wants the change "
@@ -12551,7 +13022,8 @@ class MainWindow(Adw.ApplicationWindow):
                     "what you ran, what the result actually was. If something is "
                     "still broken or you could not verify it, SAY SO plainly — a "
                     "false 'done' is worse than an honest 'this part still "
-                    "fails'. Then stop; do not latch a mission.]").strip()
+                    "fails'. Then stop; do not latch a mission.%s]"
+                    % _budget_line).strip()
             if not _continuation:
                 self.terminal_log(
                     "🔧 work mode: read, edit, run, iterate until green", "dim")
@@ -13372,6 +13844,48 @@ class MainWindow(Adw.ApplicationWindow):
                           "you actually read and cite it. Do not answer from "
                           "memory, and do not say you will fetch something — "
                           "fetch it.]")
+
+        # ── THE VERIFICATION GATE ──
+        # Sits beside the promise gate above and shares its shape exactly: no
+        # executable call left, so the turn is ENDING — and it is ending on a
+        # repo it changed and never checked. See unverified_work_gap.
+        #
+        # ONE ROUND TRIP IS THE PRICE, AND IT IS WORTH IT. If the change was a
+        # README rather than code, the suite runs, passes, and the model says
+        # so — one wasted step. If the change was code, this is the difference
+        # between a verified fix and a plausible one. That trade is not close.
+        # The deferred note below tells the model both branches so a doc-only
+        # change can close out honestly instead of casting about.
+        if (not executable and not cancelled and not self._stop_requested
+                and self.current_agent_mode and not self._tools_locked
+                and not self._mission_active
+                and not getattr(self, "_forced_verify_done", False)):
+            _vtool = unverified_work_gap(
+                getattr(self, "_tools_used_this_request", ()),
+                getattr(self, "_forced_verify_done", False))
+            if _vtool:
+                _rec = parse_tool_calls(
+                    '<tool name="%s">{}</tool>' % _vtool)
+                if _rec:
+                    self._forced_verify_done = True
+                    executable = _rec
+                    self.terminal_log(
+                        "↩ you changed the repo and never ran anything "
+                        "— verifying it myself", "error")
+                    self._activity_note(
+                        "files were changed and nothing was run to prove it "
+                        "- running the check", "gate")
+                    self._deferred_note = (
+                        (self._deferred_note or "")
+                        + "\n[system note: this turn CHANGED FILES and never "
+                          "ran anything that proves the change works, so the "
+                          "check was run FOR you. Read the result now. If "
+                          "`broke` is non-empty those are YOUR regressions and "
+                          "you must fix them before you stop. If it still "
+                          "fails, read the real error and fix the real cause. "
+                          "If there is no test command, or the change was not "
+                          "code, say that plainly in your report and stop — do "
+                          "not invent a verification you did not run.]")
 
         if _recover_fence:
             _cmd = self._shell_block_command(final)
