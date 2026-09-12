@@ -1,69 +1,76 @@
-# v1.1.3.0
+# v1.1.2.0
 
-**"Not done until verified" stops being a request and becomes a gate.**
+**The feed moves onto the button tray, and Basilisk stops searching the web
+about your own code.**
 
-This release applies Anthropic's published agent-engineering guidance to the
-half of Basilisk that needed it most: knowing when the work is actually
-finished.
+## The gap above the composer is gone
 
-## The verification gate
+The activity feed was a full-width panel in a dock of its own between the last
+message and the box you type in — with a margin above and below it, sitting
+there whether anything was running or not.
 
-Work mode already tells the model, at length, to run something that proves its
-change — *"VERIFY, DON'T ASSUME"*, *"ITERATE UNTIL IT ACTUALLY PASSES"*. That is
-advice, and advice is what a model drops on step forty of a long job.
-Anthropic's own write-up names both the failure and the split:
+It is a status indicator, so it now rides **on the button tray** with Unleash,
+attach and the speaker, at the size of the other controls. Clicking it opens
+the step list **over the conversation**; the tray never changes height and
+there is no hole left behind.
 
-> Claude stops when the work looks done. Without a check it can run, "looks
-> done" is the only signal available, and you become the verification loop.
+The panel is a `Gtk.Overlay` inside the window and deliberately **not** a
+`Gtk.Popover`. A popover is its own native surface, so on X11 with no
+compositor it cannot be translucent — it would have been the one surface that
+breaks while the rest of the glass still works.
 
-…and separates the mechanisms: a prompt instruction is advisory, a Stop hook is
-deterministic and *"blocks the turn from ending until it passes."*
+## It searches when it should, and not when it shouldn't
 
-Basilisk already **had** the check. `workspace_verify` re-runs the repo's tests
-and classifies the result against a baseline, so it reports what you fixed *and
-what you broke*. The gap was never the check — it was that nothing made the
-turn go through it.
+`_needs_web_verification` was a list of markers, and a list of markers can only
+ever say yes. Every marker added to stop a missed fetch also made it fire on
+ordinary work. Measured against fourteen plain coding questions, **thirteen**
+forced a web fetch:
 
-So there is a gate now, built on the same architecture as the existing promise
-gate and inheriting the property that made that one hold up: **it does not read
-the reply.** Two facts decide it — files were written this request, and nothing
-was ever run to check them. If both hold when the turn is about to end,
-Basilisk runs the check itself and hands the model the result, with regressions
-named as its own to fix. Once per request, never a loop.
+```
+"explain the cost of a hash table lookup"             -> cost
+"which python version does my pyproject require"      -> version
+"refactor the price calculation in cart.py"           -> price
+"why is worth() returning None in this file"          -> worth
+"the news feed component in my react app is broken"   -> news
+```
 
-## Budget ground truth
+That is both halves of the complaint at once. It searched when it obviously
+should not — and because the promise gate reads the same predicate, the turn
+could not *end* where it should have either: it answered, fetched anyway, and
+came back with a second reply nobody asked for.
 
-The model was told to iterate until green with a large tool budget, and never
-told where in that budget it was — so it either wrapped up far too early or
-walked into the cap mid-edit. Anthropic's multi-agent write-up puts explicit
-effort rules in the prompt for exactly this reason; the agent-loop guidance is
-that an agent should *"gain 'ground truth' from the environment at each step."*
+There is now a suppressor, and it needs **positive evidence**. It can only
+downgrade a weak signal, never a strong one: "latest", "today", "who won",
+"weather", "ceo of", "out yet" name the live state of the world and are never
+suppressed. Result on the corpus: 24/24 ordinary questions answer directly,
+24/24 world questions still get looked up.
 
-Work-mode continuations now carry the real step count in three bands: plenty
-left (**don't** rush or hand back a partial fix), enough to finish and verify
-(converge), and nearly out (land what you have).
+## The card says what it is
 
-## Error messages are prompts
+The boot card read **AUTONOMOUS SECURITY ASSISTANT**, which is the one thing
+Basilisk is *not* until you arm it. It now reads **GENERAL & CODING
+ASSISTANT**, with a line underneath saying Unleash arms the autonomous pentest
+agent.
 
-> …prompt-engineer your error responses to clearly communicate specific and
-> actionable improvements.
+## Quieter
 
-Audited the coding surface. Two real offenders fixed:
-
-- `workspace_verify` on a repo with no suite said *"no test command known"* —
-  what failed, nothing about what to do. It now names the repair, names the
-  fallback when there is genuinely no suite, and forbids reporting the change
-  as verified anyway.
-- `"no workspace open — import a repo zip first"` sent a model holding a
-  *directory* looking for a way to zip it. `workspace_import` has taken either
-  for several releases; the error string had never been updated.
-- `workspace_verify` with no repo open reported a missing **test command**,
-  which sent the model hunting for a test runner when the real problem was that
-  there was no repo.
+- **No competitor comparison.** The README, site and `llms.txt` lead with what
+  Basilisk scores and how to reproduce it, not with other people's numbers. The
+  cost argument stays, because that one is the actual design claim: a budget
+  open model produces the score, and if you need a frontier model to get a
+  result you have built a wrapper, not an agent.
+- **Less glow.** 125 chromatic box glows damped again (cap 0.12) and 23
+  coloured text halos damped for the first time — a halo behind a letterform is
+  what makes type look like a screensaver.
+- **The artwork came down with it.** The emblem, watermark and logo were the
+  brightest, most saturated thing on screen once the chrome went calm; their
+  highly-saturated pixels are trimmed on a curve, lightness and alpha
+  untouched.
 
 ## Also
 
-- New `tests/test_verifygate.py` (52 assertions), including the counter-property
-  that a turn which *did* verify is never gated — a gate that fires on correct
-  behaviour is a gate that gets switched off.
-- 4,491 assertions across 73 stdlib-only suites, zero red.
+- New `tests/test_websense.py` (64 assertions), including the three bugs the
+  corpus caught while it was being written — the worst being an arithmetic
+  guard that read `CVE-2026-1234` as 2026 minus 1234 and suppressed a live
+  vulnerability lookup.
+- 4,439 assertions across 72 stdlib-only suites, zero red.

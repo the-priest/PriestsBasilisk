@@ -6,8 +6,8 @@
 
 <br/>
 
-<img src="https://img.shields.io/badge/version-1.1.3.0-e11d2b?style=for-the-badge&labelColor=08090b" alt="version 1.1.3.0">
-<img src="https://img.shields.io/badge/tests-4491%20assertions-2ea043?style=for-the-badge&labelColor=08090b&logo=pytest&logoColor=2ea043" alt="4491 assertions">
+<img src="https://img.shields.io/badge/version-1.1.2.0-e11d2b?style=for-the-badge&labelColor=08090b" alt="version 1.1.2.0">
+<img src="https://img.shields.io/badge/tests-4439%20assertions-2ea043?style=for-the-badge&labelColor=08090b&logo=pytest&logoColor=2ea043" alt="4439 assertions">
 <img src="https://img.shields.io/badge/licence-MIT-e11d2b?style=for-the-badge&labelColor=08090b" alt="MIT">
 <img src="https://img.shields.io/badge/deps-stdlib%20%2B%20GTK-e11d2b?style=for-the-badge&labelColor=08090b" alt="stdlib + GTK">
 
@@ -42,11 +42,11 @@ Basilisk runs shell commands and edits files **as you**. Read the installer befo
 **Native packages** — recommended, because they resolve the GTK stack for you:
 
 ```bash
-sudo apt install ./priestsbasilisk_1.1.3.0-1_all.deb
+sudo apt install ./priestsbasilisk_1.1.2.0-1_all.deb
 ```
 
 ```bash
-sudo pacman -U priestsbasilisk-1.1.3.0-1-any.pkg.tar.zst
+sudo pacman -U priestsbasilisk-1.1.2.0-1-any.pkg.tar.zst
 ```
 
 An auditable `PKGBUILD` lives in `packaging/` and runs the whole test suite as its `check()` step. [`packaging/README.md`](packaging/README.md) covers what each package installs and where.
@@ -221,10 +221,6 @@ One loop, whether it is fixing your code or working a target, and the second hal
 - **Prove** — the test suite goes green, or the oracle confirms with a marker. Unproven ≠ done.
 - **Record** — what changed and what proved it, so the same ground is never re-covered.
 
-**"Not done until verified" is enforced, not requested.** An instruction in a prompt is advice, and advice is what a model drops on step forty of a long job. So the loop has a **gate**: if a turn changed files in the workspace and never once ran anything to check them, the turn does not end — Basilisk runs `workspace_verify` itself, which re-runs the repo's tests and classifies the result against the baseline, so the reply comes back saying what you fixed **and what you broke**. It fires at most once per request, and it decides on two facts — files were written, nothing was run — never on how confidently the reply was worded.
-
-The mirror of it points at research: ask something that needs a live source, and if no web tool ran all turn, the app performs the search itself rather than letting the turn end on a promise.
-
 **Steer it without stopping it:** while Basilisk is working, type a nudge and press **Enter** — it lands as a mid-run suggestion the loop folds in on its next step. The Stop control (click the send button, or Escape) is separate and always stops.
 
 <img src="https://capsule-render.vercel.app/api?type=rect&color=0:08090b,50:e11d2b,100:08090b&height=3" width="100%" alt="">
@@ -267,7 +263,7 @@ Capability and safety are decoupled on purpose.
 
 ## 🔬 Engineering
 
-**Stdlib only** for the engine. No pytest, no network, no fixtures, no account — **4,491 assertions across 73 suites**, run in under a minute. Four of those suites are adversarial probes that report *findings* rather than a pass count, so their checks are not in that total.
+**Stdlib only** for the engine. No pytest, no network, no fixtures, no account — **4,439 assertions across 72 suites**, run in under a minute. Four of those suites are adversarial probes that report *findings* rather than a pass count, so their checks are not in that total.
 
 Every fix ships with a regression that *fails* on the old code and *passes* on the new. Real GTK is spun up under Xvfb for the UI suites; the chat-bubble layout alone is pinned by 140 fitting checks. Repo work is covered end-to-end rather than layer by layer — a deliberately broken repo is opened as a folder, baselined red, edited through four different tool-call dialects, verified green, diffed and exported, with a 6,000-line file paged and rewritten on the way past.
 
@@ -297,7 +293,7 @@ If it earns its place in your kit, star the repo and tell someone who would use 
 
 <br/>
 
-### Built by one person, around a day job. Verified by 4,491 assertions. Priced at nothing.
+### Built by one person, around a day job. Verified by 4,439 assertions. Priced at nothing.
 
 <sub>Clone it, read it, run the suite, then point it at something you own.</sub>
 

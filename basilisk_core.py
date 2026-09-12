@@ -7165,37 +7165,11 @@ def tool_workspace_verify(command: str = "",
     edit — a repo-wide change you did not verify is a guess."""
     try:
         _w = _ws()
-        # CHECK THE REAL PRECONDITION FIRST. With no repo open, baseline_status
-        # returns empty and detect_test_command finds nothing, so this reported
-        # "no test command known for this repo" — naming a missing test command
-        # when the actual problem is that there is no repo. A model reading that
-        # goes hunting for a test runner instead of opening the workspace.
-        _st = _w.status() or {}
-        if not _st.get("open", True):
-            return {"ok": False,
-                    "error": "no workspace open, so there is nothing to verify",
-                    "next": ("Call workspace_import with the repo's path (a "
-                             "directory or a .zip), then retry.")}
         bl = _w.baseline_status()
         cmd = (command or (bl.get("baseline") or {}).get("command")
                or _w.detect_test_command().get("command") or "")
         if not cmd:
-            # AN ERROR MESSAGE IS A PROMPT. "no test command known" tells the
-            # model what failed and nothing about what to do instead, so it
-            # either gives up on verifying or guesses a command at random.
-            # Say what would fix it, and say what to do when nothing would.
-            return {
-                "ok": False,
-                "error": "no test command known for this repo",
-                "next": (
-                    "Either pass one explicitly - workspace_verify "
-                    "{\"command\": \"pytest -q\"} - or run the repo's own "
-                    "check with `run`. If this repo genuinely has no automated "
-                    "tests, prove the change another way (import the module, "
-                    "execute the script, diff the output) and SAY in your "
-                    "report that there was no suite to run. Do not report the "
-                    "change as verified when nothing verified it."),
-            }
+            return {"ok": False, "error": "no test command known"}
         r = _ws_run_tests(cmd, timeout)
         if r.get("refused"):
             return r

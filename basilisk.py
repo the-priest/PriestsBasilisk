@@ -186,7 +186,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.basilisk"
 APP_NAME = "Basilisk"
-VERSION = "1.1.3.0"
+VERSION = "1.1.2.0"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -5777,74 +5777,6 @@ def _needs_web_verification(text: str) -> bool:      # noqa: F811
 # was a better reader of the reply — a stall-phrase list, a printed-URL
 # recovery — and each one was one unseen phrasing away from failing again.
 # This one does not read the reply at all.
-# ══════════════════════════════════════════════════════════════════════
-#  THE VERIFICATION GATE — the promise gate, pointed at the other half
-# ══════════════════════════════════════════════════════════════════════
-# WORK MODE's contract already tells the model, at some length, to run
-# something that proves its change: "VERIFY, DON'T ASSUME", "ITERATE UNTIL IT
-# ACTUALLY PASSES". That is advice, and advice is exactly what a model drops
-# on step forty of a long job. Anthropic's own write-up of this names the
-# failure and the fix in one line:
-#
-#     "Claude stops when the work looks done. Without a check it can run,
-#      'looks done' is the only signal available, and you become the
-#      verification loop."
-#
-# and separates the two mechanisms: a prompt instruction is advisory, a Stop
-# hook is deterministic and "blocks the turn from ending until it passes".
-#
-# Basilisk already HAS the check — `workspace_verify` re-runs the repo's tests
-# and classifies the result against a baseline, so it reports what you fixed
-# AND what you broke. The gap was never the check. It was that nothing made
-# the turn go through it.
-#
-# So this is the promise gate's exact architecture aimed at the other half of
-# the product. Same shape, same reasons:
-#
-#   · it does NOT read the reply. Every earlier attempt at "did it really
-#     finish?" was a better reader of the model's prose, and each was one
-#     phrasing away from failing. Two FACTS decide this: files were written
-#     this request, and nothing was ever run to check them.
-#   · it fires at most ONCE per request, and after it fires a verifier HAS
-#     run, so the condition cannot re-arm. A floor, not a loop.
-#   · it is pure and total. Junk in, None out - a gate that raises is a gate
-#     that fails open on exactly the turn it exists to catch.
-#
-# WORKSPACE writes only. `workspace_write`/`workspace_replace` can only
-# succeed with a repo open, which is what makes `workspace_verify` applicable;
-# a bare `write_file` outside a workspace has nothing to re-run.
-_WORKSPACE_WRITE_TOOLS = frozenset({
-    "workspace_write", "workspace_replace", "workspace_revert",
-})
-# Anything that produces GROUND TRUTH from the environment rather than from
-# the model. `run` counts: a model that ran its own test command has verified
-# its work, and insisting on our tool instead would be ceremony.
-_VERIFY_TOOLS = frozenset({
-    "workspace_verify", "workspace_health", "run", "launch_app",
-})
-
-
-def unverified_work_gap(tools_used, already_forced: bool = False):
-    """The verifier to run, or None to let the turn end.
-
-    True when this request CHANGED a repo and never once asked the environment
-    whether the change works."""
-    try:
-        if already_forced:
-            return None
-        try:
-            used = set(tools_used or ())
-        except Exception:
-            return None
-        if not (used & _WORKSPACE_WRITE_TOOLS):
-            return None                   # nothing was changed; nothing to prove
-        if used & _VERIFY_TOOLS:
-            return None                   # it already checked its own work
-        return "workspace_verify"
-    except Exception:
-        return None
-
-
 def forced_search_url(question: str, tools_used, already_forced: bool = False):
     """The URL the app should read ITSELF, or None to let the turn end.
 
@@ -9031,7 +8963,6 @@ class MainWindow(Adw.ApplicationWindow):
     _tools_used_this_request: set = frozenset()
     _promise_pushes: int = 0
     _forced_fetch_done: bool = False
-    _forced_verify_done: bool = False
 
     def __init__(self, app: "BasiliskApp"):
         super().__init__(application=app)
@@ -10846,7 +10777,6 @@ class MainWindow(Adw.ApplicationWindow):
         ("_bad_propose_retries",       0),
         ("_promise_pushes",            0),
         ("_forced_fetch_done",         False),
-        ("_forced_verify_done",        False),
         ("_leash_work_turn",           False),
         ("_fabricated_this_turn",      0),
         ("_tools_used_this_request",   frozenset),
@@ -12597,7 +12527,6 @@ class MainWindow(Adw.ApplicationWindow):
             self._tools_used_this_request = set()
             self._promise_pushes = 0
             self._forced_fetch_done = False
-            self._forced_verify_done = False
 
         # Limit how many model round-trips a turn may chain.  Rather than
         # dead-ending with "chain too long" and no answer (annoying), once
@@ -12896,45 +12825,6 @@ class MainWindow(Adw.ApplicationWindow):
                 self.terminal_log(
                     "💬 answer mode: research, confirm, answer once", "dim")
         elif _leash_work:
-            # ── GROUND TRUTH ABOUT THE BUDGET ──
-            # The model is told to iterate until it passes and is given a
-            # large budget to do it with — and is never told where in that
-            # budget it actually is. So it cannot pace itself: it either wraps
-            # up far too early or walks into the cap mid-edit and has to
-            # "report" from a half-finished state.
-            #
-            # Anthropic's multi-agent write-up puts effort rules in the prompt
-            # for exactly this reason ("simple fact-finding requires just 1
-            # agent with 3-10 tool calls... complex research might use more
-            # than 10 subagents"), to stop both under- and over-investment.
-            # This is the same idea grounded in a real number rather than a
-            # guess: the step count is a fact the host already has, and the
-            # agent-loop guidance is explicit that the agent should "gain
-            # ground truth from the environment at each step".
-            #
-            # Only on continuations — on turn 1 the number is always "1 of N"
-            # and says nothing, and the long-form contract is already the
-            # expensive part of that message.
-            _budget_line = ""
-            if _continuation:
-                _used = int(getattr(self, "_tool_chain_depth", 0) or 0)
-                _left = max(0, _ans_cap - _used)
-                if _left <= 8:
-                    _budget_line = (
-                        "\n- BUDGET: step %d of %d — you are nearly out. Land "
-                        "what you have: finish the edit you are mid-way "
-                        "through, run the check once, and report. Do not start "
-                        "anything new." % (_used, _ans_cap))
-                elif _left <= 25:
-                    _budget_line = (
-                        "\n- BUDGET: step %d of %d. Enough left to finish and "
-                        "verify, not enough to explore. Converge."
-                        % (_used, _ans_cap))
-                else:
-                    _budget_line = (
-                        "\n- BUDGET: step %d of %d — plenty. Do not rush the "
-                        "job or hand back a partial fix to save steps."
-                        % (_used, _ans_cap))
             # ── WORK MODE (leashed) ──
             # Same leash — no offensive posture, no mission latch, no
             # never-stop directive — but the turn is a JOB, so the model is
@@ -12969,7 +12859,7 @@ class MainWindow(Adw.ApplicationWindow):
                     "- You stop when the change is made AND something you ran "
                     "proves it, or when you are genuinely blocked — and then "
                     "you say exactly what blocked you. If it is not verified, "
-                    "say so rather than claiming done.%s]" % _budget_line).strip()
+                    "say so rather than claiming done.]").strip()
             else:
                 addendum = (addendum + "\n\n[WORK MODE (leashed) — THIS turn is a "
                     "piece of WORK, not a question. The operator wants the change "
@@ -13022,8 +12912,7 @@ class MainWindow(Adw.ApplicationWindow):
                     "what you ran, what the result actually was. If something is "
                     "still broken or you could not verify it, SAY SO plainly — a "
                     "false 'done' is worse than an honest 'this part still "
-                    "fails'. Then stop; do not latch a mission.%s]"
-                    % _budget_line).strip()
+                    "fails'. Then stop; do not latch a mission.]").strip()
             if not _continuation:
                 self.terminal_log(
                     "🔧 work mode: read, edit, run, iterate until green", "dim")
@@ -13844,48 +13733,6 @@ class MainWindow(Adw.ApplicationWindow):
                           "you actually read and cite it. Do not answer from "
                           "memory, and do not say you will fetch something — "
                           "fetch it.]")
-
-        # ── THE VERIFICATION GATE ──
-        # Sits beside the promise gate above and shares its shape exactly: no
-        # executable call left, so the turn is ENDING — and it is ending on a
-        # repo it changed and never checked. See unverified_work_gap.
-        #
-        # ONE ROUND TRIP IS THE PRICE, AND IT IS WORTH IT. If the change was a
-        # README rather than code, the suite runs, passes, and the model says
-        # so — one wasted step. If the change was code, this is the difference
-        # between a verified fix and a plausible one. That trade is not close.
-        # The deferred note below tells the model both branches so a doc-only
-        # change can close out honestly instead of casting about.
-        if (not executable and not cancelled and not self._stop_requested
-                and self.current_agent_mode and not self._tools_locked
-                and not self._mission_active
-                and not getattr(self, "_forced_verify_done", False)):
-            _vtool = unverified_work_gap(
-                getattr(self, "_tools_used_this_request", ()),
-                getattr(self, "_forced_verify_done", False))
-            if _vtool:
-                _rec = parse_tool_calls(
-                    '<tool name="%s">{}</tool>' % _vtool)
-                if _rec:
-                    self._forced_verify_done = True
-                    executable = _rec
-                    self.terminal_log(
-                        "↩ you changed the repo and never ran anything "
-                        "— verifying it myself", "error")
-                    self._activity_note(
-                        "files were changed and nothing was run to prove it "
-                        "- running the check", "gate")
-                    self._deferred_note = (
-                        (self._deferred_note or "")
-                        + "\n[system note: this turn CHANGED FILES and never "
-                          "ran anything that proves the change works, so the "
-                          "check was run FOR you. Read the result now. If "
-                          "`broke` is non-empty those are YOUR regressions and "
-                          "you must fix them before you stop. If it still "
-                          "fails, read the real error and fix the real cause. "
-                          "If there is no test command, or the change was not "
-                          "code, say that plainly in your report and stop — do "
-                          "not invent a verification you did not run.]")
 
         if _recover_fence:
             _cmd = self._shell_block_command(final)
