@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 <title>Basilisk — Local AI Coding Assistant with an Armable Pentest Mode (open source)</title>
-<meta name="description" content="Basilisk is an open-source Linux desktop AI assistant: a general and coding assistant that opens your repo as a folder or a zip, edits it, runs YOUR tests and iterates until they pass, and reads the live web instead of guessing. Arm it and the same loop becomes an autonomous penetration-testing agent, scoring 87/113 on OWASP Juice Shop and 22/22 on the Duck Store API black-box. Runs locally, MIT-licensed, verified by 4,439 assertions.">
+<meta name="description" content="Basilisk is an open-source Linux desktop AI assistant: a general and coding assistant that opens your repo as a folder or a zip, edits it, runs YOUR tests and iterates until they pass, and reads the live web instead of guessing. Arm it and the same loop becomes an autonomous penetration-testing agent, scoring 87/113 on OWASP Juice Shop and 22/22 on the Duck Store API black-box. Runs locally, MIT-licensed, verified by 4,582 assertions.">
 <meta name="keywords" content="AI penetration testing agent, autonomous pentest agent, LLM red team tool, open source security tool, automated exploitation, offensive security AI, OWASP Juice Shop benchmark, Kali Linux AI, DeepSeek pentest, Basilisk, AI hacking tool, autonomous security agent, AI code repair agent, autonomous bug fixing, AI coding assistant Linux">
 <meta name="author" content="the-priest">
 <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1">
@@ -17,7 +17,7 @@
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Basilisk">
 <meta property="og:title" content="Basilisk — Local AI Coding Assistant with an Armable Pentest Mode">
-<meta property="og:description" content="An open-source AI pentester that runs on your machine and proves every exploit — and repairs your own repo the same way. 87/113 OWASP Juice Shop black-box · 22/22 Duck Store API · 4,439 assertions. MIT-licensed.">
+<meta property="og:description" content="An open-source AI pentester that runs on your machine and proves every exploit — and repairs your own repo the same way. 87/113 OWASP Juice Shop black-box · 22/22 Duck Store API · 4,582 assertions. MIT-licensed.">
 <meta property="og:url" content="https://the-priest.github.io/PriestsBasilisk/">
 <meta property="og:image" content="https://the-priest.github.io/PriestsBasilisk/assets/brand/banner.png">
 <meta property="og:image:alt" content="Basilisk — local AI coding assistant with an armable pentest mode">
@@ -74,7 +74,7 @@
     "Baseline-before-edit: records which of your tests were already failing, so pre-existing failures are never misreported as agent damage",
     "Export gate: refuses to hand back a change set it has not verified, or one whose last verification reported a regression",
     "Contained extraction: zip slip, symlink entries and zip bombs refused before anything is written, and refusals are reported rather than silently dropped",
-    "Verified by 4,439 assertions across 72 stdlib-only test suites, runnable offline before you trust it"
+    "Verified by 4,582 assertions across 75 stdlib-only test suites, runnable offline before you trust it"
   ]
 }
 </script>
@@ -126,7 +126,7 @@
     {
       "@type": "Question",
       "name": "How do I know the safety guarantees are real and not marketing?",
-      "acceptedAnswer": { "@type": "Answer", "text": "Run the suite: for f in tests/test_*.py; do python3 \"$f\"; done. It's stdlib-only \u2014 no pytest, no network, no account \u2014 4,439 assertions across 72 suites, done in under a minute. Three things make it worth more than a green tick: every fixed bug gets a test written to fail against the previous release, so regressions can't quietly return; performance is asserted as a scaling exponent rather than a millisecond ceiling, so it fails the same on a fast box and a slow one; and every safety check is paired with a corpus of ordinary work it must stay silent on, so over-blocking fails the suite too." }
+      "acceptedAnswer": { "@type": "Answer", "text": "Run the suite: for f in tests/test_*.py; do python3 \"$f\"; done. It's stdlib-only \u2014 no pytest, no network, no account \u2014 4,582 assertions across 75 suites, done in under a minute. Three things make it worth more than a green tick: every fixed bug gets a test written to fail against the previous release, so regressions can't quietly return; performance is asserted as a scaling exponent rather than a millisecond ceiling, so it fails the same on a fast box and a slow one; and every safety check is paired with a corpus of ordinary work it must stay silent on, so over-blocking fails the suite too." }
     },
     {
       "@type": "Question",
@@ -540,7 +540,7 @@
   <section class="hero">
     <div class="wrap hero-grid">
       <div>
-        <span class="eyebrow">Local AI assistant · open source · v1.1.2.0</span>
+        <span class="eyebrow">Local AI assistant · open source · v1.1.4.0</span>
         <h1>An assistant that does the work, then <span class="neon-text">proves</span> it worked.</h1>
         <p class="sub">Basilisk is a <strong>native Linux desktop AI assistant</strong> — it gives a language model you supply a real workspace, a shell, a memory, and a rule it cannot talk its way around: nothing is done until something you can read says so.</p>
         <p class="sub lead"><strong>Hand it a repository, as a folder or a zip.</strong> It runs your tests <em>before</em> it changes a line, edits the tree, runs them again, and keeps going until they pass — refusing to hand back work it has not verified. It reads the live web in full instead of guessing from training data. It drives your shell and your desktop, sees images, and speaks. <b class="ok">MIT — free to own, free to run.</b></p>
@@ -563,7 +563,7 @@
 
     <div class="wrap">
       <div class="stats reveal">
-        <div class="stat"><div class="n">4,439</div><div class="l">Assertions · 72 suites · stdlib only</div></div>
+        <div class="stat"><div class="n">4,582</div><div class="l">Assertions · 75 suites · stdlib only</div></div>
         <div class="stat"><div class="n">149</div><div class="l">Tools · workspace, shell, web, desktop</div></div>
         <div class="stat"><div class="n">0</div><div class="l">Accounts · telemetry · usage caps</div></div>
         <div class="stat"><div class="n">87<span class="slash">/</span>113</div><div class="l">Juice Shop · armed mode · black-box</div></div>
@@ -608,7 +608,7 @@
         <div class="truth"><b>Your tests are the verdict</b><span>Baseline taken before it edits. What it fixed, what it broke, what still fails — computed from your suite, not its own opinion.</span></div>
         <div class="truth"><b>A receipt for everything</b><span>Every command it runs is hashed into a tamper-evident ledger as it goes — a diff you can review, or findings you can hand to a client.</span></div>
         <div class="truth"><b>A floor it can't cross</b><span>The irreversible command class is blocked in two places, below the model. There is no "Run anyway."</span></div>
-        <div class="truth"><b>Verified, not asserted</b><span>4,439 stdlib-only assertions across 72 suites. Run them yourself before you trust it with a shell.</span></div>
+        <div class="truth"><b>Verified, not asserted</b><span>4,582 stdlib-only assertions across 75 suites. Run them yourself before you trust it with a shell.</span></div>
       </div>
     </div>
   </section>
@@ -638,7 +638,7 @@
           <p>Export is the one moment your real repository is at risk, and "the model said it was fine" is not evidence. Unverified edits, or a last run that reported a regression, and the export is refused. You can force it — but you have to ask, and the result is flagged.</p>
         </div>
         <div class="card">
-          <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M4 4h11l5 5v11a1.1.2.0 1-1 1H4a1.1.2.0 1-1-1V5a1.1.2.0 1 1-1z"/><path d="M14 4v6h6"/></svg>
+          <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M4 4h11l5 5v11a1.1.4.0 1-1 1H4a1.1.4.0 1-1-1V5a1.1.4.0 1 1-1z"/><path d="M14 4v6h6"/></svg>
           <h3>It writes whole files, not fragments</h3>
           <p>A 400-line file is 6&ndash;8k tokens. A chat-sized output budget truncates that mid-string, inside the write call&rsquo;s own JSON &mdash; which arrives as a mangled edit and reads like the model lost its mind. A turn that is doing work gets a file-sized budget and a time limit that scales with it. Whole-file writes are pinned <b>byte-for-byte across eight tool-call dialects</b>, and a read too big to fit says <span class="inline-code">[INCOMPLETE]</span> inside the content rather than quietly looking finished.</p>
         </div>
@@ -947,9 +947,9 @@ docker run -d -p 3000:3000 -e NODE_ENV=unsafe \
 
       <div class="grid g2 reveal">
         <div class="card">
-          <h3>v1.1.2.0 · the floor, and the reporting around it</h3>
+          <h3>v1.1.4.0 · the floor, and the reporting around it</h3>
           <p>The floor gets fuzzed every release, and every candidate bypass is re-run in real <span class="inline-code">bash</span> before it counts &mdash; the newest harness shims the binary itself, so a &ldquo;bypass&rdquo; means the shell really invoked <span class="inline-code">rm</span> with the destructive argument, not that a regex looked wrong. <b>v9.7.0</b> closed twenty-one shapes, among them <span class="inline-code">timeout 5 rm -rf /</span> and <span class="inline-code">( rm -rf ~ )</span>. <b>v1.0.0.22</b> closed sixteen more in two classes nothing had covered: a raw block device was not a &ldquo;critical file&rdquo;, so <span class="inline-code">truncate -s 0 /dev/sda</span> was refused by nothing; and a target hidden behind a variable &mdash; <span class="inline-code">X=/; rm -rf "$X"</span> &mdash; never puts the literal next to the verb.</p>
-          <p><b>v1.1.2.0</b> turned the same method on the <em>reporting</em> and found a worse class of bug than a missed refusal: a provider replying <span class="inline-code">max_tokens is too large for this model</span> was matched against the credential-error word list, which contained the bare word &ldquo;token&rdquo;, and came back to the operator as <b>&ldquo;authentication failed &mdash; check your API key&rdquo;</b>. A gate that refuses the right thing for the wrong stated reason sends you to fix something that was never broken, so the auth phrases now have to name a credential and the budget check runs first.</p>
+          <p><b>v1.1.4.0</b> turned the same method on the <em>reporting</em> and found a worse class of bug than a missed refusal: a provider replying <span class="inline-code">max_tokens is too large for this model</span> was matched against the credential-error word list, which contained the bare word &ldquo;token&rdquo;, and came back to the operator as <b>&ldquo;authentication failed &mdash; check your API key&rdquo;</b>. A gate that refuses the right thing for the wrong stated reason sends you to fix something that was never broken, so the auth phrases now have to name a credential and the budget check runs first.</p>
         </div>
         <div class="card">
           <h3>The method mattered more than the fixes</h3>
@@ -988,12 +988,12 @@ docker run -d -p 3000:3000 -e NODE_ENV=unsafe \
         <p>Native packages are the short path — they resolve the GTK stack through your own package manager, and they install the desktop entry and icon with it.</p>
       </div>
       <div class="code reveal">
-        <div class="code-bar"><span>Kali · Debian · Ubuntu</span><button class="copy" data-copy="sudo apt install ./priestsbasilisk_1.1.2.0-1_all.deb">Copy</button></div>
-        <pre>sudo apt install ./priestsbasilisk_1.1.2.0-1_all.deb</pre>
+        <div class="code-bar"><span>Kali · Debian · Ubuntu</span><button class="copy" data-copy="sudo apt install ./priestsbasilisk_1.1.4.0-1_all.deb">Copy</button></div>
+        <pre>sudo apt install ./priestsbasilisk_1.1.4.0-1_all.deb</pre>
       </div>
       <div class="code reveal">
-        <div class="code-bar"><span>CachyOS · Arch</span><button class="copy" data-copy="sudo pacman -U priestsbasilisk-1.1.2.0-1-any.pkg.tar.zst">Copy</button></div>
-        <pre>sudo pacman -U priestsbasilisk-1.1.2.0-1-any.pkg.tar.zst</pre>
+        <div class="code-bar"><span>CachyOS · Arch</span><button class="copy" data-copy="sudo pacman -U priestsbasilisk-1.1.4.0-1-any.pkg.tar.zst">Copy</button></div>
+        <pre>sudo pacman -U priestsbasilisk-1.1.4.0-1-any.pkg.tar.zst</pre>
       </div>
       <p class="thesis reveal" style="margin-top:1rem">An auditable <span class="inline-code">PKGBUILD</span> ships in <span class="inline-code">packaging/</span> and runs the entire test suite as its <span class="inline-code">check()</span> step, so <span class="inline-code">makepkg -si</span> will not produce a package from an engine that fails its own suite. On Arch the modules install to <span class="inline-code">/usr/share/priestsbasilisk</span> rather than site-packages on purpose: Arch is rolling, and a path pinned to <span class="inline-code">python3.13/site-packages</span> stops being importable the day python moves to 3.14.</p>
 
@@ -1079,7 +1079,7 @@ less install.sh          <span class="c"># read it first</span>
         <details><summary>What vulnerabilities can Basilisk exploit? <span class="pl">+</span></summary><div class="a">Every major web-vulnerability class via general-purpose exploit builders: SQL injection (5 DBMS plus sqlmap), JWT attacks, NoSQL, XXE, SSTi, SSRF, insecure deserialization to RCE, prototype pollution, path traversal, cross-site scripting, OS command injection, IDOR / broken access control, race conditions, file-upload bypass, GraphQL abuse, open redirect and CORS misconfiguration — plus API-first classes such as BOLA, BFLA and mass assignment.</div></details>
         <details><summary>Is Basilisk safe to run? What stops it doing damage? <span class="pl">+</span></summary><div class="a">The irreversible command class (disk wipes, fork bombs, raw block-device writes) is hard-blocked in two independent places with no "Run anyway" option. Untrusted input is quarantined as data rather than instructions, self-written code runs in a bubblewrap jail, and Basilisk will not produce standalone weaponized malware. Use it only on systems you're authorized to test.</div></details>
         <details><summary>Can Basilisk fix my code, not just attack things? <span class="pl">+</span></summary><div class="a">Yes &mdash; it is the <strong>default</strong> mode, not a side feature. Hand it a <strong>folder</strong> or a <span class="inline-code">.zip</span> of your repository and it searches, reads and edits the whole tree, iterating until they pass, runs <strong>your</strong> test suite, and hands back a fixed zip. It records which tests were already failing before it touched anything, so pre-existing failures are never misreported as its own damage, and it refuses to export a change set it hasn't verified. It will not edit your tests to make them pass.</div></details>
-        <details><summary>How do I know the safety guarantees are real and not marketing? <span class="pl">+</span></summary><div class="a">Run the suite: <span class="inline-code">for f in tests/test_*.py; do python3 "$f"; done</span>. It's stdlib-only — no pytest, no network, no account — 4,439 assertions across 72 suites, done in under a minute. Three things make it worth more than a green tick: every fixed bug gets a test written to <strong>fail against the previous release</strong>, so regressions can't quietly return; performance is asserted as a scaling exponent rather than a millisecond ceiling, so it fails the same on a fast box and a slow one; and every safety check is paired with a corpus of ordinary work it must stay silent on, so over-blocking fails the suite too.</div></details>
+        <details><summary>How do I know the safety guarantees are real and not marketing? <span class="pl">+</span></summary><div class="a">Run the suite: <span class="inline-code">for f in tests/test_*.py; do python3 "$f"; done</span>. It's stdlib-only — no pytest, no network, no account — 4,582 assertions across 75 suites, done in under a minute. Three things make it worth more than a green tick: every fixed bug gets a test written to <strong>fail against the previous release</strong>, so regressions can't quietly return; performance is asserted as a scaling exponent rather than a millisecond ceiling, so it fails the same on a fast box and a slow one; and every safety check is paired with a corpus of ordinary work it must stay silent on, so over-blocking fails the suite too.</div></details>
         <details><summary>Has Basilisk ever had a security hole of its own? <span class="pl">+</span></summary><div class="a">Yes, and they get published. The hard block on irreversible commands is fuzzed against a <strong>live shell</strong> every release &mdash; each candidate bypass re-run in real bash, the newest harness shimming the binary itself so a bypass means the shell truly invoked <span class="inline-code">rm</span> with the destructive argument. <b>v9.7.0</b> closed twenty-one shapes including <span class="inline-code">timeout 5 rm -rf /</span>. <b>v1.0.0.22</b> closed sixteen more: a raw block device was not treated as a critical file, so <span class="inline-code">truncate -s 0 /dev/sda</span> was refused by nothing, and a target hidden behind a shell variable never put the literal next to the verb. The same release caught the <em>model</em> fabricating its own tool results &mdash; inventing a fetch, a status code and a page body &mdash; now detected and deleted before it can be shown, stored or replayed to itself as history. The honest claim isn't that Basilisk has never had a hole &mdash; it's that the holes get hunted, published and pinned. Find another and open an issue.</div></details>
         <details><summary>What are the requirements? <span class="pl">+</span></summary><div class="a">Python 3.10+ and Linux with GTK4 / libadwaita (X11 or Wayland). It is built and tested on Kali and CachyOS, and runs on any Arch-, Debian- or Fedora-based distro — package manager, escalation tool and wordlist paths are auto-detected.</div></details>
       </div>

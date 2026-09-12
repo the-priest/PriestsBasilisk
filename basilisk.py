@@ -186,7 +186,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.basilisk"
 APP_NAME = "Basilisk"
-VERSION = "1.1.2.0"
+VERSION = "1.1.4.0"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -3718,6 +3718,12 @@ window.dialog, dialog, .messagedialog, .dialog-content {
    A popover is its own native surface and cannot be translucent on X11
    without a compositor, which would have made this the one surface in the
    app that breaks when the rest still works. */
+/* In the transcript it is a plain collapsible block, not a floating card:
+   no drop shadow to lift it off a surface it is already part of. */
+.activity-panel-inline {
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.10);
+    background-color: rgba(11, 15, 21, 0.52);
+}
 .activity-panel {
     /* NEARLY OPAQUE, and that is not a style choice. Every other glass
        surface in this app sits over ARTWORK; this one floats over the
@@ -5777,6 +5783,126 @@ def _needs_web_verification(text: str) -> bool:      # noqa: F811
 # was a better reader of the reply — a stall-phrase list, a printed-URL
 # recovery — and each one was one unseen phrasing away from failing again.
 # This one does not read the reply at all.
+# ══════════════════════════════════════════════════════════════════════
+#  THE VERIFICATION GATE — the promise gate, pointed at the other half
+# ══════════════════════════════════════════════════════════════════════
+# WORK MODE's contract already tells the model, at some length, to run
+# something that proves its change: "VERIFY, DON'T ASSUME", "ITERATE UNTIL IT
+# ACTUALLY PASSES". That is advice, and advice is exactly what a model drops
+# on step forty of a long job. Anthropic's own write-up of this names the
+# failure and the fix in one line:
+#
+#     "Claude stops when the work looks done. Without a check it can run,
+#      'looks done' is the only signal available, and you become the
+#      verification loop."
+#
+# and separates the two mechanisms: a prompt instruction is advisory, a Stop
+# hook is deterministic and "blocks the turn from ending until it passes".
+#
+# Basilisk already HAS the check — `workspace_verify` re-runs the repo's tests
+# and classifies the result against a baseline, so it reports what you fixed
+# AND what you broke. The gap was never the check. It was that nothing made
+# the turn go through it.
+#
+# So this is the promise gate's exact architecture aimed at the other half of
+# the product. Same shape, same reasons:
+#
+#   · it does NOT read the reply. Every earlier attempt at "did it really
+#     finish?" was a better reader of the model's prose, and each was one
+#     phrasing away from failing. Two FACTS decide this: files were written
+#     this request, and nothing was ever run to check them.
+#   · it fires at most ONCE per request, and after it fires a verifier HAS
+#     run, so the condition cannot re-arm. A floor, not a loop.
+#   · it is pure and total. Junk in, None out - a gate that raises is a gate
+#     that fails open on exactly the turn it exists to catch.
+#
+# WORKSPACE writes only. `workspace_write`/`workspace_replace` can only
+# succeed with a repo open, which is what makes `workspace_verify` applicable;
+# a bare `write_file` outside a workspace has nothing to re-run.
+_WORKSPACE_WRITE_TOOLS = frozenset({
+    "workspace_write", "workspace_replace", "workspace_revert",
+})
+# Anything that produces GROUND TRUTH from the environment rather than from
+# the model. `run` counts: a model that ran its own test command has verified
+# its work, and insisting on our tool instead would be ceremony.
+# ══════════════════════════════════════════════════════════════════════
+#  WHICH ACTIONS CHANGE THE ANSWER OTHER ACTIONS WOULD GIVE
+# ══════════════════════════════════════════════════════════════════════
+# Fed to ActionLog.record so the repeat guard counts a WINDOW rather than a
+# lifetime. Its docstring carries the reproduction; the short version is that
+# the guard compared labels, so it could not tell a scanner re-run (nothing
+# changed, refuse it) from a verifier re-run after an edit (everything
+# changed, that IS the job) — and it was refusing the second one from the
+# third call onwards, for the life of the chat, while the persona was telling
+# the model "workspace_verify. Every time."
+#
+# MEMBERSHIP RULE: a tool belongs here if running it could make a LATER,
+# DIFFERENT action return something else. Writes, deletions, moves, command
+# execution, arming and firing, recording evidence, changing scope. A pure
+# read — status, tree, search, read, verify, score — does not, and must not
+# be here: an action never resets its OWN window (see record), so adding a
+# read here would only let it excuse OTHER actions' repeats.
+_STATE_CHANGING_TOOLS = frozenset({
+    # the workspace
+    "workspace_write", "workspace_replace", "workspace_revert",
+    "workspace_import", "workspace_close", "workspace_delete",
+    "workspace_baseline", "workspace_export",
+    # the filesystem
+    "write_file", "propose_edit", "propose", "make_dir", "move_path",
+    "copy_path", "delete_path",
+    # execution
+    "run", "launch_app", "press_key", "type_text", "media_control",
+    "focus_window", "close_window", "reset_password",
+    # the engagement: arming, firing, and anything that records a fact
+    "oracle_arm", "oracle_check", "oracle_listen", "submit_flag",
+    "verify_solve", "loot_record", "asset_record", "report_findings",
+    "reflect_findings", "graph_ingest", "evidence_engagement",
+    "scope_set", "scope_exclude", "scope_window", "scope_authorisation",
+    "skill_save", "memory_save", "memory_forget", "notify",
+})
+
+
+def _action_changes_state(label: str) -> bool:
+    """Does the action behind this label change what a later one would say?
+
+    `label` is `_action_label`'s "<tool>: <argument>" form, or a bare tool
+    name for a no-argument call. Total: an unknown tool is treated as NOT
+    state-changing, which is the conservative direction — it leaves the
+    guard exactly as strict as it is today rather than quietly widening it.
+    """
+    try:
+        name = (label or "").split(":", 1)[0].strip()
+        return name in _STATE_CHANGING_TOOLS
+    except Exception:
+        return False
+
+
+_VERIFY_TOOLS = frozenset({
+    "workspace_verify", "workspace_health", "run", "launch_app",
+})
+
+
+def unverified_work_gap(tools_used, already_forced: bool = False):
+    """The verifier to run, or None to let the turn end.
+
+    True when this request CHANGED a repo and never once asked the environment
+    whether the change works."""
+    try:
+        if already_forced:
+            return None
+        try:
+            used = set(tools_used or ())
+        except Exception:
+            return None
+        if not (used & _WORKSPACE_WRITE_TOOLS):
+            return None                   # nothing was changed; nothing to prove
+        if used & _VERIFY_TOOLS:
+            return None                   # it already checked its own work
+        return "workspace_verify"
+    except Exception:
+        return None
+
+
 def forced_search_url(question: str, tools_used, already_forced: bool = False):
     """The URL the app should read ITSELF, or None to let the turn end.
 
@@ -6200,9 +6326,23 @@ class ActivityFeedWidget(Gtk.Box):
         "gate": "!",
     }
 
-    def __init__(self):
+    def __init__(self, inline: bool = False):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.add_css_class("activity-feed")
+        # ── TWO PLACEMENTS, ONE WIDGET ──
+        # A LIVE feed is a status chip on the button tray, and its step list
+        # floats over the conversation from the window's overlay (see
+        # MainWindow._dock_feed). A REPLAYED one is a record sitting inside
+        # the transcript, and its step list has to open IN FLOW underneath it
+        # — a panel that jumps to the bottom of the screen is not the row you
+        # clicked.
+        #
+        # The first cut of the chip rewrite had only the docked placement, so
+        # a replayed feed built a panel that was never parented by anything:
+        # clicking its header set the chevron, set reveal_child, and put
+        # nothing on screen. Verified under real GTK (parent None, mapped
+        # False) — a control that lies about having opened.
+        self._inline = bool(inline)
         self._steps: Dict[int, Dict[str, Any]] = {}
         self._order: List[int] = []
         self._next_id = 1
@@ -6319,11 +6459,20 @@ class ActivityFeedWidget(Gtk.Box):
         self._panel.set_transition_duration(160)
         self._panel.set_child(_frame)
         self._panel.set_reveal_child(False)
-        self._panel.set_halign(Gtk.Align.END)
-        self._panel.set_valign(Gtk.Align.END)
-        self._panel.set_margin_end(14)
-        self._panel.set_margin_bottom(10)
         self._panel.set_can_target(True)
+        if self._inline:
+            # In the transcript: an ordinary collapsible block under its own
+            # header. No floating chrome, no overlay owner — it is parented
+            # here and nowhere else.
+            _frame.add_css_class("activity-panel-inline")
+            self._panel.set_halign(Gtk.Align.FILL)
+            self._panel.set_margin_top(4)
+            self.append(self._panel)
+        else:
+            self._panel.set_halign(Gtk.Align.END)
+            self._panel.set_valign(Gtk.Align.END)
+            self._panel.set_margin_end(14)
+            self._panel.set_margin_bottom(10)
 
         # There is no in-flow Revealer under the header any more, and nothing
         # may assume one.
@@ -8963,6 +9112,7 @@ class MainWindow(Adw.ApplicationWindow):
     _tools_used_this_request: set = frozenset()
     _promise_pushes: int = 0
     _forced_fetch_done: bool = False
+    _forced_verify_done: bool = False
 
     def __init__(self, app: "BasiliskApp"):
         super().__init__(application=app)
@@ -10777,6 +10927,7 @@ class MainWindow(Adw.ApplicationWindow):
         ("_bad_propose_retries",       0),
         ("_promise_pushes",            0),
         ("_forced_fetch_done",         False),
+        ("_forced_verify_done",        False),
         ("_leash_work_turn",           False),
         ("_fabricated_this_turn",      0),
         ("_tools_used_this_request",   frozenset),
@@ -11284,7 +11435,10 @@ class MainWindow(Adw.ApplicationWindow):
         every chat already on disk — a new column would show history only for
         chats recorded after this build."""
         try:
-            feed = ActivityFeedWidget()
+            # INLINE: this one lives in the transcript, so its step list opens
+            # underneath it rather than floating over the conversation from
+            # the window overlay. See ActivityFeedWidget.__init__.
+            feed = ActivityFeedWidget(inline=True)
         except Exception:
             return
         added = 0
@@ -12026,7 +12180,13 @@ class MainWindow(Adw.ApplicationWindow):
             dock.append(feed)
             ov = getattr(self, "chat_overlay", None)
             panel = getattr(feed, "_panel", None)
-            if ov is not None and panel is not None:
+            # An INLINE feed parents its own panel; adopting it here would
+            # reparent it out of the transcript. And a panel that somehow
+            # already has a parent must never be added twice — GTK warns and
+            # the second add silently wins.
+            if (ov is not None and panel is not None
+                    and not getattr(feed, "_inline", False)
+                    and panel.get_parent() is None):
                 try:
                     ov.add_overlay(panel)
                 except Exception as e:
@@ -12041,7 +12201,7 @@ class MainWindow(Adw.ApplicationWindow):
         Display must never be able to strand a turn."""
         ov = getattr(self, "chat_overlay", None)
         panel = getattr(feed, "_panel", None)
-        if ov is None or panel is None:
+        if ov is None or panel is None or getattr(feed, "_inline", False):
             return
         try:
             panel.set_reveal_child(False)
@@ -12527,6 +12687,7 @@ class MainWindow(Adw.ApplicationWindow):
             self._tools_used_this_request = set()
             self._promise_pushes = 0
             self._forced_fetch_done = False
+            self._forced_verify_done = False
 
         # Limit how many model round-trips a turn may chain.  Rather than
         # dead-ending with "chain too long" and no answer (annoying), once
@@ -12825,6 +12986,45 @@ class MainWindow(Adw.ApplicationWindow):
                 self.terminal_log(
                     "💬 answer mode: research, confirm, answer once", "dim")
         elif _leash_work:
+            # ── GROUND TRUTH ABOUT THE BUDGET ──
+            # The model is told to iterate until it passes and is given a
+            # large budget to do it with — and is never told where in that
+            # budget it actually is. So it cannot pace itself: it either wraps
+            # up far too early or walks into the cap mid-edit and has to
+            # "report" from a half-finished state.
+            #
+            # Anthropic's multi-agent write-up puts effort rules in the prompt
+            # for exactly this reason ("simple fact-finding requires just 1
+            # agent with 3-10 tool calls... complex research might use more
+            # than 10 subagents"), to stop both under- and over-investment.
+            # This is the same idea grounded in a real number rather than a
+            # guess: the step count is a fact the host already has, and the
+            # agent-loop guidance is explicit that the agent should "gain
+            # ground truth from the environment at each step".
+            #
+            # Only on continuations — on turn 1 the number is always "1 of N"
+            # and says nothing, and the long-form contract is already the
+            # expensive part of that message.
+            _budget_line = ""
+            if _continuation:
+                _used = int(getattr(self, "_tool_chain_depth", 0) or 0)
+                _left = max(0, _ans_cap - _used)
+                if _left <= 8:
+                    _budget_line = (
+                        "\n- BUDGET: step %d of %d — you are nearly out. Land "
+                        "what you have: finish the edit you are mid-way "
+                        "through, run the check once, and report. Do not start "
+                        "anything new." % (_used, _ans_cap))
+                elif _left <= 25:
+                    _budget_line = (
+                        "\n- BUDGET: step %d of %d. Enough left to finish and "
+                        "verify, not enough to explore. Converge."
+                        % (_used, _ans_cap))
+                else:
+                    _budget_line = (
+                        "\n- BUDGET: step %d of %d — plenty. Do not rush the "
+                        "job or hand back a partial fix to save steps."
+                        % (_used, _ans_cap))
             # ── WORK MODE (leashed) ──
             # Same leash — no offensive posture, no mission latch, no
             # never-stop directive — but the turn is a JOB, so the model is
@@ -12859,7 +13059,7 @@ class MainWindow(Adw.ApplicationWindow):
                     "- You stop when the change is made AND something you ran "
                     "proves it, or when you are genuinely blocked — and then "
                     "you say exactly what blocked you. If it is not verified, "
-                    "say so rather than claiming done.]").strip()
+                    "say so rather than claiming done.%s]" % _budget_line).strip()
             else:
                 addendum = (addendum + "\n\n[WORK MODE (leashed) — THIS turn is a "
                     "piece of WORK, not a question. The operator wants the change "
@@ -12912,7 +13112,8 @@ class MainWindow(Adw.ApplicationWindow):
                     "what you ran, what the result actually was. If something is "
                     "still broken or you could not verify it, SAY SO plainly — a "
                     "false 'done' is worse than an honest 'this part still "
-                    "fails'. Then stop; do not latch a mission.]").strip()
+                    "fails'. Then stop; do not latch a mission.%s]"
+                    % _budget_line).strip()
             if not _continuation:
                 self.terminal_log(
                     "🔧 work mode: read, edit, run, iterate until green", "dim")
@@ -13733,6 +13934,48 @@ class MainWindow(Adw.ApplicationWindow):
                           "you actually read and cite it. Do not answer from "
                           "memory, and do not say you will fetch something — "
                           "fetch it.]")
+
+        # ── THE VERIFICATION GATE ──
+        # Sits beside the promise gate above and shares its shape exactly: no
+        # executable call left, so the turn is ENDING — and it is ending on a
+        # repo it changed and never checked. See unverified_work_gap.
+        #
+        # ONE ROUND TRIP IS THE PRICE, AND IT IS WORTH IT. If the change was a
+        # README rather than code, the suite runs, passes, and the model says
+        # so — one wasted step. If the change was code, this is the difference
+        # between a verified fix and a plausible one. That trade is not close.
+        # The deferred note below tells the model both branches so a doc-only
+        # change can close out honestly instead of casting about.
+        if (not executable and not cancelled and not self._stop_requested
+                and self.current_agent_mode and not self._tools_locked
+                and not self._mission_active
+                and not getattr(self, "_forced_verify_done", False)):
+            _vtool = unverified_work_gap(
+                getattr(self, "_tools_used_this_request", ()),
+                getattr(self, "_forced_verify_done", False))
+            if _vtool:
+                _rec = parse_tool_calls(
+                    '<tool name="%s">{}</tool>' % _vtool)
+                if _rec:
+                    self._forced_verify_done = True
+                    executable = _rec
+                    self.terminal_log(
+                        "↩ you changed the repo and never ran anything "
+                        "— verifying it myself", "error")
+                    self._activity_note(
+                        "files were changed and nothing was run to prove it "
+                        "- running the check", "gate")
+                    self._deferred_note = (
+                        (self._deferred_note or "")
+                        + "\n[system note: this turn CHANGED FILES and never "
+                          "ran anything that proves the change works, so the "
+                          "check was run FOR you. Read the result now. If "
+                          "`broke` is non-empty those are YOUR regressions and "
+                          "you must fix them before you stop. If it still "
+                          "fails, read the real error and fix the real cause. "
+                          "If there is no test command, or the change was not "
+                          "code, say that plainly in your report and stop — do "
+                          "not invent a verification you did not run.]")
 
         if _recover_fence:
             _cmd = self._shell_block_command(final)
@@ -15049,6 +15292,28 @@ class MainWindow(Adw.ApplicationWindow):
         self._pending_action = " + ".join(
             self._action_label(c) for c in calls)[:400]
         self._batch_members = [self._action_label(c) for c in calls]
+        # ── AND SO MUST THE USED-TOOL RECORD ──
+        # `_tools_used_this_request` is what the promise gate and the
+        # verification gate both read to decide whether a turn is ending
+        # without having fetched / without having checked. It was written at
+        # exactly one place — the SINGLE-call path — under a comment claiming
+        # it was "recorded at the one place that dispatches, so it cannot
+        # drift from reality". There are two places that dispatch. This is the
+        # third time that sentence has been wrong in this method's
+        # neighbourhood (the repeat guard, then argument normalisation, now
+        # this), which is why tests/test_gates.py asserts the pairing
+        # structurally rather than trusting a comment.
+        #
+        # No gate set intersects the batchable allow-list TODAY, so nothing is
+        # currently misreported — this is closing the seam, not chasing a
+        # symptom. A tool added to both lists later would silently blind a
+        # gate, and a gate that fails open fails on exactly the turn it exists
+        # to catch.
+        for _c in calls:
+            try:
+                self._tools_used_this_request.add(_c.name)
+            except Exception:
+                self._tools_used_this_request = {_c.name}
         # ONE ROW PER TOOL. A parallel batch is the exact case the single
         # status line could not represent honestly: it has one slot and four
         # tools are running in it. Each row closes on its own worker's result,
@@ -15995,14 +16260,18 @@ class MainWindow(Adw.ApplicationWindow):
         # thirty-odd dispatch sites (which is how they drift apart).
         try:
             if self._action_log is not None and self._pending_action:
-                self._action_log.record(self._pending_action, result_text or "")
+                self._action_log.record(
+                    self._pending_action, result_text or "",
+                    changes_state=_action_changes_state(self._pending_action))
                 # A batch also records each MEMBER under its own label, so a
                 # later solo call of the same tool is seen as the repeat it is.
                 # The combined entry above stays for the digest the model
                 # reads; these are what times_run() can actually match.
                 for _m in (getattr(self, "_batch_members", None) or []):
                     if _m and _m != self._pending_action:
-                        self._action_log.record(_m, result_text or "")
+                        self._action_log.record(
+                            _m, result_text or "",
+                            changes_state=_action_changes_state(_m))
         except Exception:
             pass
         finally:

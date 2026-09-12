@@ -1,3 +1,298 @@
+## v1.1.4.0 - the deep-debug pass
+
+He asked whether it was completely bug free. It was not.
+
+THEME NOTE FIRST, because it came up mid-pass: nothing in 1.1.3.0 or 1.1.4.0
+touches the stylesheet or any asset. Measured - 1.1.3.0 vs 1.1.2.0 differ in
+exactly five files (basilisk.py, basilisk_core.py, README, CHANGELOG,
+RELEASE_NOTES); old red `#7d121b` count is 0 in both; the emblem PNG sha256 is
+identical in both. A build that looks red is an old copy being launched.
+
+### 1. THE REPEAT GUARD WAS BLOCKING THE VERIFICATION LOOP
+
+The worst find, and it was in plain sight.
+
+`workspace_verify {}` takes no arguments, so `_action_label` returns the bare
+constant "workspace_verify". `should_block` refuses the THIRD identical action.
+`_action_log` is reset in exactly one place - the mission latch - which never
+fires in leashed work mode. So the third workspace_verify in a repo job was
+refused, and every one after it, for the life of the chat.
+
+REPRODUCED against the pre-fix module, edit/verify x5:
+
+    blocked at each round: [False, False, True, True, True]
+
+Meanwhile basilisk_persona.py says, of that same tool, in the model's own
+instructions: "Call after every edit", and "6. workspace_verify. Every time."
+THE INSTRUCTIONS MANDATED A BEHAVIOUR THE GUARD FORBADE. It is a class, not an
+instance: `run: pytest -q` the same way, and `oracle_status {}` ("Consult it
+every planning turn"), and every other no-argument status read.
+
+And it quietly undermined v1.1.3.0's whole point: the verification gate
+synthesises `workspace_verify`, the guard could refuse it, and the gate's
+one-shot was spent on a refusal.
+
+ROOT CAUSE: the guard's own docstring is right about a SCANNER and wrong about
+a VERIFIER. nmap against the same host three times tells you nothing new;
+workspace_verify after a third edit tells you something completely new, because
+the thing it measures changed underneath it. The guard compared LABELS, so it
+could not tell the two apart.
+
+FIX: count a WINDOW, not a lifetime - runs of this action since the last
+DIFFERENT state-changing action. The asymmetry is the rule: an action never
+resets its OWN window, which is what lets both of these be right at once:
+
+    verify, verify, verify              -> blocked at 3   (nothing changed)
+    edit, verify, edit, verify, edit…   -> never blocked  (the correct loop)
+    nmap, nmap, nmap                    -> blocked at 3   (unchanged)
+    pytest, edit, pytest, edit, pytest  -> never blocked  (correct)
+    pytest, pytest, pytest              -> blocked at 3   (same code)
+
+`changes_state` defaults to False on `record()`, so a caller that does not
+classify its tools gets exactly the old behaviour - the change reaches only as
+far as it was meant to. times_run/times_delivered still report LIFETIME totals,
+because the refusal message quotes them back at the model and "you have already
+done this twice" has to stay literally true.
+
+The classification table (`_STATE_CHANGING_TOOLS`) takes the conservative
+direction on anything it does not recognise: an unknown tool is NOT
+state-changing, which leaves the guard as strict as it was rather than quietly
+widening it.
+
+### 2. A TRUNCATED WRITE SILENTLY DELETED CODE AND REPORTED SUCCESS
+
+Found by probing the workspace edit surface rather than reading it. A 59-line
+file written as three lines ending `# ... rest unchanged ...` returned
+`ok: True`, and every function below the marker was gone.
+
+A placeholder is not an abbreviation, it is a deletion - and WORK MODE's
+contract warns about it twice, in capitals, and the write still landed. Same
+lesson as the verification gate, so same answer: a gate.
+
+It needs all three conditions, and the third is what makes it safe to ship:
+the file ALREADY EXISTED, the content carries a placeholder LINE (a whole line
+whose only content is a stand-in - not a sentence that mentions one), and the
+file SHRANK below 60% of its lines.
+
+MEASURED BEFORE SHIPPING, because a write guard with false positives is worse
+than none - it blocks real work with a confident wrong reason and the model has
+no way round it:
+
+  - 14 truncation shapes caught (`# ... rest unchanged ...`, `// existing code
+    here`, `/* unchanged code */`, `<!-- no changes below -->`, `# truncated
+    for brevity`, `# same as before`, …)
+  - 0 false positives over all 108 source and markdown files in this repo
+    rewritten byte-for-byte
+  - 0 on honest 80% deletions with no marker (deleting on purpose is allowed;
+    the MARKER is the signal)
+  - 0 on a document discussing patching in prose - the rule is a placeholder
+    LINE, so "The rest of the file remains unchanged when you patch it…"
+    does not match
+  - 0 on .pyi stubs full of real `...`
+  - 0 on a write that ADDS a marker line without shrinking
+
+On BOTH write primitives, because a guard only ever protects the function it
+sits in - the lesson gate_command's docstring records. tool_write_file only on
+a REPLACE: an append adds to the end and cannot delete what is above it.
+
+The refusal names the line count both ways, quotes the offending line, offers
+both ways out (whole file, or workspace_replace), and explicitly forbids the
+obvious workaround of rewording the marker.
+
+### 3. A REPLAYED FEED OPENED ONTO NOTHING - MINE, FROM 1.1.2.0
+
+The chip rewrite gave ActivityFeedWidget ONE placement: a chip on the tray
+whose step list floats from the window overlay. A feed replayed into the
+TRANSCRIPT then built a panel that nothing ever parented.
+
+VERIFIED UNDER REAL GTK rather than reasoned about - probe on the live widget
+returned `panel PARENT = None`, `panel MAPPED = False`, `body has rows = True`.
+Clicking a replayed feed set the chevron, set reveal_child, and put nothing on
+screen. A control that lies about having opened.
+
+The widget now takes `inline=` and parents its own panel in the transcript;
+the window refuses to adopt an inline panel, or any panel that already has a
+parent (GTK warns and the second add silently wins). Re-probed after the fix:
+parented, mapped True.
+
+### 4. THE USED-TOOL RECORD SAW ONLY ONE OF TWO EXECUTION PATHS
+
+`_tools_used_this_request` is what the promise gate AND the verification gate
+read to decide whether a turn is ending without having fetched / without having
+checked. It was written at exactly one place - the single-call path - under a
+comment claiming it was "recorded at the one place that dispatches, so it
+cannot drift from reality".
+
+There are two places that dispatch. That sentence has now been wrong three
+times in that method's neighbourhood: the repeat guard, argument normalisation,
+and now this.
+
+Measured: no gate set intersects the batchable allow-list today, so nothing was
+being misreported. This closes the seam rather than chasing a symptom - a tool
+added to both lists later would silently blind a gate, and a gate that fails
+open fails on exactly the turn it exists to catch.
+
+### WHAT THE SWEEP DID NOT FIND
+
+Worth recording so the same ground is not re-covered:
+
+- ruff F/E9/B/PLE over the whole tree: 61 hits, all cosmetic. The two that
+  looked real were not - `re.split(r"[.!?\n]", t, 1)` passes maxsplit
+  positionally on purpose, and the duplicate `-v` in basilisk_scope's boolean
+  flags is a set, deduped, grouped by tool for readability.
+- The workspace edit surface holds under probing: path confinement refuses
+  `../escape.py`, `/etc/passwd`, `a/../../out.py`, `sub/../../../x.py`;
+  `replace` refuses a non-unique anchor with the occurrence count and refuses
+  an absent one rather than no-op'ing; `revert` restores.
+- Per-chat session state vs per-request reset: compared field by field, the
+  gap is all deliberate (mission/unleash state is per chat by design).
+  `_fabricated_this_turn` is declared and snapshotted and never read - dead
+  weight, not a bug; the fabrication bound is `_forged_retries`, which is wired.
+
+4,582 assertions across 75 stdlib-only suites, zero red, verified from a clean
+extract of the shipped zip. `basilisk_persona.py` byte-identical.
+
+## v1.1.3.0 - "not done until verified" becomes a gate
+
+He asked for it to be better at knowing when to stop and when to keep working,
+and to use what Anthropic have published about this. So this pass is research
+first: `building-effective-agents`, `effective-context-engineering-for-ai-agents`,
+`writing-tools-for-agents`, `effective-harnesses-for-long-running-agents`, the
+multi-agent research system write-up, and the Claude Code best-practices guide.
+
+Several of their recommendations Basilisk ALREADY does, and it is worth writing
+down which so nobody "adds" them twice:
+
+- **Just-in-time context / progressive disclosure.** The "mise en place" prompt
+  design ships tool NAMES only and loads specialist specs on demand via
+  `load_tools`. That is their recommendation exactly.
+- **Compaction.** headroom + the rolling history trim.
+- **Rules-based feedback.** `workspace_verify` classifies a test run against a
+  baseline. They call rules-based feedback "the best form of feedback".
+- **Stopping conditions to maintain control.** MAX_TOOL_CHAIN, the answer and
+  work budgets, the stall caps.
+
+What was MISSING was the one they are most emphatic about.
+
+### The gate
+
+> "Claude stops when the work looks done. Without a check it can run, 'looks
+>  done' is the only signal available, and you become the verification loop."
+
+and, separating the two mechanisms: a prompt instruction is advisory; a Stop
+hook is deterministic and "blocks the turn from ending until it passes".
+
+WORK MODE's contract already says "VERIFY, DON'T ASSUME" and "ITERATE UNTIL IT
+ACTUALLY PASSES" - at length, every continuation. That is advice, and advice is
+what a model drops on step forty of a long job. Basilisk already HAD the check.
+The gap was never the check; it was that nothing made the turn go through it.
+
+`unverified_work_gap(tools_used, already_forced)` is the promise gate's exact
+architecture pointed at the other half of the product, and it inherits the
+property that made that one hold up: IT DOES NOT READ THE REPLY. Every earlier
+attempt at "did it really finish?" in this file was a better reader of the
+model's prose, and each was one phrasing away from failing. Two FACTS decide
+this one - a workspace write happened this request, and nothing in
+{workspace_verify, workspace_health, run, launch_app} ever ran. If both hold at
+the point the turn would end, the app runs `workspace_verify` itself and feeds
+the result back with regressions named as the model's own to fix.
+
+Design notes that are load-bearing:
+
+- **WORKSPACE writes only.** `workspace_write`/`workspace_replace` can only
+  succeed with a repo open, which is what makes `workspace_verify` applicable.
+  A bare `write_file` outside a workspace has nothing to re-run and is not
+  gated.
+- **`run` counts as a verifier.** A model that ran its own test command HAS
+  verified its work; insisting on our tool instead would be ceremony.
+- **Once per request** (`_forced_verify_done`), and after it fires a verifier
+  has run, so the condition cannot re-arm. A floor, not a loop.
+- **Pure and total.** Junk in, None out - a gate that raises is a gate that
+  fails open on exactly the turn it exists to catch. Including the string trap:
+  `set("workspace_write")` is a set of CHARACTERS, and the suite checks a bare
+  string argument cannot match a tool name.
+- **One round trip is the price.** If the change was a README, the suite runs,
+  passes, and the model says so - one wasted step. If it was code, this is the
+  difference between a verified fix and a plausible one. The deferred note
+  tells the model both branches so a doc-only change closes out honestly
+  instead of casting about.
+
+The counter-property is asserted as hard as the property: every tool in the
+verifier set must DISARM the gate, and a read-only turn, a pure research turn,
+a `write_file` turn and a `propose_edit` turn must all end silently. A gate that
+fires on correct behaviour is a gate that gets switched off.
+
+### Budget ground truth
+
+> "it's crucial for the agents to gain 'ground truth' from the environment at
+>  each step (such as tool call results or code execution) to assess its
+>  progress"
+
+and, from the multi-agent write-up, explicit effort rules in the prompt
+("simple fact-finding requires just 1 agent with 3-10 tool calls...") to stop
+both under- and over-investment.
+
+The model was told to iterate until green, given a 120-step budget to do it
+with, and never told where in that budget it was. So it could not pace itself:
+it either wrapped up far too early or walked into the cap mid-edit and had to
+"report" from a half-finished state. Work-mode continuations now carry the real
+number in three bands:
+
+- **plenty left** - "Do not rush the job or hand back a partial fix to save
+  steps." (This band matters most. A budget signal that only ever says HURRY
+  causes the exact early stop it was added to prevent, and the suite pins it.)
+- **enough to finish and verify** - converge.
+- **nearly out** - land what you have, run the check once, report.
+
+Continuations only: on turn 1 the number is always "1 of N" and says nothing,
+and the long-form contract is already the expensive part of that message (it
+rides the volatile trailing message, which the provider's prompt cache cannot
+reuse).
+
+### Error messages are prompts
+
+> "you can prompt-engineer your error responses to clearly communicate specific
+>  and actionable improvements"
+
+Audited `basilisk_core`: 240 literal `{"ok": False, "error": ...}` returns, of
+which THREE carried anything actionable. Rather than rewrite 240 strings blind,
+fixed the three on the coding path that a work turn actually hits:
+
+1. `workspace_verify` with no test command said "no test command known" - what
+   failed, nothing about what to do next, so the model either gave up on
+   verifying or guessed a command. It now names the repair (pass one
+   explicitly), names the fallback when the repo genuinely has no suite (prove
+   it another way and SAY there was no suite), and forbids reporting the change
+   as verified anyway.
+2. `"no workspace open - import a repo zip first"` sent a model holding a
+   DIRECTORY looking for a way to zip it. `tool_workspace_import`'s own
+   docstring records that friction as fixed - it has taken either shape for
+   releases - but the error string it leaks back through was never updated.
+3. `workspace_verify` with no repo open reported a missing TEST COMMAND,
+   because baseline_status returns empty and detect_test_command finds nothing.
+   It named the wrong problem, and a model reading it goes hunting for a test
+   runner instead of opening the workspace. It checks the real precondition
+   first now.
+
+The remaining 237 are reported, not touched: most are on tool surfaces a coding
+turn never reaches, and a blind sweep of error strings is how you break the ones
+tests assert on.
+
+### NOT done, and why
+
+- **Structured note-taking / a progress file** (their NOTES.md + feature-list
+  pattern, all features starting `"passes": false`) is the right next step for
+  multi-session work and is a real feature, not a patch. Flagged rather than
+  half-built.
+- **Tool consolidation.** Their rule is "if a human engineer can't definitively
+  say which tool should be used in a given situation, an AI agent can't be
+  expected to do better". Basilisk ships 162 specs. That audit is worth doing
+  and is its own pass; guessing at it now would break the tool contracts
+  test_toolargs parses.
+
+4,491 assertions across 73 stdlib-only suites, zero red, verified from a clean
+extract of the shipped zip. `basilisk_persona.py` byte-identical.
+
 ## v1.1.2.0 - the feed joins the tray, and the web gate learns to say no
 
 ### "there is a fucking hole between live feed and where i type"

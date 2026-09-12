@@ -265,8 +265,14 @@ def _orig_dir() -> Path:
 
 def _require() -> str:
     if not _STATE.root or not os.path.isdir(_STATE.root):
+        # SAY WHAT WOULD FIX IT, AND SAY IT ACCURATELY. This message read
+        # "import a repo zip first", so a model holding a DIRECTORY path went
+        # looking for a way to zip it — which is the exact friction
+        # tool_workspace_import's docstring records as already fixed, leaking
+        # back in through an error string nobody updated.
         raise ContainmentError(
-            "no workspace open — import a repo zip first")
+            "no workspace open. Call workspace_import with the repo's "
+            "path — a directory or a .zip, either works — then retry")
     return _STATE.root
 
 
@@ -610,7 +616,8 @@ def import_dir(path: str, name: str = "") -> Dict[str, Any]:
 def status() -> Dict[str, Any]:
     if not _STATE.root:
         return {"ok": True, "open": False,
-                "hint": "No workspace open. Use workspace_import on a repo zip."}
+                "hint": "No workspace open. Call workspace_import with the "
+                        "repo's path (a directory or a .zip)."}
     d = asdict(_STATE)
     d.update({"ok": True, "open": True,
               "dirty": bool(_STATE.modified or _STATE.created

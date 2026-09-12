@@ -160,6 +160,13 @@ class ActionLog:
         # Runs that actually delivered a readable result. The guard counts
         # THESE, not raw attempts — see outcome_is_usable.
         self._useful: Dict[str, int] = {}
+        # ── THE WINDOW ──────────────────────────────────────────────
+        # _counts/_useful are lifetime totals and are what the refusal
+        # message quotes. The GUARD counts these instead: runs of an action
+        # since the last DIFFERENT state-changing action. See should_block
+        # for why the distinction is the whole correctness of this class.
+        self._since: Dict[str, int] = {}
+        self._since_useful: Dict[str, int] = {}
         self._step = 0
 
     # ── lifecycle ────────────────────────────────────────────────────
@@ -170,6 +177,8 @@ class ActionLog:
             self._entries = []
             self._counts = {}
             self._useful = {}
+            self._since = {}
+            self._since_useful = {}
             self._step = 0
 
     def __len__(self) -> int:
@@ -177,8 +186,16 @@ class ActionLog:
             return len(self._entries)
 
     # ── writing ──────────────────────────────────────────────────────
-    def record(self, action: str, outcome: str = "") -> Dict[str, Any]:
-        """Log one completed action.  Returns the entry that was stored."""
+    def record(self, action: str, outcome: str = "",
+               changes_state: bool = False) -> Dict[str, Any]:
+        """Log one completed action.  Returns the entry that was stored.
+
+        `changes_state` says this action could have changed the answer that
+        OTHER actions would give — a file was written, a command ran, an
+        exploit fired. It resets every other action's repeat window; see
+        should_block. It defaults to False so a caller that does not classify
+        its tools gets exactly the old behaviour.
+        """
         key = normalise(action)
         if not key:
             return {}
@@ -186,8 +203,24 @@ class ActionLog:
         with self._lock:
             self._step += 1
             self._counts[key] = self._counts.get(key, 0) + 1
+            self._since[key] = self._since.get(key, 0) + 1
             if usable:
                 self._useful[key] = self._useful.get(key, 0) + 1
+                self._since_useful[key] = self._since_useful.get(key, 0) + 1
+            if changes_state:
+                # EVERY OTHER action's window restarts — but NOT this one's.
+                # That asymmetry is the rule: `run: pytest` three times in a
+                # row with nothing between them is a repeat however
+                # state-changing a test run is, because nothing changed the
+                # code it is testing. An EDIT between them is a different
+                # action, and then the third run is the first run of a new
+                # situation.
+                for _k in self._since:
+                    if _k != key:
+                        self._since[_k] = 0
+                for _k in self._since_useful:
+                    if _k != key:
+                        self._since_useful[_k] = 0
             entry = {
                 "step": self._step,
                 "action": action.strip()[:ACTION_CHARS],
@@ -248,12 +281,46 @@ class ActionLog:
 
         A ceiling still applies (UNUSABLE_GRACE extra attempts), because
         "the result was unusable" must not become an unlimited retry licence.
+
+        ── AND IT COUNTS A WINDOW, NOT A LIFETIME ──────────────────────
+        The paragraph above is right about a SCANNER and wrong about a
+        VERIFIER, and the difference had shipped: nmap against the same host
+        three times tells you nothing new, but `workspace_verify` after a
+        third edit tells you something completely new, because the thing it
+        is measuring changed underneath it.
+
+        The guard could not tell them apart — it compared labels — so it
+        blocked the exact loop the product is built around. Reproduced:
+        `workspace_verify {}` takes no arguments, so its label is the constant
+        string "workspace_verify", and the third call in a repo job was
+        refused, and every one after it, for the life of the chat (the log is
+        only reset when a MISSION latches, which never happens in leashed work
+        mode). Meanwhile the persona says of that same tool, in the model's own
+        instructions: "Call after every edit", and "6. workspace_verify. Every
+        time." The instructions mandated a behaviour the guard forbade. Same
+        for `run: pytest -q`, for `oracle_status {}` ("Consult it every
+        planning turn"), and for every other no-argument status read.
+
+        So the count is runs of this action SINCE THE LAST DIFFERENT
+        STATE-CHANGING ACTION. Checked against every shape I could construct:
+
+            verify, verify, verify              -> blocked at 3   (nothing changed)
+            edit, verify, edit, verify, edit…   -> never blocked  (correct loop)
+            nmap, nmap, nmap                    -> blocked at 3   (unchanged)
+            pytest, edit, pytest, edit, pytest  -> never blocked  (correct)
+            pytest, pytest, pytest              -> blocked at 3   (same code)
+
+        times_run/times_delivered still report LIFETIME totals, because that
+        is what the refusal message quotes back and "you have done this twice"
+        has to stay literally true.
         """
         if limit <= 0:
             return False
-        if self.times_delivered(action) >= limit:
-            return True
-        return self.times_run(action) >= limit + UNUSABLE_GRACE
+        key = normalise(action)
+        with self._lock:
+            if self._since_useful.get(key, 0) >= limit:
+                return True
+            return self._since.get(key, 0) >= limit + UNUSABLE_GRACE
 
     def cycle(self, max_len: int = 4, reps: int = 2) -> Optional[List[str]]:
         """Detect a repeating cycle at the tail: A A A, A B A B, A B C A B C…

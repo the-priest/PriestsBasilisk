@@ -2490,6 +2490,96 @@ def _check_protected_regions(realpath: str, new_content: str
     return None
 
 
+# ══════════════════════════════════════════════════════════════════════
+#  THE PLACEHOLDER WRITE — the one that destroys code and reports success
+# ══════════════════════════════════════════════════════════════════════
+# A model writing a whole file sometimes writes the part it changed and then
+# a comment standing in for the rest:
+#
+#     def add(a, b):
+#         return a + b
+#     # ... rest unchanged ...
+#
+# That is not an abbreviation, it is a DELETION. Every function below the
+# marker is gone, the write returns ok:True, and the model reports the edit
+# as done. The operator finds out when something else breaks.
+#
+# WORK MODE's contract warns about it twice, in capitals — "NEVER write
+# `# ... rest unchanged ...` ... that DELETES the omitted code". That is
+# advice, and this is the same lesson as the verification gate: the model
+# was told, and the write still lands. So it is a gate.
+#
+# THE RULE NEEDS ALL THREE CONDITIONS, and the third is what makes it safe:
+#   1. the file ALREADY EXISTED (a new file has nothing to lose),
+#   2. the new content carries a placeholder line — a whole line whose only
+#      content is a stand-in, not a sentence that happens to mention one,
+#   3. and the file SHRANK to under 60% of its lines.
+#
+# Measured before shipping: 9/9 real truncation shapes caught; 0 false
+# positives over all 108 source and markdown files in this repo rewritten
+# byte-for-byte, over honest 80% deletions with no marker, over a document
+# discussing patching in prose, over files under 12 lines, and over a write
+# that ADDS a marker line without shrinking.
+_TRUNCATION_PLACEHOLDER_RE = re.compile(
+    r"(?mi)^[ \t]*(?:#|//|/\*|--|<!--|\*)?[ \t]*"
+    r"(?:\.\.\.|\u2026)?[ \t]*"
+    r"(?:"
+    r"(?:the[ \t]+)?rest[ \t]+(?:of[ \t]+(?:the[ \t]+)?"
+    r"(?:file|code|function|class|method)[ \t]+)?"
+    r"(?:remains[ \t]+|stays[ \t]+|is[ \t]+)?unchanged"
+    r"|(?:rest|remainder)[ \t]+of[ \t]+(?:the[ \t]+)?"
+    r"(?:file|code|function|class|method)"
+    r"|existing[ \t]+(?:code|content|implementation|imports?)"
+    r"(?:[ \t]+(?:here|unchanged|remains?))?"
+    r"|unchanged[ \t]+(?:code|content|portion|part)"
+    r"|(?:keep|leave)[ \t]+(?:the[ \t]+)?(?:rest|remaining|existing)"
+    r"|no[ \t]+changes?[ \t]+(?:here|below|above)"
+    r"|same[ \t]+as[ \t]+(?:before|above)"
+    r"|truncated[ \t]+for[ \t]+brevity"
+    r"|\.\.\.[ \t]*(?:etc|and[ \t]+so[ \t]+on)"
+    r")"
+    r"[ \t]*(?:\.\.\.|\u2026)?[ \t]*(?:\*/|-->)?[ \t]*$")
+
+_TRUNCATION_MIN_LINES = 12
+_TRUNCATION_KEEP_RATIO = 0.6
+
+
+def truncated_write_refusal(path: str, old: str, new: str):
+    """The refusal to return, or None to let the write through.
+
+    Pure and total — a guard that raises is a guard that fails open."""
+    try:
+        if not old:
+            return None
+        m = _TRUNCATION_PLACEHOLDER_RE.search(new or "")
+        if not m:
+            return None
+        o = len((old or "").splitlines())
+        n = len((new or "").splitlines())
+        if o < _TRUNCATION_MIN_LINES or n >= o * _TRUNCATION_KEEP_RATIO:
+            return None
+        return {
+            "ok": False,
+            "path": path,
+            "error": ("REFUSED - this looks like a truncated write, not an "
+                      "edit. The file has %d lines, the content you sent has "
+                      "%d, and it contains a placeholder standing in for the "
+                      "rest:\n    %s\nA placeholder is not an abbreviation - "
+                      "writing this would DELETE every line it stands for, "
+                      "and the write would report success."
+                      % (o, n, m.group(0).strip()[:120])),
+            "next": ("Either send the file's ENTIRE final content, every line "
+                     "top to bottom - re-read it first if you no longer have "
+                     "it - or, for a small change to a big file, use "
+                     "workspace_replace with enough surrounding context to be "
+                     "unique. Do not re-send this content with the "
+                     "placeholder reworded."),
+            "truncation_guard": True,
+        }
+    except Exception:
+        return None
+
+
 def tool_write_file(path: str, content: str,
                     make_backup: bool = True,
                     mode: str = "replace") -> Dict[str, Any]:
@@ -2536,6 +2626,21 @@ def tool_write_file(path: str, content: str,
         mode = (mode or "replace").strip().lower()
         if mode in ("a", "add", "append_to", "appendto"):
             mode = "append"
+        # ── 0b. THE TRUNCATED-WRITE FLOOR ──
+        # Same guard as tool_workspace_write, here too because this is the
+        # primitive with the widest reach and a guard only ever protects the
+        # function it sits in (gate_command's docstring, learned the hard
+        # way). Only for a REPLACE: an append adds to the end by definition
+        # and cannot delete what is above it.
+        if mode == "replace" and os.path.isfile(rp):
+            try:
+                with open(rp, "r", encoding="utf-8", errors="replace") as _fh:
+                    _prev = _fh.read()
+            except Exception:
+                _prev = ""
+            _ref = truncated_write_refusal(rp, _prev, content)
+            if _ref:
+                return _ref
         if mode not in ("replace", "append"):
             return {"ok": False, "path": rp,
                     "error": f"unknown mode {mode!r}: use "
@@ -7051,7 +7156,18 @@ def tool_workspace_write(path: str, content: str,
     """Write a whole file in the open repo. Prefer workspace_replace for
     edits; use this for new files or a full rewrite."""
     try:
-        return _ws().write(path, content, create=create)
+        _w = _ws()
+        _prev = ""
+        try:
+            _r = _w.read(path)
+            if _r.get("ok"):
+                _prev = _r.get("content", "") or ""
+        except Exception:
+            _prev = ""
+        _ref = truncated_write_refusal(path, _prev, content)
+        if _ref:
+            return _ref
+        return _w.write(path, content, create=create)
     except Exception as e:
         return {"ok": False, "error": f"workspace unavailable: {e}"}
 
@@ -7165,11 +7281,37 @@ def tool_workspace_verify(command: str = "",
     edit — a repo-wide change you did not verify is a guess."""
     try:
         _w = _ws()
+        # CHECK THE REAL PRECONDITION FIRST. With no repo open, baseline_status
+        # returns empty and detect_test_command finds nothing, so this reported
+        # "no test command known for this repo" — naming a missing test command
+        # when the actual problem is that there is no repo. A model reading that
+        # goes hunting for a test runner instead of opening the workspace.
+        _st = _w.status() or {}
+        if not _st.get("open", True):
+            return {"ok": False,
+                    "error": "no workspace open, so there is nothing to verify",
+                    "next": ("Call workspace_import with the repo's path (a "
+                             "directory or a .zip), then retry.")}
         bl = _w.baseline_status()
         cmd = (command or (bl.get("baseline") or {}).get("command")
                or _w.detect_test_command().get("command") or "")
         if not cmd:
-            return {"ok": False, "error": "no test command known"}
+            # AN ERROR MESSAGE IS A PROMPT. "no test command known" tells the
+            # model what failed and nothing about what to do instead, so it
+            # either gives up on verifying or guesses a command at random.
+            # Say what would fix it, and say what to do when nothing would.
+            return {
+                "ok": False,
+                "error": "no test command known for this repo",
+                "next": (
+                    "Either pass one explicitly - workspace_verify "
+                    "{\"command\": \"pytest -q\"} - or run the repo's own "
+                    "check with `run`. If this repo genuinely has no automated "
+                    "tests, prove the change another way (import the module, "
+                    "execute the script, diff the output) and SAY in your "
+                    "report that there was no suite to run. Do not report the "
+                    "change as verified when nothing verified it."),
+            }
         r = _ws_run_tests(cmd, timeout)
         if r.get("refused"):
             return r

@@ -1,76 +1,80 @@
-# v1.1.2.0
+# v1.1.4.0
 
-**The feed moves onto the button tray, and Basilisk stops searching the web
-about your own code.**
+**The deep-debug pass. Four real bugs, one of them serious.**
 
-## The gap above the composer is gone
+> NOTE ON THE THEME: nothing in 1.1.3.0 or this release touches the stylesheet
+> or any asset. 1.1.3.0 differed from 1.1.2.0 in exactly five files
+> (`basilisk.py`, `basilisk_core.py`, and three markdown docs) — the emblem PNG
+> is byte-identical across all three. If a build looks like the old red theme,
+> it is an old copy being launched, not a revert.
 
-The activity feed was a full-width panel in a dock of its own between the last
-message and the box you type in — with a margin above and below it, sitting
-there whether anything was running or not.
+## 1. The repeat guard was blocking the verification loop
 
-It is a status indicator, so it now rides **on the button tray** with Unleash,
-attach and the speaker, at the size of the other controls. Clicking it opens
-the step list **over the conversation**; the tray never changes height and
-there is no hole left behind.
+The worst one, and it had been sitting there in plain sight.
 
-The panel is a `Gtk.Overlay` inside the window and deliberately **not** a
-`Gtk.Popover`. A popover is its own native surface, so on X11 with no
-compositor it cannot be translucent — it would have been the one surface that
-breaks while the rest of the glass still works.
+`workspace_verify {}` takes no arguments, so its action label is the constant
+string `"workspace_verify"`. The repeat guard refuses a **third** identical
+action, and the action log is only reset when a *mission* latches — which never
+happens in leashed work mode.
 
-## It searches when it should, and not when it shouldn't
-
-`_needs_web_verification` was a list of markers, and a list of markers can only
-ever say yes. Every marker added to stop a missed fetch also made it fire on
-ordinary work. Measured against fourteen plain coding questions, **thirteen**
-forced a web fetch:
+So in any repo job, the third `workspace_verify` was refused, and every one
+after it, for the life of the chat. Meanwhile the persona says of that exact
+tool, in the model's own instructions:
 
 ```
-"explain the cost of a hash table lookup"             -> cost
-"which python version does my pyproject require"      -> version
-"refactor the price calculation in cart.py"           -> price
-"why is worth() returning None in this file"          -> worth
-"the news feed component in my react app is broken"   -> news
+<tool name="workspace_verify">{}</tool>  // ... Call after every edit.
+//   6. workspace_verify. Every time.
 ```
 
-That is both halves of the complaint at once. It searched when it obviously
-should not — and because the promise gate reads the same predicate, the turn
-could not *end* where it should have either: it answered, fetched anyway, and
-came back with a second reply nobody asked for.
+The instructions mandated a behaviour the guard forbade. Same for
+`run: pytest -q`, and for `oracle_status {}` ("Consult it every planning turn"),
+and for every other no-argument status read. **Any repo job over two edits was
+flying blind** — and it silently caused exactly the unverified "done" the new
+verification gate was built to stop.
 
-There is now a suppressor, and it needs **positive evidence**. It can only
-downgrade a weak signal, never a strong one: "latest", "today", "who won",
-"weather", "ceo of", "out yet" name the live state of the world and are never
-suppressed. Result on the corpus: 24/24 ordinary questions answer directly,
-24/24 world questions still get looked up.
+The guard's reasoning was right about a *scanner* and wrong about a *verifier*.
+nmap against the same host three times tells you nothing new; `workspace_verify`
+after a third edit tells you something completely new, because the thing it
+measures changed underneath it. It compared labels, so it could not tell them
+apart.
 
-## The card says what it is
+It now counts a **window**: runs of an action since the last *different*
+state-changing action. An action never resets its own window, which is what
+keeps `pytest, pytest, pytest` blocked while `edit, pytest, edit, pytest` runs
+forever.
 
-The boot card read **AUTONOMOUS SECURITY ASSISTANT**, which is the one thing
-Basilisk is *not* until you arm it. It now reads **GENERAL & CODING
-ASSISTANT**, with a line underneath saying Unleash arms the autonomous pentest
-agent.
+## 2. A truncated write silently deleted code and reported success
 
-## Quieter
+Reproduced against the live workspace: a 59-line file written as three lines
+ending `# ... rest unchanged ...` returned `ok: True`, and the functions below
+the marker were gone.
 
-- **No competitor comparison.** The README, site and `llms.txt` lead with what
-  Basilisk scores and how to reproduce it, not with other people's numbers. The
-  cost argument stays, because that one is the actual design claim: a budget
-  open model produces the score, and if you need a frontier model to get a
-  result you have built a wrapper, not an agent.
-- **Less glow.** 125 chromatic box glows damped again (cap 0.12) and 23
-  coloured text halos damped for the first time — a halo behind a letterform is
-  what makes type look like a screensaver.
-- **The artwork came down with it.** The emblem, watermark and logo were the
-  brightest, most saturated thing on screen once the chrome went calm; their
-  highly-saturated pixels are trimmed on a curve, lightness and alpha
-  untouched.
+Work mode warns about this twice, in capitals. That is advice. It is a gate
+now, and it needs all three conditions — the file existed, the content carries
+a placeholder **line**, and the file shrank below 60% of its lines. Measured
+before shipping: 14 truncation shapes caught, **zero** false positives across
+every source and markdown file in the repo rewritten byte-for-byte, across
+honest 80% deletions, across prose that discusses patching, and across `.pyi`
+stubs full of real `...`.
+
+## 3. A replayed feed opened onto nothing
+
+Mine, from the chip rewrite in 1.1.2.0. The step list floats from the window
+overlay, but a feed replayed into the *transcript* built a panel nothing ever
+parented. Verified under real GTK: parent `None`, mapped `False`. Clicking a
+replayed feed set the chevron and put nothing on screen — a control that lies
+about having opened. The widget now knows which of its two placements it is in.
+
+## 4. The used-tool record saw only one of two execution paths
+
+`_tools_used_this_request` is what the promise gate and the verification gate
+both read. It was written at the single-call path only, under a comment saying
+it was recorded "at the one place that dispatches". There are two. That sentence
+has now been wrong three times in that method's neighbourhood. No gate set
+intersects the batchable list today, so nothing was misreported — this closes
+the seam before a tool added to both lists blinds a gate.
 
 ## Also
 
-- New `tests/test_websense.py` (64 assertions), including the three bugs the
-  corpus caught while it was being written — the worst being an arithmetic
-  guard that read `CVE-2026-1234` as 2026 minus 1234 and suppressed a live
-  vulnerability lookup.
-- 4,439 assertions across 72 stdlib-only suites, zero red.
+- New `tests/test_repeatwindow.py` (43) and `tests/test_truncwrite.py` (40).
+- 4,582 assertions across 75 stdlib-only suites, zero red.

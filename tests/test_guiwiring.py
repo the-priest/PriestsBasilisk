@@ -271,6 +271,44 @@ ck("the step list floats over the chat instead of reserving layout",
 ck("...and a retired feed's panel is removed from that overlay",
    "self._undock_feed_panel(old)" in body("    def _dock_feed(self, feed):"),
    "an orphaned panel would hang over the next chat with the old steps in it")
+# ── THE REPLAYED FEED MUST OPEN WHERE IT LIVES ──────────────────────
+# The chip rewrite gave the widget ONE placement: a chip on the tray whose
+# step list floats from the window overlay. A feed replayed into the
+# TRANSCRIPT then built a panel that nothing ever parented. Verified under
+# real GTK against that build: parent None, mapped False — clicking a
+# replayed feed set the chevron, set reveal_child, and put nothing on
+# screen. A control that lies about having opened.
+ck("the widget knows which of its two placements it is in",
+   "def __init__(self, inline: bool = False):" in _SRC)
+ck("a replayed feed is built inline",
+   "ActivityFeedWidget(inline=True)" in body("    def _append_history_feed(self, rows):"),
+   "it sits in the transcript, so its step list opens underneath it")
+ck("...and parents its own panel",
+   "self.append(self._panel)" in _SRC)
+ck("the window never adopts an inline panel",
+   'not getattr(feed, "_inline", False)' in body("    def _dock_feed(self, feed):"),
+   "adopting it would reparent it out of the transcript")
+ck("...nor one that already has a parent",
+   "panel.get_parent() is None" in body("    def _dock_feed(self, feed):"),
+   "GTK warns and the second add silently wins")
+ck("...and undocking leaves an inline panel alone",
+   'getattr(feed, "_inline", False)' in body("    def _undock_feed_panel(self, feed):"))
+
+# ── THE USED-TOOL RECORD MUST SEE BOTH EXECUTION PATHS ──────────────
+# `_tools_used_this_request` is what the promise gate and the verification
+# gate both read. It was written at the single-call path only, under a
+# comment claiming it was recorded "at the one place that dispatches". There
+# are two. That sentence has now been wrong three times in this method's
+# neighbourhood: the repeat guard, argument normalisation, and this.
+ck("the single-call path records the tool",
+   "self._tools_used_this_request.add(call.name)"
+   in body("    def _execute_tool_calls(self, calls):"))
+ck("the BATCH path records every member too",
+   "self._tools_used_this_request.add(_c.name)"
+   in body("    def _execute_tool_batch(self, calls):"),
+   "a gate that reads an incomplete record fails open on exactly the turn "
+   "it exists to catch")
+
 ck("the floating panel is NOT a Gtk.Popover",
    "Gtk.Popover()" not in body("    def _build(self):"),
    "a popover is its own native surface and cannot be translucent on X11 "
