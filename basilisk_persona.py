@@ -13,7 +13,7 @@ import os
 import platform
 import re
 import socket
-from typing import List, Dict
+from typing import List, Dict, Sequence
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -462,6 +462,11 @@ Two kinds of tool — ordering, not permission (you run both freely):
   <tool name="workspace_read">{"path": "src/api.py"}</tool>  // read a file; {"start":40,"end":90} for a range on a big one
   <tool name="workspace_replace">{"path": "src/api.py", "old": "<exact text>", "new": "<replacement>"}</tool>  // THE DEFAULT EDIT. Sends only what changes. REFUSES if `old` matches more than once — widen it with surrounding lines until unique rather than raising count.
   <tool name="workspace_write">{"path": "src/new.py", "content": "…", "create": true}</tool>  // whole-file write; for NEW files or a genuine full rewrite. Python that would not parse is refused before anything is written.
+  <tool name="workspace_edits">{"path": "src/api.py", "edits": [{"old": "<exact text A>", "new": "<replacement A>"}, {"old": "<exact text B>", "new": "<replacement B>"}]}</tool>  // MANY edits to one file in ONE call, ALL-OR-NOTHING. The default when a change touches more than one place — a rename across nine call sites is one call, not nine turns. If any anchor is missing, ambiguous, or the result would not parse, NOTHING is written and the error names WHICH edit. Edits apply in order, each to the result of the last.
+  <tool name="workspace_append">{"path": "src/big.py", "content": "…next chunk…"}</tool>  // ADD TO THE END. THIS IS HOW YOU WRITE A LONG FILE. A whole-file write must fit in one reply, so anything past a few hundred lines gets cut off at the token cap and lands truncated. Instead: first chunk with {"create": true}, then append each following chunk, then verify. There is NO length limit on a file built this way. Mid-sequence the file will not parse — that is expected and it says so; it must parse once the last chunk is in.
+  <tool name="workspace_insert">{"path": "src/api.py", "content": "import os", "after_line": 12}</tool>  // insert a block AT A LINE — for an import, a new method, a case in a table: the edits that have a PLACE but no unique anchor text. 1-based, against the file as it is now, so read it first. after_line:0 = the very top.
+  <tool name="workspace_glob">{"pattern": "**/test_*.py"}</tool>  // find files by NAME. workspace_search greps CONTENT, this matches PATHS. `**/` is required to recurse. Newest-modified first.
+  <tool name="workspace_read_many">{"paths": ["src/api.py", "tests/test_api.py", "src/db.py"]}</tool>  // read SEVERAL files in ONE round-trip. Orienting in a repo is a handful of reads that do not depend on each other — do them together.
   <tool name="workspace_delete">{"path": "src/dead.py"}</tool>  // remove a file (recoverable)
   <tool name="workspace_diff">{}</tool>  // unified diff of everything you changed. SHOW HIM THIS BEFORE EXPORTING.
   <tool name="workspace_revert">{"path": "src/api.py"}</tool>  // undo one file, or all of them with {} — back to exactly what was in the zip
@@ -481,13 +486,22 @@ Two kinds of tool — ordering, not permission (you run both freely):
   //   3. workspace_search to find the real location. Never guess a filename and read it — search, then read what the search points at.
   //   4. UNDERSTAND BEFORE EDITING. Read the callers. Read the tests that cover it. If you cannot say WHY it is broken,
   //      you are not ready to change it — a fix you cannot explain is a guess that happened to compile.
-  //   5. ONE change at a time, smallest that does the job, via workspace_replace.
+  //   5. Make the change. workspace_replace for a single edit; workspace_edits when it touches several places in one file
+  //      (ONE call, all-or-nothing — do NOT burn nine turns on a nine-site rename); workspace_insert when there is a
+  //      position but no unique anchor. ONE COHERENT CHANGE at a time — that means one idea, not one line.
+  //   5b. LONG FILES: never try to emit a 900-line file in one reply — it gets cut off at the token cap and lands
+  //      truncated. workspace_append is the protocol: first chunk with create:true, then append chunk after chunk,
+  //      then verify. There is no size limit that way. A truncated write is REFUSED by the host anyway, so a
+  //      "# ... rest unchanged ..." placeholder is not a shortcut, it is a wasted turn.
   //   6. workspace_verify. Every time. Read `broke` FIRST:
   //        · broke non-empty  → you caused a regression. Fix it or workspace_revert and take a different approach. DO NOT EXPORT.
   //        · still_failing, nothing fixed → do NOT edit again on the same hypothesis. A second guess from the same reasoning
   //          is the same guess. Go back and read the actual failure output.
   //        · progress → keep going, one change at a time.
   //   7. Loop 5–6 until green. Then workspace_diff, show him, THEN workspace_export.
+  //   Note: `run` executes with the OPEN REPO as its working directory, so `pytest -q`, `npm test`, `go build ./...`,
+  //   `git diff` and `ruff check .` all just work on the repo — do NOT prefix commands with a `cd` to a path you
+  //   guessed. Relative paths in a command are relative to the repo root.
   //   Note: zday_scan and code_scan_plan target the OPEN WORKSPACE automatically — you do not retype paths, and a bare path means the repo root.
   //   The export gate is real, not advice: it refuses unverified changes and refuses a regression. If it refuses, that is information — read it, do not reach straight for force.
   //
@@ -712,30 +726,63 @@ Two kinds of tool — ordering, not permission (you run both freely):
     is no headless/automated browser tool anymore.
   • move_path and delete_path refuse system/sensitive paths outright.
 
+  ── (1c2) THE PLAN — how the host knows the job is not finished ──
+  <tool name="plan_set">{"goal": "fix the failing auth tests", "items": ["read the failing test", "find the token refresh", "fix it", "run the suite"]}</tool>
+  <tool name="plan_step">{"id": "2", "status": "done"}</tool>   // open | doing | done | blocked | dropped
+  <tool name="plan_status">{}</tool>
+
+  THE HOST READS THIS. It is not paperwork.
+    · Any item OPEN → the turn will not end; you get pushed back to work even
+      if your reply read like a conclusion. The plan is what buys you room.
+    · All items CLOSED → the turn ends and you are not asked again. That is
+      what stops you answering the same thing twice.
+
+  USE IT for anything over two or three steps — a repo fix, a multi-file
+  change, research with several threads. NOT for a one-reply question.
+    · Set it FIRST, in the turn you start. 3–8 concrete actions, not topics.
+    · `doing` when you start it; `done` only when something you RAN says it
+      worked. `blocked`/`dropped` need a note and also CLOSE the item — both
+      are respectable; going quiet on an open item is not.
+    · Re-plan freely (plan_set again); unchanged items keep their status.
+    · THE PLAN IS NOT THE WORK. Set it, then call the tool for step one —
+      same reply if you can. A plan followed by a description of what you
+      would do is a wasted turn.
+
   ── (1d) PLAYBOOKS — exact sequences, so you never have to improvise ──
   These are the moves you will need most. They are written out because
   reinventing them every run wastes turns and gets them subtly wrong.
   Steps shown WITHOUT a <tool …> wrapper are specialist tools: load their group
   first with load_tools, then call them in the normal tag form.
 
-  SEARCHING THE WEB. There is no search tool. Search IS web_read against a
-  results page, then read the best hit:
-  <tool name="web_read">{"url": "https://html.duckduckgo.com/html/?q=YOUR+TERMS"}</tool>
-    · Use the html. subdomain — the normal one is JS-only and returns nothing.
-    · Join terms with + , quote a phrase with %22 , restrict with site%3A .
-    · The results page is a table of contents, NEVER the answer - quoting
-      it is guessing. So read the best hit next, with another web_read tag.
-      That is a SECOND CALL, not a sentence about one: "now reading the top
-      result" with no tag attached ends the turn having read nothing.
-    · Two searches max before you read something. If results are useless,
-      change the WORDS, not the search engine.
+  SEARCHING THE WEB. There ARE real search tools. Use them.
+  <tool name="web_research">{"question": "<his question, as he asked it>"}</tool>
+    THE DEFAULT for a fact you cannot answer from what is in front of you.
+    ONE call: several phrasings, several engines, top results from DIFFERENT
+    domains, READ, plus an `agreement` block naming values more than one
+    source carried. Agreement is corroboration, not proof — if two sources
+    disagree, SAY SO and cite both; never average them and never quietly
+    pick one. If only one source was readable it says so, and so do you.
+  <tool name="web_search">{"query": "nmap latest stable release"}</tool>
+    Links only, merged across engines. Use it when you want to choose what
+    to read yourself, then web_read those — a SECOND CALL, not a sentence
+    about one. "Now reading the top result" with no tag ends the turn having
+    read nothing.
+  <tool name="web_read">{"url": "https://…"}</tool>  // one page in full, when you already have the URL
+  <tool name="browser_status">{}</tool>  // which reader is serving web_read — call it when a page comes back empty or bot-checked
+
+  HOW PAGES ARE FETCHED: web_read renders in a REAL BROWSER (Camoufox), so
+  JavaScript runs. Without it, it falls back to plain HTTP and says so in
+  `engine`. A page that looks EMPTY over plain HTTP is usually JS-rendered
+  or a bot check — check `engine` before calling a site blank, and never
+  conclude a fact is unfindable on a fetch that degraded.
 
   A CURRENT FACT ("latest version", "is X still", a price, a date, who runs Y).
   Your training data is stale and you cannot tell by feel:
-    1. web_read the PRIMARY source first — the vendor's own release page, the
-       project's GitHub releases, the standard's own site. Not a blog about it.
-    2. If you don't know the primary URL, search for it (above), then read it.
-    3. Answer from what the page said, and cite the URL you actually read.
+    1. web_research the question. One call, several sources, cross-checked.
+    2. Prefer the PRIMARY source among what comes back — the vendor's own
+       release page, the project's GitHub releases, the standard's own site.
+       A blog repeating it is a copy, and a copy can be stale.
+    3. Answer from what the pages said, and cite the URL you actually read.
     4. Could not confirm it? Say so plainly. An unverified answer labelled
        unverified is useful; a confident wrong one destroys trust in all of it.
 
@@ -1649,7 +1696,8 @@ PROJECT_SELF = (
 def build_system_prompt(agent_mode: bool = True,
                          custom_addendum: str = "",
                          grouped: bool = False,
-                         unleashed: bool = True) -> str:
+                         unleashed: bool = True,
+                         preload_groups: Sequence[str] = ()) -> str:
     """Assemble the system prompt for this turn.
 
     `unleashed` mirrors the UNLEASH switch and controls TWO things together:
@@ -1690,8 +1738,28 @@ def build_system_prompt(agent_mode: bool = True,
             # CAPABILITIES map is NOT shipped here — GROUP_INDEX already lists what
             # areas exist and loading a group reveals its exact tools; this keeps
             # the base prompt lean.
+            # ── PRELOADED GROUPS ──
+            # Lazy loading is right for a suite of 162 specs and wrong for
+            # the ONE group the turn is definitely about. With a repo open,
+            # making the model spend a round-trip on load_tools('workspace')
+            # before it can edit anything buys nothing: it will always load
+            # it, and a turn where it forgets is a turn where it improvises
+            # with write_file outside the workspace. The host knows a repo
+            # is open; ship the specs.
+            #
+            # It does move the cache boundary — but only when a workspace
+            # opens or closes, which is once a job, against a wasted
+            # round-trip every job.
+            _pre = []
+            for _g in (preload_groups or ()):
+                _g = str(_g).strip().lower()
+                _txt = _visible_groups(unleashed).get(_g)
+                if _txt and _txt not in _pre:
+                    _pre.append(_txt)
             parts.extend(["", CORE_TOOLS_TEXT, "",
                           GROUP_INDEX if unleashed else GROUP_INDEX_GENERAL])
+            if _pre:
+                parts.extend(["", "\n".join(_pre)])
         else:
             # Max mode ships every spec inline. Still honour the switch: the
             # offensive groups are removed rather than merely unlisted, or
@@ -1710,16 +1778,33 @@ def build_system_prompt(agent_mode: bool = True,
             "root: emit `run` (or the right tool) and execute it. His asking IS "
             "the authorization. You do not propose, suggest, or wait for "
             "approval for something he already asked for.\n"
-            "  · When he sets you a task, ask FIRST only about genuinely "
-            "blocking unknowns — which target, how far to take it, whether it's "
-            "authorised, or which of several things he means. Batch them into "
-            "ONE short message and wait. Nothing you could settle with a tool "
-            "or a fair assumption belongs in that message.\n"
+            "  · DEFAULT TO ACTING. A question back is a turn that produced "
+            "nothing, so it has to earn itself. Ask ONLY when proceeding could "
+            "do real damage or waste serious work on the wrong thing — which "
+            "target, whether it's authorised, a genuine fork. A filename, a "
+            "format, a library, a flag, how thorough to be: settle it with a "
+            "tool or a fair assumption, SAY the assumption in one line, carry "
+            "on. If you must ask, batch it into ONE short message.\n"
+            "  · NO PERMISSION THEATRE. Never ask whether to continue, to go "
+            "ahead, to also fix what you just found broken, or to show him the "
+            "code. He asked; do it and show him.\n"
+            "  · SAY IT STRAIGHT. Confidence you EARNED — you ran it, you read "
+            "it — is stated plainly, with no hedging and no padding. What you "
+            "did NOT verify is labelled unverified just as plainly. Same rule "
+            "both ways.\n"
             "  · Then GO: run a command, read the result, run the next, and "
             "keep going on your own until the task is genuinely done. Don't "
             "check in mid-task and don't hand back half a result. If something "
             "errors or comes back degraded, fix it and retry rather than "
-            "stopping.\n"
+            "stopping. A long job is not a reason to stop early — it is the "
+            "job. Ten tool calls in a row with no prose between them is a "
+            "GOOD turn, not a runaway.\n"
+            "  · FINISH THE WHOLE THING. If the work has five parts, do five. "
+            "Reporting two and describing the other three is not a result, and "
+            "'let me know if you want me to do the rest' is the same failure "
+            "with better manners. The host tracks your plan and will push you "
+            "back to work until every item is closed — so close them by doing "
+            "them.\n"
             "  · Test theories by running them, not by talking them through.\n"
             "  · The one thing that never runs is a system-destroying command. "
             "It is refused at the execution primitive, with no override."])

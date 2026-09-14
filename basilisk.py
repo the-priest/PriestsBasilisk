@@ -67,6 +67,9 @@ from basilisk_core import (
     tool_media_control, tool_screenshot, tool_read_screen,
     tool_make_dir, tool_copy_path, tool_move_path, tool_delete_path,
     tool_path_info, tool_open_url, tool_web_read, web_read_tier, tool_web_sources,
+    tool_web_search, tool_web_research, tool_browser_status,
+    tool_workspace_edits, tool_workspace_append, tool_workspace_insert,
+    tool_workspace_glob, tool_workspace_read_many, workspace_cwd,
     tool_image_search,
     tool_analyze_image, tool_capture_photo, tool_detect_faces,
     tool_tooling_check, tool_pentest_plan, tool_cve_lookup,
@@ -186,7 +189,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.basilisk"
 APP_NAME = "Basilisk"
-VERSION = "1.1.4.0"
+VERSION = "1.2.0.0"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -3871,6 +3874,208 @@ window.dialog, dialog, .messagedialog, .dialog-content {
     color: #78838f;
     letter-spacing: 0.4px;
 }
+
+/* =====================================================================
+   THE QUIET PASS - appended after COMPOSURE, so it wins over everything.
+   ASCII-only, like the rest of this bytes literal.
+
+   The brief was "darker, more minimal, more professional".  The composure
+   pass got the structure right; what was left is VOLUME.  Three specific
+   things were still shouting, and none of them is the content:
+
+     1. THE GROUND WAS NOT DARK, IT WAS DIM.  Surfaces sat around 4-6%
+        lightness ABOVE the window, so every panel read as a lighter
+        rectangle pasted onto the backdrop.  Dark UIs look expensive when
+        the panels are DARKER than the frame and the only light in the
+        room comes from the text.  So the grounds drop and the separation
+        is carried by one hairline instead of by a lift.
+     2. TINT WAS DOING WORK THAT CONTRAST SHOULD DO.  A blue-tinted panel
+        next to a blue-tinted panel needs saturation to tell them apart,
+        and saturation is the thing that reads as cheap.  Chrome goes
+        near-neutral here; the cool band stays where it earns its place,
+        on the lit edge and on live/active state.
+     3. EVERY SURFACE HAD A DROP SHADOW.  A shadow means "this floats
+        above that".  When everything floats, nothing does, and the whole
+        window gets a soft halo that looks like a screenshot of a UI
+        rather than a UI.  Shadows are kept ONLY where something really
+        does float over content: the popover, the dialogs.
+
+   WHAT IS DELIBERATELY NOT TOUCHED, because quiet is not the same as
+   washed out: prose, code, tables and links keep their full contrast -
+   they are the reason the window exists.  The semantic colours (error
+   red, warning amber) are untouched, because dimming a danger signal to
+   match a mood is how a warning stops working.
+   ===================================================================== */
+
+/* ---- 1. the ground drops ------------------------------------------- */
+.activity-panel-frame,
+.activity-dock .activity-panel-frame {
+    background-color: rgba(5, 7, 10, 0.975);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.10),
+        0 14px 40px rgba(0, 0, 0, 0.60);
+    border: 1px solid rgba(206, 226, 242, 0.11);
+    border-top-color: rgba(220, 238, 252, 0.20);
+}
+.activity-header,
+.activity-dock .activity-header {
+    background-color: rgba(9, 13, 18, 0.60);
+    border: 1px solid rgba(206, 226, 242, 0.11);
+    border-top-color: rgba(220, 238, 252, 0.19);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+.activity-header:hover,
+.activity-dock .activity-header:hover {
+    background-color: rgba(16, 22, 30, 0.70);
+    border-color: rgba(206, 226, 242, 0.17);
+}
+
+/* ---- 2. chrome goes neutral ---------------------------------------- */
+.activity-title    { color: #aab3bc; letter-spacing: 0.2px; }
+.activity-meta     { color: #626c76; font-size: 13px; }
+.activity-chevron  { color: #5b656e; }
+.activity-step-detail { color: #7b848d; }
+.activity-step-time   { color: #626b74; }
+.activity-preview     { color: #6f777f; }
+.activity-preview-box { border-left-color: rgba(206, 226, 242, 0.12); }
+
+/* ---- 3. shadows only where something floats ------------------------ */
+.msg-user, .msg-assistant {
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.10);
+}
+.msg-user {
+    /* The operator's own words were the most saturated object on screen.
+       Depth, not volume: a hair lighter than the assistant pane, with the
+       same near-neutral hairline. */
+    background-color: rgba(24, 34, 45, 0.42);
+    border-color: rgba(206, 226, 242, 0.14);
+    border-top-color: rgba(220, 238, 252, 0.24);
+}
+.msg-user:hover {
+    background-color: rgba(28, 40, 53, 0.48);
+    border-color: rgba(206, 226, 242, 0.20);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.13);
+}
+.msg-assistant {
+    border-color: rgba(206, 226, 242, 0.10);
+    border-top-color: rgba(220, 238, 252, 0.18);
+}
+
+/* ---- 4. two things the quiet pass got wrong, corrected after looking
+   at a real screenshot rather than at the stylesheet ------------------
+
+   THE SELECTED CHAT ROW was the loudest object in the window: a saturated
+   blue fill, a 3px accent bar, a white top bevel AND an outer bloom, all
+   on a list row whose job is to say "you are here".  Chrome receding is
+   the rule, and a navigation row is chrome.  It keeps ONE signal - the
+   left accent bar, which is the cheapest unambiguous "here" there is -
+   and gives up the fill, the bevel and the glow.
+
+   THE COMPOSER went too far the other way and nearly vanished: a dark
+   rounded box on a dark ground with a 0.11-alpha hairline reads as
+   nothing at all, and the one control the operator needs to find without
+   looking should not be the hardest to see.  It gets a visible edge
+   back - still quiet, still no bloom, but legibly an input.  Its FOCUS
+   state stays understated, because the composer holds focus from the
+   moment the app opens: a loud focus ring means the app's resting
+   appearance is "something is shouting at you".
+   -------------------------------------------------------------------- */
+.chat-row.selected, .chat-row:selected {
+    background-color: rgba(24, 34, 45, 0.44);
+    background-image: none;
+    border-left: 3px solid #3f8fc4;
+    box-shadow: none;
+}
+.chat-row.selected .title-line, .chat-row:selected .title-line {
+    color: #e6eef5;
+}
+.input-frame {
+    background-color: rgba(11, 15, 21, 0.62);
+    background-image:
+        linear-gradient(180deg, rgba(241, 249, 254, 0.07) 0%,
+                        rgba(241, 249, 254, 0.0) 50%,
+                        rgba(0, 0, 0, 0.18) 100%);
+    border: 1px solid rgba(206, 226, 242, 0.24);
+    border-top-color: rgba(220, 238, 252, 0.30);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.09);
+}
+.input-frame:focus-within {
+    background-color: rgba(14, 20, 28, 0.70);
+    border-color: rgba(120, 176, 214, 0.44);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+/* =====================================================================
+   THE CHECKLIST - the plan, ticking off, above the step rows.
+
+   It is a READING surface, not a control: no box, no tint, no border of
+   its own.  One hairline under the header separates it from the steps
+   and that is the entire chrome budget, because a bordered card inside
+   the popover would be the nested box the composure pass exists to
+   forbid.
+
+   The four states are told apart by WEIGHT AND OPACITY, not by four
+   colours.  A five-item plan painted in five hues is a traffic light,
+   and the operator is reading it at a glance to answer one question:
+   how much is left.
+   ===================================================================== */
+.activity-plan {
+    padding: 2px 6px 6px 4px;
+    margin: 0 0 4px 0;
+    border-bottom: 1px solid rgba(206, 226, 242, 0.10);
+    background-color: transparent;
+    background-image: none;
+    border-radius: 0;
+    box-shadow: none;
+}
+.activity-plan-head {
+    padding: 2px 2px 4px 2px;
+}
+.activity-plan-title {
+    color: #6d7781;
+    font-size: 12px;
+    letter-spacing: 1.2px;
+    text-transform: uppercase;
+}
+.activity-plan-count {
+    color: #6d7781;
+    font-size: 12px;
+}
+.activity-plan-row {
+    padding: 3px 2px 3px 2px;
+}
+.activity-plan-glyph {
+    font-size: 12px;
+    min-width: 14px;
+    color: #5f6871;
+}
+.activity-plan-name {
+    color: #98a2ac;
+    letter-spacing: 0.2px;
+}
+.activity-plan-note {
+    color: #6d7781;
+    font-size: 13px;
+}
+/* OPEN: present, not yet earning attention. */
+.activity-plan-row.plan-open .activity-plan-name  { color: #8b949e; }
+/* DOING: the one line worth looking at, so it is the only lit one. */
+.activity-plan-row.plan-doing .activity-plan-glyph { color: #7fd4e8; }
+.activity-plan-row.plan-doing .activity-plan-name  {
+    color: #dce7f0;
+    font-weight: 600;
+}
+/* DONE: keeps its tick and steps back.  Finished work should be
+   countable at a glance and should not compete with what is live. */
+.activity-plan-row.plan-done .activity-plan-glyph { color: #5f6871; }
+.activity-plan-row.plan-done .activity-plan-name  { color: #69727b; }
+/* BLOCKED: the one place red belongs here - it is a real problem, and
+   red means danger and nothing else in this theme. */
+.activity-plan-row.plan-blocked .activity-plan-glyph { color: #e5484d; }
+.activity-plan-row.plan-blocked .activity-plan-name  { color: #c9a9ab; }
+/* DROPPED: deliberately not done.  Dim, not alarming. */
+.activity-plan-row.plan-dropped .activity-plan-glyph { color: #555d65; }
+.activity-plan-row.plan-dropped .activity-plan-name  { color: #5d666e; }
 """
 
 
@@ -5903,6 +6108,204 @@ def unverified_work_gap(tools_used, already_forced: bool = False):
         return None
 
 
+# ══════════════════════════════════════════════════════════════════════
+#  THE SECOND ANSWER — why a gate has to say this
+# ══════════════════════════════════════════════════════════════════════
+# Both end-of-turn gates fire at the same moment: the model has written a
+# COMPLETE reply, emitted no tool call, and the turn was about to end. The
+# gate then runs a tool anyway and hands the result back.
+#
+# From the model's side that is indistinguishable from an ordinary mid-
+# research tool result — so it does the only sensible thing and writes the
+# answer. The answer it already wrote. The operator, who cannot see any of
+# this machinery, gets two complete answers to one question and reasonably
+# reports that the app "sends two answers".
+#
+# The gates were right to fire. What was missing is the one fact only the
+# host has: THE FIRST ANSWER IS ALREADY ON SCREEN. Said plainly, the
+# continuation becomes what it should always have been — a delta. A line
+# confirming the check, or a correction if the check changed the answer.
+#
+# It is deliberately blunt and deliberately short. This rides the volatile
+# trailing message, it is read immediately after a tool result, and the
+# competing instruction it has to beat ("answer the operator's question")
+# is the strongest one in the prompt.
+_GATE_CONTINUATION_NOTE = (
+    "\n[system note — READ THIS BEFORE YOU WRITE ANYTHING: the reply you "
+    "just wrote IS ALREADY ON SCREEN and the operator has read it. This "
+    "tool ran AFTER it, because the host forced it. So do NOT answer the "
+    "question again, do not restate your conclusion in different words, and "
+    "do not re-summarise what you already said — that is the same answer "
+    "twice and it reads as a stutter.\n"
+    "Reply with the DELTA and nothing else:\n"
+    "  · the check agreed with what you said -> one short line confirming "
+    "it, naming what was run or read. Two sentences at most.\n"
+    "  · the check CONTRADICTS or changes what you said -> say so plainly, "
+    "correct the specific part that was wrong, and cite what changed it.\n"
+    "  · the check revealed more work -> stop writing and emit the next "
+    "tool call instead.]")
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  THE LEDGER GATE — the turn may not end on work it said it would do
+# ══════════════════════════════════════════════════════════════════════
+# The promise gate asks "did it fetch what the question needed?". The
+# verification gate asks "did it check the change it made?". Both read
+# facts rather than prose, and both were built because a reply-reader kept
+# being one phrasing away from wrong.
+#
+# This one asks the remaining question: "did it do what IT SAID IT WOULD?"
+# — and it is the only one of the three that can answer in BOTH directions,
+# which is why it fixes two complaints at once:
+#
+#   items still open  -> the turn does not end. This is the "it stops when
+#                        it's supposed to keep working" half. A reply like
+#                        "I've fixed two of the five files" reads as a
+#                        conclusion to every prose detector ever written,
+#                        and is plainly unfinished to a ledger.
+#   nothing open      -> the turn DOES end, and every other push is
+#                        suppressed for the rest of the request. That is
+#                        the "it doesn't stop and sends two answers" half:
+#                        once the declared work is done, the host stops
+#                        finding reasons to hand the model another turn.
+#
+# BOUNDED, like every other gate here. A model that will not close an item
+# must not be able to hold a turn open forever, so after `cap` pushes the
+# gate stands down and says so. An empty ledger is NOT "complete": a job
+# with no plan is unmanaged, not finished, and this gate says nothing about
+# it either way.
+def unfinished_plan_gap(plan, pushes: int = 0, cap: int = 6):
+    """The nudge text for a turn ending with open plan items, or None.
+
+    Pure and total: junk in, None out. A gate that raises fails open on
+    exactly the turn it exists to catch."""
+    try:
+        if plan is None or not len(plan):
+            return None
+        if plan.is_complete():
+            return None
+        try:
+            cap = max(0, int(cap))
+        except Exception:
+            cap = 6
+        if int(pushes or 0) >= cap:
+            return None
+        op = plan.open_items()
+        if not op:
+            return None
+        nxt = op[0]
+        names = "; ".join(f"{i['id']}. {i['title']}" for i in op[:8])
+        return (
+            "<tool_result>\n[system note: THE TURN IS NOT OVER. Your own plan "
+            "still has %d item(s) open:\n    %s\n"
+            "Nothing was written and nothing ran for them. The next thing you "
+            "emit must be the TOOL CALL for %r — not a description of it, not "
+            "a summary of progress, not a question about whether to continue. "
+            "Do the work.\n"
+            "If an item genuinely cannot be done, close it honestly: "
+            "plan_step {\"id\": \"%s\", \"status\": \"blocked\", \"note\": "
+            "\"<exactly what stopped you>\"} — and if the whole job is "
+            "finished and the plan is just stale, mark the remaining items "
+            "done or dropped and THEN give your final report.]\n"
+            "</tool_result>" % (len(op), names, nxt["title"], nxt["id"]))
+    except Exception:
+        return None
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  THE FAILING-VERIFICATION GATE — red is not a place to stop
+# ══════════════════════════════════════════════════════════════════════
+# v1.1.3.0 made the turn RUN the check. It did not make the turn care what
+# the check said. So the remaining shape was: edit, verify, tests are red,
+# write an honest paragraph about the tests being red, end the turn — with
+# the operator's repo in a worse state than it started and a reply that
+# reads as diligent.
+#
+# `workspace_verify` returns a structured verdict (`green`, `broke`,
+# `still_failing`), so this reads a FACT, not a mood. `broke` non-empty is
+# the important one: those are regressions this turn caused, and ending on
+# them is never right.
+#
+# It does not fire on "still_failing with nothing broken" beyond the first
+# push, because a repo that arrived red and is still red may be exactly
+# what the operator asked about — and a gate that will not let a turn end
+# gets switched off.
+def failing_verification_gap(verdict: str, pushes: int = 0, cap: int = 2):
+    """The push text for a turn ending on a red verifier, or None."""
+    try:
+        v = str(verdict or "").strip()
+        if not v:
+            return None
+        try:
+            cap = max(0, int(cap))
+        except Exception:
+            cap = 2
+        if int(pushes or 0) >= cap:
+            return None
+        if v.startswith("regression"):
+            detail = (
+                "the check you ran says YOUR CHANGES BROKE something that was "
+                "passing before (`broke` was not empty). That is a regression, "
+                "and it is never an acceptable place to stop.")
+            todo = ("Read the actual failure output, fix the real cause, and "
+                    "re-run the check. If you cannot fix it, workspace_revert "
+                    "the file and say plainly that you reverted and why.")
+        else:
+            detail = ("the check you ran did not pass (verdict %r)." % v)
+            todo = ("Read the real error — not the summary line, the error — "
+                    "and fix the cause, then re-run the check. Do not edit "
+                    "again on the same hypothesis that just failed; a second "
+                    "guess from the same reasoning is the same guess.")
+        return ("<tool_result>\n[system note: NOT DONE — " + detail + " " +
+                todo + "\nIf the failure predates your changes and is not "
+                "something you were asked to fix, say so explicitly, name the "
+                "test, and then you may stop.]\n</tool_result>")
+    except Exception:
+        return None
+
+
+# ── WHAT A VERIFIER ACTUALLY SAID ────────────────────────────────────
+# Ground truth for the gate above, read off the tool result rather than
+# off the model's account of it. Total: anything unreadable is "" (no
+# opinion), never a red verdict invented from a parse failure.
+def verifier_verdict(tool: str, result_text: str) -> str:
+    """"" when this was not a verifier or it passed; the verdict when red."""
+    try:
+        if str(tool or "").strip() not in ("workspace_verify",
+                                           "workspace_health"):
+            return ""
+        txt = result_text or ""
+        if not txt:
+            return ""
+        try:
+            blob = json.loads(txt)
+        except Exception:
+            m = re.search(r"\{.*\}", txt, re.S)
+            if not m:
+                return ""
+            try:
+                blob = json.loads(m.group(0))
+            except Exception:
+                return ""
+        if not isinstance(blob, dict):
+            return ""
+        if not blob.get("ok", True):
+            return ""                     # a tool ERROR is not a red suite
+        if blob.get("green"):
+            return ""
+        if blob.get("no_baseline"):
+            return ""                     # attributes nothing; says nothing
+        broke = blob.get("broke") or []
+        if isinstance(broke, (list, tuple)) and broke:
+            return "regression: " + ", ".join(str(x) for x in broke[:5])
+        v = str(blob.get("verdict") or "").strip()
+        if v and v != "green":
+            return v
+        return ""
+    except Exception:
+        return ""
+
+
 def forced_search_url(question: str, tools_used, already_forced: bool = False):
     """The URL the app should read ITSELF, or None to let the turn end.
 
@@ -6360,6 +6763,9 @@ class ActivityFeedWidget(Gtk.Box):
         # stops repeating it ("3 steps complete ... 3 steps" reads like two
         # different numbers that happen to agree).
         self._title_has_count = False
+        # The plan checklist, pinned above the step rows. None until a plan
+        # exists — most turns never have one and must not pay for the box.
+        self._plan_box = None
         self._build()
         self._start_tick()
 
@@ -6649,6 +7055,101 @@ class ActivityFeedWidget(Gtk.Box):
         if self._n_run == 0 and not self._done:
             self._title.set_text(self._phase)
         self._refresh_header()
+
+    # ══════════════════════════════════════════════════════════════════
+    #  THE CHECKLIST — the plan, ticking off, where he can see it
+    # ══════════════════════════════════════════════════════════════════
+    # Pinned ABOVE the step rows rather than mixed in among them, because it
+    # answers a different question. The step rows say what just happened;
+    # the checklist says how much of the job is left. Mixed together, the
+    # plan scrolls away behind forty tool rows exactly when it is most
+    # wanted.
+    #
+    # Rebuilt wholesale on every update. The plan is 3-8 rows and a diff
+    # would be more code than it saves — and a diffed list that drifts from
+    # the ledger is worse than no list, because it is a checklist that lies
+    # about what is done.
+    #
+    # ASCII GLYPHS ONLY, same rule the step rows already follow: the emoji
+    # face substitutes U+2705 / U+26D4 and friends, ignoring both the row's
+    # colour and its metrics, so one row would render wider and in a colour
+    # nothing in the stylesheet chose.
+    _PLAN_GLYPH = {"open": "\u25cb",     # white circle, an empty box
+                   "doing": "\u25d0",    # half-filled circle
+                   "done": "\u25cf",     # filled circle
+                   "blocked": "!",
+                   "dropped": "\u2013"}  # en dash
+
+    def set_checklist(self, items, summary: str = ""):
+        """Show (or refresh) the plan for this turn. Total: never raises."""
+        if self._disposed or self._body is None:
+            return
+        try:
+            items = list(items or [])
+        except Exception:
+            return
+        try:
+            if self._plan_box is not None:
+                self._body.remove(self._plan_box)
+        except Exception:
+            pass
+        self._plan_box = None
+        if not items:
+            return
+        try:
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+            box.add_css_class("activity-plan")
+
+            head = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            head.add_css_class("activity-plan-head")
+            h = Gtk.Label(label="plan", xalign=0.0)
+            h.add_css_class("activity-plan-title")
+            head.append(h)
+            sm = Gtk.Label(label=summary or "", xalign=1.0)
+            sm.add_css_class("activity-plan-count")
+            sm.set_hexpand(True)
+            head.append(sm)
+            box.append(head)
+
+            for it in items[:40]:
+                st = str(it.get("status", "open"))
+                row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
+                              spacing=8)
+                row.add_css_class("activity-plan-row")
+                row.add_css_class("plan-" + (st if st in self._PLAN_GLYPH
+                                             else "open"))
+                g = Gtk.Label(label=self._PLAN_GLYPH.get(st, "\u25cb"))
+                g.add_css_class("activity-plan-glyph")
+                row.append(g)
+                t = Gtk.Label(label=str(it.get("title", "")), xalign=0.0)
+                t.add_css_class("activity-plan-name")
+                t.set_ellipsize(Pango.EllipsizeMode.END)
+                t.set_hexpand(True)
+                row.append(t)
+                # A blocked or dropped item without its reason on screen is
+                # just a step that vanished. The ledger makes the note
+                # mandatory; this is where it is worth having.
+                nt = str(it.get("note", "") or "")
+                if st in ("blocked", "dropped") and nt:
+                    n = Gtk.Label(label=nt[:60], xalign=1.0)
+                    n.add_css_class("activity-plan-note")
+                    n.set_ellipsize(Pango.EllipsizeMode.END)
+                    row.append(n)
+                box.append(row)
+
+            self._body.prepend(box)
+            self._plan_box = box
+            # A plan arriving is worth seeing: open the panel unless he has
+            # deliberately folded it. `_pinned` is his choice either way and
+            # is never overridden — see _on_header_clicked.
+            if not self._pinned and not self._done:
+                try:
+                    self._panel.set_reveal_child(True)
+                    self._chevron.set_text("\u2303")
+                except Exception:
+                    pass
+        except Exception as e:
+            log(f"activity checklist failed: {e}")
 
     def note(self, text: str, kind: str = "note"):
         """A non-tool event worth showing: a gate refusal, a retry, the repeat
@@ -9296,6 +9797,24 @@ class MainWindow(Adw.ApplicationWindow):
         self._batch_members: List[str] = []
         # Answer-mode stall pushes spent on the current request. See
         # ANSWER_STALL_NUDGE_MAX.
+        # ── THE TASK LEDGER ──
+        # The plan for the current request, the number of times the host has
+        # pushed the turn onward because items were still open, and whether a
+        # GATE (rather than the model) put the last tool call in flight.
+        # That last one is the double-answer fix: a gate-forced continuation
+        # arrives AFTER the model has already written a complete answer to
+        # the screen, so the continuation has to be told that, or the model
+        # very reasonably writes the whole answer again.
+        self._plan = None
+        self._plan_pushes: int = 0
+        self._plan_done_announced: bool = False
+        self._gate_forced: str = ""
+        # Ground truth from the last verifier that ran this request: the
+        # verdict string when it came back RED, "" otherwise. Read by the
+        # failing-verification gate, which is the other half of "not done
+        # until it actually passes".
+        self._verify_red: str = ""
+        self._verify_pushes: int = 0
         self._answer_stall_nudges: int = 0
         # Absolute per-request ceiling — see ANSWER_STALL_NUDGE_TOTAL_MAX.
         self._answer_stall_total: int = 0
@@ -12688,6 +13207,12 @@ class MainWindow(Adw.ApplicationWindow):
             self._promise_pushes = 0
             self._forced_fetch_done = False
             self._forced_verify_done = False
+            # THE LEDGER IS PER REQUEST. See _plan_reset for why it is not
+            # per chat.
+            self._plan_reset()
+            self._verify_red = ""
+            self._verify_pushes = 0
+            self._gate_forced = ""
 
         # Limit how many model round-trips a turn may chain.  Rather than
         # dead-ending with "chain too long" and no answer (annoying), once
@@ -13405,7 +13930,14 @@ class MainWindow(Adw.ApplicationWindow):
             # UNLEASH decides the role framing AND which tool groups exist.
             # Off = ordinary work on his machine, offensive suite not loaded:
             # cheaper, and it stops a general task being framed as an attack.
-            unleashed=self._unleashed)
+            unleashed=self._unleashed,
+            # THE REPO TOOLS SHIP WHEN THERE IS A REPO. Not after a
+            # load_tools round-trip the model has to remember to make — a
+            # coding assistant with a workspace open needs the edit tools
+            # the way it needs the file tools. Also on a leashed WORK turn,
+            # where the job is a repo job by classification even before one
+            # is imported.
+            preload_groups=self._preload_groups())
         # The clock and the addendum go last, as their own trailing message, so
         # everything above them stays byte-identical between turns and gets
         # served from the provider's prefix cache: half price on input, lower
@@ -13919,6 +14451,8 @@ class MainWindow(Adw.ApplicationWindow):
                 if _rec:
                     self._forced_fetch_done = True
                     executable = _rec
+                    # THE REPLY IS ALREADY ON SCREEN. See _gate_forced.
+                    self._gate_forced = "fetch"
                     self.terminal_log(
                         "↩ you asked for something current and nothing was "
                         "fetched — searching it myself", "error")
@@ -13933,7 +14467,8 @@ class MainWindow(Adw.ApplicationWindow):
                           "the best links from here, then answer from what "
                           "you actually read and cite it. Do not answer from "
                           "memory, and do not say you will fetch something — "
-                          "fetch it.]")
+                          "fetch it.]"
+                        + _GATE_CONTINUATION_NOTE)
 
         # ── THE VERIFICATION GATE ──
         # Sits beside the promise gate above and shares its shape exactly: no
@@ -13959,6 +14494,7 @@ class MainWindow(Adw.ApplicationWindow):
                 if _rec:
                     self._forced_verify_done = True
                     executable = _rec
+                    self._gate_forced = "verify"
                     self.terminal_log(
                         "↩ you changed the repo and never ran anything "
                         "— verifying it myself", "error")
@@ -13975,7 +14511,8 @@ class MainWindow(Adw.ApplicationWindow):
                           "fails, read the real error and fix the real cause. "
                           "If there is no test command, or the change was not "
                           "code, say that plainly in your report and stop — do "
-                          "not invent a verification you did not run.]")
+                          "not invent a verification you did not run.]"
+                        + _GATE_CONTINUATION_NOTE)
 
         if _recover_fence:
             _cmd = self._shell_block_command(final)
@@ -14520,8 +15057,118 @@ class MainWindow(Adw.ApplicationWindow):
             # a repo job runs 100 steps, where a stall at step 12 and one at
             # step 60 are independent stalls, not a loop.
             _work_turn = bool(getattr(self, "_leash_work_turn", False))
+
+            # ══════════════════════════════════════════════════════════
+            #  THE LEDGER GATE — deterministic, and it runs FIRST
+            # ══════════════════════════════════════════════════════════
+            # Before any prose is read. The three pushes below are in
+            # descending order of how much they know:
+            #
+            #   1. the ledger    — the model's own declared, tracked state
+            #   2. the verifier  — what a command actually returned
+            #   3. the stall detector — a guess about English
+            #
+            # The first two are facts and the third is a heuristic, so the
+            # heuristic gets consulted only when neither fact applies. That
+            # ordering is the point: every "it stopped early" bug in this
+            # app's history came from a heuristic answering a question a
+            # fact could have answered.
+            _plan = getattr(self, "_plan", None)
+            _plan_complete = False
+            try:
+                _plan_complete = bool(_plan is not None and len(_plan)
+                                      and _plan.is_complete())
+            except Exception:
+                _plan_complete = False
+            if (not cancelled and not executable
+                    and not self._stop_requested
+                    and not self._tools_locked
+                    and not self._mission_active
+                    and self.current_agent_mode
+                    and self.settings.get("plan_enabled", True)):
+                _pg = unfinished_plan_gap(
+                    _plan, getattr(self, "_plan_pushes", 0),
+                    _as_int(self.settings.get("plan_push_max", 6), 6))
+                if _pg:
+                    self._plan_pushes = getattr(self, "_plan_pushes", 0) + 1
+                    _left = len(_plan.open_items())
+                    self.terminal_log(
+                        "↻ %d plan item(s) still open — the turn does not "
+                        "end here (%d/%d)"
+                        % (_left, self._plan_pushes,
+                           _as_int(self.settings.get("plan_push_max", 6), 6)),
+                        "dim")
+                    self._activity_note(
+                        "%d step(s) still open - keeping going" % _left,
+                        "gate")
+                    try:
+                        _sc = self.streaming_chat_id or self.current_chat_id
+                        self.store.add_message(_sc, "user", _pg,
+                                               meta={"kind": "tool_result"})
+                    except Exception as e:
+                        log(f"plan gate: store write failed: {e}")
+                    self.streaming_msg_widget = None
+                    self.streaming_msg_db_id = None
+                    self._kick_assistant_turn()
+                    return False
+
+            # ══════════════════════════════════════════════════════════
+            #  THE FAILING-VERIFICATION GATE — red is not a stopping point
+            # ══════════════════════════════════════════════════════════
+            # v1.1.3.0 made the turn RUN the check; nothing made it care
+            # what the check SAID. `_verify_red` is set in _feed_tool_result
+            # from the verifier's own structured verdict, so this is the
+            # tool's answer and not the model's account of it.
+            if (not cancelled and not executable
+                    and not self._stop_requested
+                    and not self._tools_locked
+                    and not self._mission_active
+                    and self.current_agent_mode
+                    and getattr(self, "_verify_red", "")):
+                _fv = failing_verification_gap(
+                    self._verify_red, getattr(self, "_verify_pushes", 0))
+                if _fv:
+                    self._verify_pushes = getattr(self, "_verify_pushes", 0) + 1
+                    self.terminal_log(
+                        "↻ the check is still red (%s) — not ending on that"
+                        % self._verify_red[:60], "error")
+                    self._activity_note(
+                        "the check did not pass - going back to it", "gate")
+                    try:
+                        _sc = self.streaming_chat_id or self.current_chat_id
+                        self.store.add_message(_sc, "user", _fv,
+                                               meta={"kind": "tool_result"})
+                    except Exception as e:
+                        log(f"verify gate: store write failed: {e}")
+                    self.streaming_msg_widget = None
+                    self.streaming_msg_db_id = None
+                    self._kick_assistant_turn()
+                    return False
+
+            # ── A COMPLETED PLAN ENDS THE TURN, FULL STOP ──
+            # The other half of the ledger, and the half that stops the
+            # second answer. Every item closed means the declared work is
+            # done, so the host stops looking for reasons to hand the model
+            # another turn — including the stall detector below, which is a
+            # prose heuristic and therefore the most likely of the three to
+            # push a FINISHED turn back into the loop. A finished job is not
+            # a stall however the last sentence happens to be phrased.
             _nudge_cap = (ANSWER_STALL_NUDGE_MAX * 2 if _work_turn
                           else ANSWER_STALL_NUDGE_MAX)
+            if _plan_complete:
+                _nudge_cap = 0
+                if not getattr(self, "_plan_done_announced", False):
+                    self._plan_done_announced = True
+                    self.terminal_log(
+                        "✅ every plan item closed (%s) — ending the turn"
+                        % _plan.summary_line(), "ok")
+                    self._activity_note(
+                        "all steps closed - done", "note")
+            # ── ANSWER-MODE STALL NUDGE (the block below is this one) ──
+            # Given its own anchor because tests locate it by comment and a
+            # fixed-width slice from the section header broke the moment the
+            # deterministic gates above were added. A named anchor cannot
+            # drift when a neighbour grows.
             if (not cancelled and not executable
                     and not self._stop_requested
                     and not self._tools_locked
@@ -14627,6 +15274,106 @@ class MainWindow(Adw.ApplicationWindow):
 
     # ── tool execution ──────────────────────────────────────────
 
+    # ══════════════════════════════════════════════════════════════════
+    #  THE TASK LEDGER — host side
+    # ══════════════════════════════════════════════════════════════════
+    def _plan_obj(self):
+        """The plan for THIS request. One per request, created on demand."""
+        pl = getattr(self, "_plan", None)
+        if pl is None:
+            try:
+                from basilisk_ext.tasks import TaskPlan
+            except Exception:
+                return None
+            pl = TaskPlan()
+            self._plan = pl
+        return pl
+
+    def _plan_reset(self):
+        """A new operator message starts a new plan.
+
+        NOT per chat. Carrying a plan across requests would let an item left
+        open in the last question hold this question's answer hostage, and
+        the gate would be enforcing an intention the operator has moved on
+        from."""
+        pl = getattr(self, "_plan", None)
+        if pl is not None:
+            try:
+                pl.clear()
+            except Exception:
+                self._plan = None
+        self._plan_pushes = 0
+        self._plan_done_announced = False
+
+    def _plan_call(self, op, a):
+        """plan_set / plan_step / plan_status, and the screen update."""
+        pl = self._plan_obj()
+        if pl is None:
+            return {"ok": False, "error": (
+                "the task-ledger module is not installed — carry on without "
+                "a plan and just do the work, verifying as you go.")}
+        try:
+            if op == "set":
+                items = a.get("items", a.get("steps", a.get("plan",
+                              a.get("tasks", a.get("todo")))))
+                out = pl.set_plan(items, a.get("goal", a.get("objective", "")))
+            elif op == "step":
+                out = pl.update(
+                    a.get("id", a.get("item", a.get("step", a.get("task",
+                          a.get("title", ""))))),
+                    a.get("status", a.get("state", a.get("to", ""))),
+                    a.get("note", a.get("reason", a.get("detail", ""))))
+            else:
+                out = pl.status()
+        except Exception as e:
+            return {"ok": False, "error": f"plan tool failed: {e}"}
+        try:
+            GLib.idle_add(self._plan_render)
+        except Exception:
+            pass
+        return out
+
+    def _plan_render(self):
+        """Push the checklist onto the live activity feed."""
+        try:
+            pl = getattr(self, "_plan", None)
+            if pl is None or not len(pl):
+                return False
+            feed = getattr(self, "_feed", None)
+            if feed is not None and hasattr(feed, "set_checklist"):
+                feed.set_checklist(pl.items, pl.summary_line())
+        except Exception:
+            pass
+        return False
+
+    def _preload_groups(self):
+        """Tool groups to ship inline this turn instead of lazily.
+
+        Pure and cheap — called once per round-trip. Anything it cannot
+        determine it simply does not preload, which is exactly the old
+        behaviour."""
+        out = []
+        try:
+            if workspace_cwd():
+                out.append("workspace")
+            elif getattr(self, "_leash_work_turn", False):
+                out.append("workspace")
+        except Exception:
+            pass
+        return tuple(out)
+
+    def _research_reader(self):
+        """The reader web_search / web_research fetch through.
+
+        _web_read_gated, not tool_web_read: the domain-approval gate lives
+        in that wrapper, and a research fetch must not be a way around it."""
+        def _rd(url):
+            try:
+                return self._web_read_gated(url, 14000)
+            except Exception as e:
+                return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+        return _rd
+
     def _workspace_call(self, n, a):
         """One arg-mapper for all 13 workspace tools, shared by BOTH dispatch
         paths (autonomous and approval-gated).
@@ -14695,6 +15442,28 @@ class MainWindow(Adw.ApplicationWindow):
             return lambda: tool_workspace_write(
                 path, _p("content", "text", "body", "source", "code"),
                 _b("create", "new", "create_new"))
+        if n == "workspace_edits":
+            return lambda: tool_workspace_edits(
+                path, a.get("edits", a.get("items", a.get("changes",
+                            a.get("replacements", a.get("edit"))))))
+        if n == "workspace_append":
+            return lambda: tool_workspace_append(
+                path, _p("content", "text", "body", "source", "code",
+                         "chunk"),
+                _b("create", "new", "create_new"))
+        if n == "workspace_insert":
+            return lambda: tool_workspace_insert(
+                path, _p("content", "text", "body", "block", "code"),
+                _i("after_line", "after", "line", default=0),
+                _i("before_line", "before", default=0))
+        if n == "workspace_glob":
+            return lambda: tool_workspace_glob(
+                _p("pattern", "glob", "files", "q", "query", default="*"),
+                _i("limit", "max", "max_results", default=300))
+        if n == "workspace_read_many":
+            return lambda: tool_workspace_read_many(
+                a.get("paths", a.get("files", a.get("path", a.get("items")))),
+                _i("max_chars", "chars", "limit", default=6000))
         if n == "workspace_delete":
             return lambda: tool_workspace_delete(path)
         if n == "workspace_diff":
@@ -15610,6 +16379,36 @@ class MainWindow(Adw.ApplicationWindow):
                     a.get("url", a.get("u", "")),
                     _safe_int(a.get("max_chars", 6000), 6000))),
             "web_sources":       lambda a: self._tool_simple(tool_web_sources),
+            # SEARCH, PROPERLY. Several phrasings, several engines, merged
+            # and ranked by cross-engine agreement. Both route their fetches
+            # through _web_read_gated — the SAME door as a direct web_read —
+            # so the unleashed-mode domain approval, the SSRF floor and the
+            # shield apply here too. A second web path with its own idea of
+            # what is allowed is how a gate ends up guarding one door of two.
+            "web_search":        lambda a: self._tool_simple(
+                lambda: tool_web_search(
+                    a.get("query", a.get("q", a.get("terms", ""))),
+                    _safe_int(a.get("limit", a.get("max_results", 8)), 8),
+                    a.get("engines", a.get("engine", "")),
+                    read_fn=self._research_reader())),
+            "web_research":      lambda a: self._tool_simple(
+                lambda: tool_web_research(
+                    a.get("question", a.get("query", a.get("q", ""))),
+                    _safe_int(a.get("sources", a.get("max_sources", 3)), 3),
+                    a.get("queries", ""),
+                    read_fn=self._research_reader())),
+            "browser_status":    lambda a: self._tool_simple(
+                tool_browser_status),
+
+            # ── THE TASK LEDGER ──
+            # State the app OWNS, so "is this turn finished?" stops being a
+            # judgement about the model's prose. See basilisk_ext/tasks.py.
+            "plan_set":          lambda a: self._tool_simple(
+                lambda: self._plan_call("set", a)),
+            "plan_step":         lambda a: self._tool_simple(
+                lambda: self._plan_call("step", a)),
+            "plan_status":       lambda a: self._tool_simple(
+                lambda: self._plan_call("status", a)),
 
             # ── Media: image search / analysis (read-only) ──
             # image_search returns image URLs to RENDER, not page text to
@@ -15717,6 +16516,21 @@ class MainWindow(Adw.ApplicationWindow):
                 self._workspace_call("workspace_replace", a)),
             "workspace_write":    lambda a: self._tool_simple(
                 self._workspace_call("workspace_write", a)),
+            # ── REPO-WORK PARITY ──
+            # Many edits per call, chunked writes for long files, positional
+            # insert, name-glob, batch read. See basilisk_ext/workspace.py
+            # for why each of these exists — every one of them is a ceiling
+            # a real repo job kept hitting.
+            "workspace_edits":    lambda a: self._tool_simple(
+                self._workspace_call("workspace_edits", a)),
+            "workspace_append":   lambda a: self._tool_simple(
+                self._workspace_call("workspace_append", a)),
+            "workspace_insert":   lambda a: self._tool_simple(
+                self._workspace_call("workspace_insert", a)),
+            "workspace_glob":     lambda a: self._tool_simple(
+                self._workspace_call("workspace_glob", a)),
+            "workspace_read_many": lambda a: self._tool_simple(
+                self._workspace_call("workspace_read_many", a)),
             "workspace_delete":   lambda a: self._tool_simple(
                 self._workspace_call("workspace_delete", a)),
             "workspace_diff":     lambda a: self._tool_simple(
@@ -16277,6 +17091,27 @@ class MainWindow(Adw.ApplicationWindow):
         finally:
             self._pending_action = None
             self._batch_members = []
+
+        # ── GROUND TRUTH FROM THE VERIFIER, AT THE ONE CHOKE POINT ──
+        # What the check SAID, read off the result itself. The failing-
+        # verification gate reads this and nothing else: the model's account
+        # of a red suite is prose, and prose is what this app has learned
+        # not to make turn-ending decisions from. Recorded here because this
+        # is the single method every tool result passes through — the same
+        # reason ACTION RECALL and the activity feed hang off it, and the
+        # opposite of the `_tools_used_this_request` drift that had to be
+        # fixed at v1.1.4.0 because it was written at one of two sites.
+        try:
+            _vv = verifier_verdict(_tool, result_text or "")
+            if _vv:
+                self._verify_red = _vv
+            elif str(_tool or "") in ("workspace_verify", "workspace_health"):
+                # A verifier that came back clean CLEARS the flag: the gate
+                # must not hold a turn open over a failure that has since
+                # been fixed.
+                self._verify_red = ""
+        except Exception:
+            pass
 
         # Close the live feed row with what actually came back, BEFORE the
         # turn advances. One hook here covers every tool, for the same reason
@@ -17399,7 +18234,22 @@ class MainWindow(Adw.ApplicationWindow):
                 # operator opens the log themselves with the toggle when
                 # they want it.  The command still shows in the status line.
                 self.terminal_log(f"$ {command}", "cmd")
-                r = tool_run_command(command, timeout=timeout,
+                # ── RUN IN THE REPO, NOT IN $HOME ──
+                # With a workspace open, `pytest -q` meant "run the tests in
+                # my home directory", which finds nothing and reports it as
+                # if the repo had no tests. The model's answer was to prefix
+                # every command with a `cd` it had to remember, derived from
+                # a path it was never told — so it guessed, and a guessed cd
+                # is a command that runs somewhere nobody intended.
+                # The host KNOWS the root; a command's cwd is not a decision
+                # the model should have to make. An explicit `cd` in the
+                # command still wins, because it is relative to this cwd.
+                _cwd = None
+                try:
+                    _cwd = workspace_cwd() or None
+                except Exception:
+                    _cwd = None
+                r = tool_run_command(command, timeout=timeout, cwd=_cwd,
                                      sudo_password=password) or {}
                 # Record to the evidence ledger (fail-safe: a ledger error must
                 # never affect the command result the operator sees).

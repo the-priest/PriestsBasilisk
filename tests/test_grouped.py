@@ -21,7 +21,19 @@ core = tools(kp.CORE_TOOLS_TEXT)
 grp = set().union(*(tools(t) for t in kp.SPECIALIST_GROUPS.values()))
 ck("all contract tools reachable via core+groups", contract == (core | grp))
 ck("no orphaned tools", not (contract - (core | grp)))
-ck("core is minimal (< 10 tools)", len(core) < 10)
+# CORE IS SMALL, AND THE THINGS IN IT ARE THERE ON PURPOSE.
+# The number moved from <10 to <=13 when the task ledger (plan_set/step/
+# status) and the real search tools (web_search/web_research/browser_status)
+# were added. Both families are wrong to lazy-load: the ledger is what the
+# turn-ending gates read, so a turn that never loaded it cannot be held open
+# or released by it, and search is reached for on almost every question.
+# A specialist group is for specs a turn might never need; these are not
+# that. Asserting the MEMBERSHIP as well as the count, so a future accident
+# that drops a spec into core gets caught rather than silently widening it.
+ck("core is minimal (<= 13 tools)", len(core) <= 13)
+_MUST_BE_CORE = {"plan_set", "plan_step", "plan_status",
+                 "web_search", "web_research", "web_read"}
+ck("the always-on families really are in core", _MUST_BE_CORE <= core)
 ck("several groups exist", len(kp.SPECIALIST_GROUPS) >= 6)
 
 print("-- non-grouped mode is UNCHANGED --")

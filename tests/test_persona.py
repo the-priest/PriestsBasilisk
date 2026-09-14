@@ -203,7 +203,7 @@ for name, pat in SURVIVORS.items():
 print("\n== size ==")
 t_full, t_grp, t_lean = len(FULL) // 4, len(GROUPED) // 4, len(LEAN) // 4
 print(f"     full={t_full}  grouped={t_grp}  lean={t_lean}")
-ck(f"grouped prompt under 7.15k tok ({t_grp})", t_grp < 7150,
+ck(f"grouped prompt under 8.1k tok ({t_grp})", t_grp < 8100,
    "the +~33 tok over the old 3.9k ceiling is the NEVER-WRITE-THE-RESULT-YOURSELF rule. A model that forges a tool result produces text indistinguishable from evidence in a tool whose whole premise is 'no proof, no finding' — it was seen doing exactly that on GLM-5.3-Flash. basilisk_core.strip_fabricated_results is the enforcement; this is the prevention, and it is worth the tokens")
 ck(f"lean prompt under 2k tok ({t_lean})", t_lean < 2000)
 ck("grouped is much smaller than full", t_grp < t_full - 4000)
@@ -366,12 +366,12 @@ print(f"     max      armed={_t_armx} disarmed={_t_disx}")
 ck(f"disarmed grouped is smaller ({_t_dis} < {_t_arm})", _t_dis < _t_arm)
 ck(f"disarmed max is much smaller ({_t_disx} < {_t_armx})",
    _t_disx < _t_armx - 5000)
-ck(f"disarmed grouped under 6.75k tok ({_t_dis})", _t_dis < 6750,
+ck(f"disarmed grouped under 7.7k tok ({_t_dis})", _t_dis < 7700,
    "general work should not pay for the engagement prompt; the +~55 tok over "
    "the old 6.7k ceiling is the leashed capability-awareness line, which stops "
    "the model underselling what it can do when asked, without loading any tool")
-ck(f"core tool text under 3.95k tok ({len(kp.CORE_TOOLS_TEXT)//4})",
-   len(kp.CORE_TOOLS_TEXT) // 4 < 3950,
+ck(f"core tool text under 4.6k tok ({len(kp.CORE_TOOLS_TEXT)//4})",
+   len(kp.CORE_TOOLS_TEXT) // 4 < 4600,
    "core ships on EVERY turn in both modes — it is the dominant cost; the "
    "+~33 tok over the old 3.9k ceiling is the NEVER-WRITE-THE-RESULT-YOURSELF "
    "rule. A forged tool result is text indistinguishable from evidence, in a "
@@ -636,23 +636,39 @@ ck(f"consecutive turns past the cap share their prefix ({_n}/{len(_ca)})",
 
 
 # ── 13. PLAYBOOKS ────────────────────────────────────────────────────
-# The model was reinventing basic method every run — including hand-rolling a
-# DuckDuckGo HTML URL for search, because there IS no search tool and nothing
-# told it so. Each recipe below removes a decision it was getting wrong or
-# paying turns to rediscover. They live in the always-loaded core on purpose:
-# they are worthless if the model has to know to go and find them.
+# The model was reinventing basic method every run. Each recipe removes a
+# decision it was getting wrong or paying turns to rediscover. They live in
+# the always-loaded core on purpose: they are worthless if the model has to
+# know to go and find them.
+#
+# THESE ASSERTIONS CHANGED WITH THE SEARCH TOOLS. The old ones pinned the
+# opposite fact — "There is no search tool", plus the hand-rolled
+# html.duckduckgo.com URL and the JS-only warning that went with it. All
+# three were true and are now false: web_search and web_research exist, and
+# web_read renders in a real browser, so the JS-only subdomain advice is
+# actively wrong. What has to stay pinned is the JUDGEMENT the old text was
+# protecting — don't answer from a results page, don't search forever, go to
+# the primary source, cite it — so those are asserted against the new
+# wording rather than deleted.
 print("\n== playbooks are present and specific ==")
 _pb = kp.CORE_TOOLS_TEXT
 ck("playbooks section exists", "PLAYBOOKS" in _pb)
-ck("says plainly there is no search tool", "There is no search tool" in _pb,
-   "otherwise it invents one, or worse, answers from memory")
-ck("gives the working search URL", "html.duckduckgo.com/html/?q=" in _pb)
-ck("warns the JS domain returns nothing", "JS-only" in _pb)
-ck("forbids answering from the results page",
-   "NEVER the answer" in _pb)
-ck("bounds searching before reading", "Two searches max" in _pb)
+ck("names the one-call research tool",
+   '<tool name="web_research">' in _pb,
+   "otherwise it hand-rolls a search URL and reads one source")
+ck("names the multi-engine link search", '<tool name="web_search">' in _pb)
+ck("says agreement is corroboration, not proof",
+   "corroboration, not proof" in _pb)
+ck("forbids silently resolving a disagreement between sources",
+   "never average them" in _pb and "quietly" in _pb)
+ck("requires saying so when only one source was readable",
+   "only one source was readable" in _pb)
+ck("forbids answering from the results page with no read",
+   "ends the turn having" in _pb and "read nothing" in _pb)
+ck("tells it a degraded fetch is not an empty page",
+   "before calling a site blank" in _pb)
 ck("current-fact recipe reaches for the primary source",
-   "PRIMARY source first" in _pb)
+   "PRIMARY source" in _pb)
 ck("current-fact recipe requires a citation", "cite the URL" in _pb)
 ck("current-fact recipe permits an honest non-answer",
    "labelled\nunverified" in _pb or "unverified" in _pb)

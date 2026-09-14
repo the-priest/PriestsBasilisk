@@ -154,8 +154,8 @@ for _a in "${OPTIONAL_ART[@]}"; do OPTIONAL_FILES+=("${ASSET_DIR}/${_a}"); done
 # basilisk_ext sidecar modules — fetched in remote (curl|bash) mode so phones
 # and fresh boxes get the full toolset (headroom / verify / pentest plus the
 # memory/skills/foresight extensions), not just the core four files.
-EXT_FILES=(__init__.py bench.py codescan.py engage.py exploits.py extman.py foresight.py headroom.py mcp.py memory.py \
-           oracle.py juiceshop.py pentest.py reach.py sandbox.py skills.py verify.py webshield.py worker.py xbow.py \
+EXT_FILES=(__init__.py bench.py browser.py codescan.py engage.py exploits.py extman.py foresight.py headroom.py mcp.py memory.py \
+           oracle.py juiceshop.py pentest.py reach.py research.py sandbox.py skills.py tasks.py verify.py webshield.py worker.py xbow.py \
            zdayfind.py workspace.py recall.py unblock.py)
 GITHUB_REPO="${BASILISK_REPO:-the-priest/PriestsBasilisk}"
 GITHUB_BRANCH="${BASILISK_BRANCH:-main}"

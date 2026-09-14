@@ -545,7 +545,7 @@ import basilisk_core as _C  # noqa: E402
 _core = {n[len("tool_"):] for n in dir(_C)
          if n.startswith("tool_workspace_")}
 
-ck("persona advertises every workspace tool", len(_spec) == 17, str(len(_spec)))
+ck("persona advertises every workspace tool", len(_spec) == 22, str(len(_spec)))
 ck("core implements exactly what persona advertises", _spec == _core,
    str(_spec ^ _core))
 ck("approval-gated dispatch table matches", _spec == _table, str(_spec ^ _table))

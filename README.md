@@ -6,8 +6,8 @@
 
 <br/>
 
-<img src="https://img.shields.io/badge/version-1.1.4.0-e11d2b?style=for-the-badge&labelColor=08090b" alt="version 1.1.4.0">
-<img src="https://img.shields.io/badge/tests-4582%20assertions-2ea043?style=for-the-badge&labelColor=08090b&logo=pytest&logoColor=2ea043" alt="4582 assertions">
+<img src="https://img.shields.io/badge/version-1.2.0.0-e11d2b?style=for-the-badge&labelColor=08090b" alt="version 1.2.0.0">
+<img src="https://img.shields.io/badge/tests-4750%20assertions-2ea043?style=for-the-badge&labelColor=08090b&logo=pytest&logoColor=2ea043" alt="4750 assertions">
 <img src="https://img.shields.io/badge/licence-MIT-e11d2b?style=for-the-badge&labelColor=08090b" alt="MIT">
 <img src="https://img.shields.io/badge/deps-stdlib%20%2B%20GTK-e11d2b?style=for-the-badge&labelColor=08090b" alt="stdlib + GTK">
 
@@ -42,11 +42,11 @@ Basilisk runs shell commands and edits files **as you**. Read the installer befo
 **Native packages** — recommended, because they resolve the GTK stack for you:
 
 ```bash
-sudo apt install ./priestsbasilisk_1.1.4.0-1_all.deb
+sudo apt install ./priestsbasilisk_1.2.0.0-1_all.deb
 ```
 
 ```bash
-sudo pacman -U priestsbasilisk-1.1.4.0-1-any.pkg.tar.zst
+sudo pacman -U priestsbasilisk-1.2.0.0-1-any.pkg.tar.zst
 ```
 
 An auditable `PKGBUILD` lives in `packaging/` and runs the whole test suite as its `check()` step. [`packaging/README.md`](packaging/README.md) covers what each package installs and where.
@@ -128,6 +128,26 @@ Big files are handled honestly at the other end too. A read that could not fit s
 
 Whole-file writes are pinned **byte-for-byte across every tool-call dialect** — 128 round-trips of 16 payloads × 8 dialects, plus a 300 KB single-call rewrite in the end-to-end suite.
 
+### Many edits per call, and no ceiling on file size
+
+- **`workspace_edits` applies many exact edits to one file, all-or-nothing.** A rename across nine call sites is one call, not nine round-trips — and if any anchor is missing or ambiguous, or the result would not parse, **nothing is written** and the error names which edit failed. A half-applied change leaves the file in a state nobody designed and the model reasoning from fiction.
+- **`workspace_append` is how a long file gets written.** A whole-file write has to fit in one reply, so anything past a few hundred lines was cut off at the token cap and landed truncated. First chunk with `create`, append the rest, verify. There is no size limit that way.
+- **`workspace_glob` finds files by name**, `workspace_read_many` reads several in one round-trip, `workspace_insert` puts a block at a line where there is no unique anchor to replace against.
+- **`run` executes with your repo as its working directory.** `pytest -q` means your tests, not whatever is in `$HOME` — and the agent stops prefixing commands with a `cd` to a path it guessed.
+
+### The plan is state, not a promise
+
+The agent writes its plan up front and the **app tracks it**. This is the mechanism behind both halves of knowing when to stop:
+
+| the ledger | what the turn does |
+|---|---|
+| any item still **open** | **does not end** — the turn is pushed back to the work, bounded |
+| every item **closed** | **ends**, and every other nudge is suppressed |
+
+`blocked` and `dropped` both close an item and both require a reason, so "I can't do this" is a real outcome rather than a loop. The plan shows as a live checklist in the activity feed, ticking off as it goes.
+
+That replaces reading the reply's prose, which was wrong in both directions at once: *"I've fixed two of the five files"* reads like a conclusion to any phrase detector, and a genuinely finished answer that mentions a next step reads like a stall.
+
 ### It knows a question from a job
 
 "What changed in nmap 7.99" wants research, one answer, stop. "Fix the auth bug in my repo" wants the change *made* — and *answer once, then stop* fights every multi-file edit. So the turn is classified first, and a job gets work mode: read before you write, write complete files, run something that proves it, iterate until the tests actually pass, then report what changed — with a tool budget sized for a repository rather than for a lookup.
@@ -136,7 +156,13 @@ Whole-file writes are pinned **byte-for-byte across every tool-call dialect** �
 
 ## 🌐 It goes and looks first
 
-Leashed has **unrestricted web reading** — any public page, in full, no approval, because reading is not attacking. It searches by reading a results page and following its links, and it is told to cite what it used.
+Leashed has **unrestricted web reading** — any public page, in full, no approval, because reading is not attacking.
+
+**Pages are rendered in a real browser.** `web_read` drives **Camoufox** (a hardened Firefox), falling back to Playwright Firefox, then Chromium, then a plain HTTP GET. That difference is not cosmetic: a JS-rendered page returns an empty shell to urllib, and an anti-bot edge returns a challenge page with **HTTP 200** stamped on it. Both arrive looking like a successful fetch of a nearly-empty page, so nothing downstream can tell them from a genuinely thin one. Every result now **names the reader that served it**, so "this page was empty" can be told from "this page was not really read".
+
+The SSRF floor is *injected* into the browser, never reimplemented there — one definition of "private address" in the tree — and it is applied to every redirect hop and every subresource the page requests, aborting and **reporting** each one.
+
+**`web_research` searches like a researcher.** One call runs several phrasings across several independent engines, picks the top results from *different domains*, reads them, and returns an `agreement` block naming the values more than one source carried. It does not decide what is true: it reports that four sources say 7.95 and one says 7.94, and expects the answer to say so. `web_search` returns merged links ranked by cross-engine agreement; `browser_status` says which reader is running when a page comes back empty.
 
 And it cannot promise to look and then not look. At the end of a turn, if your question needed a live source and **no web tool ran during the entire request**, the app runs the search *itself* and hands the results back to the model. That check never reads the reply, because every version that did was one unseen phrasing away from letting *"okay, fetching that now."* end a turn with nothing fetched.
 
@@ -251,7 +277,7 @@ Capability and safety are decoupled on purpose.
 | Module | What it is |
 |---|---|
 | `basilisk.py` | GTK4 / libadwaita desktop app — the chat, the UI, the live activity feed, streaming |
-| `basilisk_core.py` | The turn engine — **149 tools**, tool-call parsing across every model dialect, the destructive-command floor |
+| `basilisk_core.py` | The turn engine — **157 tools**, tool-call parsing across every model dialect, the destructive-command floor |
 | `basilisk_persona.py` | The assistant and engagement roles, the load-bearing safety guardrail, capability-aware prompting |
 | `basilisk_safety.py` · `basilisk_scope.py` | The irreversible-command floor, and the scope gate that fails **closed** |
 | `basilisk_ext/workspace.py` · `sandbox.py` | The repo workspace, `bubblewrap` sandbox, `workspace_baseline` / `workspace_verify` / `workspace_export` |
@@ -267,7 +293,7 @@ Capability and safety are decoupled on purpose.
 
 ## 🔬 Engineering
 
-**Stdlib only** for the engine. No pytest, no network, no fixtures, no account — **4,582 assertions across 75 suites**, run in under a minute. Four of those suites are adversarial probes that report *findings* rather than a pass count, so their checks are not in that total.
+**Stdlib only** for the engine. No pytest, no network, no fixtures, no account — **4,750 assertions across 79 suites**, run in under a minute. Four of those suites are adversarial probes that report *findings* rather than a pass count, so their checks are not in that total.
 
 Every fix ships with a regression that *fails* on the old code and *passes* on the new. Real GTK is spun up under Xvfb for the UI suites; the chat-bubble layout alone is pinned by 140 fitting checks. Repo work is covered end-to-end rather than layer by layer — a deliberately broken repo is opened as a folder, baselined red, edited through four different tool-call dialects, verified green, diffed and exported, with a 6,000-line file paged and rewritten on the way past.
 
@@ -297,7 +323,7 @@ If it earns its place in your kit, star the repo and tell someone who would use 
 
 <br/>
 
-### Built by one person, around a day job. Verified by 4,582 assertions. Priced at nothing.
+### Built by one person, around a day job. Verified by 4,750 assertions. Priced at nothing.
 
 <sub>Clone it, read it, run the suite, then point it at something you own.</sub>
 

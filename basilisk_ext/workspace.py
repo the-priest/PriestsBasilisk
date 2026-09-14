@@ -1219,6 +1219,412 @@ def replace(path: str, old: str, new: str, count: int = 1) -> Dict[str, Any]:
         return {"ok": False, "error": f"{type(e).__name__}: {e}"}
 
 
+# ══════════════════════════════════════════════════════════════════════
+#  THE TOOLS A REAL CODING AGENT NEEDS
+# ══════════════════════════════════════════════════════════════════════
+# write() and replace() are enough to edit a file and not enough to work a
+# repo. The gap showed up as the operator's complaint that long code "keeps
+# failing", and it is three separate ceilings wearing one symptom:
+#
+#   1. ONE EDIT PER ROUND-TRIP. A rename touching nine call sites is nine
+#      model turns, and every one of them is a chance to lose the thread,
+#      hit the step budget, or half-apply a change and leave the file in a
+#      state that does not parse.
+#   2. A FILE MUST FIT IN ONE REPLY. write() takes the whole file, so the
+#      largest file the agent can create is bounded by max_tokens. Past
+#      that the reply is cut off mid-function and the write either fails or
+#      lands truncated — which is the bug the v1.1.4.0 truncation guard
+#      catches, correctly, while leaving the agent with no way to write the
+#      file at all. A guard that blocks the only route is half a fix.
+#   3. NO WAY TO FIND FILES BY SHAPE. search() greps CONTENT; there was no
+#      "every test file", "every yaml under deploy/".
+#
+# So: edits() applies many edits atomically, append() builds a long file in
+# pieces, insert() puts a block at a line, glob() finds by name, and
+# read_many() reads several files in one round-trip.
+#
+# ATOMICITY IS THE POINT OF edits(). Applying four of six edits and
+# reporting a failure leaves the file in a state nobody designed and the
+# model holding a stale picture of it. Everything is validated against an
+# in-memory copy first, and the file is touched only if all of it applies.
+
+
+def edits(path: str, items: Any) -> Dict[str, Any]:
+    """Apply SEVERAL exact-substring edits to one file, all or nothing.
+
+    `items` is a list of {"old": ..., "new": ..., "count": 1}. Every edit is
+    checked and applied to an in-memory copy first; the file is written only
+    if all of them land AND the result still parses. A failure names the
+    edit that failed by index and changes nothing.
+
+    Edits apply IN ORDER, each to the result of the last, so an edit may
+    legitimately target text an earlier edit produced.
+    """
+    try:
+        root = _require()
+        fp = _confine(root, path)
+        rel = os.path.relpath(fp, root)
+        if not os.path.isfile(fp):
+            return {"ok": False, "error": f"no such file: {path}"}
+        try:
+            if isinstance(items, dict):
+                items = [items]
+            items = list(items or [])
+        except Exception:
+            items = []
+        if not items:
+            return {"ok": False, "error": (
+                'no edits given. Pass a list: {"path": "src/a.py", "edits": '
+                '[{"old": "<exact text>", "new": "<replacement>"}, ...]}')}
+        if len(items) > 100:
+            return {"ok": False, "error": (
+                f"{len(items)} edits in one call is too many (cap 100). "
+                f"Split it, and verify between batches.")}
+        norm = []
+        for i, it in enumerate(items):
+            if not isinstance(it, dict):
+                return {"ok": False, "error": (
+                    f"edit {i + 1} is not an object. Each edit is "
+                    f'{{"old": "...", "new": "..."}}.')}
+            old = it.get("old", it.get("old_str", it.get("find",
+                         it.get("search", ""))))
+            new = it.get("new", it.get("new_str", it.get("replace",
+                         it.get("replacement", ""))))
+            try:
+                cnt = int(it.get("count", it.get("n", 1)) or 1)
+            except Exception:
+                cnt = 1
+            if not isinstance(old, str) or not old:
+                return {"ok": False, "error": (
+                    f"edit {i + 1} has no `old` text to find.")}
+            norm.append((old, new if isinstance(new, str) else str(new or ""),
+                         max(1, cnt)))
+
+        with _LOCK:
+            with open(fp, "r", encoding="utf-8", errors="replace") as f:
+                body = f.read()
+            work = body
+            applied = []
+            for i, (old, new, cnt) in enumerate(norm, 1):
+                found = work.count(old)
+                if found == 0:
+                    return {"ok": False, "path": rel, "failed_edit": i,
+                            "applied": 0,
+                            "error": (
+                                f"edit {i} of {len(norm)}: search string not "
+                                f"found. NOTHING was written — the file is "
+                                f"unchanged. Read the file and match the text "
+                                f"exactly, including indentation. (If an "
+                                f"earlier edit in this same call was meant to "
+                                f"create this text, check its replacement.)")}
+                if found > cnt:
+                    return {"ok": False, "path": rel, "failed_edit": i,
+                            "occurrences": found, "applied": 0,
+                            "error": (
+                                f"edit {i} of {len(norm)}: that text appears "
+                                f"{found} times but count={cnt}. NOTHING was "
+                                f"written. Widen it with surrounding lines "
+                                f"until it is unique, or set count "
+                                f"deliberately.")}
+                work = work.replace(old, new, cnt)
+                applied.append({"edit": i, "replaced": found})
+            err = _syntax_check(rel, work, body)
+            if err:
+                return {"ok": False, "path": rel, "syntax_error": True,
+                        "applied": 0,
+                        "error": (f"the file would not parse after these "
+                                  f"edits, so NOTHING was written: {err}")}
+            _stash_original(root, fp, rel)
+            tmp = f"{fp}.{threading.get_ident():x}.bz-tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                f.write(work)
+            os.replace(tmp, fp)
+            _mark(rel, "modified")
+        diff = list(difflib.unified_diff(
+            body.splitlines(), work.splitlines(),
+            fromfile=f"a/{rel}", tofile=f"b/{rel}", lineterm="", n=2))
+        res = {"ok": True, "path": rel, "edits_applied": len(norm),
+               "details": applied,
+               "lines_before": len(body.splitlines()),
+               "lines_after": len(work.splitlines()),
+               "diff": "\n".join(diff[:200])}
+        note = _still_broken_note(rel, work)
+        if note:
+            res["note"] = note
+            res["parses"] = False
+        return res
+    except ContainmentError as e:
+        return {"ok": False, "error": str(e)}
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+
+
+def append(path: str, content: str, create: bool = False) -> Dict[str, Any]:
+    """Add text to the END of a file — the way to write a LONG one.
+
+    THIS IS THE ANSWER TO "it can't write big files". A whole-file write has
+    to fit in one model reply, so past a few hundred lines the reply is cut
+    off at max_tokens and the file lands truncated or the write is refused.
+    Neither leaves the agent anywhere to go.
+
+    The protocol is: write the first chunk with create=true, then append
+    each following chunk, then verify. Each chunk is its own round-trip and
+    its own modest reply, so file size stops being bounded by reply size.
+
+    NO SYNTAX GATE ON A CHUNK, deliberately: a half-written Python file does
+    not parse and must not be refused for it, or the protocol cannot get
+    past its first chunk. The check that matters still happens — the file is
+    re-checked when it is next written whole or edited, and workspace_verify
+    runs the real thing. `parses` is REPORTED on every append so a file left
+    unparseable at the end of a chunk sequence is visible rather than
+    silent.
+    """
+    try:
+        root = _require()
+        fp = _confine(root, path)
+        rel = os.path.relpath(fp, root)
+        content = content if isinstance(content, str) else str(content or "")
+        existed = os.path.isfile(fp)
+        if not existed and not create:
+            return {"ok": False, "path": rel, "error": (
+                "file does not exist. For the FIRST chunk of a new file pass "
+                'create=true; for later chunks it already exists.')}
+        with _LOCK:
+            old = ""
+            if existed:
+                with open(fp, "r", encoding="utf-8", errors="replace") as f:
+                    old = f.read()
+            if len((old + content).encode("utf-8")) > MAX_EDIT_BYTES:
+                return {"ok": False, "path": rel,
+                        "error": "file would exceed the 8 MB cap"}
+            _stash_original(root, fp, rel)
+            os.makedirs(os.path.dirname(fp), exist_ok=True)
+            # A chunk boundary that lands mid-line silently joins two lines
+            # of code. If the file so far ends without a newline and the new
+            # chunk does not start one, the join is almost certainly an
+            # accident — but it is the model's call, so say what was done
+            # rather than deciding silently.
+            joined = old + content
+            tmp = f"{fp}.{threading.get_ident():x}.bz-tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                f.write(joined)
+            os.replace(tmp, fp)
+            _mark(rel, "created" if not existed else "modified")
+        res = {"ok": True, "path": rel, "created": not existed,
+               "appended_lines": len(content.splitlines()),
+               "total_lines": len(joined.splitlines()),
+               "bytes": len(joined.encode("utf-8")),
+               "parses": _parses(joined) if rel.endswith(".py") else True}
+        if old and not old.endswith("\n") and not content.startswith("\n"):
+            res["joined_mid_line"] = True
+            res["warning"] = (
+                "the previous chunk did not end in a newline, so this chunk "
+                "was joined onto its last line. If that was not intended, "
+                "read the file around that point and fix it.")
+        if rel.endswith(".py") and not res["parses"]:
+            res["note"] = (
+                "the file does not parse YET — expected mid-sequence. Keep "
+                "appending; it must parse once the last chunk is in, and "
+                "workspace_verify will tell you if it does not.")
+        return res
+    except ContainmentError as e:
+        return {"ok": False, "error": str(e)}
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+
+
+def insert(path: str, content: str, after_line: int = 0,
+           before_line: int = 0) -> Dict[str, Any]:
+    """Insert a block at a line position, without restating the file.
+
+    For adding an import, a method, a case to a dispatch table — the edits
+    where there is no unique anchor text to replace against, only a place.
+    Line numbers are 1-based and refer to the file as it is NOW, so read it
+    first; after_line=0 means the very top.
+    """
+    try:
+        root = _require()
+        fp = _confine(root, path)
+        rel = os.path.relpath(fp, root)
+        if not os.path.isfile(fp):
+            return {"ok": False, "error": f"no such file: {path}"}
+        content = content if isinstance(content, str) else str(content or "")
+        with _LOCK:
+            with open(fp, "r", encoding="utf-8", errors="replace") as f:
+                body = f.read()
+            lines = body.splitlines(keepends=True)
+            n = len(lines)
+            a, b = _as_line(after_line), _as_line(before_line)
+            if b:
+                idx = max(0, min(n, b - 1))
+            elif a:
+                idx = max(0, min(n, a))
+            else:
+                idx = 0
+            if a and b:
+                return {"ok": False, "error": (
+                    "pass after_line OR before_line, not both.")}
+            if (a and a > n) or (b and b > n + 1):
+                return {"ok": False, "path": rel, "lines": n, "error": (
+                    f"line {a or b} is past the end of the file, which has "
+                    f"{n} lines. To add at the end use workspace_append.")}
+            block = content if content.endswith("\n") else content + "\n"
+            updated = "".join(lines[:idx]) + block + "".join(lines[idx:])
+            err = _syntax_check(rel, updated, body)
+            if err:
+                return {"ok": False, "path": rel, "error": err,
+                        "syntax_error": True}
+            _stash_original(root, fp, rel)
+            tmp = f"{fp}.{threading.get_ident():x}.bz-tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                f.write(updated)
+            os.replace(tmp, fp)
+            _mark(rel, "modified")
+        diff = list(difflib.unified_diff(
+            body.splitlines(), updated.splitlines(),
+            fromfile=f"a/{rel}", tofile=f"b/{rel}", lineterm="", n=2))
+        return {"ok": True, "path": rel, "inserted_at_line": idx + 1,
+                "inserted_lines": len(block.splitlines()),
+                "total_lines": len(updated.splitlines()),
+                "diff": "\n".join(diff[:120])}
+    except ContainmentError as e:
+        return {"ok": False, "error": str(e)}
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+
+
+def glob_files(pattern: str = "*", limit: int = 300) -> Dict[str, Any]:
+    """Find files by NAME pattern — the counterpart to search()'s content grep.
+
+    "**/test_*.py", "src/**/*.ts", "deploy/*.yaml". Results are sorted by
+    modification time, newest first, because in a repo you are working on
+    the recently-touched files are almost always the ones you want.
+    """
+    try:
+        root = _require()
+        pat = (pattern or "*").strip() or "*"
+        if pat.startswith("/"):
+            pat = pat.lstrip("/")
+        base = Path(root)
+        out = []
+        try:
+            it = base.glob(pat)
+        except Exception as e:
+            return {"ok": False, "error": (
+                f"bad glob pattern {pat!r}: {e}. Use shell-style patterns "
+                f'like "**/*.py" or "src/*.ts".')}
+        for p in it:
+            try:
+                if not p.is_file():
+                    continue
+                rel = os.path.relpath(str(p), root)
+                if _skip_path(rel):
+                    continue
+                st = p.stat()
+                out.append((st.st_mtime, rel, st.st_size))
+            except Exception:
+                continue
+        out.sort(key=lambda t: (-t[0], t[1]))
+        try:
+            lim = max(1, min(2000, int(limit or 300)))
+        except Exception:
+            lim = 300
+        files = [{"path": r, "bytes": sz} for _, r, sz in out[:lim]]
+        res = {"ok": True, "pattern": pat, "count": len(out),
+               "files": files}
+        if not files:
+            res["note"] = (
+                "nothing matched. `**/` is needed to recurse — \"*.py\" only "
+                "matches the repo root, \"**/*.py\" matches every directory. "
+                "workspace_tree shows the real layout.")
+        elif len(out) > lim:
+            res["truncated"] = True
+            res["note"] = (f"{len(out)} matched, showing the {lim} most "
+                           f"recently modified.")
+        return res
+    except ContainmentError as e:
+        return {"ok": False, "error": str(e)}
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+
+
+def read_many(paths: Any, max_chars: int = 6000) -> Dict[str, Any]:
+    """Read SEVERAL files in one round-trip.
+
+    Orientation in an unfamiliar repo is a handful of reads that do not
+    depend on each other — the module, its test, and the caller. Doing them
+    one per turn spends three model round-trips to learn one thing.
+    """
+    try:
+        _require()
+        try:
+            if isinstance(paths, str):
+                paths = [p for p in re.split(r"[,\n]+", paths) if p.strip()]
+            paths = list(paths or [])
+        except Exception:
+            paths = []
+        if not paths:
+            return {"ok": False, "error": (
+                'no paths. Pass a list: {"paths": ["src/a.py", "tests/'
+                'test_a.py"]}')}
+        if len(paths) > 20:
+            return {"ok": False, "error": (
+                f"{len(paths)} files at once is too many (cap 20).")}
+        # A FLOOR, AND IT SAYS SO. A 10-character read is not a read, so a
+        # tiny max_chars is raised to something useful — but raising it
+        # SILENTLY means the caller's number was ignored and nothing says
+        # which number actually applied. Report it when it differs.
+        _asked = max_chars
+        try:
+            cap = max(200, min(40000, int(max_chars or 6000)))
+        except Exception:
+            cap = 6000
+        out = []
+        for p in paths:
+            rec = read(str(p).strip(), 1, 0)
+            if rec.get("ok"):
+                # read() returns `content` and `total_lines` — checked
+                # against the real function, not assumed. A reader that
+                # guesses its own callee's key shape returns empty strings
+                # that look exactly like empty files.
+                txt = str(rec.get("content") or "")
+                out.append({"path": rec.get("path", p), "ok": True,
+                            "total_lines": rec.get("total_lines"),
+                            "truncated": bool(rec.get("truncated")
+                                              or len(txt) > cap),
+                            "content": txt[:cap]})
+            else:
+                out.append({"path": p, "ok": False,
+                            "error": rec.get("error", "unreadable")})
+        good = sum(1 for r in out if r.get("ok"))
+        res = {"ok": good > 0, "read": good, "requested": len(paths),
+               "chars_per_file": cap, "files": out}
+        try:
+            if _asked and int(_asked) != cap:
+                res["max_chars_note"] = (
+                    f"max_chars={_asked} was clamped to {cap} (the useful "
+                    f"range is 200-40000); that is the limit actually applied.")
+        except Exception:
+            pass
+        if good < len(paths):
+            res["note"] = ("some files could not be read — check the paths "
+                           "with workspace_glob or workspace_tree.")
+        return res
+    except ContainmentError as e:
+        return {"ok": False, "error": str(e)}
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+
+
+def repo_root() -> str:
+    """The open workspace's absolute root, or "" — so the host can run
+    commands with the repo as cwd instead of making the model cd."""
+    try:
+        return _require()
+    except Exception:
+        return ""
+
+
 def delete(path: str) -> Dict[str, Any]:
     """Delete a file inside the workspace.  Recoverable via revert()."""
     try:

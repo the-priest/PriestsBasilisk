@@ -694,6 +694,28 @@ DEFAULT_SETTINGS = {
     # Click-to-open "Thoughts" panel on a reply, shown when the model
     # exposes its reasoning (a reasoning_content stream or inline <think>).
     "show_thoughts":           True,
+
+    # ── THE BROWSER ──────────────────────────────────────────────────
+    # web_read renders pages in a real browser (Camoufox by preference)
+    # instead of doing a bare urllib GET. A JS-rendered page returns an
+    # empty shell to urllib and its actual content to a browser, and a bot
+    # check returns a challenge page with a 200 on it — both of which the
+    # model reads as "the page was blank" and then guesses around.
+    "browser_read":            True,     # use the browser for web_read
+    "browser_engine":          "camoufox",   # camoufox | firefox | chromium | http
+    "browser_timeout":         25,
+    # Fall back to the plain HTTP fetch when the browser is absent or the
+    # render fails. OFF would mean a missing browser silently disables web
+    # reading altogether, which is a worse failure than a weaker fetch.
+    "browser_http_fallback":   True,
+
+    # ── THE TASK LEDGER ──────────────────────────────────────────────
+    # The model declares its plan; the app tracks the items; the turn
+    # cannot end while any are open and must end once none are. See
+    # basilisk_ext/tasks.py for why this replaces reading the reply.
+    "plan_enabled":            True,
+    "plan_min_steps":          3,        # jobs smaller than this need no plan
+    "plan_push_max":           6,        # how often the host may push per request
 }
 
 # Add a key + model slot for every registered provider so the schema is
@@ -896,11 +918,13 @@ def load_settings() -> Dict[str, Any]:
             _migrate_settings(merged, data)
             _coerce_settings_types(merged)
             _apply_key_env_and_register(merged)
+            publish_settings(merged)
             return merged
         except Exception:
             pass
     merged = dict(DEFAULT_SETTINGS)
     _apply_key_env_and_register(merged)
+    publish_settings(merged)
     return merged
 
 
@@ -1008,6 +1032,16 @@ def _migrate_settings(merged: Dict[str, Any], raw: Dict[str, Any]) -> None:
 
 
 def save_settings(settings: Dict[str, Any]) -> None:
+    # PUBLISH FIRST, at the ONE choke point every save goes through.
+    # There are nine save_settings() call sites in the GUI. Publishing at
+    # each of them is the drift this codebase keeps paying for: the eight
+    # that get it right hide the one that does not, and the symptom is a
+    # setting that "doesn't take effect" only when changed from one
+    # particular dialog. One writer, one place.
+    try:
+        publish_settings(settings)
+    except Exception:
+        pass
     # Atomic write: temp file in same directory, then os.replace.  Without
     # this, a crash mid-write would leave settings.json truncated or empty
     # and the next load would silently fall back to defaults — wiping the
@@ -6348,6 +6382,104 @@ def _ascii_safe_url(url: str) -> str:
     return "".join(out).rstrip("/?#&=")
 
 
+# ══════════════════════════════════════════════════════════════════════
+#  LIVE SETTINGS FOR FREE-FUNCTION TOOLS
+# ══════════════════════════════════════════════════════════════════════
+# The Router carries `self.settings`; the ~160 tool functions in this module
+# are free functions with no host object to ask. Until now nothing in them
+# needed a setting, so nothing existed. The browser does: whether to use it,
+# which engine, how long to wait.
+#
+# ONE PUBLISHER (the GUI, on load and on every save), one reader (here), and
+# a fall back to load_settings() so a tool called before the GUI has
+# published still sees the operator's file rather than the shipped defaults.
+#
+# NOT FOR AUTHORISATION. The scope gate and the destructive floor are pure
+# functions of the command string precisely so no mutable state can change
+# a yes into a no; this registry is for feature toggles and timeouts, and
+# nothing that decides whether an action is ALLOWED may read it. The SSRF
+# floor above stays a pure function for that reason.
+SETTINGS: Dict[str, Any] = dict(DEFAULT_SETTINGS)
+_SETTINGS_LOADED = False
+
+
+def publish_settings(d: Dict[str, Any]) -> None:
+    """Host: call after load and after every save."""
+    global _SETTINGS_LOADED
+    try:
+        if isinstance(d, dict):
+            SETTINGS.clear()
+            SETTINGS.update(DEFAULT_SETTINGS)
+            SETTINGS.update(d)
+            _SETTINGS_LOADED = True
+    except Exception:
+        pass
+
+
+def _setting(key: str, default: Any = None) -> Any:
+    global _SETTINGS_LOADED
+    if not _SETTINGS_LOADED:
+        try:
+            publish_settings(load_settings())
+        except Exception:
+            _SETTINGS_LOADED = True       # never retry-loop on a broken file
+    return SETTINGS.get(key, default)
+
+
+def _bool_setting(key: str, default: bool = False) -> bool:
+    v = _setting(key, default)
+    if isinstance(v, bool):
+        return v
+    return str(v).strip().lower() in ("1", "true", "yes", "on")
+
+
+def _browser_read_enabled() -> bool:
+    if not _bool_setting("browser_read", True):
+        return False
+    return str(_setting("browser_engine", "") or "").strip().lower() not in (
+        "http", "urllib", "off", "none")
+
+
+def _browser_mod():
+    """The browser sidecar, or None. Absent package => plain HTTP, silently
+    correct rather than broken."""
+    try:
+        from basilisk_ext import browser as _b
+    except Exception:
+        return None
+    try:
+        if not _b.available(str(_setting("browser_engine", "") or "")):
+            return None
+    except Exception:
+        return None
+    return _b
+
+
+def tool_browser_status() -> Dict[str, Any]:
+    """Report which browser engine web_read is using, and what is installed.
+
+    Call this when a page comes back empty, blocked, or looks like a bot
+    check: the answer is usually that the render fell back to plain HTTP,
+    and this says so instead of leaving you to guess."""
+    try:
+        from basilisk_ext import browser as _b
+    except Exception as e:
+        return {"ok": True, "engine": "http", "browser_available": False,
+                "reason": f"browser module not installed ({e})",
+                "note": ("web_read is doing plain HTTP GETs: no JavaScript, "
+                         "no bot-check survival. Install with: pip install "
+                         "camoufox && python3 -m camoufox fetch")}
+    try:
+        out = _b.probe()
+    except Exception as e:
+        return {"ok": False, "error": f"browser probe failed: {e}"}
+    out["browser_read_setting"] = _bool_setting("browser_read", True)
+    out["engine_setting"] = _setting("browser_engine", "")
+    out["http_fallback"] = _bool_setting("browser_http_fallback", True)
+    out["browser_available"] = bool(out.get("chosen"))
+    return out
+
+
 def tool_web_read(url: str, max_chars: int = 6000) -> Dict[str, Any]:
     """Fetch and read a web page as shielded, readable text (with the final URL
     so you can cite it).
@@ -6394,10 +6526,61 @@ def tool_web_read(url: str, max_chars: int = 6000) -> Dict[str, Any]:
                           "internet hosts are fine: trusted sources fetch "
                           "automatically, any other public site fetches once "
                           "the operator approves it.")}
-    try:
-        status, body, final_url = _trusted_fetch(url, timeout=20)
-    except Exception as e:
-        return {"ok": False, "error": f"web_read failed: {type(e).__name__}: {e}"}
+    # ── THE BROWSER IS THE PRIMARY READER ────────────────────────────
+    # urllib gets the bytes; a browser gets the PAGE. On the modern web
+    # those are different documents often enough that the difference is
+    # the tool's whole reliability: a JS-rendered site hands urllib an
+    # empty shell, and an anti-bot edge hands it a challenge page with
+    # HTTP 200 stamped on it. Both arrive looking like a successful fetch
+    # of a nearly-empty page, so nothing downstream can tell them from a
+    # genuinely thin page — the model reads "blank" and either guesses or
+    # re-fetches until the repeat guard stops it.
+    #
+    # The SSRF floor above has ALREADY run and is not repeated inside the
+    # browser module: `_web_read_host_ok` is passed in and applied there
+    # to every redirect hop and every subresource the page requests. One
+    # rule, one definition, two enforcement points that cannot drift
+    # because there is only one copy of the rule.
+    _engine = ""
+    _degraded = ""
+    _blocked: List[str] = []
+    body = None
+    status = 0
+    final_url = url
+    if _browser_read_enabled():
+        br = _browser_mod()
+        if br is not None:
+            try:
+                _r = br.fetch(
+                    url, host_ok=_web_read_host_ok,
+                    timeout=_as_int(SETTINGS.get("browser_timeout", 25), 25),
+                    prefer=str(SETTINGS.get("browser_engine", "") or ""))
+            except Exception as e:               # never let it take the tool down
+                _r = {"ok": False, "error": f"{type(e).__name__}: {e}"}
+            if _r.get("ok"):
+                body = _r.get("html") or ""
+                status = _as_int(_r.get("status", 200), 200)
+                final_url = _r.get("final_url") or url
+                _engine = str(_r.get("engine") or "browser")
+                _blocked = list(_r.get("blocked") or ())
+            else:
+                _degraded = str(_r.get("error") or "browser unavailable")[:200]
+        else:
+            _degraded = ("no browser engine installed (pip install camoufox "
+                         "&& python3 -m camoufox fetch)")
+    if body is None:
+        # FALL BACK, AND SAY SO. A silent downgrade to a weaker fetch is
+        # how "why did it stop seeing that site" becomes unanswerable.
+        if _degraded and not _bool_setting("browser_http_fallback", True):
+            return {"ok": False, "engine": "", "error": (
+                f"the browser could not read this page ({_degraded}) and the "
+                f"plain-HTTP fallback is switched off in settings.")}
+        try:
+            status, body, final_url = _trusted_fetch(url, timeout=20)
+        except Exception as e:
+            return {"ok": False,
+                    "error": f"web_read failed: {type(e).__name__}: {e}"}
+        _engine = "http"
     # Re-validate the FINAL host in case a redirect somehow slipped through.
     fhost = urllib.parse.urlparse(final_url).hostname
     if not _web_read_host_ok(fhost):
@@ -6409,9 +6592,110 @@ def tool_web_read(url: str, max_chars: int = 6000) -> Dict[str, Any]:
     if len(text) > max_chars:
         text = text[:max_chars] + f"\n… [truncated at {max_chars} chars]"
     head = f"[{final_url}]  (HTTP {status})"
-    return {"ok": True, "url": url, "final_url": final_url, "host": fhost,
-            "status": status,
-            "text": _shield_web(f"{head}\n\n{text}", source=final_url)}
+    out = {"ok": True, "url": url, "final_url": final_url, "host": fhost,
+           "status": status, "engine": _engine,
+           "text": _shield_web(f"{head}\n\n{text}", source=final_url)}
+    if _engine == "http" and _degraded:
+        # The model needs this: a page that came back thin via the HTTP
+        # path may well be full in a browser, and "it looked empty" is a
+        # conclusion it should not draw without knowing which reader ran.
+        out["engine_note"] = (
+            f"read WITHOUT a browser (fell back to plain HTTP: {_degraded}). "
+            f"If this page looks empty or looks like a bot check, that is "
+            f"probably why — say so rather than reporting the page as blank.")
+    if _blocked:
+        out["blocked_requests"] = _blocked[:8]
+    return out
+
+
+def _research_mod():
+    try:
+        from basilisk_ext import research as _r
+        return _r
+    except Exception:
+        return None
+
+
+def _read_for_research(url: str) -> Dict[str, Any]:
+    """The reader handed to the research module.
+
+    It is web_read itself — so the SSRF floor, the shield, the browser and
+    the operator's settings all apply to a research fetch exactly as they
+    do to a direct one. Passing anything else would be a second web path
+    with its own (drifting) idea of what is allowed, which is how a safety
+    rule ends up enforced on one of two doors."""
+    return tool_web_read(url, max_chars=14000)
+
+
+def tool_web_search(query: str = "", limit: int = 8,
+                    engines: str = "", read_fn=None) -> Dict[str, Any]:
+    """Search the web across SEVERAL engines at once and return merged,
+    de-duplicated result links ranked by how many engines agree.
+
+    This replaces hand-writing a DuckDuckGo URL: it runs a few phrasings of
+    the query against several independent indexes, strips tracking
+    parameters so the same page from two engines counts as one, drops
+    social/aggregator noise, and ranks by cross-engine agreement rather
+    than by any single engine's order.
+
+    It returns LINKS, not answers. Read the ones you need with web_read (or
+    use web_research to search, read and cross-check in one call)."""
+    q = (query or "").strip()
+    if not q:
+        return {"ok": False, "error": (
+            "no query. Pass the thing you want to find, in plain words: "
+            '{"query": "nmap latest stable release"}')}
+    r = _research_mod()
+    if r is None:
+        return {"ok": False, "error": (
+            "the research module is not installed; fall back to "
+            'web_read {"url": "https://html.duckduckgo.com/html/?q=TERMS"}')}
+    try:
+        eng = [e for e in re.split(r"[,\s]+", str(engines or "")) if e]
+        return r.search(q, read_fn or _read_for_research, engines=eng,
+                        limit=_as_int(limit, 8))
+    except Exception as e:
+        return {"ok": False,
+                "error": f"web_search failed: {type(e).__name__}: {e}"}
+
+
+def tool_web_research(question: str = "", sources: int = 3,
+                      queries: str = "", read_fn=None) -> Dict[str, Any]:
+    """Search, READ several independent sources, and report where they agree.
+
+    The one call to reach for on any question of fact you cannot answer
+    from what is already in front of you. It expands the question into
+    several queries, searches several engines, picks the top results from
+    DIFFERENT domains (one page per site — three pages from one site is one
+    source), reads them, and returns each source's text plus an
+    `agreement` block naming the specific values more than one source
+    carried.
+
+    It does NOT decide what is true. If sources disagree it shows you both
+    and expects you to say so in your answer, with the URL for each."""
+    q = (question or "").strip()
+    if not q:
+        return {"ok": False, "error": (
+            "no question. Pass the operator's question as written: "
+            '{"question": "what is the latest stable nmap release"}')}
+    r = _research_mod()
+    if r is None:
+        return {"ok": False, "error": (
+            "the research module is not installed; search by hand with "
+            'web_read {"url": "https://html.duckduckgo.com/html/?q=TERMS"} '
+            "and read the best two or three links.")}
+    try:
+        extra = [x for x in re.split(r"\s*\|\s*|\n", str(queries or "")) if x.strip()]
+        # read_fn is the HOST's gated reader when the app supplies one, so a
+        # research fetch goes through exactly the same door as a direct
+        # web_read — including the unleashed-mode domain approval. A second
+        # web path with its own idea of what is allowed is how a safety rule
+        # ends up enforced on one door of two (see tool_launch_app, v9.x).
+        return r.research(q, read_fn or _read_for_research,
+                          queries=extra, max_sources=_as_int(sources, 3))
+    except Exception as e:
+        return {"ok": False,
+                "error": f"web_research failed: {type(e).__name__}: {e}"}
 
 
 def tool_web_sources() -> Dict[str, Any]:
@@ -7149,6 +7433,72 @@ def tool_workspace_replace(path: str, old: str, new: str,
         return _ws().replace(path, old, new, count=count)
     except Exception as e:
         return {"ok": False, "error": f"workspace unavailable: {e}"}
+
+
+def tool_workspace_edits(path: str, edits: Any) -> Dict[str, Any]:
+    """MANY exact edits to one file in ONE call, all-or-nothing.
+
+    The default for any change that touches more than one place in a file:
+    a rename across nine call sites is one call, not nine round-trips. If
+    any edit does not apply, or the result would not parse, NOTHING is
+    written and the failure names which edit and why."""
+    try:
+        return _ws().edits(path, edits)
+    except Exception as e:
+        return {"ok": False, "error": f"workspace unavailable: {e}"}
+
+
+def tool_workspace_append(path: str, content: str,
+                          create: bool = False) -> Dict[str, Any]:
+    """Append to a file — THE WAY TO WRITE A LONG FILE.
+
+    A whole-file write has to fit in one reply, so a big file gets cut off
+    at max_tokens and lands truncated. Write the first chunk with
+    create=true, append each following chunk, then verify. Each chunk is a
+    modest reply, so file size stops being limited by reply size."""
+    try:
+        return _ws().append(path, content, create=create)
+    except Exception as e:
+        return {"ok": False, "error": f"workspace unavailable: {e}"}
+
+
+def tool_workspace_insert(path: str, content: str, after_line: int = 0,
+                          before_line: int = 0) -> Dict[str, Any]:
+    """Insert a block at a line position — for an import, a new method, a
+    case in a table: the edits with a PLACE but no unique anchor text.
+    Line numbers are 1-based against the file as it is now."""
+    try:
+        return _ws().insert(path, content, after_line=after_line,
+                            before_line=before_line)
+    except Exception as e:
+        return {"ok": False, "error": f"workspace unavailable: {e}"}
+
+
+def tool_workspace_glob(pattern: str = "*", limit: int = 300) -> Dict[str, Any]:
+    """Find files by NAME ("**/test_*.py", "src/**/*.ts"). The counterpart to
+    workspace_search, which greps CONTENT. Newest-modified first."""
+    try:
+        return _ws().glob_files(pattern, limit)
+    except Exception as e:
+        return {"ok": False, "error": f"workspace unavailable: {e}"}
+
+
+def tool_workspace_read_many(paths: Any, max_chars: int = 6000) -> Dict[str, Any]:
+    """Read SEVERAL files in one round-trip. Orienting in a repo is a handful
+    of independent reads; doing them one per turn spends three model calls
+    to learn one thing."""
+    try:
+        return _ws().read_many(paths, max_chars)
+    except Exception as e:
+        return {"ok": False, "error": f"workspace unavailable: {e}"}
+
+
+def workspace_cwd() -> str:
+    """The open repo's root, for running commands IN it. "" when none."""
+    try:
+        return _ws().repo_root() or ""
+    except Exception:
+        return ""
 
 
 def tool_workspace_write(path: str, content: str,

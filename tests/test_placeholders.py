@@ -170,7 +170,12 @@ ck("it tells the model plainly that nothing ran",
 # this file asserted "emit the tool call now" and failed because the sentence is
 # split across two adjacent string literals, which is a property of the
 # formatter, not of the code.
-_ANCHOR = "ANSWER MODE: an ANNOUNCED next step with no tool call"
+# ANCHORED ON THE BLOCK ITSELF, not on a fixed width from the section
+# header. The original sliced 2600 chars after the section comment and broke
+# the day the deterministic plan/verification gates were added between the
+# two — the code was correct and the test measured a distance. A named
+# anchor cannot be pushed out of range by a neighbour growing.
+_ANCHOR = "ANSWER-MODE STALL NUDGE (the block below is this one)"
 _NUDGE_BLOCK = (SRC.split(_ANCHOR, 1)[1][:2600] if _ANCHOR in SRC else "")
 ck("the nudge block is findable by its own comment anchor", bool(_NUDGE_BLOCK))
 _FLAT = re.sub(r'"\s*\n\s*"', "", SRC)      # join adjacent string literals

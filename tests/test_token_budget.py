@@ -116,8 +116,30 @@ _leashed = Bp.build_system_prompt(grouped=_grouped, unleashed=False)
 _armed = Bp.build_system_prompt(grouped=_grouped, unleashed=True)
 
 # Ceilings, not exact values: prose should be free to change, size should not.
-LEASHED_CEIL = 8200
-ARMED_CEIL = 8800
+# CEILINGS RAISED DELIBERATELY at v1.2.0.0, and this is the accounting.
+# +~800 tokens on every turn, in three named pieces, none of which can be
+# lazy-loaded without breaking the thing it was added for:
+#
+#   · the TASK LEDGER (plan_set/plan_step/plan_status, ~180 tok). The
+#     turn-ending gates read this ledger. A turn that never loaded the specs
+#     cannot be held open by it when work is unfinished, nor released by it
+#     when work is done — which is the whole fix for "stops early" and
+#     "answers twice". Lazy-loading the mechanism that decides whether the
+#     turn ends is not an option.
+#   · REAL SEARCH (web_search/web_research/browser_status, ~230 tok). Reached
+#     for on nearly every question of fact; the text it REPLACED (the
+#     hand-rolled DuckDuckGo URL playbook) is gone, so the net is smaller
+#     than the gross.
+#   · the ACTING rules (~180 tok): don't ask permission, don't hedge, finish
+#     the whole job. These exist to stop turns that produce nothing, so they
+#     pay for themselves in round-trips rather than costing them.
+#
+# The workspace group is NOT in this number: it is preloaded only when a repo
+# is actually open (see build_system_prompt's preload_groups), which is the
+# one place where paying for specs inline is cheaper than a load_tools
+# round-trip that will always be made anyway.
+LEASHED_CEIL = 8600
+ARMED_CEIL = 9000
 ck(f"leashed prompt is within budget ({tok(_leashed):,} <= {LEASHED_CEIL:,})",
    tok(_leashed) <= LEASHED_CEIL,
    "the group index exists to keep this small - something is inlining specs")
