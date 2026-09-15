@@ -174,11 +174,11 @@ class TestProviderRegistry(unittest.TestCase):
     def test_siliconflow_primary_model_is_deepseek_v4_flash(self):
         # The locked default model. Guards against an accidental reorder of the
         # chain that would silently change which model fresh installs use.
+        # v1.2.0.0: default is DeepSeek-V4.1-Flash (operator's instruction);
+        # the benchmarked V4-Flash is the immediate fallback, chain[1].
         sf = basilisk_core.PROVIDERS_BY_KEY["siliconflow"]
-        self.assertEqual(sf.chain[0], "deepseek-ai/DeepSeek-V4-Flash")
-        # GLM-5.3-Flash stays one place behind and first in the
-        # picker: fully supported, never imposed.
-        self.assertEqual(sf.chain[1], "zai-org/GLM-5.3-Flash")
+        self.assertEqual(sf.chain[0], "deepseek-ai/DeepSeek-V4.1-Flash")
+        self.assertEqual(sf.chain[1], "deepseek-ai/DeepSeek-V4-Flash")
 
 
 # Persona fixtures for the guardrail tests.  A GUARDRAIL block is delimited by

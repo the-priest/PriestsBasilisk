@@ -173,6 +173,42 @@ if "authentication" not in (out6.get("error") or "").lower():
 if len(seen6) != 1:
     note(f"2f: auth failure walked the chain ({len(seen6)} attempts)")
 
+# 2h. A 500 IS TRANSIENT — walk to the next model, don't kill the turn.
+#     v1.2.0.0: SiliconFlow returned a plain 500 ({"code":50500,"message":
+#     "Request failed: Unknown error.","data":null}) mid-build and the turn
+#     died with a red toast — 500 was not in the transient set (only 502/503
+#     were). Now the whole 5xx range walks the chain, so a single-model hiccup
+#     self-heals onto the fallback.
+b5 = make_backend(chain=("model-a", "model-b"))
+_hits = {"n": 0}
+def reject_500_once(p):
+    if p["model"] == "model-a":
+        return _FakeHTTPError(500, json.dumps(
+            {"code": 50500, "message": "Request failed: Unknown error.",
+             "data": None}))
+    return None
+seen500, out500 = run(b5, reject_500_once)
+if out500.get("error"):
+    note(f"2h: a 500 killed the turn instead of failing over: {out500['error']}")
+if out500.get("text") != "hi":
+    note(f"2h: the turn did not recover after a 500: {out500!r}")
+if [p["model"] for p in seen500] != ["model-a", "model-b"]:
+    note(f"2h: a 500 did not walk to the next model: "
+         f"{[p['model'] for p in seen500]}")
+
+# 2i. a provider-wide 500 (every model) must still terminate and surface the
+#     real error, not spin.
+b6 = make_backend(chain=("model-a", "model-b"))
+def reject_500_all(p):
+    return _FakeHTTPError(500, json.dumps(
+        {"code": 50500, "message": "Request failed: Unknown error.",
+         "data": None}))
+seen500b, out500b = run(b6, reject_500_all)
+if not out500b.get("error"):
+    note("2i: a provider-wide 500 did not surface an error")
+if len(seen500b) != 2:
+    note(f"2i: a provider-wide 500 did not try each model once: {len(seen500b)}")
+
 # 2g. the wall cap actually applied is derived from the SENT budget, not the
 #     module constant — assert the code reads the payload, at source level.
 SRC = io.open(os.path.join(_ROOT, "basilisk_core.py"), encoding="utf-8").read()

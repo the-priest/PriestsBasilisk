@@ -269,12 +269,31 @@ SILICONFLOW_CATALOGUE: List[ModelInfo] = [
               vision=True, tier="flagship"),
 
     # ── Workhorse: the everyday tier. The pinned default lives here ──
+    ModelInfo("deepseek-ai/DeepSeek-V4.1-Flash", "DeepSeek-V4.1-Flash",
+              1049,
+              0.13, 0.28,
+              "PINNED DEFAULT (v1.2.0.0). DeepSeek's Sep-2026 refresh of the "
+              "V4-Flash line — new causal encoder-decoder MoE (552B, ~8B "
+              "active in / 16B out), smarter and cheaper per token, same "
+              "vendor and same tool-call dialect so prompts port unchanged. "
+              "Falls back to V4-Flash, the build every benchmark was measured "
+              "on.",
+              tier="workhorse",
+              cached_in_usd=0.028,
+              # SAME family as V4-Flash, which honours enable_thinking, and on
+              # DeepSeek's own platform the v4-flash id ROUTES to V4.1 — so the
+              # switch is understood. If this new architecture ever rejects it,
+              # the backend strips-and-retries once and remembers (see
+              # _extras_rejected), so a wrong guess costs one light-turn
+              # round-trip, never a broken model.
+              think_off={"enable_thinking": False}),
     ModelInfo("deepseek-ai/DeepSeek-V4-Flash", "DeepSeek-V4-Flash",
               1049,
               0.13, 0.28,
-              "PINNED DEFAULT. 284B/13B, 1M ctx. Every benchmark was produced "
-              "on this, and re-verified on it at v1.0.0.17 — the scaffolding "
-              "scores, not the price tag.",
+              "The measured build: 284B/13B, 1M ctx. Every benchmark on the "
+              "board was produced on this and re-verified on it at v1.0.0.17 "
+              "— the scaffolding scores, not the price tag. Kept as the "
+              "immediate fallback under the V4.1 default.",
               tier="workhorse",
               cached_in_usd=0.028,
               think_off={"enable_thinking": False}),
@@ -347,12 +366,30 @@ SILICONFLOW_CATALOGUE: List[ModelInfo] = [
 # The benchmark settles it. 87/113 was produced on DeepSeek-V4-Flash, and the
 # operator re-ran the board on v1.0.0.17 — also DeepSeek — and got 87 again,
 # challenge for challenge, no regression. That is the configuration with a
-# measured score behind it, so that is what a fresh install gets.
+# measured score behind it.
 #
-# GLM-5.3-Flash stays FIRST in the catalogue and one click away in the model
+# ── v1.2.0.0: THE DEFAULT MOVED TO DeepSeek-V4.1-Flash, AT HIS INSTRUCTION ──
+# He asked for V4.1-Flash (DeepSeek's Sep-2026 refresh, confirmed live on
+# SiliconFlow) added and made the default. It is the SAME VENDOR and the same
+# tool-call dialect as V4-Flash — DeepSeek's own platform routes the old
+# v4-flash id to V4.1 — so everything that makes V4 work (the DSML/native
+# canonicaliser, enable_thinking) applies unchanged. Two things make this a
+# safe default rather than a blind one:
+#   · V4-Flash is chain[1], the IMMEDIATE fallback, so the measured 87/113
+#     build is one hop away and its benchmark rows/labels are NOT restated as
+#     V4.1 numbers — nobody has run the board on V4.1 yet.
+#   · the backend recovers from a wrong model id: a 404/400 refetches the
+#     provider's live /models and walks to a real one, so even if SiliconFlow's
+#     exact slug differed, a fresh install degrades to V4-Flash, never dies.
+# This is NOT an auto-hop: it is the operator changing the shipped default,
+# which he is entitled to do. Existing installs keep their saved siliconflow_
+# model, so anyone who measured on V4-Flash stays on V4-Flash.
+#
+# GLM-5.3-Flash stays in the catalogue and one click away in the model
 # picker, with every GLM fix intact. Choosing it is one setting; being moved
-# onto it without asking is what this reverts.
+# onto it without asking is what the earlier revert was about.
 SILICONFLOW_CHAIN = [
+    "deepseek-ai/DeepSeek-V4.1-Flash",
     "deepseek-ai/DeepSeek-V4-Flash",
     "zai-org/GLM-5.3-Flash",
     "deepseek-ai/DeepSeek-V4-Pro",
@@ -1699,8 +1736,19 @@ class OpenAICompatBackend:
                 if e.code == 429:
                     log(f"{self.name} {attempt_model} -> 429 rate-limit, next")
                     continue
-                if e.code in (502, 503):
-                    log(f"{self.name} {attempt_model} -> {e.code}, next")
+                # TRANSIENT SERVER ERRORS — walk to the next model instead of
+                # killing the turn. 500 was NOT in this set, and that is the
+                # gap the operator hit: SiliconFlow returned
+                #   {"code":50500,"message":"Request failed: Unknown error.",
+                #    "data":null}
+                # — a plain 500 — mid-build, and the turn died with a red toast
+                # while three files were half-written. A 500/"unknown error" is
+                # the provider hiccuping, not a permanent fault: try the next
+                # model (which self-heals onto V4-Flash), and if the whole
+                # provider is 500ing, the chain still ends with the real error.
+                if 500 <= e.code < 600:
+                    log(f"{self.name} {attempt_model} -> {e.code} "
+                        f"(transient server error), next")
                     continue
 
                 # Anything else: report and stop.
@@ -2692,16 +2740,33 @@ def tool_write_file(path: str, content: str,
             content = _prior + content
 
         # 1. parse-check python before we risk the existing file
+        # ── BUT NOT MID-CHUNK ──
+        # A long file is written in SECTIONS with mode="append" (this
+        # docstring's own promise), and the first section of a .py never
+        # parses on its own — `def f():\n    x = (` is a perfectly good
+        # opening chunk. Refusing it made chunked .py writing impossible, so
+        # the model fell back to a `run` heredoc, which truncates at the
+        # token cap and collapses to {"_raw": …}. That is the bug behind
+        # "writing big code fails every time".
+        #
+        # So on APPEND we REPORT the parse state and let the sequence
+        # continue; on REPLACE (a whole-file write that claims to be
+        # complete) a syntax error is still refused outright. The guardrail
+        # region check below runs in BOTH modes regardless — a chunk can
+        # never edit protected source.
+        _py_parses = True
         if rp.endswith(".py"):
             import ast
             try:
                 ast.parse(content)
             except SyntaxError as e:
-                return {"ok": False, "path": rp,
-                        "error": f"refused: new content has a Python syntax "
-                                 f"error (line {e.lineno}: {e.msg}). "
-                                 f"Nothing was written.",
-                        "syntax_error": True}
+                _py_parses = False
+                if mode == "replace":
+                    return {"ok": False, "path": rp,
+                            "error": f"refused: new content has a Python "
+                                     f"syntax error (line {e.lineno}: "
+                                     f"{e.msg}). Nothing was written.",
+                            "syntax_error": True}
 
         # 1b. PROTECTED-REGION GUARD.  Any block delimited by the
         # GUARDRAIL markers below is immutable: a write that adds,
@@ -2714,10 +2779,20 @@ def tool_write_file(path: str, content: str,
         if guard is not None:
             return guard
 
+        # CREATE THE PARENT, don't refuse over it. "build me a game at
+        # ~/Documents/moba/index.html" failed here with "parent directory
+        # does not exist", which sent the model to a `mkdir -p && cat >>`
+        # heredoc — the exact path that truncates and collapses to _raw.
+        # The fs_guard above already vetted the destination; making the
+        # directory under it is safe and is what any editor does on save.
         parent = os.path.dirname(rp)
         if parent and not os.path.isdir(parent):
-            return {"ok": False, "path": rp,
-                    "error": f"parent directory does not exist: {parent}"}
+            try:
+                os.makedirs(parent, exist_ok=True)
+            except Exception as e:
+                return {"ok": False, "path": rp,
+                        "error": f"could not create the parent directory "
+                                 f"{parent}: {e}"}
 
         # 2. back up the original if it exists
         backup_path = None
@@ -2758,11 +2833,24 @@ def tool_write_file(path: str, content: str,
         size = os.path.getsize(rp)
         log(f"wrote {rp} ({size} bytes)"
             + (f", backup {backup_path}" if backup_path else ""))
-        return {"ok": True, "path": rp, "size": size,
+        _res = {"ok": True, "path": rp, "size": size,
                 "created": not existed, "backup": backup_path,
                 "mode": mode,
                 "appended": len(content) - len(_prior) if mode == "append" else 0,
                 "is_python": rp.endswith(".py")}
+        # On an APPEND to a .py, tell the model whether the file parses YET.
+        # Mid-sequence it will not, and that is expected — but a file left
+        # unparseable at the END of a chunk run is a real problem it must
+        # see, not one that surfaces later as a mysterious import error.
+        if mode == "append" and rp.endswith(".py"):
+            _res["parses"] = _py_parses
+            if not _py_parses:
+                _res["note"] = (
+                    "the file does not parse YET — expected while you are "
+                    "still appending chunks. Keep going; it MUST parse once "
+                    "the last chunk is in. If this was the last chunk, you "
+                    "have a syntax error to fix.")
+        return _res
     except PermissionError:
         return {"ok": False, "path": path,
                 "error": f"permission denied: {path} "
@@ -4695,6 +4783,7 @@ lint reformat unfuck
 # a task in "make the tests pass" and a request in "make a case for X".
 _WORK_VERBS_WEAK = frozenset("""
 write rewrite make create build generate scaffold
+code develop design implement program author compose
 add remove delete drop strip
 update change modify edit alter adjust amend tweak
 fix repair mend correct resolve
@@ -4743,6 +4832,17 @@ _CODE_OBJECT_RE = re.compile(
     r"workspace|project|projects|"
     r"file|files|dir|directory|folder|"
     r"script|scripts|program|programs|app|apps|application|"
+    # THE THINGS HE ASKS ME TO BUILD. "make me a moba game", "build a candy
+    # crush clone", "write me a tetris game" all classified as QUESTIONS —
+    # answer mode, no plan, no checklist — because the noun he was building
+    # was not on this list. A game IS the deliverable for half this user's
+    # requests, so a build verb aimed at one is work, not an essay about it.
+    r"game|games|clone|website|websites|webapp|webapps|webpage|webpages|"
+    r"site|sites|page|pages|landing|homepage|"
+    r"bot|bots|plugin|plugins|extension|extensions|addon|addons|mod|mods|"
+    r"simulator|simulation|demo|prototype|mockup|mock-up|"
+    r"dashboard|dashboards|tracker|trackers|generator|generators|"
+    r"engine|level|levels|sprite|sprites|canvas|animation|animations|"
     r"module|modules|package|packages|library|libraries|"
     r"function|functions|func|method|methods|class|classes|"
     r"test|tests|testsuite|suite|unittest|pytest|"

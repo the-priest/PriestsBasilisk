@@ -266,8 +266,8 @@ ck("adaptive_effort=False disables the toggle too",
 # still carry an explicit depth.
 print("\n== the shipped default (GLM-5.3-Flash) ==")
 _GLM = "zai-org/GLM-5.3-Flash"   # explicitly, not via the default
-ck("the shipped default is DeepSeek-V4-Flash again",
-   C.DEFAULT_SETTINGS["siliconflow_model"] == "deepseek-ai/DeepSeek-V4-Flash",
+ck("the shipped default is DeepSeek-V4.1-Flash (v1.2.0.0)",
+   C.DEFAULT_SETTINGS["siliconflow_model"] == "deepseek-ai/DeepSeek-V4.1-Flash",
    C.DEFAULT_SETTINGS["siliconflow_model"])
 _run(_settings(siliconflow_model=_GLM, fast_light_turns=True), "light",
      _urlopen_factory())

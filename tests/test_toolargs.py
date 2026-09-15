@@ -275,5 +275,45 @@ ck("…and neither mentions a FileNotFoundError on ''",
    "No such file or directory: ''" not in
    _C.tool_copy_path("/etc/hostname", "")["error"])
 
+# ── THE {"_raw": …} CALL — cut-off reply, steered to write_file ──────
+# v1.2.0.0: parse_tool_calls falls back to {"_raw": <body>} when a call's
+# arguments cannot be decoded — most often because the reply was CUT OFF at
+# the token cap partway through a long argument (a file written inside a
+# `run` heredoc). The old message ("missing required argument ['command']")
+# sent the model to re-issue the same giant heredoc, which truncated again.
+print("\n== a _raw (undecodable) call is explained, not mis-blamed ==")
+_out, _err = norm("run", {"_raw": "mkdir -p ~/x && cat > f << 'EOF'\n<html>…"})
+ck("run _raw is refused with an error", bool(_err))
+ck("…it says the reply was cut off, not 'missing argument'",
+   "CUT OFF" in _err and "missing required" not in _err)
+ck("…it names the heredoc as the cause", "heredoc" in _err.lower()
+   or "<<" in _err)
+ck("…and steers to write_file in append sections",
+   "write_file" in _err and "append" in _err)
+_out2, _err2 = norm("web_read", {"_raw": "https://…truncated"})
+ck("a non-run _raw is still explained as a cut-off", "CUT OFF" in _err2)
+ck("…without the heredoc-specific advice",
+   "heredoc" not in _err2.lower())
+
+# ── write_file: sectioned .py + parent-dir creation ──────────────────
+# The write path a "build me a game at ~/Documents/moba" request needs, and
+# that the model was forced away from into heredocs.
+print("\n== write_file: long files and new directories ==")
+import tempfile as _tf                                          # noqa: E402
+_d = _tf.mkdtemp()
+_deep = os.path.join(_d, "new", "nested", "dir", "game.py")
+_r1 = _C.tool_write_file(_deep, "def part():\n    x = (\n",
+                         make_backup=False, mode="append")
+ck("write_file creates missing parent directories",
+   _r1.get("ok") is True, str(_r1)[:100])
+ck("…and a partial .py chunk reports parses:false rather than refusing",
+   _r1.get("parses") is False)
+_r2 = _C.tool_write_file(_deep, "        1,\n    )\n    return x\n",
+                         make_backup=False, mode="append")
+ck("…the completing chunk parses", _r2.get("parses") is True)
+ck("…the file exists and is valid python",
+   os.path.isfile(_deep)
+   and __import__("ast").parse(open(_deep, encoding="utf-8").read()) is not None)
+
 print(f"\ntoolargs: {_p} passed, {_f} failed")
 sys.exit(1 if _f else 0)

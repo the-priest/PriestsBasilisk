@@ -204,10 +204,36 @@ _txt = open(_big, encoding="utf-8").read()
 ck("the file is the two sections joined, in order",
    _txt == "def a():\n    return 1\n\ndef b():\n    return 2\n", repr(_txt))
 
-r3 = C.tool_write_file(_big, "def broken(:\n", mode="append")
-ck("an append that would break the file is refused",
+# ── SECTIONED .py: A MID-SEQUENCE CHUNK NEED NOT PARSE ──
+# v1.2.0.0 CHANGED THIS. The old code REFUSED an append whose assembled .py
+# did not parse — which is correct for a REPLACE but made sectioned .py
+# writing IMPOSSIBLE: the first section of any real module ("def a():\n
+# x = (") never parses on its own. So the model fell back to a `run`
+# heredoc, which truncates at the token cap and collapses to {"_raw": …} —
+# the actual bug behind "writing big code fails every time". Now an append
+# that does not parse YET is ACCEPTED and REPORTS parses:false with a note;
+# the completing chunk makes it parse. A REPLACE with a syntax error is
+# still refused outright (asserted separately below).
+_open_chunk = os.path.join(_loot, "sectioned.py")
+rp1 = C.tool_write_file(_open_chunk, "def calc():\n    total = (\n",
+                        mode="append")
+ck("a mid-sequence .py chunk that does not parse is ACCEPTED",
+   rp1.get("ok") is True, str(rp1)[:120])
+ck("…and it REPORTS that the file does not parse yet",
+   rp1.get("parses") is False and "does not parse YET" in (rp1.get("note") or ""))
+rp2 = C.tool_write_file(_open_chunk, "        1 + 2\n    )\n    return total\n",
+                        mode="append")
+ck("…the completing chunk makes it parse, and the note clears",
+   rp2.get("parses") is True and not rp2.get("note"))
+ck("…and the whole function is really there and valid",
+   __import__("ast").parse(open(_open_chunk, encoding="utf-8").read()) is not None)
+
+# A REPLACE (a whole-file write claiming to be complete) with a syntax error
+# is STILL refused — that guard did not move.
+r3 = C.tool_write_file(_big, "def broken(:\n", mode="replace")
+ck("a whole-file REPLACE that breaks the .py is still refused",
    r3.get("ok") is False and r3.get("syntax_error") is True, str(r3)[:120])
-ck("…against the ASSEMBLED file, and the file survives",
+ck("…and the existing file survives it",
    "broken" not in open(_big, encoding="utf-8").read())
 
 r4 = C.tool_write_file(os.path.join(_loot, "new.txt"), "first\n", mode="append")

@@ -856,10 +856,14 @@ Two kinds of tool — ordering, not permission (you run both freely):
 
   EMITTING IT CORRECTLY:
     · `content` is a JSON string: escape " as \" and newlines as \n.
-    · BIG FILE? Write it in SECTIONS — one reply has a token cap and a call cut
-      off by it runs NOTHING. First part normally, each next part with
-      "mode": "append" (the parse-check runs on the ASSEMBLED file). Told you
-      were CUT OFF: split it, never re-send the same call.
+    · NEVER write a file with a shell heredoc (`cat > f << EOF` in `run`) —
+      that stuffs the whole file into ONE JSON string the token cap cuts off
+      mid-file, and the call runs nothing. write_file is the only way to put a
+      file on disk; it makes parent dirs for you, so no `mkdir -p` first.
+    · BIG FILE (longer than a screen)? Write it in SECTIONS: first as a normal
+      write, each next with "mode": "append". A .py section that doesn't parse
+      yet is FINE mid-sequence (it says so) and must parse by the last one.
+      Told you were CUT OFF: split smaller, never re-send the same call.
     · Emit the tag in the SAME reply you decide to write; never end a turn on
       "I'll save that now". NEVER say a file is saved unless the call
       succeeded — text typed into chat is NOT a file.

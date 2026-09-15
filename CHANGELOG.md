@@ -1,3 +1,85 @@
+# v1.2.0.2
+
+**Theme: neutral graphite. He said the blue was boring — dark gray and black now.**
+
+The obsidian-glass theme was a cool blue band (a hue migration off the original
+red at v1.1.1.0). This neutralises the whole blue/cyan/indigo band to gray while
+preserving every lightness and alpha value, so the glass structure — the lit
+edges, the depth, the one-hairline composure — is untouched; only the tint is
+gone. Applied identically to three places so nothing is left blue:
+
+- **The stylesheet** (462 hex + 620 rgba values in the ASCII bytes literal).
+- **The brand + app PNGs** (emblem, wordmark, avatar, watermark, every button)
+  — per-pixel, so the emblem's glow is silver on black instead of blue.
+- **The 4 blue SVGs and the 11 embedded base64 button PNGs** in
+  `basilisk_btn_art.py`, so a remote-fetch install with no assets dir gets the
+  gray buttons too — the on-disk and embedded art stay in lockstep, same rule
+  as the v1.1.1.0 migration.
+
+**Semantic colour is untouched:** danger red (`#e5484d`) and warning amber
+(`#f0a500`) sit outside the neutralised band and stay loud — red still means
+danger and nothing else. Verified: 0 saturated blue hexes left in the CSS, CSS
+parses clean under real GTK 4.14, ASCII-only bytes literal intact, GUARDRAIL
+byte-identical.
+
+Everything below is the v1.2.0.1 write-up, unchanged.
+
+---
+
+# v1.2.0.1
+
+**Follow-up to v1.2.0.0, from a real "build me a game" run that failed. Five
+fixes, all reproduced first.**
+
+The operator asked it to build a MOBA at `~/Documents/moba` and watched it fail
+in the terminal log. Every failure was real and traced to one of these:
+
+1. **Long files were written with a `run` heredoc, and heredocs truncate.** The
+   model did `cat > index.html << EOF …` inside a `run` call; the reply hit the
+   token cap mid-file, the JSON string was left unterminated, and the call
+   collapsed to `{"_raw": …}` — refused with a useless "missing argument
+   ['command']" that sent it to re-issue the same giant heredoc. Fixed at the
+   root: **`write_file` now writes long files in sections** even for `.py` (a
+   mid-sequence chunk that doesn't parse yet is accepted and reports
+   `parses:false` instead of being refused — the old refusal is what made
+   sectioned Python impossible and pushed the model to heredocs), it
+   **creates parent directories** so no `mkdir -p` dance, and an undecodable
+   `run` call now says plainly *the reply was cut off — use write_file in
+   append sections, never a heredoc.* The persona says the same.
+
+2. **"make me a moba game" classified as a QUESTION, not a task** — so no work
+   mode, no plan, and the checklist/objectives he expected never appeared. The
+   intent classifier had no vocabulary for the things he builds. Now
+   `make/build/create/code/design/develop me a game|app|website|clone|bot|…`
+   is a build task, with zero new false positives on "what is a moba" /
+   "make a sandwich" / "make a case for X".
+
+3. **A SiliconFlow HTTP 500 killed the turn.** `{"code":50500,"message":
+   "Request failed: Unknown error.","data":null}` is a provider-side hiccup,
+   but 500 wasn't in the transient-retry set (only 502/503 were), so the turn
+   died with a red toast mid-build. The whole **5xx range now walks the
+   fallback chain**, so a single-model 500 self-heals onto the fallback and a
+   provider-wide outage still surfaces the real error instead of spinning.
+   *(To answer the operator's question directly: that 500 was SiliconFlow's
+   fault, not the app's — but the app should survive it, and now does.)*
+
+4. **DeepSeek-V4.1-Flash added and made the default**, at the operator's
+   instruction — DeepSeek's Sep-2026 refresh of the V4-Flash line, confirmed
+   live on SiliconFlow (`deepseek-ai/DeepSeek-V4.1-Flash`). Same vendor, same
+   tool-call dialect, so every V4 behaviour (the DSML/native canonicaliser,
+   `enable_thinking`, the sampling profile) applies unchanged — verified. The
+   benchmarked **V4-Flash is the immediate fallback**, its 87/113 provenance
+   intact and *not* restated as V4.1's, and the backend recovers from a wrong
+   model id (a 404 refetches the live catalogue), so even a slug mismatch
+   degrades to V4-Flash rather than dying. Existing installs keep their saved
+   model; only fresh installs move.
+
+5. **GLM-5.3-Flash parity re-verified** — 90/90 of its dedicated suite green;
+   V4.1 correctly does *not* use GLM's reasoning-effort dial, and GLM correctly
+   still does.
+
+---
+
 # v1.2.0.0
 
 **The coding-assistant release. A real browser, real search, a task ledger the

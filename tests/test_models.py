@@ -54,10 +54,17 @@ SF = C.PROVIDERS_BY_KEY["siliconflow"]
 
 # ── 1. the pinned default ────────────────────────────────────────────
 print("\n== pinned default ==")
-PINNED = "deepseek-ai/DeepSeek-V4-Flash"
-ck("chain[0] is the pinned default", SF.chain[0] == PINNED, SF.chain[0])
+# v1.2.0.0: the default moved to V4.1-Flash at the operator's instruction —
+# DeepSeek's Sep-2026 refresh of the V4-Flash line, same vendor, same tool-call
+# dialect. V4-Flash (the measured 87/113 build) stays as the immediate
+# fallback, chain[1].
+PINNED = "deepseek-ai/DeepSeek-V4.1-Flash"
+BENCH = "deepseek-ai/DeepSeek-V4-Flash"
+ck("chain[0] is the pinned default (V4.1-Flash)", SF.chain[0] == PINNED, SF.chain[0])
 ck("default_model agrees", SF.default_model == PINNED)
 ck("pinned default is also pickable", PINNED in SF.pick_ids)
+ck("the benchmarked V4-Flash is the IMMEDIATE fallback (chain[1])",
+   SF.chain[1] == BENCH, str(SF.chain))
 ck("DEFAULT_SETTINGS still pins siliconflow",
    C.DEFAULT_SETTINGS["active_provider"] == "siliconflow")
 ck("DEFAULT_SETTINGS model matches the chain head",
@@ -185,26 +192,29 @@ ck("GLM-5.2 keeps its think toggle (hybrid)",
 # Natively multimodal, so it must be offered as a vision model too.
 ck("GLM-5.3-Flash is a pickable vision model",
    "zai-org/GLM-5.3-Flash" in C.VISION_MODELS.get("siliconflow", []))
-# THE PIN WENT BACK. It moved to GLM at v1.0.0.18; everything that broke after
-# it was GLM behaviour shipped to operators who had not chosen GLM, and the
-# 87/113 board was measured on DeepSeek-V4-Flash and re-verified on it at
-# v1.0.0.17. The configuration with a measured score behind it is the one a
-# fresh install gets. GLM stays FIRST in the catalogue, one click away.
-ck("the pin is DeepSeek-V4-Flash and the chain head agrees",
-   SF.chain[0] == PINNED and PINNED == "deepseek-ai/DeepSeek-V4-Flash")
+# v1.2.0.0: the default is V4.1-Flash (operator's instruction), a same-vendor
+# same-dialect refresh of V4-Flash. The measured 87/113 build stays one hop
+# away as chain[1] and its blurb keeps the benchmark provenance — nobody has
+# run the board on V4.1 yet, so those numbers are NOT restated as V4.1's.
+ck("the pin is DeepSeek-V4.1-Flash and the chain head agrees",
+   SF.chain[0] == PINNED and PINNED == "deepseek-ai/DeepSeek-V4.1-Flash")
 ck("GLM-5.3-Flash is still the FIRST pick in the catalogue",
    SF.pick_ids[0] == "zai-org/GLM-5.3-Flash", SF.pick_ids[0])
-ck("...and is one place behind the pin in the fallback walk",
-   SF.chain[1] == "zai-org/GLM-5.3-Flash", str(SF.chain))
+ck("...and is in the fallback walk behind both DeepSeek workhorses",
+   "zai-org/GLM-5.3-Flash" in SF.chain[2:], str(SF.chain))
 # THE BENCHMARK ROWS DO NOT MOVE WITH THE PIN. Every README score was produced
-# driving DeepSeek-V4-Flash; that model stays in the catalogue, stays FIRST in
-# the fallback walk behind the pin, and its blurb keeps saying so. Restating
-# those numbers as GLM numbers would be a fabricated benchmark.
+# driving DeepSeek-V4-Flash; that model stays in the catalogue, stays the
+# IMMEDIATE fallback behind the new default, and its blurb keeps saying so.
+# Restating those numbers as V4.1's would be a fabricated benchmark.
 ck("DeepSeek-V4-Flash is still catalogued", SF.info(
     "deepseek-ai/DeepSeek-V4-Flash") is not None)
 ck("…and still carries the benchmark provenance in its blurb",
    "benchmark" in (SF.info("deepseek-ai/DeepSeek-V4-Flash").note or "").lower(),
    SF.info("deepseek-ai/DeepSeek-V4-Flash").note)
+ck("V4.1-Flash is catalogued as the new default",
+   SF.info("deepseek-ai/DeepSeek-V4.1-Flash") is not None)
+ck("…and its blurb does NOT claim the benchmark score for itself",
+   "87" not in (SF.info("deepseek-ai/DeepSeek-V4.1-Flash").note or ""))
 
 # ── reasoning-effort dial (GLM-5.x is deep-by-default; we bound it) ──
 print("\n== reasoning effort ==")

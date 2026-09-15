@@ -6,8 +6,8 @@
 
 <br/>
 
-<img src="https://img.shields.io/badge/version-1.2.0.0-e11d2b?style=for-the-badge&labelColor=08090b" alt="version 1.2.0.0">
-<img src="https://img.shields.io/badge/tests-4750%20assertions-2ea043?style=for-the-badge&labelColor=08090b&logo=pytest&logoColor=2ea043" alt="4750 assertions">
+<img src="https://img.shields.io/badge/version-1.2.0.2-e11d2b?style=for-the-badge&labelColor=08090b" alt="version 1.2.0.2">
+<img src="https://img.shields.io/badge/tests-4770%20assertions-2ea043?style=for-the-badge&labelColor=08090b&logo=pytest&logoColor=2ea043" alt="4770 assertions">
 <img src="https://img.shields.io/badge/licence-MIT-e11d2b?style=for-the-badge&labelColor=08090b" alt="MIT">
 <img src="https://img.shields.io/badge/deps-stdlib%20%2B%20GTK-e11d2b?style=for-the-badge&labelColor=08090b" alt="stdlib + GTK">
 
@@ -42,11 +42,11 @@ Basilisk runs shell commands and edits files **as you**. Read the installer befo
 **Native packages** — recommended, because they resolve the GTK stack for you:
 
 ```bash
-sudo apt install ./priestsbasilisk_1.2.0.0-1_all.deb
+sudo apt install ./priestsbasilisk_1.2.0.2-1_all.deb
 ```
 
 ```bash
-sudo pacman -U priestsbasilisk-1.2.0.0-1-any.pkg.tar.zst
+sudo pacman -U priestsbasilisk-1.2.0.2-1-any.pkg.tar.zst
 ```
 
 An auditable `PKGBUILD` lives in `packaging/` and runs the whole test suite as its `check()` step. [`packaging/README.md`](packaging/README.md) covers what each package installs and where.
@@ -89,7 +89,7 @@ cd basilisk && less install.sh
 - a model writing its *own* tool results — inventing a fetch, a status code and a page body — is detected structurally and deleted before it can be shown, stored, or replayed to itself as history;
 - its 128K output ceiling is what makes the file-sized write budget usable.
 
-**On the benchmark numbers below:** they were produced on **DeepSeek-V4-Flash**, which is why that is what a fresh install pins. GLM-5.3-Flash has not been re-benchmarked on that board, so its score is not stated — choosing it is one click, and every GLM fix above is in the engine either way.
+**On the benchmark numbers below:** they were produced on **DeepSeek-V4-Flash**. A fresh install now defaults to **DeepSeek-V4.1-Flash** (DeepSeek's Sep-2026 refresh of that model — same vendor, same tool-call dialect), with V4-Flash kept as the immediate fallback so the measured build is one hop away. V4.1 and GLM-5.3-Flash have not been re-benchmarked on that board, so their scores are not stated — every fix above is in the engine for all three either way.
 
 **Requirements:** **Python 3.10+**, Linux with **GTK4** / libadwaita (X11 or Wayland). Built and tested on **CachyOS** and **Kali**; runs on any Arch-, Debian- or Fedora-based distro — package manager, escalation tool (`sudo`/`sudo-rs`/`doas`) and tool paths are all auto-detected, never assumed.
 
@@ -293,7 +293,7 @@ Capability and safety are decoupled on purpose.
 
 ## 🔬 Engineering
 
-**Stdlib only** for the engine. No pytest, no network, no fixtures, no account — **4,750 assertions across 79 suites**, run in under a minute. Four of those suites are adversarial probes that report *findings* rather than a pass count, so their checks are not in that total.
+**Stdlib only** for the engine. No pytest, no network, no fixtures, no account — **4,770 assertions across 79 suites**, run in under a minute. Four of those suites are adversarial probes that report *findings* rather than a pass count, so their checks are not in that total.
 
 Every fix ships with a regression that *fails* on the old code and *passes* on the new. Real GTK is spun up under Xvfb for the UI suites; the chat-bubble layout alone is pinned by 140 fitting checks. Repo work is covered end-to-end rather than layer by layer — a deliberately broken repo is opened as a folder, baselined red, edited through four different tool-call dialects, verified green, diffed and exported, with a 6,000-line file paged and rewritten on the way past.
 
@@ -323,7 +323,7 @@ If it earns its place in your kit, star the repo and tell someone who would use 
 
 <br/>
 
-### Built by one person, around a day job. Verified by 4,750 assertions. Priced at nothing.
+### Built by one person, around a day job. Verified by 4,770 assertions. Priced at nothing.
 
 <sub>Clone it, read it, run the suite, then point it at something you own.</sub>
 

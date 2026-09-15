@@ -61,6 +61,22 @@ def want(text, expect, why=""):
 
 # ── 1. Real coding requests, phrased the way a tired person phrases them ──
 TASKS = [
+    # v1.2.0.0: "build/make/create/code me a <game|app|website|...>" is a
+    # BUILD job (work mode, a plan, a checklist), not an essay about one. The
+    # operator hit this directly — "make me a moba game" classified as a
+    # QUESTION, so no plan and no objectives showed on screen.
+    "make me a moba game like league of legends",
+    "build me a moba game",
+    "make a candy crush clone",
+    "write me a tetris game",
+    "create a snake game in html",
+    "build me a landing page for my startup",
+    "make a discord bot",
+    "code me a plinko game",
+    "design a poster generator",
+    "develop a chat app",
+    "make me a website",
+    "build a chrome extension",
     "fix it",
     "fix this shit",
     "fix the bug",
@@ -127,6 +143,19 @@ for t in TASKS:
 
 # ── 2. Questions that MUST stay questions ──
 QUESTIONS = [
+    # The counter-property for the game/app additions above: asking ABOUT a
+    # game must stay a question, and non-code build verbs ("make a sandwich",
+    # "write a poem") must not be dragged into work mode.
+    "what is a moba",
+    "how do games handle collision detection",
+    "whats the best game engine",
+    "explain how a game loop works",
+    "is unity better than godot",
+    "should i use react or vue for my website",
+    "write a poem about the sea",
+    "make me a sandwich",
+    "make a case for microservices",
+    "compose an email to my boss",
     "what is a race condition",
     "what's the difference between a list and a tuple",
     "why does python have a gil",
