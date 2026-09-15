@@ -1,31 +1,3 @@
-# v1.2.0.2
-
-**Theme: neutral graphite. He said the blue was boring — dark gray and black now.**
-
-The obsidian-glass theme was a cool blue band (a hue migration off the original
-red at v1.1.1.0). This neutralises the whole blue/cyan/indigo band to gray while
-preserving every lightness and alpha value, so the glass structure — the lit
-edges, the depth, the one-hairline composure — is untouched; only the tint is
-gone. Applied identically to three places so nothing is left blue:
-
-- **The stylesheet** (462 hex + 620 rgba values in the ASCII bytes literal).
-- **The brand + app PNGs** (emblem, wordmark, avatar, watermark, every button)
-  — per-pixel, so the emblem's glow is silver on black instead of blue.
-- **The 4 blue SVGs and the 11 embedded base64 button PNGs** in
-  `basilisk_btn_art.py`, so a remote-fetch install with no assets dir gets the
-  gray buttons too — the on-disk and embedded art stay in lockstep, same rule
-  as the v1.1.1.0 migration.
-
-**Semantic colour is untouched:** danger red (`#e5484d`) and warning amber
-(`#f0a500`) sit outside the neutralised band and stay loud — red still means
-danger and nothing else. Verified: 0 saturated blue hexes left in the CSS, CSS
-parses clean under real GTK 4.14, ASCII-only bytes literal intact, GUARDRAIL
-byte-identical.
-
-Everything below is the v1.2.0.1 write-up, unchanged.
-
----
-
 # v1.2.0.1
 
 **Follow-up to v1.2.0.0, from a real "build me a game" run that failed. Five

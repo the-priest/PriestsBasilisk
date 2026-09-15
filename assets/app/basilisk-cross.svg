@@ -1,15 +1,15 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Cross">
   <defs>
     <linearGradient id="steel" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#ededee"/>
-      <stop offset="45%" stop-color="#b5b7b9"/>
-      <stop offset="55%" stop-color="#919497"/>
-      <stop offset="100%" stop-color="#606265"/>
+      <stop offset="0%" stop-color="#e9edf2"/>
+      <stop offset="45%" stop-color="#aeb6c0"/>
+      <stop offset="55%" stop-color="#8b939d"/>
+      <stop offset="100%" stop-color="#5a616b"/>
     </linearGradient>
     <linearGradient id="steelEdge" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="#606265"/>
-      <stop offset="50%" stop-color="#d4d5d7"/>
-      <stop offset="100%" stop-color="#606265"/>
+      <stop offset="0%" stop-color="#5a616b"/>
+      <stop offset="50%" stop-color="#cfd5dc"/>
+      <stop offset="100%" stop-color="#5a616b"/>
     </linearGradient>
     <filter id="cglow" x="-40%" y="-40%" width="180%" height="180%">
       <feGaussianBlur stdDeviation="3" result="b"/>
@@ -17,7 +17,7 @@
     </filter>
   </defs>
   <!-- gothic cross: arms flare toward flat ends -->
-  <g filter="url(#cglow)" stroke="#2f3031" stroke-width="3" stroke-linejoin="round">
+  <g filter="url(#cglow)" stroke="#2b2f35" stroke-width="3" stroke-linejoin="round">
     <!-- vertical bar -->
     <path fill="url(#steel)" d="M222 78
       L290 78 L300 150 L300 360 L312 452 L256 478 L200 452 L212 360 L212 150 Z"/>
@@ -29,11 +29,11 @@
       L290 78 L300 150 L300 360 L312 452 L256 478 L200 452 L212 360 L212 150 Z"/>
   </g>
   <!-- thin inner bevel lines for the metal look -->
-  <g fill="none" stroke="#f2f2f2" stroke-width="2" opacity="0.5">
+  <g fill="none" stroke="#eef2f6" stroke-width="2" opacity="0.5">
     <path d="M236 96 L236 452"/>
     <path d="M276 96 L276 452"/>
   </g>
   <!-- subtle red core gem at the crossing -->
-  <circle cx="256" cy="228" r="13" fill="#939799" stroke="#3b3d3f" stroke-width="2"/>
-  <circle cx="252" cy="224" r="4" fill="#e7e8e8" opacity="0.8"/>
+  <circle cx="256" cy="228" r="13" fill="#3aacf2" stroke="#074773" stroke-width="2"/>
+  <circle cx="252" cy="224" r="4" fill="#d3ecfc" opacity="0.8"/>
 </svg>
