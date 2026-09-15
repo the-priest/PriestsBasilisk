@@ -135,58 +135,58 @@ def _run(settings, effort, urlopen):
 PINNED = "deepseek-ai/DeepSeek-V4-Flash"
 
 
-# ── 1. the default is genuinely free ─────────────────────────────────
-print("\n== default OFF changes nothing ==")
-ck("fast_light_turns defaults to False",
-   C.DEFAULT_SETTINGS.get("fast_light_turns") is False,
-   str(C.DEFAULT_SETTINGS.get("fast_light_turns")))
+# ── 1. THINKING IS OFF BY DEFAULT ON THE DEEPSEEK FLASH FAMILY ───────
+# v1.2.0.3: the DeepSeek V4/V4.1-Flash family default to a thinking mode that,
+# in an agentic tool loop, spends the whole budget reasoning and returns an
+# empty answer — "thought for 50,000 characters and said nothing", the loop the
+# operator filmed. So enable_thinking:False is now sent by DEFAULT on EVERY
+# turn (light/standard/heavy) for any model that HAS a think_off, and the old
+# "no extra field unless you opt in" contract is gone for those models.
+print("\n== thinking OFF by default on the DeepSeek Flash family ==")
+ck("deepseek_thinking defaults to False",
+   C.DEFAULT_SETTINGS.get("deepseek_thinking") is False,
+   str(C.DEFAULT_SETTINGS.get("deepseek_thinking")))
 
 _run(_settings(), "light", _urlopen_factory())
-_off_light = dict(SENT[0])
+_def_light = dict(SENT[0])
 _run(_settings(), "standard", _urlopen_factory())
-_off_std = dict(SENT[0])
-ck("OFF: no extra field on a light turn", "enable_thinking" not in _off_light,
-   str(sorted(_off_light)))
-ck("OFF: no extra field on a standard turn",
-   "enable_thinking" not in _off_std)
+_def_std = dict(SENT[0])
+_run(_settings(approval_mode="manual"), "heavy", _urlopen_factory())
+_def_heavy = dict(SENT[0])
+ck("DEFAULT: light turn disables thinking",
+   _def_light.get("enable_thinking") is False, str(sorted(_def_light)))
+ck("DEFAULT: standard turn disables thinking",
+   _def_std.get("enable_thinking") is False, str(sorted(_def_std)))
+ck("DEFAULT: heavy turn ALSO disables thinking (this is the build case)",
+   _def_heavy.get("enable_thinking") is False, str(sorted(_def_heavy)))
+
+# Opting thinking back ON restores the byte-identical, pre-feature body.
 _EXPECTED_KEYS = {"messages", "temperature", "top_p", "max_tokens",
                   "stream", "model"}
-ck("OFF: request body has exactly the pre-existing keys",
-   set(_off_light) == _EXPECTED_KEYS,
-   str(set(_off_light) ^ _EXPECTED_KEYS))
-
-
-# ── 2. ON, and only where it belongs ─────────────────────────────────
-print("\n== ON: light turns only ==")
-_run(_settings(fast_light_turns=True), "light", _urlopen_factory())
+_run(_settings(deepseek_thinking=True), "light", _urlopen_factory())
 _on_light = dict(SENT[0])
-ck("ON: light turn disables thinking",
-   _on_light.get("enable_thinking") is False, str(_on_light.get("enable_thinking")))
-ck("ON: the pinned model is still the one used",
-   _on_light.get("model") == PINNED, str(_on_light.get("model")))
+ck("deepseek_thinking=True: no enable_thinking field (thinking restored)",
+   "enable_thinking" not in _on_light, str(sorted(_on_light)))
+ck("deepseek_thinking=True: body is exactly the pre-feature keys",
+   set(_on_light) == _EXPECTED_KEYS, str(set(_on_light) ^ _EXPECTED_KEYS))
 
-_run(_settings(fast_light_turns=True), "standard", _urlopen_factory())
-ck("ON: STANDARD turn is untouched", "enable_thinking" not in SENT[0],
-   str(sorted(SENT[0])))
-_run(_settings(fast_light_turns=True, approval_mode="manual"), "heavy",
+
+# ── 2. only where it belongs ─────────────────────────────────────────
+print("\n== the toggle only touches models that have it ==")
+ck("DEFAULT: the pinned DeepSeek model is still the one used",
+   _def_light.get("model") == PINNED, str(_def_light.get("model")))
+
+# A model with no toggle must not get one invented for it, default or not.
+_run(_settings(siliconflow_model="moonshotai/Kimi-K3"), "light",
      _urlopen_factory())
-ck("ON: HEAVY turn is untouched — reasoning is the point there",
+ck("a model with no think_off gets no field by default",
    "enable_thinking" not in SENT[0], str(sorted(SENT[0])))
 
-# A model with no toggle must not get one invented for it.
-ck("ON: a model with no think_off gets no field",
-   "enable_thinking" not in dict(
-       _run(_settings(fast_light_turns=True,
-                      siliconflow_model="moonshotai/Kimi-K3"),
-            "light", _urlopen_factory()) or {}) and
-   "enable_thinking" not in SENT[0],
-   str(sorted(SENT[0])))
-
 # The light cap still applies — the toggle must not have replaced it.
-ck("ON: light max_tokens cap still applied",
-   _on_light.get("max_tokens")
+ck("light max_tokens cap still applied",
+   _def_light.get("max_tokens")
    <= C.DEFAULT_SETTINGS["effort_light_max_tokens"],
-   str(_on_light.get("max_tokens")))
+   str(_def_light.get("max_tokens")))
 
 
 # ── 3. rejection is survivable ───────────────────────────────────────
@@ -254,7 +254,13 @@ ck("heavy: a bogus heavy model is ignored, not sent",
 SENT.clear()
 _run(_settings(adaptive_effort=False, fast_light_turns=True),
      "light", _urlopen_factory())
-ck("adaptive_effort=False disables the toggle too",
+ck("adaptive_effort=False does NOT re-enable thinking — the think-off "
+   "default is a baseline, not a rung of the effort ladder",
+   SENT[0].get("enable_thinking") is False, str(sorted(SENT[0])))
+SENT.clear()
+_run(_settings(adaptive_effort=False, deepseek_thinking=True),
+     "light", _urlopen_factory())
+ck("deepseek_thinking=True with adaptive_effort=False sends no field",
    "enable_thinking" not in SENT[0], str(sorted(SENT[0])))
 
 

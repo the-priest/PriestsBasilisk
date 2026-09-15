@@ -98,7 +98,7 @@ ck("...and to poll oracle_status every planning turn",
    "Consult it every planning turn" in PERSONA)
 ck("a no-argument call really does produce a constant label",
    re.search(r'def _action_label\(self, call\)', SRC) is not None
-   and "return n\n" in SRC.split("def _action_label")[1][:900],
+   and "return n\n" in SRC.split("def _action_label")[1][:2400],
    "if a bare tool name were not the label, none of this would bite")
 
 

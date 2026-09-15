@@ -1,3 +1,101 @@
+# v1.2.0.3
+
+**The one where V4.1-Flash actually builds the game. From a live build the
+operator filmed failing the same way over and over — every fault reproduced
+first, then fixed at the root.**
+
+The symptom was brutal and repeatable: ask V4.1-Flash to build a small game and
+it "thought for 50,000 characters and said nothing", forever. Three separate
+mechanisms were behind it.
+
+## 1. Thinking was ON for exactly the turns that couldn't afford it
+
+The DeepSeek V4/V4.1-Flash family default to a **thinking** mode. In an agentic
+tool loop that is the wrong default — the model spends its whole `max_tokens`
+budget reasoning and streams back an **empty** answer: no prose, no tool call.
+The host saw "reasoning present, content empty", called it degraded, and
+retried — which changes nothing, so it looped.
+
+The toggle that turns thinking off (`enable_thinking:false`) existed, but it was
+only ever sent on a **light** turn that had *also* opted into `fast_light_turns`.
+A build is a **standard/heavy** turn, so on every build the toggle was never
+sent. **Now thinking is off by default on any model that has a `think_off`**
+(the whole DeepSeek Flash family), on *every* turn — which is how DeepSeek's own
+agent harness runs them for tool use. `deepseek_thinking:true` turns it back on
+for anyone who wants it. GLM-5.3-Flash is untouched: its reasoning has no
+switch, so it keeps steering on `reasoning_effort`.
+
+## 2. A tool call that arrives in the reasoning stream is no longer lost
+
+Two independent backstops, because a provider can still route a call into the
+reasoning channel:
+
+- **Structured `delta.tool_calls` are read.** DeepSeek's harness consumes tool
+  calls from the OpenAI-style structured channel; so do we now. The streamed
+  fragments are reassembled and rendered into the **same** `<tool …>` text every
+  other dialect is folded to, so one parser and one dispatcher handle all of
+  them — even when `content` came back empty.
+- **The reasoning stream is re-parsed.** If a turn ends with an empty answer and
+  no call, the host runs the *same* canonicaliser over the captured reasoning; a
+  real call the model emitted while thinking is recovered and dispatched instead
+  of feeding the degraded-retry loop.
+
+## 3. The repeat guard stopped refusing legitimate re-writes
+
+Writing `index.html`, improving it, and writing it again is three **different**
+actions — but the guard labelled them all `write_file: index.html` and refused
+the third ("already run 2× — not running it again"), which is the block the
+operator filmed. The label for a content-writing tool now carries a **fingerprint
+of the content**, so iterating on one file never false-blocks, while a
+byte-identical re-write (which genuinely tells you nothing new) still collapses
+to one label and is still caught. `run` is deliberately unchanged — its command
+*is* its label, so `pytest`/`pytest`/`pytest` still blocks.
+
+## 4. Persona: the build mistakes that cost a whole run
+
+Standing rules added for building an app or game from scratch: a build script
+must **never read its own output** (that is what doubled `index.html`); **data
+belongs in its own file**, never only inside the page you are about to rewrite
+(that is how the champion/item table got destroyed); and **guard every lookup**
+so the first frame doesn't crash on `cannot read x of undefined`.
+
+## Numbers
+
+**4,936 assertions across 80 suites**, zero red. One new suite:
+`test_structcalls.py` (the structured-call fold, the reasoning recovery, and the
+repeat-guard fingerprint, end to end). `test_effort.py` was rewritten around the
+new think-off default. The immutable `GUARDRAIL` block is byte-identical.
+
+---
+
+# v1.2.0.2
+
+**Theme: neutral graphite. He said the blue was boring — dark gray and black now.**
+
+The obsidian-glass theme was a cool blue band (a hue migration off the original
+red at v1.1.1.0). This neutralises the whole blue/cyan/indigo band to gray while
+preserving every lightness and alpha value, so the glass structure — the lit
+edges, the depth, the one-hairline composure — is untouched; only the tint is
+gone. Applied identically to three places so nothing is left blue:
+
+- **The stylesheet** (462 hex + 620 rgba values in the ASCII bytes literal).
+- **The brand + app PNGs** (emblem, wordmark, avatar, watermark, every button)
+  — per-pixel, so the emblem's glow is silver on black instead of blue.
+- **The 4 blue SVGs and the 11 embedded base64 button PNGs** in
+  `basilisk_btn_art.py`, so a remote-fetch install with no assets dir gets the
+  gray buttons too — the on-disk and embedded art stay in lockstep, same rule
+  as the v1.1.1.0 migration.
+
+**Semantic colour is untouched:** danger red (`#e5484d`) and warning amber
+(`#f0a500`) sit outside the neutralised band and stay loud — red still means
+danger and nothing else. Verified: 0 saturated blue hexes left in the CSS, CSS
+parses clean under real GTK 4.14, ASCII-only bytes literal intact, GUARDRAIL
+byte-identical.
+
+Everything below is the v1.2.0.1 write-up, unchanged.
+
+---
+
 # v1.2.0.1
 
 **Follow-up to v1.2.0.0, from a real "build me a game" run that failed. Five

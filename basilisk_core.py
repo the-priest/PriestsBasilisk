@@ -558,6 +558,16 @@ DEFAULT_SETTINGS = {
     # reasoning earns its keep.  Default OFF because it adds a field to the
     # request body; the backend degrades safely if a provider rejects it.
     "fast_light_turns": False,
+    # ── THINKING OFF BY DEFAULT ON THE DEEPSEEK FLASH FAMILY ──
+    # The V4/V4.1-Flash models default to a THINKING mode that, in an agentic
+    # tool loop, spends the whole token budget reasoning and returns an empty
+    # answer ("thought for 50,000 characters and said nothing"), which fed a
+    # degraded-retry loop the operator hit on every build. DeepSeek's own agent
+    # harness runs these models NON-thinking for tool use, so Basilisk does too:
+    # for any model whose ProviderSpec carries a think_off, enable_thinking is
+    # sent False on EVERY turn. Flip this True to let them think again (and pay
+    # for it). GLM-5.3-Flash is unaffected — its reasoning has no switch.
+    "deepseek_thinking": False,
     "hard_engagement_model": "deepseek-ai/DeepSeek-V4-Pro",  # heavier sibling
 
     # Behaviour
@@ -1268,6 +1278,7 @@ class GroqBackend:
                 )
                 parts: List[str] = []
                 _wall_cut = False
+                _tc_acc: Dict[int, Dict[str, str]] = {}
                 _wall_start = time.time()
                 # Scales with the output budget this turn was granted; see
                 # wall_cap_for. A flat cap truncates a legitimate big write.
@@ -1296,6 +1307,28 @@ class GroqBackend:
                         parts.append(tok)
                         any_tokens_emitted = True
                         on_token(tok)
+                    # Structured tool-call fragments on the SDK delta — same
+                    # recovery as the OpenAI-compat backend, so a call that
+                    # arrives structured with empty content is not lost.
+                    _tcs = getattr(delta, "tool_calls", None)
+                    if _tcs:
+                        for _tc in _tcs:
+                            try:
+                                _i = int(getattr(_tc, "index", 0) or 0)
+                            except Exception:
+                                _i = 0
+                            _slot = _tc_acc.setdefault(
+                                _i, {"name": "", "args": ""})
+                            _fn = getattr(_tc, "function", None)
+                            if _fn is not None:
+                                if getattr(_fn, "name", None):
+                                    _slot["name"] = _fn.name
+                                if getattr(_fn, "arguments", None):
+                                    _slot["args"] += _fn.arguments
+                if _tc_acc:
+                    _synth = _render_native_tool_calls(_tc_acc)
+                    if _synth and not parse_tool_calls("".join(parts)):
+                        parts.append(_synth)
                 on_done({
                     "text": "".join(parts),
                     "backend": "groq",
@@ -1354,6 +1387,42 @@ def _join_url(base: str, path: str) -> str:
     """Join an API base with a path, tolerating a trailing slash on the
     base (Google's endpoint is commonly written with one)."""
     return base.rstrip("/") + "/" + path.lstrip("/")
+
+
+def _render_native_tool_calls(acc: Dict[int, Dict[str, str]]) -> str:
+    """Render accumulated STRUCTURED tool calls into the canonical text form.
+
+    The streaming backend collects the OpenAI-style `delta.tool_calls`
+    fragments (a name, and JSON arguments that arrive a few characters at a
+    time) into `acc`, keyed by call index. This turns each finished call into
+    the exact `<tool name="X">{args}</tool>` syntax the rest of the app already
+    parses, so a call that arrived structured is handled by the SAME
+    canonicaliser and dispatcher as one written in text — no second code path.
+
+    An entry with no name is dropped (a fragment that never resolved). Arguments
+    that are absent or not valid JSON degrade to `{}`, matching how the text
+    parser treats an unparseable body, rather than raising.
+    """
+    if not acc:
+        return ""
+    out = []
+    for _i in sorted(acc):
+        slot = acc.get(_i) or {}
+        name = (slot.get("name") or "").strip()
+        if not name:
+            continue
+        args = (slot.get("args") or "").strip()
+        if not args:
+            args = "{}"
+        else:
+            try:
+                # Normalise to compact JSON when it parses; leave it as-is if it
+                # does not (the downstream parser has its own _raw fallback).
+                args = json.dumps(json.loads(args), separators=(",", ":"))
+            except Exception:
+                pass
+        out.append('<tool name="%s">%s</tool>' % (name, args))
+    return "\n".join(out)
 
 
 class OpenAICompatBackend:
@@ -1541,6 +1610,15 @@ class OpenAICompatBackend:
                 parts: List[str] = []
                 _finish_reason = ""
                 _wall_cut = False
+                # Accumulator for STRUCTURED tool calls (the OpenAI-style
+                # delta.tool_calls channel). DeepSeek's own harness consumes
+                # tool calls from this field; some SiliconFlow deployments of
+                # the V4/V4.1 family emit their native tool-call tokens here as
+                # structured deltas rather than in `content`. We reassemble the
+                # streamed fragments and, at stream end, render them into the
+                # canonical `<tool …>` text so the ONE parser downstream handles
+                # every dialect the same way. index -> {"name", "args"}.
+                _tc_acc: Dict[int, Dict[str, str]] = {}
                 _wall_start = time.time()
                 # Scales with the output budget this turn was granted; see
                 # wall_cap_for. A flat cap truncates a legitimate big write.
@@ -1608,6 +1686,31 @@ class OpenAICompatBackend:
                             parts.append(tok)
                             any_tokens_emitted = True
                             on_token(tok)
+                        # STRUCTURED tool-call fragments — accumulate by index.
+                        _tcs = delta.get("tool_calls")
+                        if _tcs:
+                            for _tc in _tcs:
+                                try:
+                                    _i = int(_tc.get("index", 0) or 0)
+                                except Exception:
+                                    _i = 0
+                                _slot = _tc_acc.setdefault(
+                                    _i, {"name": "", "args": ""})
+                                _fn = _tc.get("function") or {}
+                                if _fn.get("name"):
+                                    _slot["name"] = _fn["name"]
+                                if _fn.get("arguments"):
+                                    _slot["args"] += _fn["arguments"]
+                # ── FOLD STRUCTURED CALLS INTO THE CANONICAL TEXT PROTOCOL ──
+                # Only when the model gave us structured calls AND no textual
+                # tool call already rode in `content` (the two are mutually
+                # exclusive in practice; the guard just makes double-dispatch
+                # impossible). This is what stops the "thought and said nothing"
+                # loop when the call came back structured with empty content.
+                if _tc_acc:
+                    _synth = _render_native_tool_calls(_tc_acc)
+                    if _synth and not parse_tool_calls("".join(parts)):
+                        parts.append(_synth)
                 on_done({
                     "text": "".join(parts),
                     "backend": self.name,
@@ -1898,7 +2001,9 @@ class BackendRouter:
                     _spec = PROVIDERS_BY_KEY.get(getattr(backend, "name", ""))
                     _info = _spec.info(model) if _spec is not None else None
                     if _info is not None and _info.think_off:
-                        _extra = dict(_info.think_off)
+                        # think_off is already applied by default above; .update
+                        # so we never clobber the reasoning_extra added later.
+                        _extra.update(_info.think_off)
             elif effort == "heavy":
                 max_tokens = max(
                     max_tokens,
@@ -1969,6 +2074,34 @@ class BackendRouter:
             _re = "high"
         if supports_reasoning_effort(model):
             _extra.update(reasoning_extra(model, _re))
+        # ── THINKING IS OFF BY DEFAULT ON MODELS THAT LET US TURN IT OFF ──
+        # The fix for the report the operator hit head-on: on a build ("make me
+        # a MOBA game"), V4.1-Flash "thought for 50,000 characters and said
+        # nothing", which fed the degraded-retry loop for ever. The DeepSeek
+        # V4/V4.1-Flash family DEFAULT to a thinking mode that, in an agentic
+        # tool loop, spends the whole max_tokens budget reasoning and returns an
+        # EMPTY content stream — no answer, no tool call. Worse, enable_thinking
+        # used to be sent ONLY on a `light` turn that had also opted into
+        # fast_light_turns; a build is a standard/heavy turn, so the toggle was
+        # never sent on the turns that needed it most.
+        #
+        # DeepSeek's own agent harness runs these models NON-thinking for tool
+        # use, so Basilisk does too — on EVERY turn, for any model whose
+        # ProviderSpec carries a think_off, unless the operator flips
+        # `deepseek_thinking` on. Applied HERE, after the effort ladder, so it
+        # reads the FINAL model id: a cross-family heavy escalation to GLM (no
+        # think_off) correctly gets no field, and a same-family escalation to
+        # V4-Pro correctly does. A model with a reasoning dial instead of a
+        # thinking switch (GLM-5.3-Flash) is untouched.
+        if backend is not None and not self.settings.get(
+                "deepseek_thinking", False):
+            try:
+                _spec_t = PROVIDERS_BY_KEY.get(getattr(backend, "name", ""))
+                _info_t = _spec_t.info(model) if _spec_t is not None else None
+                if _info_t is not None and _info_t.think_off:
+                    _extra.update(_info_t.think_off)
+            except Exception:
+                pass
         opts = {
             "temperature": self.settings.get("temperature", 0.7),
             "top_p": self.settings.get("top_p", 0.9),

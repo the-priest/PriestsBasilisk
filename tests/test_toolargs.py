@@ -315,5 +315,73 @@ ck("…the file exists and is valid python",
    os.path.isfile(_deep)
    and __import__("ast").parse(open(_deep, encoding="utf-8").read()) is not None)
 
+# ── A BARE NUMBER WHERE A STRING WAS MEANT ──────────────────────────
+# A model (a new architecture especially) can emit `{"url": 123}` — a JSON
+# NUMBER, not a string. 17 tools did `(x or "").strip()` and raised
+# AttributeError, which on the single-call path kills the whole turn. The
+# dispatch choke point now coerces a stray int/float to str; bool and
+# list/dict are left alone (bool because str(False) is truthy; containers
+# because they are the real typed args).
+print("\n== a stray number is coerced to a string at the choke point ==")
+_o,_e = norm("web_read", {"url": 123})
+ck("int url -> str", _o.get("url") == "123", str(_o))
+_o,_e = norm("web_search", {"query": 3.5})
+ck("float query -> str", _o.get("query") == "3.5", str(_o))
+_o,_e = norm("run", {"command": "ls", "timeout": 30})
+ck("int timeout -> str (re-parses via _safe_int downstream)",
+   _o.get("timeout") == "30")
+_o,_e = norm("write_file", {"path": "x", "create": True})
+ck("bool is NOT coerced (str(False) would be truthy)",
+   _o.get("create") is True, str(_o))
+_o,_e = norm("workspace_edits", {"path": "a.py", "edits": [{"old":"a","new":"b"}]})
+ck("a list arg is left alone", isinstance(_o.get("edits"), list))
+_o,_e = norm("run", {"data": {"k": "v"}, "command": "x"})
+ck("a dict arg is left alone", isinstance(_o.get("data"), dict))
+
+# ── TOTALITY: every tool returns, never raises, on empty/garbage input ──
+# The whole point of the arg-normalise layer is that a malformed call yields
+# an error the model can read, not a crash that ends the turn. This sweeps
+# all 157 core tools with empty args AND with a bare number, and asserts each
+# returns a dict/str/None rather than raising.
+print("\n== every tool survives empty and numeric input ==")
+import inspect as _inspect                                      # noqa: E402
+import tempfile as _tmp, os as _os                              # noqa: E402
+_os.environ["HOME"] = _tmp.mkdtemp()
+_alltools = [(n, getattr(_C, n)) for n in dir(_C)
+             if n.startswith("tool_") and callable(getattr(_C, n))]
+ck("discovered the full tool surface (>=150)", len(_alltools) >= 150,
+   str(len(_alltools)))
+_raised = []
+for _n, _fn in _alltools:
+    _sig = _inspect.signature(_fn)
+    _req = [pp for pp in _sig.parameters.values()
+            if pp.default is _inspect._empty]
+    # empty-ish required args, then a numeric first arg (the real crash shape,
+    # now coerced by the dispatch layer but tools must still not explode if a
+    # caller reaches them directly)
+    for _variant in ("empty", "number"):
+        _args = []
+        for _i, _pp in enumerate(_req):
+            _nm = _pp.name.lower()
+            if _variant == "number" and _i == 0:
+                _args.append("123")   # what the choke point would hand it
+            elif any(t in _nm for t in ("timeout","count","limit","port",
+                                        "max_","top_n","start","end","width")):
+                _args.append(0)
+            elif _nm in ("args","items","edits","paths","findings","runs"):
+                _args.append([])
+            elif _nm in ("parsed","spec","scored","finding","data"):
+                _args.append({})
+            else:
+                _args.append("")
+        try:
+            _r = _fn(*_args)
+            if not isinstance(_r, (dict, str, list, bool, type(None))):
+                _raised.append(f"{_n}: returned {type(_r).__name__}")
+        except Exception as _ex:
+            _raised.append(f"{_n}({_variant}): {type(_ex).__name__}: {_ex}")
+ck("no tool raised on empty or numeric-string input", not _raised,
+   "; ".join(_raised[:6]))
+
 print(f"\ntoolargs: {_p} passed, {_f} failed")
 sys.exit(1 if _f else 0)
