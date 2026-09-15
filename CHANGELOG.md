@@ -1,3 +1,30 @@
+# v1.2.0.4
+
+**Native function-calling.** DeepSeek's V4/V4.1 family is trained for the OpenAI
+`tools` flow (declare tools as function schemas, model replies with structured
+`tool_calls`) — the flow Claude Code, opencode and DeepSeek's own app use.
+Basilisk had only a text `<tool>` protocol and never sent a `tools` array, so the
+model guessed a convention instead of doing what it was trained for. Now it
+sends a real `tools` schema built from the SAME system prompt the model reads
+(so it can never list a phantom tool; parameters and types are lifted from the
+persona's example JSON, the `//` comment becomes the description). The text
+protocol stays as the floor (canonicaliser + argument aliasing), a provider that
+rejects the tools field strips it and retries the same model on the text
+protocol and remembers, and it is a setting (`native_tool_calls`, default on;
+sidecars never send tools). Together with v1.2.0.3's structured-call reader and
+reasoning recovery, the model is now driven and read back the way the reference
+harnesses do it.
+
+**GUI:** reverted the v1.2.0.3 serif title-card look ("not a black-and-white
+movie"); added a muted phosphor-green terminal accent (desaturated, highlights
+only) over the flat grey, and a faint top-to-bottom gradient on the near-black
+surfaces for depth. Red/amber untouched. Parses under real GTK 4.14, ASCII-only.
+
+**4,961 assertions across 81 suites**, zero red. New suite:
+`test_nativetools.py`. GUARDRAIL byte-identical.
+
+---
+
 # v1.2.0.3
 
 **The one where V4.1-Flash actually builds the game.** From a live build the
