@@ -568,15 +568,6 @@ DEFAULT_SETTINGS = {
     # sent False on EVERY turn. Flip this True to let them think again (and pay
     # for it). GLM-5.3-Flash is unaffected — its reasoning has no switch.
     "deepseek_thinking": False,
-    # ── NATIVE FUNCTION-CALLING ──
-    # Send the tool set as a proper OpenAI `tools` schema so the model replies
-    # with structured `tool_calls` — the flow Claude Code, opencode and
-    # DeepSeek's own app use, and the one the V4/V4.1 family is trained for.
-    # The text `<tool>` protocol stays as the fallback (the persona still
-    # documents it, the canonicaliser still parses it, and a provider that
-    # rejects the tools field degrades to it automatically), so this is upside
-    # with a floor under it. Default ON.
-    "native_tool_calls": True,
     "hard_engagement_model": "deepseek-ai/DeepSeek-V4-Pro",  # heavier sibling
 
     # Behaviour
@@ -1434,83 +1425,6 @@ def _render_native_tool_calls(acc: Dict[int, Dict[str, str]]) -> str:
     return "\n".join(out)
 
 
-_TOOL_DECL_RE = re.compile(
-    r'<tool\s+name="([a-zA-Z0-9_]+)"\s*>(.*?)</tool>([^\n]*)',
-    re.DOTALL)
-
-
-def _infer_json_type(v: Any) -> str:
-    if isinstance(v, bool):
-        return "boolean"
-    if isinstance(v, int):
-        return "integer"
-    if isinstance(v, float):
-        return "number"
-    if isinstance(v, list):
-        return "array"
-    if isinstance(v, dict):
-        return "object"
-    return "string"
-
-
-def build_tools_schema(system_prompt: str) -> List[Dict[str, Any]]:
-    """Build an OpenAI `tools` array from the persona's own `<tool …>` lines.
-
-    This is how the reference harnesses (Claude Code, opencode, DeepSeek's own
-    app) drive the model: the tools are declared as function schemas in the
-    request, and the model replies with structured `tool_calls`. DeepSeek's
-    V4/V4.1 family is TRAINED for exactly that flow, so feeding it only a text
-    protocol and hoping for `<tool>` tags is fighting the model — which is what
-    produced the empty/looping turns.
-
-    The single source of truth is the SAME system prompt the model is about to
-    read, so the schema can never list a tool the model was not told about, and
-    it tracks the leashed/armed variants automatically. Each declaration line
-    is `<tool name="X">{example args}</tool>  // description`; the example JSON,
-    when it parses, gives the property names and their types, and the `//`
-    comment gives the description. A line whose example does not parse degrades
-    to a permissive object — the dispatcher's argument aliasing absorbs any
-    drift either way, so a loose schema never costs a failed call.
-    """
-    if not system_prompt:
-        return []
-    seen: Dict[str, Dict[str, Any]] = {}
-    for m in _TOOL_DECL_RE.finditer(system_prompt):
-        name = m.group(1)
-        if not name or name in seen:
-            continue
-        body = (m.group(2) or "").strip()
-        rest = m.group(3) or ""
-        # the human description is the `// ...` comment after the tag, if any
-        desc = ""
-        if "//" in rest:
-            desc = rest.split("//", 1)[1].strip()
-        # trim a long description to something the model can skim
-        if len(desc) > 220:
-            desc = desc[:217].rstrip() + "..."
-        params: Dict[str, Any] = {"type": "object"}
-        try:
-            example = json.loads(body) if body else None
-        except Exception:
-            example = None
-        if isinstance(example, dict) and example:
-            props = {}
-            for k, v in example.items():
-                if isinstance(k, str) and k:
-                    props[k] = {"type": _infer_json_type(v)}
-            if props:
-                params = {"type": "object", "properties": props}
-        seen[name] = {
-            "type": "function",
-            "function": {
-                "name": name,
-                "description": desc or ("Basilisk tool: " + name),
-                "parameters": params,
-            },
-        }
-    return list(seen.values())
-
-
 class OpenAICompatBackend:
     """Generic backend for any OpenAI-compatible /chat/completions API.
 
@@ -1534,10 +1448,6 @@ class OpenAICompatBackend:
         # losing one model's rejection memo and costing a wasted round-trip.
         # set.add is atomic under the GIL, so no lock is needed once it exists.
         self._extras_rejected: set = set()
-        # Models that have 400'd on the native `tools` field — degrade them to
-        # the text `<tool>` protocol for the rest of the session, same memo
-        # pattern as _extras_rejected.
-        self._tools_rejected: set = set()
         # Largest max_tokens a given model has been proven to ACCEPT, learned
         # the only way a client can learn it: by being told no. Asking for a
         # whole-file write needs a big output budget, but "big" is per-model
@@ -1658,17 +1568,6 @@ class OpenAICompatBackend:
             "max_tokens": opts.get("max_tokens", 2048),
             "stream": True,
         }
-        # ── NATIVE TOOLS ──
-        # A proper OpenAI `tools` schema, so the model replies with structured
-        # tool_calls (the flow the V4/V4.1 family is trained for). Standard
-        # fields, sent in the body — but a provider that does not support them
-        # is handled by the tool-specific strip-and-retry below, which degrades
-        # to the text `<tool>` protocol rather than killing the turn. Tracked
-        # separately from extra_body so a max_tokens 400 never strips the tools.
-        _tools = opts.get("tools")
-        if _tools:
-            body_base["tools"] = _tools
-            body_base["tool_choice"] = opts.get("tool_choice", "auto")
         # Optional non-standard fields (currently the thinking toggle).  These
         # are NOT part of the OpenAI schema, so a provider is entitled to 400
         # on them -- see the strip-and-retry in the HTTPError handler.  Once a
@@ -1699,14 +1598,6 @@ class OpenAICompatBackend:
             if _cap:
                 payload["max_tokens"] = min(
                     int(payload.get("max_tokens") or 2048), int(_cap))
-            # Drop native tools for a model that already rejected them this
-            # session — degrade to the text protocol without re-paying the probe.
-            sent_tools = bool(
-                payload.get("tools")
-                and attempt_model not in getattr(self, "_tools_rejected", ()))
-            if not sent_tools:
-                payload.pop("tools", None)
-                payload.pop("tool_choice", None)
             sent_extras = bool(
                 extra_body
                 and attempt_model not in getattr(self, "_extras_rejected", ()))
@@ -1903,25 +1794,6 @@ class OpenAICompatBackend:
                              f"provider in Settings → Backends.")
                     return
 
-                # NATIVE TOOLS REJECTED.  A provider or model that does not
-                # accept the `tools` schema must degrade to the text protocol,
-                # not die — and the retry is the SAME model without tools, so a
-                # model that is otherwise fine is never abandoned over this.
-                # Checked before the generic extras strip so the reason logged
-                # is the true one.  The word test is broad on purpose: providers
-                # word this rejection many ways ("tools", "function", "tool_choice",
-                # "not support ... tool").
-                _tool_words = ("tool", "function call", "function_call",
-                               "tool_choice", "tools")
-                if (e.code == 400 and sent_tools
-                        and any(w in low for w in _tool_words)):
-                    self._tools_rejected.add(attempt_model)
-                    log(f"{self.name} {attempt_model} rejected native tools "
-                        f"-> retrying on the text protocol "
-                        f"(and not sending tools again this session)")
-                    idx -= 1            # retry this same model
-                    continue
-
                 # OUR OWN FAULT FIRST.  If we added a non-standard field and
                 # the provider 400'd, that is the likeliest cause -- strip it
                 # and retry the SAME model before blaming the model id.  This
@@ -2073,9 +1945,7 @@ class BackendRouter:
                     effort: str = "standard",
                     max_tokens_override: Optional[int] = None,
                     single_model: bool = False,
-                    reasoning_override: Optional[str] = None,
-                    tools: Optional[List[Dict[str, Any]]] = None
-                    ) -> Tuple[str, str]:
+                    reasoning_override: Optional[str] = None) -> Tuple[str, str]:
         """Route one streamed completion to the active provider.
 
         max_tokens_override / single_model exist for the SIDECAR completions
@@ -2239,12 +2109,6 @@ class BackendRouter:
         }
         if _extra:
             opts["extra_body"] = _extra
-        # Native function-calling: hand the backend the tools schema so the
-        # model can reply with structured tool_calls. Off by setting, or for a
-        # sidecar completion (those ask for a line of JSON, never a tool call).
-        if (tools and not single_model
-                and self.settings.get("native_tool_calls", True)):
-            opts["tools"] = tools
         if backend is None:
             on_error("No provider configured. Add an API key in Settings.")
             return "none", ""
