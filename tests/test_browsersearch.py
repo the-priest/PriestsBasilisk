@@ -177,11 +177,8 @@ ck("…all eight refused cleanly",
 print("\n== engine selection ==")
 pr = B.probe()
 ck("probe returns a dict and launches nothing", isinstance(pr, dict))
-# v1.2.0.6: "camoufox-bin" drives an on-disk Camoufox binary through Playwright
-# when the camoufox python package is not importable (the common "browser is in
-# ~/.cache/camoufox but import camoufox fails" case).
 ck("…listing every engine it knows", set(pr["engines"]) == {
-    "camoufox", "camoufox-bin", "firefox", "chromium"})
+    "camoufox", "firefox", "chromium"})
 ck("…and which one would be used", "chosen" in pr)
 ck("THE PACKAGE IS NOT THE BROWSER: camoufox is only chosen when its "
    "browser build is actually installed",
@@ -203,53 +200,6 @@ finally:
         os.environ.pop("BASILISK_BROWSER", None)
     else:
         os.environ["BASILISK_BROWSER"] = _old
-
-print("\n== camoufox-bin: drive an on-disk Camoufox when the pkg is missing ==")
-# The reported failure: ~/.cache/camoufox holds the whole Firefox tree
-# (camoufox-bin, libxul.so, ...) but `import camoufox` returns None, so web_read
-# dropped to plain HTTP even though the browser was right there.
-import tempfile as _tf
-_fakehome = _tf.mkdtemp()
-_cf = os.path.join(_fakehome, ".cache", "camoufox")
-os.makedirs(_cf)
-_binp = os.path.join(_cf, "camoufox-bin")
-open(_binp, "w").write("#!/bin/sh\n")
-os.chmod(_binp, 0o755)
-_oldhome = os.environ.get("HOME")
-_oldcfp = os.environ.get("CAMOUFOX_PATH")
-try:
-    os.environ["HOME"] = _fakehome
-    os.environ.pop("CAMOUFOX_PATH", None)
-    ck("finds an on-disk camoufox binary in ~/.cache/camoufox",
-       B._find_camoufox_binary() == _binp, B._find_camoufox_binary())
-    ck("probe reports the on-disk binary path",
-       B.probe().get("camoufox_binary") == _binp)
-    ck("CAMOUFOX_PATH override is honoured", True)
-    os.environ["CAMOUFOX_PATH"] = _cf
-    ck("…really honoured", B._find_camoufox_binary() == _binp)
-finally:
-    if _oldhome is not None:
-        os.environ["HOME"] = _oldhome
-    if _oldcfp is None:
-        os.environ.pop("CAMOUFOX_PATH", None)
-    else:
-        os.environ["CAMOUFOX_PATH"] = _oldcfp
-# with no binary anywhere, the finder returns "" cleanly (no raise)
-_eh = _tf.mkdtemp()
-_oh = os.environ.get("HOME")
-try:
-    os.environ["HOME"] = _eh
-    os.environ.pop("CAMOUFOX_PATH", None)
-    ck("no binary on disk -> finder returns '' (no exception)",
-       B._find_camoufox_binary() == "")
-finally:
-    if _oh is not None:
-        os.environ["HOME"] = _oh
-# the launch path uses executable_path for camoufox-bin (source-level)
-ck("camoufox-bin launches via Playwright firefox with executable_path",
-   'executable_path' in BSRC and 'pw.firefox.launch' in BSRC)
-ck("the diagnostic tells the user playwright alone can drive the on-disk build",
-   "pip install playwright" in BSRC)
 
 print("\n== the proxy pair travels together ==")
 ck("NO_PROXY is honoured alongside HTTPS_PROXY",

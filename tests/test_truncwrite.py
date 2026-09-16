@@ -171,25 +171,5 @@ ck("...only on a replace, never an append",
    "an append adds to the end and cannot delete what is above it")
 
 
-# ── 5. A CUT-OFF propose_edit/write_file STEERS TO SMALL CHUNKS ───────
-# v1.2.0.6: when a file write comes back truncated/unparseable in autonomous
-# mode, the old correction said "re-send it as a single well-formed call" — so
-# a too-big file was re-sent whole and truncated again, forever (the loop the
-# operator filmed). The correction must instead read the cut reason the host
-# already has and MANDATE small append chunks, recovering the target path.
-print("\n== a cut-off write is steered to small append chunks ==")
-APP = io.open(os.path.join(_ROOT, "basilisk.py"), encoding="utf-8").read()
-_seg = APP.split("if not card_ok:", 1)
-ck("the autonomous card-failure path exists", len(_seg) == 2)
-_c = _seg[1][:4000] if len(_seg) == 2 else ""
-ck("it reads whether the stream was truncated (not just 'unparseable')",
-   "_last_stream_truncated" in _c and "_last_stream_cut_by" in _c)
-ck("it mandates small chunks instead of re-sending the same call",
-   "SMALL CHUNKS" in _c and 'mode": "append' in _c)
-ck("it recovers the target path from a raw/truncated call",
-   '"path"' in _c and "_raw" in _c)
-ck("it no longer tells the model to re-send as a single call",
-   "as a single\n" not in _c and "single well-formed tool call" not in _c)
-
 print(f"\ntruncated write: {_p} passed, {_f} failed")
 sys.exit(1 if _f else 0)

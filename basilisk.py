@@ -190,7 +190,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.basilisk"
 APP_NAME = "Basilisk"
-VERSION = "1.2.0.6"
+VERSION = "1.2.0.5"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -352,17 +352,16 @@ MAX_CHAT_ROWS = 20
 
 CSS = b"""
 /* =====================================================================
-   BASILISK THEME - a warm, dark, Claude-coloured dark theme: warm-charcoal
-   surfaces under Claude's clay/coral accent, red for danger, monospace for
-   headers and machine output. Minimalist and professional - dark first, the
-   coral only where it earns attention.
+   BASILISK THEME - modelled on the official Kali Linux desktop palette:
+   near-black surfaces, the Basilisk dragon-blue accent (#292a2b / #45484a),
+   red for danger, monospace for headers and machine output.  Built to
+   read like a first-party Basilisk tool, not a pastel toy.
    GTK CSS has no variables across rules, so the palette is inlined.
 
    Palette:
-     bg base    #0a090a   surfaces  #11100f / #171716   line  #232120
-     text       #dfdedb   dim       #8e8c88
-     accent     #a94f34   accent-hi #d97757   accent-dim rgba(217, 119, 87, .15)
-     accent-fill#c15f3c (suggested-action buttons, white text)
+     bg base    #09090a   surfaces  #0f0f10 / #151617   line  #202021
+     text       #dbdcdd   dim       #85888c
+     accent     #292a2b   accent-hi #45484a   accent-dim rgba(69, 72, 74, .15)
      ok/green   #2ecc71   warn      #f0a500   danger #e5484d
    ===================================================================== */
 
@@ -373,16 +372,14 @@ CSS = b"""
    the user's Plasma accent - which is exactly what made the UI look
    inconsistent.  Retint them ALL to the Basilisk palette in one place. */
 
-/* Accent: Claude's clay/coral. #d97757 carries every highlight -- focus rings,
-   links, switches, selection, the accent glows across the custom widgets -- so
-   the app reads as warm-dark-with-coral rather than black-and-grey. Filled
-   primary (suggested-action) surfaces use the coral itself (#c15f3c, one shade
-   deeper so white text stays legible on it). The neutrals are warmed a touch
-   toward charcoal to sit under the coral. Danger red, warning amber and success
-   green are semantic and untouched. */
-@define-color accent_color              #d97757;
-@define-color accent_bg_color           #c15f3c;
-@define-color accent_fg_color           #ffffff;
+/* Accent: a muted phosphor-green terminal highlight -- the "pro coding
+   terminal" signal, kept desaturated so it reads professional, not neon, and
+   restrained to highlights (focus rings, links, switches, selection). The
+   button surface stays a near-neutral graphite with the faintest green cast so
+   it ties in without going loud. Danger red and warning amber are untouched. */
+@define-color accent_color              #55c295;
+@define-color accent_bg_color           #21302a;
+@define-color accent_fg_color           #eafff6;
 
 @define-color destructive_color         #e5484d;
 @define-color destructive_bg_color      #e5484d;
@@ -390,31 +387,31 @@ CSS = b"""
 
 @define-color success_color             #2ecc71;
 @define-color success_bg_color          #2ecc71;
-@define-color success_fg_color          #0a090a;
+@define-color success_fg_color          #09090a;
 @define-color warning_color             #f0a500;
 @define-color warning_bg_color          #f0a500;
-@define-color warning_fg_color          #0a090a;
+@define-color warning_fg_color          #09090a;
 @define-color error_color               #e5484d;
 @define-color error_bg_color            #e5484d;
 @define-color error_fg_color            #ffffff;
 
-@define-color window_bg_color           #0a090a;
-@define-color window_fg_color           #dfdedb;
-@define-color view_bg_color             #11100f;
-@define-color view_fg_color             #dfdedb;
-@define-color headerbar_bg_color        #11100f;
-@define-color headerbar_fg_color        #dfdedb;
-@define-color headerbar_border_color    #232120;
-@define-color popover_bg_color          #11100f;
-@define-color popover_fg_color          #dfdedb;
-@define-color dialog_bg_color           #11100f;
-@define-color dialog_fg_color           #dfdedb;
-@define-color card_bg_color             #171716;
-@define-color card_fg_color             #dfdedb;
-@define-color sidebar_bg_color          #0d0d0c;
-@define-color sidebar_fg_color          #dfdedb;
+@define-color window_bg_color           #09090a;
+@define-color window_fg_color           #dbdcdd;
+@define-color view_bg_color             #0f0f10;
+@define-color view_fg_color             #dbdcdd;
+@define-color headerbar_bg_color        #0f0f10;
+@define-color headerbar_fg_color        #dbdcdd;
+@define-color headerbar_border_color    #202021;
+@define-color popover_bg_color          #0f0f10;
+@define-color popover_fg_color          #dbdcdd;
+@define-color dialog_bg_color           #0f0f10;
+@define-color dialog_fg_color           #dbdcdd;
+@define-color card_bg_color             #151617;
+@define-color card_fg_color             #dbdcdd;
+@define-color sidebar_bg_color          #0c0c0d;
+@define-color sidebar_fg_color          #dbdcdd;
 
-@define-color borders                   #232120;
+@define-color borders                   #202021;
 
 /* ===== Base ===== */
 
@@ -423,25 +420,25 @@ CSS = b"""
    feel -- without touching the structure or the palette. The deltas are a
    couple of points of lightness, so it reads as depth, not as a colour. */
 window, .background {
-    background-color: #0a090a;
-    background-image: linear-gradient(to bottom, #0c0c0c, #09080a 60%);
-    color: #dfdedb;
+    background-color: #09090a;
+    background-image: linear-gradient(to bottom, #0b0b0d, #08080a 60%);
+    color: #dbdcdd;
     font-family: 'Inter', 'Cantarell', 'SF Pro Text', sans-serif;
 }
 
 headerbar {
-    background-color: #11100f;
-    background-image: linear-gradient(to bottom, #161515, #100f0f);
-    color: #dfdedb;
-    border-bottom: 1px solid #232120;
+    background-color: #0f0f10;
+    background-image: linear-gradient(to bottom, #141416, #0e0e10);
+    color: #dbdcdd;
+    border-bottom: 1px solid #202021;
     min-height: 56px;
     padding: 4px 8px;
 }
 
 .sidebar {
-    background-color: #0d0d0c;
-    background-image: linear-gradient(to bottom, #100f0f, #0b0a0b);
-    border-right: 1px solid #232120;
+    background-color: #0c0c0d;
+    background-image: linear-gradient(to bottom, #0e0e10, #0a0a0b);
+    border-right: 1px solid #202021;
 }
 
 /* ===== App branding ===== */
@@ -450,9 +447,9 @@ headerbar {
     font-size: 27px;
     font-weight: 900;
     font-family: 'JetBrains Mono', 'Fira Code', monospace;
-    color: #e7e5e4;
+    color: #e4e4e5;
     letter-spacing: 3px;
-    text-shadow: 0 2px 3px rgba(0, 0, 0, 0.9), 0 0 11px rgba(169, 167, 164, 0.041);
+    text-shadow: 0 2px 3px rgba(0, 0, 0, 0.9), 0 0 11px rgba(161, 164, 167, 0.041);
 }
 /* Connectivity dot beside BASILISK: green online, red offline */
 .online-dot {
@@ -460,16 +457,16 @@ headerbar {
     margin-top: 2px;
 }
 .online-dot.online {
-    color: #d97757;
-    text-shadow: 0 0 8px rgba(217, 119, 87, 0.45);
+    color: #55c295;
+    text-shadow: 0 0 8px rgba(85, 194, 149, 0.45);
 }
 .online-dot.offline {
-    color: #7a7873;
-    text-shadow: 0 0 6px rgba(122, 120, 115, 0.6);
+    color: #717477;
+    text-shadow: 0 0 6px rgba(113, 116, 119, 0.6);
 }
 .app-subtitle {
     font-size: 16px;
-    color: #8e8c88;
+    color: #85888c;
     font-family: 'JetBrains Mono', monospace;
     margin-top: 2px;
 }
@@ -477,24 +474,24 @@ headerbar {
 .chat-title {
     font-size: 16px;
     font-weight: 600;
-    color: #dfdedb;
+    color: #dbdcdd;
 }
 /* Composer input as a rounded bubble so it reads as a contained field
    instead of bleeding into the bottom edge. */
 .input-frame {
-    background-color: #121110;
-    border: 1px solid #2d2c2a;
+    background-color: #101011;
+    border: 1px solid #292a2c;
     border-radius: 20px;
     padding: 4px 8px;
     margin-bottom: 8px;
 }
 .input-frame:focus-within {
-    border-color: #d97757;
-    background-color: #1e1c1b;
+    border-color: #45484a;
+    background-color: #1b1b1c;
 }
 .chat-subtitle {
     font-size: 16px;
-    color: #8e8c88;
+    color: #85888c;
 }
 
 /* ===== Sidebar chat list ===== */
@@ -509,13 +506,13 @@ headerbar {
     transition: background-color 160ms ease, border-color 160ms ease;
 }
 .chat-row:hover {
-    background-color: #11100f;
-    border-left-color: rgba(217, 119, 87, 0.55);
+    background-color: #0f0f10;
+    border-left-color: rgba(69, 72, 74, 0.55);
 }
 .chat-row.selected, .chat-row:selected {
-    background: linear-gradient(90deg, rgba(215, 213, 210, 0.10),
-                rgba(136, 135, 131, 0.04) 55%, rgba(17, 16, 15, 0) 90%);
-    border-left: 3px solid #d5d3d0;
+    background: linear-gradient(90deg, rgba(210, 211, 212, 0.10),
+                rgba(127, 131, 135, 0.04) 55%, rgba(15, 15, 16, 0) 90%);
+    border-left: 3px solid #d0d1d2;
     /* NO INFINITE ANIMATION HERE. This rule is on the SELECTED chat row,
        which means it is on screen from the moment the app opens until it
        closes - so a 3s infinite keyframe kept a repaint loop running at
@@ -524,21 +521,21 @@ headerbar {
        app "feels laggy" when nothing is happening. The lit state is now
        static; the animated ones that remain are all gated behind a state
        class (.working, .live, .busy) and stop when the work does. */
-    box-shadow: inset 0 0 0 1px rgba(239, 239, 238, 0.046),
-                -2px 0 15px rgba(220, 219, 217, 0.22);
+    box-shadow: inset 0 0 0 1px rgba(237, 238, 239, 0.046),
+                -2px 0 15px rgba(216, 217, 219, 0.22);
 }
 @keyframes metalglow {
-    0%   { border-left-color: #8e8c88; box-shadow: inset 0 0 0 1px rgba(215, 213, 210, 0.08), -2px 0 12px rgba(205, 204, 202, 0.16); }
-    50%  { border-left-color: #f4f4f3; box-shadow: inset 0 0 0 1px rgba(239, 239, 238, 0.18), -2px 0 17px rgba(232, 231, 230, 0.30); }
-    100% { border-left-color: #8e8c88; box-shadow: inset 0 0 0 1px rgba(215, 213, 210, 0.08), -2px 0 12px rgba(205, 204, 202, 0.16); }
+    0%   { border-left-color: #85888c; box-shadow: inset 0 0 0 1px rgba(210, 211, 212, 0.08), -2px 0 12px rgba(200, 202, 204, 0.16); }
+    50%  { border-left-color: #f3f3f4; box-shadow: inset 0 0 0 1px rgba(237, 238, 239, 0.18), -2px 0 17px rgba(229, 230, 231, 0.30); }
+    100% { border-left-color: #85888c; box-shadow: inset 0 0 0 1px rgba(210, 211, 212, 0.08), -2px 0 12px rgba(200, 202, 204, 0.16); }
 }
 .chat-row .title-line {
-    color: #edeceb;
+    color: #ebebec;
     font-weight: 700;
     font-size: 20px;
 }
 .chat-row .meta-line {
-    color: #7c7a76;
+    color: #73767a;
     font-size: 12px;
     letter-spacing: 0.3px;
     margin-top: 3px;
@@ -550,19 +547,19 @@ headerbar {
 /* ===== Empty states ===== */
 
 .empty-state {
-    color: #696762;
+    color: #616366;
     padding: 60px 32px;
 }
 .empty-state-title {
     font-size: 34px;
     font-weight: 700;
     font-family: 'JetBrains Mono', monospace;
-    color: #dfdedb;
+    color: #dbdcdd;
     margin-bottom: 18px;
 }
 .empty-state-body {
     font-size: 22px;
-    color: #8e8c88;
+    color: #85888c;
     line-height: 1.55;
 }
 
@@ -575,7 +572,7 @@ headerbar {
 /* User: right-aligned bubble */
 .msg-user {
     background-color: rgba(64, 20, 96, 0.14);
-    color: #f3f3f1;
+    color: #f2f2f2;
     border-radius: 12px 12px 4px 12px;
     padding: 18px 22px;
     margin: 8px 12px;
@@ -587,14 +584,14 @@ headerbar {
 /* Assistant: left-aligned, translucent SILVER bubble (matches Basilisk's icon;
    contrasts the user's green) */
 .msg-assistant {
-    background-color: rgba(217, 119, 87, 0.13);
-    color: #f3f2f1;
+    background-color: rgba(69, 72, 74, 0.13);
+    color: #f1f1f2;
     padding: 16px 20px;
     margin: 8px 12px;
     font-size: 30px;
     line-height: 1.55;
     border-radius: 12px 12px 12px 4px;
-    border: 1px solid rgba(217, 119, 87, 0.36);
+    border: 1px solid rgba(69, 72, 74, 0.36);
 }
 
 /* ---- WHY THE 60px INSET LIVES HERE AND NOT ON THE BUBBLE ----
@@ -630,7 +627,7 @@ headerbar {
     margin: 2px 12px;
 }
 .tool-indicator-label {
-    color: #8e8c88;
+    color: #85888c;
     font-size: 17px;
     font-family: 'JetBrains Mono', monospace;
     opacity: 0.85;
@@ -640,24 +637,24 @@ headerbar {
 .thoughts-expander {
     margin: 2px 0 4px 0;
     font-size: 15px;
-    color: #9b9894;
+    color: #929498;
 }
 .thoughts-expander > title {
-    color: #9b9894;
+    color: #929498;
     opacity: 0.9;
 }
 .thoughts-text {
-    color: #aba9a6;
+    color: #a3a6a9;
     font-family: 'JetBrains Mono', monospace;
     font-size: 15px;
-    background: rgba(142, 140, 136, 0.08);
-    border-left: 2px solid rgba(142, 140, 136, 0.35);
+    background: rgba(133, 136, 140, 0.08);
+    border-left: 2px solid rgba(133, 136, 140, 0.35);
     padding: 8px 10px;
     border-radius: 4px;
 }
 
 .msg-system-notice {
-    color: #8e8c88;
+    color: #85888c;
     font-style: italic;
     font-size: 18px;
     padding: 8px 16px;
@@ -669,24 +666,24 @@ headerbar {
     border-radius: 6px;
     min-width: 52px;
     min-height: 52px;
-    background-color: #171716;
+    background-color: #151617;
     font-weight: bold;
     font-size: 22px;
-    color: #dfdedb;
+    color: #dbdcdd;
 }
 .avatar-user {
-    background-color: #232120;
-    color: #dfdedb;
+    background-color: #202021;
+    color: #dbdcdd;
 }
 .avatar-basilisk {
-    background: linear-gradient(135deg, #4a4945, #9c9b95);
-    color: #0a090a;
-    border: 1px solid #afaeaa;
-    box-shadow: 0 0 10px rgba(156, 155, 149, 0.12);
+    background: linear-gradient(135deg, #434648, #939799);
+    color: #09090a;
+    border: 1px solid #a7abad;
+    box-shadow: 0 0 10px rgba(147, 151, 153, 0.12);
 }
 
 .role-label {
-    color: #8e8c88;
+    color: #85888c;
     font-weight: 700;
     font-size: 17px;
     font-family: 'JetBrains Mono', monospace;
@@ -694,14 +691,14 @@ headerbar {
     text-transform: uppercase;
     margin: 0 0 5px 0;
 }
-.role-label.user { color: #d97757; }
-.role-label.basilisk { color: #cfcecc; }
+.role-label.user { color: #45484a; }
+.role-label.basilisk { color: #caccce; }
 
 /* ===== Code blocks ===== */
 
 .code-block {
-    background-color: #0d0d0c;
-    border: 1px solid #232120;
+    background-color: #0c0c0d;
+    border: 1px solid #202021;
     border-radius: 6px;
     padding: 0;
     margin: 8px 4px;
@@ -710,22 +707,22 @@ headerbar {
     margin: 8px 4px;
 }
 .chat-image {
-    border: 1px solid #232120;
+    border: 1px solid #202021;
     border-radius: 8px;
-    background-color: #0d0d0c;
+    background-color: #0c0c0d;
 }
 .image-caption {
-    color: #8e8c88;
+    color: #85888c;
     font-size: 11px;
     margin: 2px 2px;
 }
 .code-block-header {
-    background-color: #11100f;
-    color: #8e8c88;
+    background-color: #0f0f10;
+    color: #85888c;
     font-size: 11px;
     font-family: 'JetBrains Mono', monospace;
     padding: 6px 12px;
-    border-bottom: 1px solid #232120;
+    border-bottom: 1px solid #202021;
     border-radius: 6px 6px 0 0;
 }
 .code-block textview {
@@ -739,8 +736,8 @@ headerbar {
 /* ===== Status pills ===== */
 
 .status-pill {
-    background-color: #171716;
-    color: #8e8c88;
+    background-color: #151617;
+    color: #85888c;
     border-radius: 6px;
     padding: 8px 16px;
     font-size: 16px;
@@ -748,16 +745,16 @@ headerbar {
     font-family: 'JetBrains Mono', monospace;
     letter-spacing: 0.5px;
 }
-.status-pill.online   { background-color: #2ecc71; color: #0a090a; }
-.status-pill.offline  { background-color: #232120; color: #dfdedb; }
+.status-pill.online   { background-color: #2ecc71; color: #09090a; }
+.status-pill.offline  { background-color: #202021; color: #dbdcdd; }
 .status-pill.error    { background-color: #e5484d; color: #ffffff; }
-.status-pill.groq     { background: linear-gradient(135deg, #a94f34, #d97757);
+.status-pill.groq     { background: linear-gradient(135deg, #292a2b, #45484a);
                         color: #ffffff; }
 
 /* ===== Settings ===== */
 
 .settings-section-title {
-    color: #d97757;
+    color: #45484a;
     font-weight: bold;
     font-size: 17px;
     font-family: 'JetBrains Mono', monospace;
@@ -769,81 +766,81 @@ headerbar {
 /* ===== Confirm dialog ===== */
 
 .confirm-cmd {
-    background-color: #0d0d0c;
-    color: #d97757;
+    background-color: #0c0c0d;
+    color: #45484a;
     font-family: 'JetBrains Mono', monospace;
     font-size: 20px;
     padding: 16px;
     border-radius: 6px;
-    border: 1px solid #232120;
+    border: 1px solid #202021;
     margin: 10px 0;
 }
 
 /* ===== Scrollbar -- wider for touch ===== */
 
 scrollbar slider {
-    background-color: #3c3937;
+    background-color: #363739;
     border-radius: 8px;
     min-width: 16px;
     min-height: 50px;
 }
-scrollbar slider:hover { background-color: #4c4a46; }
-scrollbar slider:active { background-color: #a94f34; }
+scrollbar slider:hover { background-color: #454749; }
+scrollbar slider:active { background-color: #292a2b; }
 
 /* ===== Entry ===== */
 
 entry {
-    background-color: #171716;
-    color: #dfdedb;
+    background-color: #151617;
+    color: #dbdcdd;
     border-radius: 6px;
     padding: 12px 16px;
-    border: 1px solid #232120;
+    border: 1px solid #202021;
     font-size: 20px;
 }
-entry:focus-within { outline: 2px solid #a94f34; border-color: #a94f34; }
+entry:focus-within { outline: 2px solid #292a2b; border-color: #292a2b; }
 
 passwordentry {
-    background-color: #171716;
-    color: #dfdedb;
+    background-color: #151617;
+    color: #dbdcdd;
     border-radius: 6px;
     padding: 12px 16px;
-    border: 1px solid #232120;
+    border: 1px solid #202021;
     font-size: 20px;
 }
 
 /* ===== Quick-action chips in empty state ===== */
 
 .quick-chip {
-    background-color: #171716;
-    color: #dfdedb;
-    border: 1px solid #232120;
+    background-color: #151617;
+    color: #dbdcdd;
+    border: 1px solid #202021;
     border-radius: 6px;
     padding: 14px 24px;
     font-size: 19px;
     min-height: 40px;
 }
 .quick-chip:hover {
-    background-color: #2a2927;
-    color: #d97757;
-    border-color: #a94f34;
+    background-color: #262729;
+    color: #45484a;
+    border-color: #292a2b;
 }
 
 /* ===== Terminal log panel ===== */
 
 .terminal-panel {
-    background-color: #090809;
-    border-top: 2px solid #232120;
+    background-color: #080809;
+    border-top: 2px solid #202021;
 }
 
 .terminal-panel-header {
-    background-color: #0d0d0c;
-    border-bottom: 1px solid #232120;
+    background-color: #0c0c0d;
+    border-bottom: 1px solid #202021;
     padding: 6px 12px;
     min-height: 40px;
 }
 
 .terminal-panel-title {
-    color: #d97757;
+    color: #45484a;
     font-family: 'JetBrains Mono', monospace;
     font-size: 14px;
     font-weight: bold;
@@ -859,12 +856,12 @@ passwordentry {
 }
 
 .media-panel {
-    background-color: #090809;
-    border-top: 2px solid #232120;
+    background-color: #080809;
+    border-top: 2px solid #202021;
     min-height: 260px;
 }
 .media-body {
-    background-color: #070606;
+    background-color: #060606;
     padding: 6px;
 }
 .media-caption {
@@ -873,36 +870,36 @@ passwordentry {
     margin-right: 8px;
 }
 .media-placeholder {
-    color: #5c5a57;
+    color: #54575a;
     font-size: 13px;
     font-style: italic;
     padding: 40px 12px;
 }
 
 .terminal-toggle-btn {
-    background-color: #11100f;
-    color: #8e8c88;
+    background-color: #0f0f10;
+    color: #85888c;
     border-radius: 6px;
     padding: 6px 10px;
     font-size: 13px;
     min-height: 32px;
 }
 .status-pill {
-    background-color: #0d0d0c;
-    border: 1px solid #201f1e;
+    background-color: #0c0c0d;
+    border: 1px solid #1d1e1f;
     border-radius: 10px;
     padding: 3px 10px;
     margin-left: 4px;
     min-height: 26px;
 }
 .status-pill-label {
-    color: #7b7875;
+    color: #727479;
     font-size: 12px;
     font-style: italic;
 }
 .status-pill.busy {
-    border-color: #d97757;
-    background-color: #11100e;
+    border-color: #45484a;
+    background-color: #0f0f0f;
 }
 .status-pill.busy .status-pill-label {
     color: #d1434f;
@@ -911,22 +908,22 @@ passwordentry {
 .status-pill-spinner {
     min-width: 12px;
     min-height: 12px;
-    color: #d97757;
+    color: #45484a;
 }
 .terminal-toggle-btn:hover {
-    background-color: #171716;
-    color: #d97757;
+    background-color: #151617;
+    color: #45484a;
 }
 .terminal-toggle-btn.active {
-    background-color: #0d0d0c;
-    color: #d97757;
-    border: 1px solid #a94f34;
+    background-color: #0c0c0d;
+    color: #45484a;
+    border: 1px solid #292a2b;
 }
 
 /* ===== Banner for watcher events ===== */
 
 .watcher-banner {
-    background-color: #0d0d0c;
+    background-color: #0c0c0d;
     border-left: 4px solid #f0a500;
     border-radius: 6px;
     padding: 14px 18px;
@@ -936,19 +933,19 @@ passwordentry {
 }
 
 .working-row {
-    background-color: rgba(217, 119, 87, 0.15);
+    background-color: rgba(69, 72, 74, 0.15);
     border-radius: 8px;
     padding: 10px 22px;
 }
 .working-label {
-    color: #d97757;
+    color: #45484a;
     font-size: 18px;
     font-style: italic;
     font-weight: bold;
     letter-spacing: 0.5px;
 }
 .working-spinner {
-    color: #d97757;
+    color: #45484a;
     min-width: 24px;
     min-height: 24px;
 }
@@ -956,9 +953,9 @@ passwordentry {
 /* ===== Proposed-command card (advisory flow) ===== */
 
 .cmd-card {
-    background-color: #11100f;
-    border: 1px solid #232120;
-    border-left: 4px solid #a94f34;
+    background-color: #0f0f10;
+    border: 1px solid #202021;
+    border-left: 4px solid #292a2b;
     border-radius: 8px;
     padding: 14px 16px;
     margin: 8px 0;
@@ -967,7 +964,7 @@ passwordentry {
     margin-bottom: 8px;
 }
 .cmd-card-title {
-    color: #d97757;
+    color: #45484a;
     font-weight: bold;
     font-size: 15px;
     font-family: 'JetBrains Mono', monospace;
@@ -981,21 +978,21 @@ passwordentry {
     font-family: 'JetBrains Mono', monospace;
     letter-spacing: 0.5px;
 }
-.risk-badge.low    { background-color: #2ecc71; color: #0a090a; }
-.risk-badge.medium { background-color: #f0a500; color: #0a090a; }
+.risk-badge.low    { background-color: #2ecc71; color: #09090a; }
+.risk-badge.medium { background-color: #f0a500; color: #09090a; }
 .risk-badge.high   { background-color: #e5484d; color: #ffffff; }
 .cmd-text {
-    background-color: #0d0d0c;
-    color: #d97757;
+    background-color: #0c0c0d;
+    color: #45484a;
     font-family: 'JetBrains Mono', monospace;
     font-size: 18px;
     padding: 12px 14px;
     border-radius: 6px;
-    border: 1px solid #232120;
+    border: 1px solid #202021;
     margin-bottom: 8px;
 }
 .cmd-explain {
-    color: #bdbbb7;
+    color: #b6b8ba;
     font-size: 16px;
     margin-bottom: 12px;
 }
@@ -1003,30 +1000,30 @@ passwordentry {
     background-color: rgba(229, 72, 77, 0.10);
     border: 1px solid rgba(229, 72, 77, 0.45);
     border-radius: 8px;
-    color: #d5d4d1;
+    color: #d0d2d3;
     font-size: 15px;
     padding: 10px 14px;
     margin: 6px 0;
 }
 .cmd-run-btn {
-    background: linear-gradient(135deg, #a94f34, #d97757);
+    background: linear-gradient(135deg, #292a2b, #45484a);
     color: #ffffff;
     border-radius: 6px;
     padding: 10px 22px;
     font-weight: bold;
     font-size: 16px;
 }
-.cmd-run-btn:hover { background: linear-gradient(135deg, #d97757, #a94f34); }
-.cmd-run-btn:disabled { background: #232120; color: #696762; }
+.cmd-run-btn:hover { background: linear-gradient(135deg, #45484a, #292a2b); }
+.cmd-run-btn:disabled { background: #202021; color: #616366; }
 .cmd-copy-btn {
-    background-color: #171716;
-    color: #dfdedb;
+    background-color: #151617;
+    color: #dbdcdd;
     border-radius: 6px;
     padding: 10px 18px;
     font-size: 16px;
-    border: 1px solid #232120;
+    border: 1px solid #202021;
 }
-.cmd-copy-btn:hover { background-color: #2a2927; border-color: #a94f34; }
+.cmd-copy-btn:hover { background-color: #262729; border-color: #292a2b; }
 
 /* ===== libadwaita rows / settings / dialogs =====
    Force the Basilisk surfaces on the built-in widgets so Settings and
@@ -1034,78 +1031,78 @@ passwordentry {
    grey. */
 
 preferencespage, preferencesgroup {
-    background-color: #0a090a;
+    background-color: #09090a;
 }
 row, .row, list.boxed-list > row {
-    background-color: #11100f;
-    color: #dfdedb;
+    background-color: #0f0f10;
+    color: #dbdcdd;
 }
 list.boxed-list {
-    background-color: #11100f;
-    border: 1px solid #232120;
+    background-color: #0f0f10;
+    border: 1px solid #202021;
     border-radius: 8px;
 }
-row:hover { background-color: #171716; }
+row:hover { background-color: #151617; }
 row > box { background-color: transparent; }
 
 /* Switches: blue when on, dark track when off */
 switch {
-    background-color: #232120;
+    background-color: #202021;
     border-radius: 14px;
 }
 switch:checked {
-    background-color: #a94f34;
+    background-color: #292a2b;
 }
 switch > slider {
-    background-color: #dfdedb;
+    background-color: #dbdcdd;
     border-radius: 50%;
 }
 
 /* SpinRow / spinbuttons */
 spinbutton, spinbutton entry {
-    background-color: #171716;
-    color: #dfdedb;
+    background-color: #151617;
+    color: #dbdcdd;
     border-radius: 6px;
 }
 spinbutton button {
-    background-color: #171716;
-    color: #d97757;
+    background-color: #151617;
+    color: #45484a;
 }
-spinbutton button:hover { background-color: #232120; }
+spinbutton button:hover { background-color: #202021; }
 
 /* ComboRow dropdown */
 comborow, dropdown {
-    background-color: #171716;
-    color: #dfdedb;
+    background-color: #151617;
+    color: #dbdcdd;
 }
 dropdown > button {
-    background-color: #171716;
-    color: #dfdedb;
+    background-color: #151617;
+    color: #dbdcdd;
     border-radius: 6px;
 }
 popover > contents, popover > arrow {
-    background-color: #11100f;
-    color: #dfdedb;
-    border: 1px solid #232120;
+    background-color: #0f0f10;
+    color: #dbdcdd;
+    border: 1px solid #202021;
 }
 popover row:selected, dropdown listview > row:selected {
-    background-color: #a94f34;
+    background-color: #292a2b;
     color: #ffffff;
 }
 
 /* Dialogs (AlertDialog / PreferencesDialog) */
 window.dialog, dialog, .messagedialog, .dialog-content {
-    background-color: #11100f;
-    color: #dfdedb;
+    background-color: #0f0f10;
+    color: #dbdcdd;
 }
 .messagedialog .response-area button {
-    background-color: #171716;
-    color: #dfdedb;
+    background-color: #151617;
+    color: #dbdcdd;
     border-radius: 6px;
     margin: 4px;
 }
 .messagedialog .response-area button.suggested-action {
-    background: linear-gradient(135deg, #a94f34, #d97757);
+    background: linear-gradient(135deg, #292a2b, #45484a);
     color: #ffffff;
 }
 .messagedialog .response-area button.destructive-action {
@@ -1115,34 +1112,34 @@ window.dialog, dialog, .messagedialog, .dialog-content {
 
 /* Search entry in the sidebar */
 .sidebar-search, searchentry, searchentry text {
-    background-color: #171716;
-    color: #dfdedb;
+    background-color: #151617;
+    color: #dbdcdd;
     border-radius: 6px;
-    border: 1px solid #232120;
+    border: 1px solid #202021;
 }
-searchentry:focus-within { border-color: #a94f34; }
+searchentry:focus-within { border-color: #292a2b; }
 
 /* Menu button / popover menu */
 menubutton > button, .menu-button {
-    color: #dfdedb;
+    color: #dbdcdd;
 }
 .popover-menu, menu, .menu {
-    background-color: #11100f;
-    color: #dfdedb;
+    background-color: #0f0f10;
+    color: #dbdcdd;
 }
 
 /* Generic buttons inherit the dark surface unless given a role class */
 button {
-    background-color: #171716;
-    color: #dfdedb;
-    border: 1px solid #232120;
+    background-color: #151617;
+    color: #dbdcdd;
+    border: 1px solid #202021;
     border-radius: 11px;
 }
-button:hover { background-color: #2a2927; border-color: #a94f34; }
+button:hover { background-color: #262729; border-color: #292a2b; }
 button.flat { background-color: transparent; border: none; }
-button.flat:hover { background-color: #171716; }
+button.flat:hover { background-color: #151617; }
 button.suggested-action {
-    background: linear-gradient(135deg, #a94f34, #d97757);
+    background: linear-gradient(135deg, #292a2b, #45484a);
     color: #ffffff;
     border: none;
 }
@@ -1151,16 +1148,16 @@ button.suggested-action {
 .avatar-dragon {
     border-radius: 8px;
     background-color: #000000;
-    box-shadow: 0 0 10px rgba(156, 155, 149, 0.12), 0 0 4px rgba(217, 119, 87, 0.114);
+    box-shadow: 0 0 10px rgba(147, 151, 153, 0.12), 0 0 4px rgba(69, 72, 74, 0.114);
 }
 .avatar-cross {
     border-radius: 8px;
-    background-color: #0d0d0b;
-    box-shadow: 0 0 8px rgba(217, 119, 87, 0.1);
+    background-color: #0c0c0c;
+    box-shadow: 0 0 8px rgba(69, 72, 74, 0.1);
 }
 .avatar-priest {
     border-radius: 10px;
-    background-color: #0d0d0b;
+    background-color: #0c0c0c;
     box-shadow: 0 0 10px rgba(64, 20, 96, 0.12), 0 0 4px rgba(64, 20, 96, 0.1);
 }
 /* let the penguin watermark show through the chat */
@@ -1178,32 +1175,32 @@ button.suggested-action {
 
 /* Tao Te Ching line under the chat list (sidebar) - quiet, muted, out of the way */
 .tao-quote {
-    color: #ababa6;
+    color: #a3a8a9;
     font-size: 19px;
     font-style: italic;
     line-height: 1.5;
 }
 
 /* Links (e.g. 'Get an API key') in Basilisk blue */
-link, button.link, *:link { color: #d97757; }
+link, button.link, *:link { color: #45484a; }
 
 /* Voice: mic button + active recording state */
 .mic-button {
-    background-color: #171716;
-    color: #dfdedb;
-    border: 1px solid #232120;
+    background-color: #151617;
+    color: #dbdcdd;
+    border: 1px solid #202021;
     border-radius: 11px;
 }
-.mic-button:hover { background-color: #2a2927; border-color: #a94f34; }
+.mic-button:hover { background-color: #262729; border-color: #292a2b; }
 .mic-recording {
-    background: linear-gradient(135deg, #e5484d, #b3b1ad);
+    background: linear-gradient(135deg, #e5484d, #abaeb0);
     color: #ffffff;
-    border: 1px solid #b3b1ad;
+    border: 1px solid #abaeb0;
     box-shadow: 0 0 10px rgba(229, 72, 77, 0.12);
 }
 .mic-recording:hover {
-    background: linear-gradient(135deg, #b3b1ad, #bcbbb6);
-    border-color: #bcbbb6;
+    background: linear-gradient(135deg, #abaeb0, #b5b8b9);
+    border-color: #b5b8b9;
 }
 
 /* Per-message read-aloud button - sits under the reply, clearly tappable */
@@ -1211,9 +1208,9 @@ link, button.link, *:link { color: #d97757; }
 .msg-speak-btn {
     padding: 5px 14px;
     margin: 2px 0 0 2px;
-    color: #969490;
-    background-color: rgba(18, 18, 17, 0.72);
-    border: 1px solid rgba(94, 93, 89, 0.34);
+    color: #8d9094;
+    background-color: rgba(16, 17, 18, 0.72);
+    border: 1px solid rgba(86, 90, 92, 0.34);
     border-radius: 11px;
     /* 12px against 30px body copy was a speck. This is a control the
        operator has to be able to hit on a phone. */
@@ -1223,14 +1220,14 @@ link, button.link, *:link { color: #d97757; }
 }
 .msg-speak-btn:hover { opacity: 1.0; }
 .msg-speak-btn:hover {
-    background-color: #242321;
-    color: #d97757;
-    border-color: #a94f34;
+    background-color: #202123;
+    color: #45484a;
+    border-color: #292a2b;
 }
 .msg-speak-btn.speaking {
-    color: #d97757;
-    border-color: #a94f34;
-    background-color: rgba(217, 119, 87, 0.12);
+    color: #45484a;
+    border-color: #292a2b;
+    background-color: rgba(69, 72, 74, 0.12);
 }
 
 /* Composer action icons (attach, audit, scan, mic) - subtle + rounded */
@@ -1238,17 +1235,17 @@ link, button.link, *:link { color: #d97757; }
    not flat gray squares. Hover awakens the ember; press sinks it into the
    stone. ASCII-only (this is a bytes-literal stylesheet). ===== */
 .icon-button {
-    background-color: #0a0909;
+    background-color: #090909;
     background-image:
-        radial-gradient(ellipse at 50% 118%, rgba(100, 99, 95, 0.30), rgba(100, 99, 95, 0) 70%),
-        linear-gradient(180deg, rgba(43, 42, 39, 0.28), rgba(9, 8, 8, 0) 62%);
-    border: 1px solid rgba(217, 119, 87, 0.48);
+        radial-gradient(ellipse at 50% 118%, rgba(92, 96, 98, 0.30), rgba(92, 96, 98, 0) 70%),
+        linear-gradient(180deg, rgba(39, 40, 41, 0.28), rgba(8, 8, 8, 0) 62%);
+    border: 1px solid rgba(69, 72, 74, 0.48);
     border-radius: 12px;
-    color: #c2c1bc;
+    color: #bbbebf;
     padding: 7px;
-    box-shadow: inset 0 1px 0 rgba(134, 135, 129, 0.10),
-                inset 0 -6px 12px rgba(72, 71, 66, 0.16),
-                0 0 8px rgba(217, 119, 87, 0.063);
+    box-shadow: inset 0 1px 0 rgba(125, 131, 133, 0.10),
+                inset 0 -6px 12px rgba(65, 68, 69, 0.16),
+                0 0 8px rgba(69, 72, 74, 0.063);
     transition: all 160ms ease;
 }
 .notif-badge {
@@ -1264,40 +1261,40 @@ link, button.link, *:link { color: #d97757; }
 }
 .bell-glyph {
     font-size: 15px;
-    color: #cfcecc;
+    color: #caccce;
 }
-.notif-title { font-weight: 700; color: #f3f2f1; font-size: 14px; }
-.notif-body { color: #cfcecc; font-size: 13px; }
-.notif-time { color: #7a7873; font-size: 11px; }
+.notif-title { font-weight: 700; color: #f1f1f2; font-size: 14px; }
+.notif-body { color: #caccce; font-size: 13px; }
+.notif-time { color: #717477; font-size: 11px; }
 .icon-button:hover {
     background-image:
-        radial-gradient(ellipse at 50% 118%, rgba(131, 131, 125, 0.44), rgba(131, 131, 125, 0) 72%),
-        linear-gradient(180deg, rgba(60, 59, 56, 0.36), rgba(9, 8, 8, 0) 60%);
-    color: #e1e1df;
-    border-color: rgba(124, 124, 118, 0.90);
-    box-shadow: inset 0 1px 0 rgba(166, 165, 160, 0.16),
-                inset 0 -7px 14px rgba(109, 109, 103, 0.24),
-                0 0 17px rgba(122, 122, 116, 0.12);
+        radial-gradient(ellipse at 50% 118%, rgba(122, 127, 129, 0.44), rgba(122, 127, 129, 0) 72%),
+        linear-gradient(180deg, rgba(54, 57, 58, 0.36), rgba(8, 8, 8, 0) 60%);
+    color: #dee0e0;
+    border-color: rgba(115, 120, 122, 0.90);
+    box-shadow: inset 0 1px 0 rgba(158, 162, 163, 0.16),
+                inset 0 -7px 14px rgba(100, 105, 107, 0.24),
+                0 0 17px rgba(113, 118, 120, 0.12);
 }
 .icon-button:active {
-    background-color: #070606;
+    background-color: #060606;
     box-shadow: inset 0 3px 10px rgba(0, 0, 0, 0.62),
-                inset 0 0 12px rgba(98, 97, 92, 0.091),
-                0 0 7px rgba(217, 119, 87, 0.074);
+                inset 0 0 12px rgba(90, 94, 95, 0.091),
+                0 0 7px rgba(69, 72, 74, 0.074);
 }
 .icon-button.toggled {
-    color: #d7d6d3;
-    border-color: rgba(133, 134, 128, 0.95);
+    color: #d2d4d5;
+    border-color: rgba(124, 130, 132, 0.95);
     background-image:
-        radial-gradient(ellipse at 50% 118%, rgba(128, 129, 123, 0.50), rgba(128, 129, 123, 0) 74%),
-        linear-gradient(180deg, rgba(65, 65, 60, 0.40), rgba(9, 8, 8, 0) 60%);
-    box-shadow: inset 0 -7px 14px rgba(112, 111, 105, 0.30),
-                0 0 16px rgba(124, 125, 119, 0.12);
+        radial-gradient(ellipse at 50% 118%, rgba(119, 125, 127, 0.50), rgba(119, 125, 127, 0) 74%),
+        linear-gradient(180deg, rgba(59, 62, 63, 0.40), rgba(8, 8, 8, 0) 60%);
+    box-shadow: inset 0 -7px 14px rgba(103, 107, 109, 0.30),
+                0 0 16px rgba(115, 121, 123, 0.12);
 }
 /* Send button - blends into the background; only the silver dragon pops.
    Glows softly while working; still acts as Stop when pressed. */
 .send-button {
-    background-color: #0a090a;
+    background-color: #09090a;
     border: none;
     border-radius: 14px;
     min-width: 0;
@@ -1306,11 +1303,11 @@ link, button.link, *:link { color: #d97757; }
     box-shadow: none;
 }
 .send-button:hover {
-    background-color: #0a090a;
-    box-shadow: 0 0 14px rgba(122, 122, 116, 0.12);
+    background-color: #09090a;
+    box-shadow: 0 0 14px rgba(113, 118, 120, 0.12);
 }
 .send-button:active {
-    background-color: #0d0d0c;
+    background-color: #0c0c0d;
     box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.5);
 }
 .send-button.working {
@@ -1319,9 +1316,9 @@ link, button.link, *:link { color: #d97757; }
     animation: none;
 }
 @keyframes sendglow {
-    0%   { box-shadow: 0 0 6px rgba(212, 210, 207, 0.072); border-color: #363432; }
-    50%  { box-shadow: 0 0 20px rgba(234, 233, 232, 0.12); border-color: #d4d2cf; }
-    100% { box-shadow: 0 0 6px rgba(212, 210, 207, 0.072); border-color: #363432; }
+    0%   { box-shadow: 0 0 6px rgba(207, 208, 209, 0.072); border-color: #313234; }
+    50%  { box-shadow: 0 0 20px rgba(231, 232, 233, 0.12); border-color: #cfd0d1; }
+    100% { box-shadow: 0 0 6px rgba(207, 208, 209, 0.072); border-color: #313234; }
 }
 /* Header buttons (sidebar toggle, new chat) - blend into the header, with a
    quiet dragon-green accent only on hover so they don't draw the eye. */
@@ -1335,7 +1332,7 @@ link, button.link, *:link { color: #d97757; }
     min-width: 0;
 }
 .wordmark-btn:hover {
-    background-color: rgba(217, 119, 87, 0.16);
+    background-color: rgba(69, 72, 74, 0.16);
     box-shadow: none;
 }
 .logo-toggle { padding: 3px; }
@@ -1347,36 +1344,36 @@ link, button.link, *:link { color: #d97757; }
        bright bevel on the upper edge, so the button reads as a pane of red
        glass rather than carved stone. Kept translucent (low alphas) so the
        ember backdrop shows through. */
-    background-color: rgba(25, 24, 23, 0.28);
+    background-color: rgba(22, 23, 24, 0.28);
     background-image: linear-gradient(180deg,
-                      rgba(230, 229, 227, 0.16) 0%,
-                      rgba(100, 99, 95, 0.12) 46%,
-                      rgba(17, 16, 14, 0.10) 54%,
-                      rgba(49, 47, 44, 0.14) 100%);
-    border: 1px solid rgba(192, 191, 187, 0.28);
+                      rgba(227, 228, 228, 0.16) 0%,
+                      rgba(92, 96, 98, 0.12) 46%,
+                      rgba(15, 15, 15, 0.10) 54%,
+                      rgba(44, 45, 46, 0.14) 100%);
+    border: 1px solid rgba(185, 188, 190, 0.28);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.30),
                 inset 0 -1px 0 rgba(0, 0, 0, 0.30),
-                0 0 8px rgba(217, 119, 87, 0.063);
+                0 0 8px rgba(69, 72, 74, 0.063);
     padding: 3px;
     border-radius: 12px;
     transition: all 150ms ease;
 }
 .art-button:hover {
-    background-color: rgba(100, 99, 95, 0.30);
+    background-color: rgba(92, 96, 98, 0.30);
     background-image: linear-gradient(180deg,
-                      rgba(234, 234, 232, 0.24) 0%,
-                      rgba(125, 125, 120, 0.18) 46%,
-                      rgba(41, 40, 37, 0.14) 54%,
-                      rgba(78, 77, 72, 0.20) 100%);
-    border-color: rgba(197, 196, 191, 0.55);
+                      rgba(232, 233, 233, 0.24) 0%,
+                      rgba(116, 121, 124, 0.18) 46%,
+                      rgba(37, 38, 39, 0.14) 54%,
+                      rgba(71, 74, 75, 0.20) 100%);
+    border-color: rgba(191, 193, 194, 0.55);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.40),
-                0 0 16px rgba(140, 140, 135, 0.12);
+                0 0 16px rgba(131, 136, 139, 0.12);
 }
 .art-button:active {
-    background-color: rgba(59, 57, 55, 0.40);
+    background-color: rgba(53, 55, 57, 0.40);
     box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.45),
                 inset 0 1px 0 rgba(255, 255, 255, 0.10),
-                0 0 8px rgba(122, 122, 116, 0.114);
+                0 0 8px rgba(113, 118, 120, 0.114);
 }
 /* UNLEASH -- the big red dragon. A quiet ember when idle, a hot red glow when
    armed so it's unmistakable that Basilisk is off the leash. */
@@ -1385,17 +1382,17 @@ link, button.link, *:link { color: #d97757; }
     background-image: none;
     border: none;
     border-radius: 999px;
-    box-shadow: 0 0 6px rgba(122, 122, 116, 0.08);
+    box-shadow: 0 0 6px rgba(113, 118, 120, 0.08);
 }
 .unleash-button:hover {
-    box-shadow: 0 0 16px rgba(135, 136, 130, 0.12);
+    box-shadow: 0 0 16px rgba(126, 132, 134, 0.12);
 }
 .unleash-button.toggled {
-    background-color: rgba(90, 89, 85, 0.30);
-    box-shadow: 0 0 22px rgba(138, 138, 132, 0.12), inset 0 0 9px rgba(163, 163, 156, 0.12);
+    background-color: rgba(82, 86, 88, 0.30);
+    box-shadow: 0 0 22px rgba(129, 134, 136, 0.12), inset 0 0 9px rgba(155, 159, 160, 0.12);
 }
 .unleash-button.toggled:hover {
-    box-shadow: 0 0 30px rgba(153, 153, 147, 0.12), inset 0 0 11px rgba(172, 171, 167, 0.12);
+    box-shadow: 0 0 30px rgba(144, 149, 151, 0.12), inset 0 0 11px rgba(164, 168, 170, 0.12);
 }
 
 /* Reasoning-effort pill: a compact Low/Med/High segmented control. Ember
@@ -1408,21 +1405,21 @@ link, button.link, *:link { color: #d97757; }
 .effort-seg {
     background: transparent;
     background-image: none;
-    color: rgba(216, 215, 211, 0.75);
+    color: rgba(211, 213, 213, 0.75);
     padding: 2px 9px;
     min-height: 22px;
     font-size: 12px;
     font-weight: 600;
-    border: 1px solid rgba(138, 139, 132, 0.28);
+    border: 1px solid rgba(129, 135, 136, 0.28);
 }
 .effort-seg:hover {
-    color: rgba(239, 239, 237, 0.95);
-    background-color: rgba(128, 129, 122, 0.14);
+    color: rgba(237, 238, 238, 0.95);
+    background-color: rgba(119, 125, 126, 0.14);
 }
 .effort-seg:checked {
-    color: #121211;
-    background-image: linear-gradient(160deg, rgba(160, 161, 154, 0.95), rgba(121, 121, 114, 0.95));
-    border-color: rgba(156, 156, 149, 0.7);
+    color: #101112;
+    background-image: linear-gradient(160deg, rgba(152, 157, 158, 0.95), rgba(112, 117, 118, 0.95));
+    border-color: rgba(147, 152, 153, 0.7);
 }
 /* A Gtk.MenuButton (settings, notifications) wraps its child in an inner
    > button that keeps GTK's default flat-grey styling -- that's the grey box
@@ -1430,97 +1427,97 @@ link, button.link, *:link { color: #d97757; }
    inner button too: fully transparent, no border/shadow, ember glow on hover to
    match the plain art buttons. */
 menubutton.art-button > button {
-    background-color: rgba(25, 24, 23, 0.28);
+    background-color: rgba(22, 23, 24, 0.28);
     background-image: linear-gradient(180deg,
-                      rgba(230, 229, 227, 0.16) 0%,
-                      rgba(100, 99, 95, 0.12) 46%,
-                      rgba(17, 16, 14, 0.10) 54%,
-                      rgba(49, 47, 44, 0.14) 100%);
-    border: 1px solid rgba(192, 191, 187, 0.28);
+                      rgba(227, 228, 228, 0.16) 0%,
+                      rgba(92, 96, 98, 0.12) 46%,
+                      rgba(15, 15, 15, 0.10) 54%,
+                      rgba(44, 45, 46, 0.14) 100%);
+    border: 1px solid rgba(185, 188, 190, 0.28);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.30),
                 inset 0 -1px 0 rgba(0, 0, 0, 0.30),
-                0 0 8px rgba(217, 119, 87, 0.063);
+                0 0 8px rgba(69, 72, 74, 0.063);
     padding: 3px;
     min-width: 0;
     min-height: 0;
     border-radius: 12px;
 }
 menubutton.art-button > button:hover {
-    background-color: rgba(100, 99, 95, 0.30);
-    border-color: rgba(197, 196, 191, 0.55);
+    background-color: rgba(92, 96, 98, 0.30);
+    border-color: rgba(191, 193, 194, 0.55);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.40),
-                0 0 16px rgba(140, 140, 135, 0.12);
+                0 0 16px rgba(131, 136, 139, 0.12);
 }
 menubutton.art-button > button:active {
-    background-color: rgba(59, 57, 55, 0.40);
+    background-color: rgba(53, 55, 57, 0.40);
     box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.45),
                 inset 0 1px 0 rgba(255, 255, 255, 0.10),
-                0 0 8px rgba(122, 122, 116, 0.114);
+                0 0 8px rgba(113, 118, 120, 0.114);
 }
 /* Startup splash window -- dark backdrop behind the igniting-dragon animation
    (the DrawingArea paints over this; it just avoids a white flash on the very
    first frame). */
 .splash-window {
-    background-color: #121110;
+    background-color: #101011;
 }
 .header-icon-button {
     background-color: transparent;
     background-image: none;
     border: none;
     box-shadow: none;
-    color: #6c6a66;
+    color: #63666a;
     border-radius: 10px;
     padding: 6px;
 }
 .header-icon-button:hover {
-    background-color: rgba(217, 119, 87, 0.10);
-    color: #d97757;
+    background-color: rgba(69, 72, 74, 0.10);
+    color: #45484a;
     box-shadow: none;
 }
 .header-icon-button:active {
-    background-color: rgba(217, 119, 87, 0.16);
+    background-color: rgba(69, 72, 74, 0.16);
 }
 /* Model / provider switcher in the composer */
 .model-switch-btn {
-    background-color: #0a0909;
+    background-color: #090909;
     background-image:
-        radial-gradient(ellipse at 50% 130%, rgba(100, 99, 95, 0.22), rgba(100, 99, 95, 0) 72%),
-        linear-gradient(180deg, rgba(43, 42, 39, 0.22), rgba(9, 8, 8, 0) 62%);
-    border: 1px solid rgba(217, 119, 87, 0.42);
+        radial-gradient(ellipse at 50% 130%, rgba(92, 96, 98, 0.22), rgba(92, 96, 98, 0) 72%),
+        linear-gradient(180deg, rgba(39, 40, 41, 0.22), rgba(8, 8, 8, 0) 62%);
+    border: 1px solid rgba(69, 72, 74, 0.42);
     border-radius: 11px;
-    color: #bcbcb7;
+    color: #b5b9ba;
     padding: 5px 12px;
     font-size: 10.5px;
     font-weight: 600;
-    box-shadow: inset 0 -5px 10px rgba(72, 71, 66, 0.14),
-                0 0 7px rgba(217, 119, 87, 0.052);
+    box-shadow: inset 0 -5px 10px rgba(65, 68, 69, 0.14),
+                0 0 7px rgba(69, 72, 74, 0.052);
     transition: all 160ms ease;
 }
 .model-switch-btn:hover {
-    color: #e1e1df;
-    border-color: rgba(124, 124, 118, 0.85);
-    box-shadow: inset 0 -6px 12px rgba(109, 109, 103, 0.22),
-                0 0 14px rgba(122, 122, 116, 0.12);
+    color: #dee0e0;
+    border-color: rgba(115, 120, 122, 0.85);
+    box-shadow: inset 0 -6px 12px rgba(100, 105, 107, 0.22),
+                0 0 14px rgba(113, 118, 120, 0.12);
 }
 /* Window controls (close / minimise): the same summoned-stone look, and the
    close sigil flares blood-red when you reach for it. */
 windowcontrols > button,
 .titlebutton {
-    background-color: #0a0909;
-    background-image: radial-gradient(ellipse at 50% 120%, rgba(89, 88, 84, 0.24), rgba(89, 88, 84, 0) 72%);
-    border: 1px solid rgba(217, 119, 87, 0.40);
+    background-color: #090909;
+    background-image: radial-gradient(ellipse at 50% 120%, rgba(81, 85, 87, 0.24), rgba(81, 85, 87, 0) 72%);
+    border: 1px solid rgba(69, 72, 74, 0.40);
     border-radius: 10px;
-    color: #b5b4af;
-    box-shadow: inset 0 -5px 10px rgba(72, 71, 66, 0.14),
-                0 0 6px rgba(217, 119, 87, 0.052);
+    color: #aeb1b2;
+    box-shadow: inset 0 -5px 10px rgba(65, 68, 69, 0.14),
+                0 0 6px rgba(69, 72, 74, 0.052);
     transition: all 150ms ease;
 }
 windowcontrols > button:hover,
 .titlebutton:hover {
-    color: #e1e1df;
-    border-color: rgba(124, 124, 118, 0.85);
-    box-shadow: inset 0 -6px 12px rgba(109, 109, 103, 0.22),
-                0 0 14px rgba(122, 122, 116, 0.12);
+    color: #dee0e0;
+    border-color: rgba(115, 120, 122, 0.85);
+    box-shadow: inset 0 -6px 12px rgba(100, 105, 107, 0.22),
+                0 0 14px rgba(113, 118, 120, 0.12);
 }
 windowcontrols > button.close:hover,
 .titlebutton.close:hover {
@@ -1530,7 +1527,7 @@ windowcontrols > button.close:hover,
     box-shadow: 0 0 16px rgba(229, 72, 77, 0.12);
 }
 .model-group-header {
-    color: #a2a19b;
+    color: #9a9d9f;
     font-size: 15px;
     font-weight: 800;
     letter-spacing: 1px;
@@ -1542,18 +1539,18 @@ windowcontrols > button.close:hover,
     background-color: transparent;
     border: none;
     border-radius: 8px;
-    color: #edeceb;
+    color: #ebebec;
     padding: 11px 14px;
     font-size: 17px;
     font-weight: 500;
 }
 .model-pick-row:hover {
-    background-color: rgba(217, 119, 87, 0.10);
-    color: #d97757;
+    background-color: rgba(69, 72, 74, 0.10);
+    color: #45484a;
 }
 .model-pick-active {
-    background-color: rgba(217, 119, 87, 0.16);
-    color: #d97757;
+    background-color: rgba(69, 72, 74, 0.16);
+    color: #45484a;
     font-weight: 700;
 }
 
@@ -1575,26 +1572,26 @@ button, .quick-chip, .chat-row, entry, .mic-button, switch, row,
 
 /* Header: lift it off the content with a hairline + soft shadow. */
 headerbar {
-    box-shadow: 0 1px 0 rgba(255, 255, 255,0.02),
-                0 2px 8px rgba(0, 0, 0,0.35);
+    box-shadow: 0 1px 0 rgba(255,255,255,0.02),
+                0 2px 8px rgba(0,0,0,0.35);
 }
 
 /* ---- Buttons: depth, gradient sheen, a real pressed state ---- */
 button {
     background-image: linear-gradient(180deg,
-                      rgba(255, 255, 255,0.03), rgba(255, 255, 255,0.0));
-    box-shadow: 0 1px 2px rgba(0, 0, 0,0.25),
-                inset 0 1px 0 rgba(255, 255, 255,0.03);
+                      rgba(255,255,255,0.03), rgba(255,255,255,0.0));
+    box-shadow: 0 1px 2px rgba(0,0,0,0.25),
+                inset 0 1px 0 rgba(255,255,255,0.03);
     padding: 8px 16px;
     font-weight: 500;
 }
 button:hover {
-    box-shadow: 0 2px 6px rgba(0, 0, 0,0.30),
-                inset 0 1px 0 rgba(255, 255, 255,0.05);
+    box-shadow: 0 2px 6px rgba(0,0,0,0.30),
+                inset 0 1px 0 rgba(255,255,255,0.05);
 }
 button:active {
     background-image: none;
-    box-shadow: inset 0 2px 5px rgba(0, 0, 0,0.40);
+    box-shadow: inset 0 2px 5px rgba(0,0,0,0.40);
 }
 button:disabled {
     box-shadow: none;
@@ -1602,45 +1599,45 @@ button:disabled {
     opacity: 0.55;
 }
 button:focus-visible {
-    outline: 2px solid rgba(217, 119, 87, 0.65);
+    outline: 2px solid rgba(69, 72, 74, 0.65);
     outline-offset: 1px;
 }
 button.suggested-action {
-    box-shadow: 0 2px 8px rgba(217, 119, 87, 0.35),
-                inset 0 1px 0 rgba(255, 255, 255,0.15);
+    box-shadow: 0 2px 8px rgba(69, 72, 74, 0.35),
+                inset 0 1px 0 rgba(255,255,255,0.15);
 }
 button.suggested-action:hover {
-    box-shadow: 0 3px 14px rgba(217, 119, 87, 0.45),
-                inset 0 1px 0 rgba(255, 255, 255,0.20);
+    box-shadow: 0 3px 14px rgba(69, 72, 74, 0.45),
+                inset 0 1px 0 rgba(255,255,255,0.20);
 }
 
 /* ---- Primary action buttons (Run / Apply) ---- */
 .cmd-run-btn {
-    box-shadow: 0 2px 10px rgba(217, 119, 87, 0.40),
-                inset 0 1px 0 rgba(255, 255, 255,0.18);
+    box-shadow: 0 2px 10px rgba(69, 72, 74, 0.40),
+                inset 0 1px 0 rgba(255,255,255,0.18);
     padding: 11px 26px;
     letter-spacing: 0.2px;
 }
 .cmd-run-btn:hover {
-    box-shadow: 0 4px 16px rgba(217, 119, 87, 0.50),
-                inset 0 1px 0 rgba(255, 255, 255,0.22);
+    box-shadow: 0 4px 16px rgba(69, 72, 74, 0.50),
+                inset 0 1px 0 rgba(255,255,255,0.22);
 }
 .cmd-run-btn:active {
-    box-shadow: inset 0 2px 6px rgba(0, 0, 0,0.35);
+    box-shadow: inset 0 2px 6px rgba(0,0,0,0.35);
 }
 .cmd-copy-btn { padding: 11px 20px; }
 
 /* ---- Command / edit cards: lift them onto a surface ---- */
 .cmd-card {
-    background-image: linear-gradient(180deg, #1d1c1b, #171615);
-    box-shadow: 0 4px 18px rgba(0, 0, 0,0.40),
-                inset 0 1px 0 rgba(255, 255, 255,0.03);
-    border: 1px solid #363533;
+    background-image: linear-gradient(180deg, #1a1b1c, #151516);
+    box-shadow: 0 4px 18px rgba(0,0,0,0.40),
+                inset 0 1px 0 rgba(255,255,255,0.03);
+    border: 1px solid #313335;
     padding: 16px 18px;
 }
 .cmd-card-title { letter-spacing: 0.4px; }
 .risk-badge {
-    box-shadow: 0 1px 3px rgba(0, 0, 0,0.30);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.30);
     letter-spacing: 0.3px;
     font-weight: 700;
 }
@@ -1648,20 +1645,20 @@ button.suggested-action:hover {
 /* ---- Composer entry: inset depth + a focus glow ---- */
 entry {
     background-image: linear-gradient(180deg,
-                      rgba(0, 0, 0,0.18), rgba(0, 0, 0,0.0));
-    box-shadow: inset 0 1px 3px rgba(0, 0, 0,0.35);
+                      rgba(0,0,0,0.18), rgba(0,0,0,0.0));
+    box-shadow: inset 0 1px 3px rgba(0,0,0,0.35);
 }
 entry:focus-within {
-    box-shadow: inset 0 1px 3px rgba(0, 0, 0,0.35),
-                0 0 0 3px rgba(217, 119, 87, 0.063);
+    box-shadow: inset 0 1px 3px rgba(0,0,0,0.35),
+                0 0 0 3px rgba(69, 72, 74, 0.063);
 }
 
 /* ---- Message bubbles: quiet depth so they sit above the canvas ---- */
 .msg-user {
-    box-shadow: 0 2px 10px rgba(217, 119, 87, 0.18);
+    box-shadow: 0 2px 10px rgba(69, 72, 74, 0.18);
 }
 .msg-assistant {
-    box-shadow: 0 2px 10px rgba(0, 0, 0,0.28);
+    box-shadow: 0 2px 10px rgba(0,0,0,0.28);
 }
 
 /* ---- Sidebar chat rows: fire accent handled in the base block above ---- */
@@ -1672,12 +1669,12 @@ entry:focus-within {
 /* ---- Quick chips: pill polish ---- */
 .quick-chip {
     background-image: linear-gradient(180deg,
-                      rgba(255, 255, 255,0.03), rgba(255, 255, 255,0.0));
-    box-shadow: 0 1px 2px rgba(0, 0, 0,0.20);
+                      rgba(255,255,255,0.03), rgba(255,255,255,0.0));
+    box-shadow: 0 1px 2px rgba(0,0,0,0.20);
     padding: 7px 15px;
 }
 .quick-chip:hover {
-    box-shadow: 0 2px 8px rgba(217, 119, 87, 0.25);
+    box-shadow: 0 2px 8px rgba(69, 72, 74, 0.25);
 }
 
 /* ---- Mic recording: gentle pulse-ready glow already set; deepen it ---- */
@@ -1689,29 +1686,29 @@ entry:focus-within {
 /* ---- Working row: a soft active surface ---- */
 .working-row {
     background-image: linear-gradient(90deg,
-                      rgba(217, 119, 87, 0.10), rgba(217, 119, 87, 0.0));
-    box-shadow: inset 0 0 0 1px rgba(217, 119, 87, 0.043);
+                      rgba(69, 72, 74, 0.10), rgba(69, 72, 74, 0.0));
+    box-shadow: inset 0 0 0 1px rgba(69, 72, 74, 0.043);
 }
 
 /* ---- Slim, themed scrollbars ---- */
 scrollbar { background-color: transparent; border: none; }
 scrollbar slider {
-    background-color: #363533;
+    background-color: #313335;
     border-radius: 10px;
     min-width: 7px;
     min-height: 7px;
 }
-scrollbar slider:hover { background-color: #4a4744; }
-scrollbar slider:active { background-color: #d97757; }
+scrollbar slider:hover { background-color: #434447; }
+scrollbar slider:active { background-color: #45484a; }
 
 /* ---- Boxed settings lists: a touch of depth ---- */
 list.boxed-list {
-    box-shadow: 0 2px 12px rgba(0, 0, 0,0.30);
+    box-shadow: 0 2px 12px rgba(0,0,0,0.30);
 }
 
 /* ---- Auto-run note: when Basilisk runs a command without a card ---- */
 .autorun-note {
-    color: #817f7b;
+    color: #787b7f;
     font-size: 13px;
     font-family: 'JetBrains Mono', monospace;
     margin: 2px 0 6px 0;
@@ -1731,46 +1728,46 @@ list.boxed-list {
         engine the base color still lands, so panels never fall back to a
         flat slab. ---- */
 window, .background {
-    background-color: #070606;
+    background-color: #060606;
     background-image:
-        radial-gradient(circle at 15% 12%, rgba(47, 46, 42, 0.55), rgba(47, 46, 42, 0.0) 40%),
-        radial-gradient(circle at 82% 20%, rgba(34, 33, 31, 0.55), rgba(34, 33, 31, 0.0) 42%),
-        radial-gradient(circle at 42% 66%, rgba(27, 26, 24, 0.60), rgba(27, 26, 24, 0.0) 46%),
-        radial-gradient(circle at 90% 84%, rgba(89, 88, 84, 0.06), rgba(89, 88, 84, 0.0) 40%),
-        radial-gradient(circle at 8% 88%, rgba(106, 106, 99, 0.05), rgba(106, 106, 99, 0.0) 38%),
-        linear-gradient(0deg, rgba(71, 70, 65, 0.07) 0%, rgba(9, 8, 8, 0.0) 28%),
-        linear-gradient(180deg, #0a0909, #070606 55%, #040404);
+        radial-gradient(circle at 15% 12%, rgba(42, 44, 44, 0.55), rgba(42, 44, 44, 0.0) 40%),
+        radial-gradient(circle at 82% 20%, rgba(31, 32, 32, 0.55), rgba(31, 32, 32, 0.0) 42%),
+        radial-gradient(circle at 42% 66%, rgba(24, 25, 25, 0.60), rgba(24, 25, 25, 0.0) 46%),
+        radial-gradient(circle at 90% 84%, rgba(81, 85, 87, 0.06), rgba(81, 85, 87, 0.0) 40%),
+        radial-gradient(circle at 8% 88%, rgba(97, 102, 103, 0.05), rgba(97, 102, 103, 0.0) 38%),
+        linear-gradient(0deg, rgba(64, 67, 68, 0.07) 0%, rgba(8, 8, 8, 0.0) 28%),
+        linear-gradient(180deg, #090909, #060606 55%, #040404);
 }
 
 /* ---- Structural panels: same charred base, a hair lighter than the
         window so depth still reads, with a low ember bloom baked in. ---- */
 headerbar {
-    background-color: #090909;
+    background-color: #080909;
     background-image:
-        radial-gradient(circle at 20% 40%, rgba(41, 41, 37, 0.30), rgba(41, 41, 37, 0.0) 55%),
-        radial-gradient(circle at 85% 60%, rgba(30, 29, 28, 0.35), rgba(30, 29, 28, 0.0) 55%),
-        linear-gradient(180deg, #0d0e0c, #090808);
-    border-bottom: 1px solid #201f1e;
-    box-shadow: inset 0 -6px 14px rgba(71, 70, 65, 0.10);
+        radial-gradient(circle at 20% 40%, rgba(37, 39, 39, 0.30), rgba(37, 39, 39, 0.0) 55%),
+        radial-gradient(circle at 85% 60%, rgba(27, 28, 29, 0.35), rgba(27, 28, 29, 0.0) 55%),
+        linear-gradient(180deg, #0c0d0d, #080808);
+    border-bottom: 1px solid #1d1e1f;
+    box-shadow: inset 0 -6px 14px rgba(64, 67, 68, 0.10);
 }
 .sidebar {
-    background-color: #070707;
+    background-color: #060707;
     background-image:
-        radial-gradient(circle at 30% 20%, rgba(43, 43, 39, 0.40), rgba(43, 43, 39, 0.0) 45%),
-        radial-gradient(circle at 60% 80%, rgba(54, 54, 51, 0.10), rgba(54, 54, 51, 0.0) 45%),
-        linear-gradient(180deg, #0a0a0a, #070606);
-    border-right: 1px solid #1c1b1a;
+        radial-gradient(circle at 30% 20%, rgba(39, 41, 41, 0.40), rgba(39, 41, 41, 0.0) 45%),
+        radial-gradient(circle at 60% 80%, rgba(49, 52, 53, 0.10), rgba(49, 52, 53, 0.0) 45%),
+        linear-gradient(180deg, #090a0a, #060606);
+    border-right: 1px solid #191a1b;
 }
 .input-frame {
-    background-color: #0b0a0a;
-    background-image: linear-gradient(180deg, rgba(41, 41, 37, 0.16), rgba(11, 10, 10, 0.0) 60%);
-    border: 1px solid #2b2b27;
-    box-shadow: inset 0 -5px 14px rgba(83, 82, 77, 0.10);
+    background-color: #0a0a0a;
+    background-image: linear-gradient(180deg, rgba(37, 39, 39, 0.16), rgba(10, 10, 10, 0.0) 60%);
+    border: 1px solid #272929;
+    box-shadow: inset 0 -5px 14px rgba(76, 79, 80, 0.10);
 }
 .input-frame:focus-within {
-    border-color: #777770;
-    background-color: #11100e;
-    box-shadow: inset 0 -6px 16px rgba(116, 116, 109, 0.22), 0 0 14px rgba(116, 116, 109, 0.052);
+    border-color: #6e7374;
+    background-color: #0f0f0f;
+    box-shadow: inset 0 -6px 16px rgba(107, 112, 113, 0.22), 0 0 14px rgba(107, 112, 113, 0.052);
 }
 
 /* ---- Chat bubbles: charred body plus a breathing ember halo.  User and
@@ -1779,60 +1776,60 @@ headerbar {
     transition: box-shadow 240ms ease, border-color 240ms ease;
 }
 .msg-user {
-    color: #ebebea;
+    color: #e9eaeb;
     border-radius: 16px 16px 4px 16px;
-    background-color: #0a0a0a;
+    background-color: #090a0a;
     background-image:
-        radial-gradient(ellipse at 92% -12%, rgba(135, 136, 130, 0.16), rgba(135, 136, 130, 0) 48%),
-        radial-gradient(ellipse at 4% 126%, rgba(88, 86, 81, 0.20), rgba(88, 86, 81, 0) 56%),
-        linear-gradient(0deg, rgba(89, 87, 82, 0.12), rgba(37, 36, 33, 0.05) 42%, rgba(0, 0, 0, 0.0) 74%);
-    border: 1px solid rgba(119, 119, 112, 0.54);
+        radial-gradient(ellipse at 92% -12%, rgba(126, 132, 134, 0.16), rgba(126, 132, 134, 0) 48%),
+        radial-gradient(ellipse at 4% 126%, rgba(80, 83, 84, 0.20), rgba(80, 83, 84, 0) 56%),
+        linear-gradient(0deg, rgba(81, 84, 85, 0.12), rgba(33, 34, 35, 0.05) 42%, rgba(0, 0, 0, 0.0) 74%);
+    border: 1px solid rgba(110, 115, 116, 0.54);
     box-shadow:
-        inset 0 1px 0 rgba(170, 170, 165, 0.12),
-        inset 0 0 26px rgba(89, 88, 84, 0.046),
-        inset 0 -7px 18px rgba(98, 97, 93, 0.18),
+        inset 0 1px 0 rgba(162, 167, 168, 0.12),
+        inset 0 0 26px rgba(81, 85, 87, 0.046),
+        inset 0 -7px 18px rgba(90, 94, 96, 0.18),
         0 0 0 1px rgba(0, 0, 0, 0.40),
         0 8px 22px rgba(0, 0, 0, 0.50),
-        0 0 14px rgba(122, 123, 117, 0.086);
-    text-shadow: 0 0 9px rgba(132, 133, 127, 0.033), 0 1px 1px rgba(0, 0, 0, 0.55);
+        0 0 14px rgba(113, 119, 121, 0.086);
+    text-shadow: 0 0 9px rgba(123, 129, 131, 0.033), 0 1px 1px rgba(0, 0, 0, 0.55);
 }
 .msg-assistant {
-    color: #eae9e8;
+    color: #e7e8e9;
     border-radius: 4px 16px 16px 16px;
-    background-color: #090909;
+    background-color: #080909;
     background-image:
-        radial-gradient(ellipse at 6% -12%, rgba(122, 123, 117, 0.16), rgba(122, 123, 117, 0) 46%),
-        radial-gradient(ellipse at 104% 128%, rgba(82, 81, 76, 0.20), rgba(82, 81, 76, 0) 56%),
-        linear-gradient(0deg, rgba(98, 97, 93, 0.11), rgba(42, 42, 38, 0.05) 42%, rgba(0, 0, 0, 0.0) 74%);
-    border: 1px solid rgba(112, 111, 105, 0.52);
+        radial-gradient(ellipse at 6% -12%, rgba(113, 119, 121, 0.16), rgba(113, 119, 121, 0) 46%),
+        radial-gradient(ellipse at 104% 128%, rgba(75, 78, 79, 0.20), rgba(75, 78, 79, 0) 56%),
+        linear-gradient(0deg, rgba(90, 94, 96, 0.11), rgba(38, 40, 40, 0.05) 42%, rgba(0, 0, 0, 0.0) 74%);
+    border: 1px solid rgba(103, 107, 109, 0.52);
     box-shadow:
-        inset 0 1px 0 rgba(161, 162, 155, 0.11),
-        inset 0 0 28px rgba(91, 90, 86, 0.046),
-        inset 0 -7px 18px rgba(93, 92, 87, 0.17),
+        inset 0 1px 0 rgba(153, 158, 159, 0.11),
+        inset 0 0 28px rgba(83, 87, 89, 0.046),
+        inset 0 -7px 18px rgba(85, 89, 90, 0.17),
         0 0 0 1px rgba(0, 0, 0, 0.40),
         0 8px 22px rgba(0, 0, 0, 0.50),
-        0 0 14px rgba(117, 117, 110, 0.08);
-    text-shadow: 0 0 9px rgba(123, 124, 118, 0.032), 0 1px 1px rgba(0, 0, 0, 0.55);
+        0 0 14px rgba(108, 113, 114, 0.08);
+    text-shadow: 0 0 9px rgba(114, 120, 122, 0.032), 0 1px 1px rgba(0, 0, 0, 0.55);
 }
 .msg-user:hover {
-    border-color: rgba(138, 139, 133, 0.72);
+    border-color: rgba(129, 135, 137, 0.72);
     box-shadow:
-        inset 0 1px 0 rgba(170, 170, 165, 0.14),
-        inset 0 0 30px rgba(95, 94, 90, 0.057),
-        inset 0 -7px 18px rgba(104, 104, 98, 0.20),
+        inset 0 1px 0 rgba(162, 167, 168, 0.14),
+        inset 0 0 30px rgba(87, 91, 93, 0.057),
+        inset 0 -7px 18px rgba(96, 100, 102, 0.20),
         0 0 0 1px rgba(0, 0, 0, 0.40),
         0 10px 26px rgba(0, 0, 0, 0.52),
-        0 0 24px rgba(133, 134, 128, 0.12);
+        0 0 24px rgba(124, 130, 132, 0.12);
 }
 .msg-assistant:hover {
-    border-color: rgba(127, 128, 122, 0.72);
+    border-color: rgba(118, 124, 126, 0.72);
     box-shadow:
-        inset 0 1px 0 rgba(161, 162, 155, 0.13),
-        inset 0 0 32px rgba(97, 96, 92, 0.057),
-        inset 0 -7px 18px rgba(99, 98, 94, 0.19),
+        inset 0 1px 0 rgba(153, 158, 159, 0.13),
+        inset 0 0 32px rgba(89, 93, 95, 0.057),
+        inset 0 -7px 18px rgba(91, 95, 97, 0.19),
         0 0 0 1px rgba(0, 0, 0, 0.40),
         0 10px 26px rgba(0, 0, 0, 0.52),
-        0 0 24px rgba(126, 127, 121, 0.12);
+        0 0 24px rgba(117, 123, 125, 0.12);
 }
 
 /* ---- The status line, reborn as a burning bar.  A flame gradient taller
@@ -1840,41 +1837,41 @@ headerbar {
         the same keyframes flicker the glow.  Placed just above the Send
         button by the layout change in _build_input_area. ---- */
 .working-row {
-    background-color: #080808;
+    background-color: #070808;
     background-image: linear-gradient(0deg,
-        rgba(163, 164, 156, 0.0) 0%,
-        rgba(148, 149, 142, 0.34) 18%,
-        rgba(120, 120, 113, 0.46) 44%,
-        rgba(69, 69, 64, 0.32) 68%,
-        rgba(13, 14, 12, 0.0) 100%);
+        rgba(155, 160, 160, 0.0) 0%,
+        rgba(139, 145, 146, 0.34) 18%,
+        rgba(111, 116, 117, 0.46) 44%,
+        rgba(63, 66, 67, 0.32) 68%,
+        rgba(12, 13, 13, 0.0) 100%);
     background-size: 100% 280%;
     background-position: 0% 100%;
-    border: 1px solid rgba(123, 124, 118, 0.50);
+    border: 1px solid rgba(114, 120, 122, 0.50);
     border-radius: 10px;
     padding: 10px 22px;
     animation: fireScroll 1.15s linear infinite;
 }
 @keyframes fireScroll {
-    0%   { background-position: 0% 100%; box-shadow: 0 0 12px rgba(125, 126, 120, 0.086), inset 0 -6px 16px rgba(148, 149, 142, 0.20); }
-    50%  { background-position: 0% 40%;  box-shadow: 0 0 24px rgba(148, 149, 142, 0.12), inset 0 -9px 22px rgba(155, 156, 149, 0.36); }
-    100% { background-position: 0% 0%;   box-shadow: 0 0 12px rgba(125, 126, 120, 0.086), inset 0 -6px 16px rgba(148, 149, 142, 0.20); }
+    0%   { background-position: 0% 100%; box-shadow: 0 0 12px rgba(116, 122, 124, 0.086), inset 0 -6px 16px rgba(139, 145, 146, 0.20); }
+    50%  { background-position: 0% 40%;  box-shadow: 0 0 24px rgba(139, 145, 146, 0.12), inset 0 -9px 22px rgba(146, 152, 153, 0.36); }
+    100% { background-position: 0% 0%;   box-shadow: 0 0 12px rgba(116, 122, 124, 0.086), inset 0 -6px 16px rgba(139, 145, 146, 0.20); }
 }
 .working-label {
-    color: #c2c1bb;
+    color: #bbbebe;
     font-size: 18px;
     font-style: normal;
     font-weight: 800;
     letter-spacing: 0.6px;
-    text-shadow: 0 0 8px rgba(155, 156, 149, 0.054), 0 0 16px rgba(144, 144, 138, 0.054);
+    text-shadow: 0 0 8px rgba(146, 152, 153, 0.054), 0 0 16px rgba(135, 140, 142, 0.054);
     animation: emberText 0.85s ease-in-out infinite;
 }
 @keyframes emberText {
-    0%   { color: #ffcf6e; text-shadow: 0 0 6px rgba(155, 156, 149, 0.054), 0 0 14px rgba(144, 144, 138, 0.054); }
-    50%  { color: #fff1c6; text-shadow: 0 0 13px rgba(165, 165, 159, 0.054), 0 0 24px rgba(148, 149, 142, 0.054); }
-    100% { color: #ffcf6e; text-shadow: 0 0 6px rgba(155, 156, 149, 0.054), 0 0 14px rgba(144, 144, 138, 0.054); }
+    0%   { color: #ffcf6e; text-shadow: 0 0 6px rgba(146, 152, 153, 0.054), 0 0 14px rgba(135, 140, 142, 0.054); }
+    50%  { color: #fff1c6; text-shadow: 0 0 13px rgba(157, 162, 162, 0.054), 0 0 24px rgba(139, 145, 146, 0.054); }
+    100% { color: #ffcf6e; text-shadow: 0 0 6px rgba(146, 152, 153, 0.054), 0 0 14px rgba(135, 140, 142, 0.054); }
 }
 .working-spinner {
-    color: #9d9e97;
+    color: #949a9b;
     min-width: 24px;
     min-height: 24px;
 }
@@ -1884,9 +1881,9 @@ headerbar {
     animation: sendFire 1.2s ease-in-out infinite;
 }
 @keyframes sendFire {
-    0%   { box-shadow: 0 0 6px rgba(148, 149, 142, 0.086); border-color: #2b2b27; }
-    50%  { box-shadow: 0 0 22px rgba(148, 149, 142, 0.12); border-color: #9a9a94; }
-    100% { box-shadow: 0 0 6px rgba(148, 149, 142, 0.086); border-color: #2b2b27; }
+    0%   { box-shadow: 0 0 6px rgba(139, 145, 146, 0.086); border-color: #272929; }
+    50%  { box-shadow: 0 0 22px rgba(139, 145, 146, 0.12); border-color: #919698; }
+    100% { box-shadow: 0 0 6px rgba(139, 145, 146, 0.086); border-color: #272929; }
 }
 
 /* =====================================================================
@@ -1904,14 +1901,14 @@ headerbar {
 .activity-feed {
     margin: 6px 60px 10px 12px;
     border-radius: 14px;
-    background-color: #090909;
+    background-color: #080909;
     background-image: linear-gradient(180deg,
-        rgba(163, 164, 156, 0.055) 0%,
-        rgba(153, 153, 147, 0.018) 34%,
+        rgba(155, 160, 160, 0.055) 0%,
+        rgba(144, 149, 151, 0.018) 34%,
         rgba(0, 0, 0, 0.0) 100%);
-    border: 1px solid rgba(91, 90, 86, 0.34);
+    border: 1px solid rgba(83, 87, 89, 0.34);
     box-shadow:
-        inset 0 1px 0 rgba(187, 187, 182, 0.07),
+        inset 0 1px 0 rgba(180, 184, 185, 0.07),
         0 0 0 1px rgba(0, 0, 0, 0.40),
         0 8px 22px rgba(0, 0, 0, 0.46);
 }
@@ -1920,17 +1917,17 @@ headerbar {
    animated element in the panel -- a per-row animation would be dozens of
    clocks running at once during a mission, for no extra information. */
 .activity-feed.live {
-    border-color: rgba(135, 136, 130, 0.50);
-    border-left: 3px solid #868780;
+    border-color: rgba(126, 132, 134, 0.50);
+    border-left: 3px solid #7d8384;
     animation: activityRail 1.6s ease-in-out infinite;
 }
 @keyframes activityRail {
-    0%   { border-left-color: #53524d; box-shadow: inset 0 1px 0 rgba(187, 187, 182, 0.07), 0 0 0 1px rgba(0, 0, 0,0.40), 0 8px 22px rgba(0, 0, 0,0.46), -1px 0 12px rgba(135, 136, 130, 0.20); }
-    50%  { border-left-color: #a7a6a1; box-shadow: inset 0 1px 0 rgba(187, 187, 182, 0.10), 0 0 0 1px rgba(0, 0, 0,0.40), 0 8px 22px rgba(0, 0, 0,0.46), -1px 0 22px rgba(158, 159, 152, 0.55); }
-    100% { border-left-color: #53524d; box-shadow: inset 0 1px 0 rgba(187, 187, 182, 0.07), 0 0 0 1px rgba(0, 0, 0,0.40), 0 8px 22px rgba(0, 0, 0,0.46), -1px 0 12px rgba(135, 136, 130, 0.20); }
+    0%   { border-left-color: #4c4f50; box-shadow: inset 0 1px 0 rgba(180, 184, 185, 0.07), 0 0 0 1px rgba(0,0,0,0.40), 0 8px 22px rgba(0,0,0,0.46), -1px 0 12px rgba(126, 132, 134, 0.20); }
+    50%  { border-left-color: #9fa3a4; box-shadow: inset 0 1px 0 rgba(180, 184, 185, 0.10), 0 0 0 1px rgba(0,0,0,0.40), 0 8px 22px rgba(0,0,0,0.46), -1px 0 22px rgba(149, 155, 156, 0.55); }
+    100% { border-left-color: #4c4f50; box-shadow: inset 0 1px 0 rgba(180, 184, 185, 0.07), 0 0 0 1px rgba(0,0,0,0.40), 0 8px 22px rgba(0,0,0,0.46), -1px 0 12px rgba(126, 132, 134, 0.20); }
 }
 .activity-feed.done {
-    border-left: 3px solid rgba(75, 74, 69, 0.55);
+    border-left: 3px solid rgba(68, 71, 72, 0.55);
 }
 .activity-feed.collapsed {
     background-image: none;
@@ -1947,14 +1944,14 @@ headerbar {
     border-radius: 14px;
 }
 .activity-header:hover {
-    background-color: rgba(163, 163, 156, 0.06);
+    background-color: rgba(155, 159, 160, 0.06);
 }
 .activity-header:active {
-    background-color: rgba(163, 163, 156, 0.10);
+    background-color: rgba(155, 159, 160, 0.10);
 }
 
 .activity-spinner {
-    color: #a7a6a1;
+    color: #9fa3a4;
     min-width: 18px;
     min-height: 18px;
 }
@@ -1963,36 +1960,36 @@ headerbar {
     font-size: 18px;
     font-weight: 800;
     min-width: 18px;
-    color: #8e8c88;
+    color: #85888c;
 }
 .activity-verdict.ok   { color: #35c46f; text-shadow: 0 0 10px rgba(46, 204, 113, 0.054); }
 .activity-verdict.fail { color: #e5484d; text-shadow: 0 0 10px rgba(229, 72, 77, 0.054); }
 
 .activity-title {
-    color: #cbcac6;
+    color: #c5c8c8;
     font-family: 'JetBrains Mono', monospace;
     font-size: 19px;
     font-weight: 700;
     letter-spacing: 0.3px;
-    text-shadow: 0 0 9px rgba(163, 164, 156, 0.039);
+    text-shadow: 0 0 9px rgba(155, 160, 160, 0.039);
 }
 .activity-feed.done .activity-title {
-    color: #c6c5c1;
+    color: #c0c2c4;
     text-shadow: none;
 }
 .activity-meta {
-    color: #9a9793;
+    color: #919397;
     font-family: 'JetBrains Mono', monospace;
     font-size: 15px;
     letter-spacing: 0.2px;
 }
 .activity-chevron {
-    color: #7f7d7a;
+    color: #76797e;
     font-size: 17px;
     font-weight: 700;
     min-width: 14px;
 }
-.activity-header:hover .activity-chevron { color: #b4b3ae; }
+.activity-header:hover .activity-chevron { color: #acb0b1; }
 
 /* ---- Body: the stream ---- */
 .activity-body {
@@ -2004,7 +2001,7 @@ headerbar {
     border-radius: 7px;
 }
 .activity-step.run {
-    background-color: rgba(158, 159, 152, 0.055);
+    background-color: rgba(149, 155, 156, 0.055);
 }
 
 .activity-glyph {
@@ -2012,52 +2009,52 @@ headerbar {
     font-size: 15px;
     font-weight: 800;
     min-width: 15px;
-    color: #7f7d7a;
+    color: #76797e;
 }
-.activity-step.run  .activity-glyph { color: #a7a6a1; }
+.activity-step.run  .activity-glyph { color: #9fa3a4; }
 .activity-step.ok   .activity-glyph { color: #35c46f; }
 .activity-step.fail .activity-glyph { color: #e5484d; }
-.activity-step.stop .activity-glyph { color: #7a7c75; }
+.activity-step.stop .activity-glyph { color: #717879; }
 .activity-step.gate .activity-glyph { color: #e5484d; }
 
 .activity-step-name {
-    color: #e8e6e5;
+    color: #e5e5e6;
     font-family: 'JetBrains Mono', monospace;
     font-size: 17px;
     font-weight: 700;
     letter-spacing: 0.2px;
 }
-.activity-step.run .activity-step-name { color: #dcdcd9; }
+.activity-step.run .activity-step-name { color: #d8dadb; }
 .activity-step.note .activity-step-name,
 .activity-step.gate .activity-step-name {
     font-weight: 500;
-    color: #aaa8a5;
+    color: #a2a5a8;
 }
-.activity-step.gate .activity-step-name { color: #c9c7c5; }
+.activity-step.gate .activity-step-name { color: #c3c5c7; }
 
 .activity-step-detail {
-    color: #94918d;
+    color: #8b8d91;
     font-family: 'JetBrains Mono', monospace;
     font-size: 16px;
 }
 .activity-step-time {
-    color: #797773;
+    color: #707377;
     font-family: 'JetBrains Mono', monospace;
     font-size: 14px;
     letter-spacing: 0.3px;
 }
-.activity-step.run .activity-step-time { color: #8c8d86; }
+.activity-step.run .activity-step-time { color: #83898a; }
 
 .activity-step.past {
     padding: 4px 6px 4px 4px;
 }
-.activity-step.past .activity-glyph { color: #6d6b67; }
+.activity-step.past .activity-glyph { color: #64676b; }
 .activity-step.past .activity-step-name {
     font-weight: 500;
-    color: #b9b7b3;
+    color: #b2b4b6;
 }
 
-/* ---- Links inside a reply.  The base rule paints them #d97757, which is
+/* ---- Links inside a reply.  The base rule paints them #45484a, which is
         the deep accent -- fine on a light chrome surface, but inside a
         charred bubble it is barely separable from the body text, and a
         citation the operator cannot SEE is a citation he will not click.
@@ -2067,24 +2064,24 @@ headerbar {
 .msg-assistant *:link,
 .msg-user link,
 .msg-user *:link {
-    color: #a7a6a1;
-    text-decoration-color: rgba(167, 166, 161, 0.45);
+    color: #9fa3a4;
+    text-decoration-color: rgba(159, 163, 164, 0.45);
 }
 .msg-assistant *:link:hover,
 .msg-user *:link:hover {
-    color: #c2c1bb;
-    text-decoration-color: rgba(194, 193, 187, 0.85);
+    color: #bbbebe;
+    text-decoration-color: rgba(187, 190, 190, 0.85);
 }
 .msg-assistant *:visited,
 .msg-user *:visited {
-    color: #979790;
+    color: #8e9394;
 }
 
 .activity-preview-box {
     padding: 0 6px 6px 27px;
 }
 .activity-preview {
-    color: #8f8d89;
+    color: #86898d;
     font-family: 'JetBrains Mono', monospace;
     font-size: 15px;
     line-height: 1.35;
@@ -2103,8 +2100,8 @@ headerbar {
 .md-table {
     margin: 10px 0 12px 0;
     border-radius: 10px;
-    background-color: #0c0c0b;
-    border: 1px solid rgba(95, 94, 90, 0.36);
+    background-color: #0b0b0c;
+    border: 1px solid rgba(87, 91, 93, 0.36);
     box-shadow: 0 3px 12px rgba(0, 0, 0, 0.34);
 }
 .md-table scrolledwindow { border-radius: 10px; }
@@ -2112,13 +2109,13 @@ headerbar {
 
 .md-th {
     padding: 10px 14px;
-    background-color: #12110f;
-    border-bottom: 2px solid rgba(123, 124, 118, 0.55);
-    border-right: 1px solid rgba(86, 84, 79, 0.24);
+    background-color: #101010;
+    border-bottom: 2px solid rgba(114, 120, 122, 0.55);
+    border-right: 1px solid rgba(78, 81, 82, 0.24);
 }
 .md-th.lastcol { border-right: none; }
 .md-th label {
-    color: #d1d1cd;
+    color: #cccfcf;
     font-family: 'JetBrains Mono', monospace;
     font-size: 21px;
     font-weight: 800;
@@ -2127,38 +2124,38 @@ headerbar {
 
 .md-td {
     padding: 9px 14px;
-    border-top: 1px solid rgba(90, 89, 85, 0.16);
-    border-right: 1px solid rgba(86, 84, 79, 0.16);
+    border-top: 1px solid rgba(82, 86, 88, 0.16);
+    border-right: 1px solid rgba(78, 81, 82, 0.16);
 }
 .md-td.lastcol { border-right: none; }
-.md-td.odd { background-color: rgba(180, 180, 174, 0.055); }
+.md-td.odd { background-color: rgba(173, 177, 177, 0.055); }
 .md-td label {
-    color: #e9e8e7;
+    color: #e6e7e8;
     font-size: 26px;
     line-height: 1.35;
 }
 .md-table-more {
     padding: 8px 14px;
-    color: #868780;
+    color: #7d8384;
     font-family: 'JetBrains Mono', monospace;
     font-size: 19px;
-    border-top: 1px solid rgba(90, 89, 85, 0.20);
+    border-top: 1px solid rgba(82, 86, 88, 0.20);
 }
 
 /* ---- Blockquote: an accent rail and an inset panel ---- */
 .md-quote {
     margin: 9px 0;
     border-radius: 8px;
-    background-color: rgba(168, 167, 162, 0.045);
+    background-color: rgba(160, 164, 165, 0.045);
 }
 .md-quote-rail {
     min-width: 3px;
-    background-color: #777771;
+    background-color: #6e7375;
     border-radius: 3px;
 }
 .md-quote-body {
     padding: 10px 16px;
-    color: #d8d7d5;
+    color: #d4d5d7;
     font-size: 28px;
     font-style: italic;
     line-height: 1.45;
@@ -2168,30 +2165,30 @@ headerbar {
 .md-heading { margin: 14px 0 6px 0; }
 .md-heading:first-child { margin-top: 2px; }
 .md-heading-text {
-    color: #d8d8d4;
+    color: #d4d6d6;
     font-weight: 800;
     letter-spacing: 0.3px;
 }
 .md-heading.h1 .md-heading-text { font-size: 40px; }
 .md-heading.h2 .md-heading-text { font-size: 35px; }
-.md-heading.h3 .md-heading-text { font-size: 31px; color: #cccbc7; }
+.md-heading.h3 .md-heading-text { font-size: 31px; color: #c6c9c9; }
 .md-heading.h4 .md-heading-text,
 .md-heading.h5 .md-heading-text,
 .md-heading.h6 .md-heading-text {
     font-size: 28px;
-    color: #c2c2bd;
+    color: #bcbfc0;
     letter-spacing: 0.6px;
 }
 .md-heading-rule {
     min-height: 1px;
     margin-top: 5px;
-    background-color: rgba(123, 124, 118, 0.34);
+    background-color: rgba(114, 120, 122, 0.34);
 }
 
 .md-rule {
     min-height: 1px;
     margin: 13px 6px;
-    background-color: rgba(111, 111, 104, 0.32);
+    background-color: rgba(102, 107, 108, 0.32);
 }
 
 /* ---- Lists: a real hanging indent ---- */
@@ -2199,14 +2196,14 @@ headerbar {
     margin: 5px 0 7px 0;
 }
 .md-list-marker {
-    color: #92928b;
+    color: #898e8f;
     font-weight: 800;
     font-size: 26px;
     padding: 2px 11px 2px 4px;
     min-width: 22px;
 }
 .md-list-text {
-    color: #ececeb;
+    color: #eaebec;
     font-size: 30px;
     line-height: 1.45;
     padding-bottom: 6px;
@@ -2248,20 +2245,20 @@ headerbar {
     padding: 6px 8px 6px 10px;
     margin: 2px 3px;
     border-radius: 11px;
-    background-color: #0f0f0d;
+    background-color: #0d0e0e;
     background-image: linear-gradient(180deg,
-        rgba(163, 164, 156, 0.07), rgba(153, 153, 147, 0.015));
-    border: 1px solid rgba(109, 109, 102, 0.46);
+        rgba(155, 160, 160, 0.07), rgba(144, 149, 151, 0.015));
+    border: 1px solid rgba(100, 105, 106, 0.46);
     box-shadow:
-        inset 0 1px 0 rgba(192, 192, 187, 0.09),
+        inset 0 1px 0 rgba(185, 189, 190, 0.09),
         0 2px 8px rgba(0, 0, 0, 0.40);
 }
 .attach-chip:hover {
-    border-color: rgba(138, 139, 133, 0.72);
+    border-color: rgba(129, 135, 137, 0.72);
     box-shadow:
-        inset 0 1px 0 rgba(192, 192, 187, 0.12),
+        inset 0 1px 0 rgba(185, 189, 190, 0.12),
         0 3px 12px rgba(0, 0, 0, 0.46),
-        0 0 14px rgba(133, 134, 128, 0.074);
+        0 0 14px rgba(124, 130, 132, 0.074);
 }
 
 .attach-chip-kind {
@@ -2271,25 +2268,25 @@ headerbar {
     letter-spacing: 0.8px;
     padding: 2px 6px;
     border-radius: 5px;
-    color: #080808;
-    background-color: #888982;
+    color: #070808;
+    background-color: #7f8586;
 }
-.attach-chip.image .attach-chip-kind { background-color: #7e7f79; }
-.attach-chip.file  .attach-chip-kind { background-color: #979491; }
+.attach-chip.image .attach-chip-kind { background-color: #757b7d; }
+.attach-chip.file  .attach-chip-kind { background-color: #8e9095; }
 
 .attach-chip-name {
-    color: #dededb;
+    color: #dadcdd;
     font-family: 'JetBrains Mono', monospace;
     font-size: 16px;
     font-weight: 600;
 }
 .attach-chip-size {
-    color: #868780;
+    color: #7d8384;
     font-family: 'JetBrains Mono', monospace;
     font-size: 14px;
 }
 .attach-chip-remove {
-    color: #979891;
+    color: #8e9495;
     font-size: 17px;
     font-weight: 800;
     min-width: 22px;
@@ -2334,38 +2331,38 @@ headerbar {
 }
 
 .msg-user {
-    color: #eeeeec;
+    color: #eceded;
     margin: 7px 12px 7px 64px;
     line-height: 1.45;
     border-radius: 16px 16px 5px 16px;
-    background-color: #131311;
-    border: 1px solid rgba(114, 114, 107, 0.42);
+    background-color: #111212;
+    border: 1px solid rgba(105, 110, 111, 0.42);
     box-shadow:
-        inset 0 1px 0 rgba(202, 201, 197, 0.06),
+        inset 0 1px 0 rgba(196, 199, 199, 0.06),
         0 2px 10px rgba(0, 0, 0, 0.42);
 }
 .msg-assistant {
-    color: #efeeed;
+    color: #ededee;
     margin: 7px 64px 7px 12px;
     line-height: 1.5;
     border-radius: 5px 16px 16px 16px;
-    background-color: #141312;
-    border: 1px solid rgba(94, 93, 89, 0.38);
+    background-color: #121213;
+    border: 1px solid rgba(86, 90, 92, 0.38);
     box-shadow:
-        inset 0 1px 0 rgba(199, 199, 194, 0.05),
+        inset 0 1px 0 rgba(193, 196, 197, 0.05),
         0 2px 10px rgba(0, 0, 0, 0.42);
 }
 
 .msg-user:hover {
-    border-color: rgba(134, 135, 129, 0.62);
+    border-color: rgba(125, 131, 133, 0.62);
     box-shadow:
-        inset 0 1px 0 rgba(202, 201, 197, 0.08),
+        inset 0 1px 0 rgba(196, 199, 199, 0.08),
         0 4px 16px rgba(0, 0, 0, 0.48);
 }
 .msg-assistant:hover {
-    border-color: rgba(122, 122, 115, 0.58);
+    border-color: rgba(113, 118, 119, 0.58);
     box-shadow:
-        inset 0 1px 0 rgba(199, 199, 194, 0.07),
+        inset 0 1px 0 rgba(193, 196, 197, 0.07),
         0 4px 16px rgba(0, 0, 0, 0.48);
 }
 
@@ -2377,8 +2374,8 @@ headerbar {
     opacity: 0.62;
     margin: 0 4px 4px 4px;
 }
-.role-label.user     { color: #83847d; }
-.role-label.basilisk { color: #a8a7a2; }
+.role-label.user     { color: #7a8081; }
+.role-label.basilisk { color: #a0a4a5; }
 
 /* The seal is atmosphere, not information -- at full strength it sat behind
    the last line of every reply. */
@@ -2390,12 +2387,12 @@ headerbar {
     margin: 1px 12px;
 }
 .tool-indicator-label {
-    color: #7d7b77;
+    color: #74777b;
     font-size: 16px;
     opacity: 0.78;
 }
 
-/* ---- Links inside a reply. The base rule paints them #d97757, which is
+/* ---- Links inside a reply. The base rule paints them #45484a, which is
         nearly inseparable from body text inside a dark bubble -- and ANSWER
         MODE makes one of these the last line of nearly every leashed reply,
         so it earns a colour that reads. ---- */
@@ -2403,16 +2400,16 @@ headerbar {
 .msg-assistant *:link,
 .msg-user link,
 .msg-user *:link {
-    color: #a0a19a;
-    text-decoration-color: rgba(160, 161, 154, 0.42);
+    color: #989d9e;
+    text-decoration-color: rgba(152, 157, 158, 0.42);
 }
 .msg-assistant *:link:hover,
 .msg-user *:link:hover {
-    color: #c0bfba;
-    text-decoration-color: rgba(192, 191, 186, 0.85);
+    color: #b9bcbd;
+    text-decoration-color: rgba(185, 188, 189, 0.85);
 }
 .msg-assistant *:visited,
-.msg-user *:visited { color: #95958e; }
+.msg-user *:visited { color: #8c9192; }
 
 /* =====================================================================
    AERO GLASS LAYER  --  Windows 7 "Aero" styling laid OVER the base
@@ -2420,7 +2417,7 @@ headerbar {
    deleting any base rule (revert = delete this block).  The look:
    glossy top-lit gradients, a bright 1px inner highlight on the upper
    edge (the Aero bevel), soft rounded corners, and outer glow.  The
-   accent stays RED (#d97757 / #4a4945 / #9c9b95), not Aero's stock
+   accent stays RED (#45484a / #434648 / #939799), not Aero's stock
    blue -- the "red shine" is kept, just made glassy.
    ASCII only, per the CSS invariant.
    ===================================================================== */
@@ -2430,65 +2427,65 @@ headerbar {
    core Aero surface; the inset white-ish highlight is the bevel. */
 headerbar {
     background: linear-gradient(180deg,
-                rgba(72, 70, 66, 0.55) 0%,
-                rgba(30, 29, 28, 0.65) 48%,
-                rgba(17, 16, 15, 0.85) 100%);
+                rgba(65, 67, 69, 0.55) 0%,
+                rgba(27, 28, 29, 0.65) 48%,
+                rgba(15, 15, 16, 0.85) 100%);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.20),
                 inset 0 -1px 0 rgba(0, 0, 0, 0.55);
-    border-bottom: 1px solid rgba(217, 119, 87, 0.45);
+    border-bottom: 1px solid rgba(69, 72, 74, 0.45);
 }
 .sidebar {
     background: linear-gradient(180deg,
-                rgba(26, 25, 24, 0.72) 0%,
-                rgba(13, 13, 12, 0.88) 100%);
+                rgba(23, 24, 25, 0.72) 0%,
+                rgba(12, 12, 13, 0.88) 100%);
     box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.05);
 }
 .input-frame {
     background: linear-gradient(180deg,
-                rgba(48, 46, 43, 0.75) 0%,
-                rgba(20, 20, 19, 0.92) 100%);
+                rgba(43, 44, 45, 0.75) 0%,
+                rgba(18, 19, 20, 0.92) 100%);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18),
                 inset 0 0 0 1px rgba(0, 0, 0, 0.30);
-    border: 1px solid rgba(217, 119, 87, 0.40);
+    border: 1px solid rgba(69, 72, 74, 0.40);
     border-radius: 18px;
 }
 .input-frame:focus-within {
-    border-color: #9c9b95;
+    border-color: #939799;
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28),
-                0 0 12px rgba(156, 155, 149, 0.12);
+                0 0 12px rgba(147, 151, 153, 0.12);
 }
 
 /* Buttons: the signature Aero glass pill -- top-lit gradient, bright
    upper bevel, rounded, with a red-tinted rim and a soft glow on hover. */
 button {
     background: linear-gradient(180deg,
-                rgba(84, 82, 78, 0.55) 0%,
-                rgba(49, 47, 45, 0.60) 45%,
-                rgba(26, 25, 24, 0.75) 55%,
-                rgba(37, 36, 34, 0.70) 100%);
+                rgba(77, 79, 81, 0.55) 0%,
+                rgba(44, 45, 47, 0.60) 45%,
+                rgba(23, 24, 25, 0.75) 55%,
+                rgba(33, 34, 36, 0.70) 100%);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22),
                 inset 0 -1px 0 rgba(0, 0, 0, 0.45);
-    border: 1px solid rgba(157, 155, 150, 0.22);
+    border: 1px solid rgba(148, 151, 154, 0.22);
     border-radius: 9px;
-    color: #ededec;
+    color: #ebeced;
     text-shadow: 0 1px 1px rgba(0, 0, 0, 0.6);
     transition: box-shadow 140ms ease, background 140ms ease;
 }
 button:hover {
     background: linear-gradient(180deg,
-                rgba(100, 99, 95, 0.60) 0%,
-                rgba(71, 69, 65, 0.66) 48%,
-                rgba(44, 43, 40, 0.80) 55%,
-                rgba(61, 59, 56, 0.72) 100%);
+                rgba(92, 96, 98, 0.60) 0%,
+                rgba(64, 66, 68, 0.66) 48%,
+                rgba(40, 41, 42, 0.80) 55%,
+                rgba(55, 57, 58, 0.72) 100%);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.30),
                 inset 0 -1px 0 rgba(0, 0, 0, 0.50),
-                0 0 12px rgba(156, 155, 149, 0.12);
-    border-color: rgba(175, 174, 170, 0.55);
+                0 0 12px rgba(147, 151, 153, 0.12);
+    border-color: rgba(167, 171, 173, 0.55);
 }
 button:active {
     background: linear-gradient(180deg,
-                rgba(49, 47, 45, 0.85) 0%,
-                rgba(26, 25, 24, 0.90) 100%);
+                rgba(44, 45, 47, 0.85) 0%,
+                rgba(23, 24, 25, 0.90) 100%);
     box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.60),
                 inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
@@ -2497,19 +2494,19 @@ button:active {
    they still read as the accent, now with the Aero sheen. */
 .cmd-run-btn, .send-button, .primary-action {
     background: linear-gradient(180deg,
-                #83827d 0%, #61605c 46%, #494844 54%, #5d5c58 100%);
+                #7a7e81 0%, #595d5f 46%, #424547 54%, #55595b 100%);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35),
                 inset 0 -1px 0 rgba(0, 0, 0, 0.40),
                 0 0 10px rgba(229, 40, 58, 0.114);
-    border: 1px solid rgba(178, 176, 172, 0.60);
+    border: 1px solid rgba(170, 173, 175, 0.60);
     color: #fff;
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
 }
 .cmd-run-btn:hover, .send-button:hover, .primary-action:hover {
     background: linear-gradient(180deg,
-                #9f9e99 0%, #74736d 46%, #565450 54%, #6c6b66 100%);
+                #969a9d 0%, #6b6f71 46%, #4e5153 54%, #63676a 100%);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45),
-                0 0 16px rgba(156, 155, 149, 0.12);
+                0 0 16px rgba(147, 151, 153, 0.12);
 }
 
 /* Chat bubbles: a light glass sheen on top, so they look like Aero panes
@@ -2518,24 +2515,24 @@ button:active {
 .msg-assistant {
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.10),
                 0 2px 8px rgba(0, 0, 0, 0.45);
-    border: 1px solid rgba(176, 174, 171, 0.14);
+    border: 1px solid rgba(168, 171, 174, 0.14);
 }
 .msg-user {
     background: linear-gradient(180deg,
-                rgba(100, 99, 95, 0.30) 0%,
-                rgba(59, 57, 55, 0.22) 100%);
+                rgba(92, 96, 98, 0.30) 0%,
+                rgba(53, 55, 57, 0.22) 100%);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16),
                 0 2px 8px rgba(0, 0, 0, 0.45);
-    border: 1px solid rgba(175, 174, 170, 0.28);
+    border: 1px solid rgba(167, 171, 173, 0.28);
 }
 
 /* Selected chat row: an Aero-blue-style wash, kept red, with a lit edge. */
 .chat-row.selected, .chat-row:selected {
     background: linear-gradient(180deg,
-                rgba(100, 99, 95, 0.34) 0%,
-                rgba(58, 56, 54, 0.20) 100%);
+                rgba(92, 96, 98, 0.34) 0%,
+                rgba(52, 54, 56, 0.20) 100%);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14);
-    border-left: 3px solid #9c9b95;
+    border-left: 3px solid #939799;
 }
 
 /* Status pills + cards: glass sheen so chrome matches the new surfaces. */
@@ -2553,8 +2550,8 @@ button:active {
 window {
     border-radius: 14px;
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14),
-                inset 0 0 0 1px rgba(192, 191, 187, 0.029),
-                0 0 22px rgba(217, 119, 87, 0.086);
+                inset 0 0 0 1px rgba(185, 188, 190, 0.029),
+                0 0 22px rgba(69, 72, 74, 0.086);
 }
 window > contents,
 window.csd,
@@ -2565,8 +2562,8 @@ window.csd,
    Aero "light source above" cue, sitting under the header. */
 window > contents > box {
     background-image: linear-gradient(180deg,
-                      rgba(243, 244, 242, 0.05) 0%,
-                      rgba(243, 244, 242, 0.0) 90px);
+                      rgba(242, 243, 243, 0.05) 0%,
+                      rgba(242, 243, 243, 0.0) 90px);
 }
 /* The header's bottom edge gets a thin lit line so the glass panels below it
    read as separate sheets of glass, not one flat wall. */
@@ -2592,16 +2589,16 @@ headerbar {
    toolbar/header reads as one glass set without any PNG plaques. Red ember
    text with a faint glow; brighter on hover; lit when toggled/active. ---- */
 .glyph-btn, menubutton.glyph-btn > button {
-    background-color: rgba(25, 24, 23, 0.30);
+    background-color: rgba(22, 23, 24, 0.30);
     background-image: linear-gradient(180deg,
-                      rgba(230, 229, 227, 0.14) 0%,
-                      rgba(100, 99, 95, 0.10) 46%,
-                      rgba(17, 16, 14, 0.08) 54%,
-                      rgba(49, 47, 44, 0.12) 100%);
-    border: 1px solid rgba(192, 191, 187, 0.26);
+                      rgba(227, 228, 228, 0.14) 0%,
+                      rgba(92, 96, 98, 0.10) 46%,
+                      rgba(15, 15, 15, 0.08) 54%,
+                      rgba(44, 45, 46, 0.12) 100%);
+    border: 1px solid rgba(185, 188, 190, 0.26);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.26),
                 inset 0 -1px 0 rgba(0, 0, 0, 0.28),
-                0 0 7px rgba(217, 119, 87, 0.057);
+                0 0 7px rgba(69, 72, 74, 0.057);
     border-radius: 11px;
     min-width: 42px;
     min-height: 38px;
@@ -2614,35 +2611,35 @@ menubutton.glyph-btn > button { min-width: 42px; min-height: 38px; }
     font-family: 'JetBrains Mono', 'Fira Code', 'DejaVu Sans Mono', monospace;
     font-size: 19px;
     font-weight: 700;
-    color: #b2b0ac;
-    text-shadow: 0 0 6px rgba(229, 40, 58, 0.054), 0 1px 1px rgba(0, 0, 0,0.7);
+    color: #aaadaf;
+    text-shadow: 0 0 6px rgba(229, 40, 58, 0.054), 0 1px 1px rgba(0,0,0,0.7);
 }
 .glyph-btn:hover, menubutton.glyph-btn > button:hover {
-    background-color: rgba(100, 99, 95, 0.32);
-    border-color: rgba(197, 196, 191, 0.55);
+    background-color: rgba(92, 96, 98, 0.32);
+    border-color: rgba(191, 193, 194, 0.55);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.36),
-                0 0 14px rgba(140, 140, 135, 0.12);
+                0 0 14px rgba(131, 136, 139, 0.12);
 }
 .glyph-btn:active, menubutton.glyph-btn > button:active {
-    background-color: rgba(59, 57, 55, 0.42);
+    background-color: rgba(53, 55, 57, 0.42);
     box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.45),
                 inset 0 1px 0 rgba(255, 255, 255, 0.10);
 }
 .glyph-btn.toggled, .glyph-btn.active {
-    background-color: rgba(106, 105, 99, 0.45);
-    border-color: rgba(178, 176, 172, 0.70);
+    background-color: rgba(97, 101, 103, 0.45);
+    border-color: rgba(170, 173, 175, 0.70);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.30),
-                0 0 14px rgba(156, 155, 149, 0.12);
+                0 0 14px rgba(147, 151, 153, 0.12);
 }
 .glyph-btn.toggled .glyph-btn-label,
 .glyph-btn.active .glyph-btn-label {
-    color: #e6e5e3;
-    text-shadow: 0 0 9px rgba(172, 171, 167, 0.054);
+    color: #e3e4e4;
+    text-shadow: 0 0 9px rgba(164, 168, 170, 0.054);
 }
 .term-glyph .glyph-btn-label { font-size: 20px; letter-spacing: 1px; }
 /* close button leans red on hover; minimise/expand stay neutral-red */
-.winctl-close:hover { border-color: rgba(172, 171, 167, 0.85); }
-.winctl-close:hover .glyph-btn-label { color: #c2c0bb; }
+.winctl-close:hover { border-color: rgba(164, 168, 170, 0.85); }
+.winctl-close:hover .glyph-btn-label { color: #bbbdbe; }
 
 /* =====================================================================
    OBSIDIAN GLASS  -  Aero-over-obsidian theme overlay
@@ -2681,15 +2678,15 @@ menubutton.glyph-btn > button { min-width: 42px; min-height: 38px; }
    neutral steel rgba(235, 236, 237) for the highlights and a blue-black
    rgba(20, 20, 21) for the smoke, and the result read GREY - the glass
    went the colour of a stainless-steel appliance and fought the red art
-   behind it.  The whites here are pushed towards #f8f8f8 and the smoke
-   towards a red-black #11100e, so the glass takes its colour FROM the
+   behind it.  The whites here are pushed towards #f7f8f8 and the smoke
+   towards a red-black #0f0f0f, so the glass takes its colour FROM the
    backdrop instead of arguing with it.  If a surface ever looks grey,
    that is the bug, and the fix is to warm its tint - not to darken it.
 
    Palette lifted off the backdrop art:
-     neon red   #95948e / #7d7d78      deep blood  #3e3c3a
-     smoke      rgba(22, 11, 14, a)    lit edge    rgba(255, 238, 240, a)
-     text       #f3f3f1   dim #b7b6b2  code #f3f2f0
+     neon red   #8c9092 / #74797c      deep blood  #383a3c
+     smoke      rgba(20, 10, 15, a)    lit edge    rgba(255, 238, 240, a)
+     text       #f2f2f2   dim #b0b3b5  code #f1f1f1
    ===================================================================== */
 
 /* ---- Base plate ------------------------------------------------------
@@ -2698,11 +2695,11 @@ menubutton.glyph-btn > button { min-width: 42px; min-height: 38px; }
    window never go dead flat where the art has fallen off.
    ---------------------------------------------------------------------- */
 window, .background {
-    background-color: #080406;
+    background-color: #070406;
     background-image:
-        radial-gradient(circle at 50% 38%, rgba(87, 84, 80, 0.14), rgba(87, 84, 80, 0.0) 58%),
-        linear-gradient(180deg, #080707, #080406 60%, #040205);
-    color: #f3f3f1;
+        radial-gradient(circle at 50% 38%, rgba(79, 81, 83, 0.14), rgba(79, 81, 83, 0.0) 58%),
+        linear-gradient(180deg, #070707, #070406 60%, #040205);
+    color: #f2f2f2;
 }
 
 /* ---- Let the artwork reach every corner -----------------------------
@@ -2727,7 +2724,7 @@ window, .background {
    the whole app into black - they re-light it in the artwork's own red. */
 .chat-scrim {
     background-image:
-        radial-gradient(circle at 50% 42%, rgba(93, 92, 88, 0.16), rgba(93, 92, 88, 0.0) 62%),
+        radial-gradient(circle at 50% 42%, rgba(85, 89, 91, 0.16), rgba(85, 89, 91, 0.0) 62%),
         linear-gradient(180deg, rgba(0, 0, 0, 0.22) 0%, rgba(0, 0, 0, 0.0) 22%,
                         rgba(0, 0, 0, 0.0) 76%, rgba(0, 0, 0, 0.30) 100%);
 }
@@ -2735,75 +2732,75 @@ window, .background {
 
 /* ---- Header: a glass rail with a lit bottom edge --------------------- */
 headerbar {
-    background-color: rgba(18, 17, 15, 0.46);
+    background-color: rgba(16, 16, 16, 0.46);
     background-image:
         linear-gradient(180deg,
-            rgba(248, 248, 248, 0.16) 0%,
-            rgba(248, 248, 248, 0.05) 46%,
-            rgba(248, 248, 248, 0.0) 52%,
+            rgba(247, 248, 248, 0.16) 0%,
+            rgba(247, 248, 248, 0.05) 46%,
+            rgba(247, 248, 248, 0.0) 52%,
             rgba(0, 0, 0, 0.18) 100%);
-    border-bottom: 1px solid rgba(157, 156, 150, 0.42);
+    border-bottom: 1px solid rgba(148, 152, 154, 0.42);
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.22),
-        inset 0 -16px 28px rgba(102, 102, 96, 0.16),
+        inset 0 -16px 28px rgba(94, 98, 100, 0.16),
         0 6px 20px rgba(0, 0, 0, 0.45);
 }
 
 /* ---- Sidebar: the same glass, one shade smokier so depth still reads - */
 .sidebar {
-    background-color: rgba(12, 12, 11, 0.44);
+    background-color: rgba(11, 11, 12, 0.44);
     background-image:
         linear-gradient(180deg,
-            rgba(248, 248, 248, 0.10) 0%,
-            rgba(248, 248, 248, 0.03) 42%,
-            rgba(248, 248, 248, 0.0) 52%,
+            rgba(247, 248, 248, 0.10) 0%,
+            rgba(247, 248, 248, 0.03) 42%,
+            rgba(247, 248, 248, 0.0) 52%,
             rgba(0, 0, 0, 0.22) 100%);
-    border-right: 1px solid rgba(157, 156, 150, 0.32);
+    border-right: 1px solid rgba(148, 152, 154, 0.32);
     box-shadow:
         inset -1px 0 0 rgba(255, 255, 255, 0.07),
         6px 0 22px rgba(0, 0, 0, 0.40);
 }
 .sidebar headerbar {
-    background-color: rgba(18, 17, 15, 0.34);
-    border-bottom: 1px solid rgba(157, 156, 150, 0.26);
+    background-color: rgba(16, 16, 16, 0.34);
+    border-bottom: 1px solid rgba(148, 152, 154, 0.26);
 }
 
 /* ---- Sidebar chat rows: glass chips ---------------------------------- */
 .chat-row {
     border-radius: 14px;
     border-left: 3px solid transparent;
-    background-color: rgba(27, 26, 25, 0.26);
+    background-color: rgba(24, 25, 26, 0.26);
     background-image:
         linear-gradient(180deg,
-            rgba(248, 248, 248, 0.10) 0%,
-            rgba(248, 248, 248, 0.02) 48%,
-            rgba(248, 248, 248, 0.0) 52%,
+            rgba(247, 248, 248, 0.10) 0%,
+            rgba(247, 248, 248, 0.02) 48%,
+            rgba(247, 248, 248, 0.0) 52%,
             rgba(0, 0, 0, 0.10) 100%);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.11);
 }
 .chat-row:hover {
-    background-color: rgba(45, 44, 41, 0.40);
-    border-left-color: rgba(163, 162, 156, 0.60);
+    background-color: rgba(41, 42, 43, 0.40);
+    border-left-color: rgba(155, 158, 160, 0.60);
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.18),
-        0 0 16px rgba(130, 130, 125, 0.069);
+        0 0 16px rgba(121, 126, 129, 0.069);
 }
 .chat-row.selected, .chat-row:selected {
-    background-color: rgba(81, 79, 75, 0.34);
+    background-color: rgba(74, 76, 78, 0.34);
     background-image:
         linear-gradient(180deg,
-            rgba(246, 245, 245, 0.20) 0%,
-            rgba(192, 191, 187, 0.07) 48%,
-            rgba(163, 162, 156, 0.0) 52%,
+            rgba(245, 245, 245, 0.20) 0%,
+            rgba(185, 188, 190, 0.07) 48%,
+            rgba(155, 158, 160, 0.0) 52%,
             rgba(0, 0, 0, 0.16) 100%);
-    border-left: 3px solid #9d9c96;
+    border-left: 3px solid #94989a;
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.30),
-        inset 0 0 26px rgba(153, 152, 147, 0.046),
-        0 0 22px rgba(130, 130, 125, 0.103);
+        inset 0 0 26px rgba(144, 148, 151, 0.046),
+        0 0 22px rgba(121, 126, 129, 0.103);
 }
-.chat-row .title-line { color: #f9f8f8; }
-.chat-row .meta-line  { color: #acaaa6; }
+.chat-row .title-line { color: #f8f8f8; }
+.chat-row .meta-line  { color: #a4a7a9; }
 
 /* ---- MESSAGE BUBBLES  -  the point of the whole theme ----------------
    Real glass: you can see the artwork through both of them.  The user's
@@ -2822,131 +2819,131 @@ headerbar {
                 background-color 200ms ease;
 }
 .msg-user {
-    color: #f9f8f8;
+    color: #f8f8f8;
     border-radius: 18px 18px 6px 18px;
     padding: 18px 22px;
     margin: 8px 12px;
-    background-color: rgba(74, 72, 68, 0.32);
+    background-color: rgba(67, 69, 71, 0.32);
     background-image:
         linear-gradient(180deg,
-            rgba(246, 246, 246, 0.22) 0%,
-            rgba(206, 205, 202, 0.08) 46%,
-            rgba(163, 162, 156, 0.0) 52%,
-            rgba(23, 23, 22, 0.22) 100%);
-    border: 1px solid rgba(184, 183, 179, 0.58);
+            rgba(245, 246, 246, 0.22) 0%,
+            rgba(201, 203, 204, 0.08) 46%,
+            rgba(155, 158, 160, 0.0) 52%,
+            rgba(21, 22, 23, 0.22) 100%);
+    border: 1px solid rgba(177, 180, 182, 0.58);
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.38),
-        inset 0 0 30px rgba(153, 152, 147, 0.04),
-        inset 0 -18px 30px rgba(54, 52, 50, 0.22),
+        inset 0 0 30px rgba(144, 148, 151, 0.04),
+        inset 0 -18px 30px rgba(49, 50, 52, 0.22),
         0 10px 26px rgba(0, 0, 0, 0.46),
-        0 0 24px rgba(130, 130, 125, 0.086);
+        0 0 24px rgba(121, 126, 129, 0.086);
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.75);
 }
 .msg-assistant {
-    color: #f7f6f6;
+    color: #f6f6f6;
     border-radius: 6px 18px 18px 18px;
     padding: 16px 20px;
     margin: 8px 12px;
-    background-color: rgba(20, 20, 19, 0.34);
+    background-color: rgba(18, 19, 20, 0.34);
     background-image:
         linear-gradient(180deg,
-            rgba(247, 247, 247, 0.18) 0%,
-            rgba(230, 229, 227, 0.05) 46%,
-            rgba(230, 229, 227, 0.0) 52%,
+            rgba(246, 247, 247, 0.18) 0%,
+            rgba(227, 228, 228, 0.05) 46%,
+            rgba(227, 228, 228, 0.0) 52%,
             rgba(0, 0, 0, 0.24) 100%);
-    border: 1px solid rgba(236, 236, 234, 0.34);
+    border: 1px solid rgba(234, 235, 235, 0.34);
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.34),
-        inset 0 0 30px rgba(178, 176, 172, 0.02),
+        inset 0 0 30px rgba(170, 173, 175, 0.02),
         inset 0 -18px 30px rgba(0, 0, 0, 0.24),
         0 10px 26px rgba(0, 0, 0, 0.48),
-        0 0 22px rgba(130, 130, 125, 0.057);
+        0 0 22px rgba(121, 126, 129, 0.057);
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.72);
 }
 .msg-user:hover {
-    background-color: rgba(82, 80, 76, 0.36);
-    border-color: rgba(198, 197, 192, 0.76);
+    background-color: rgba(75, 77, 79, 0.36);
+    border-color: rgba(192, 194, 195, 0.76);
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.44),
-        inset 0 0 34px rgba(158, 157, 152, 0.052),
-        inset 0 -18px 30px rgba(54, 52, 50, 0.24),
+        inset 0 0 34px rgba(149, 153, 156, 0.052),
+        inset 0 -18px 30px rgba(49, 50, 52, 0.24),
         0 12px 30px rgba(0, 0, 0, 0.48),
-        0 0 32px rgba(153, 152, 147, 0.12);
+        0 0 32px rgba(144, 148, 151, 0.12);
 }
 .msg-assistant:hover {
-    background-color: rgba(27, 25, 24, 0.38);
-    border-color: rgba(242, 242, 240, 0.50);
+    background-color: rgba(24, 24, 25, 0.38);
+    border-color: rgba(240, 241, 241, 0.50);
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.40),
-        inset 0 0 34px rgba(187, 186, 182, 0.029),
+        inset 0 0 34px rgba(180, 183, 185, 0.029),
         inset 0 -18px 30px rgba(0, 0, 0, 0.26),
         0 12px 30px rgba(0, 0, 0, 0.50),
-        0 0 30px rgba(130, 130, 125, 0.091);
+        0 0 30px rgba(121, 126, 129, 0.091);
 }
 .msg-system-notice {
-    background-color: rgba(20, 20, 19, 0.32);
+    background-color: rgba(18, 19, 20, 0.32);
     background-image:
-        linear-gradient(180deg, rgba(248, 248, 248, 0.10) 0%,
-                        rgba(248, 248, 248, 0.0) 52%,
+        linear-gradient(180deg, rgba(247, 248, 248, 0.10) 0%,
+                        rgba(247, 248, 248, 0.0) 52%,
                         rgba(0, 0, 0, 0.14) 100%);
-    border: 1px solid rgba(236, 236, 234, 0.24);
+    border: 1px solid rgba(234, 235, 235, 0.24);
     border-radius: 12px;
-    color: #d8d8d5;
+    color: #d4d6d7;
 }
-.role-label            { color: #a5a3a0; }
-.role-label.user       { color: #b6b5b1; }
-.role-label.basilisk   { color: #ebebe9; }
+.role-label            { color: #9da0a3; }
+.role-label.user       { color: #afb2b4; }
+.role-label.basilisk   { color: #e9eaea; }
 .msg-footer            { margin-top: 6px; }
 .avatar {
     border-radius: 10px;
-    background-color: rgba(27, 26, 25, 0.36);
+    background-color: rgba(24, 25, 26, 0.36);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18),
-                0 0 14px rgba(130, 130, 125, 0.069);
+                0 0 14px rgba(121, 126, 129, 0.069);
 }
 
 /* ---- Links inside bubbles: readable on glass ------------------------- */
 .msg-assistant *:link, .msg-user *:link, link, *:link {
-    color: #d0cfcc;
+    color: #cbcdce;
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.72);
 }
 .msg-assistant *:link:hover, .msg-user *:link:hover {
-    color: #e6e5e3;
+    color: #e3e4e4;
 }
 
 /* ---- Code: dark glass with a red-lit edge.  The TEXTVIEW itself stays
         transparent so the artwork carries on through the code, and the
         monospace metrics are untouched - only colour changes here. ----- */
 .code-block {
-    background-color: rgba(13, 5, 9, 0.62);
+    background-color: rgba(12, 5, 9, 0.62);
     background-image:
-        linear-gradient(180deg, rgba(248, 248, 248, 0.09) 0%,
-                        rgba(248, 248, 248, 0.0) 52%,
+        linear-gradient(180deg, rgba(247, 248, 248, 0.09) 0%,
+                        rgba(247, 248, 248, 0.0) 52%,
                         rgba(0, 0, 0, 0.20) 100%);
-    border: 1px solid rgba(163, 162, 156, 0.36);
+    border: 1px solid rgba(155, 158, 160, 0.36);
     border-radius: 12px;
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.16),
         0 6px 18px rgba(0, 0, 0, 0.42);
 }
 .code-block-header {
-    background-color: rgba(81, 79, 75, 0.30);
-    color: #e3e2e0;
-    border-bottom: 1px solid rgba(163, 162, 156, 0.34);
+    background-color: rgba(74, 76, 78, 0.30);
+    color: #e0e1e1;
+    border-bottom: 1px solid rgba(155, 158, 160, 0.34);
     border-radius: 12px 12px 0 0;
 }
-.code-block textview       { background-color: transparent; color: #f3f2f0; }
-.code-block textview text  { background-color: transparent; color: #f3f2f0; }
+.code-block textview       { background-color: transparent; color: #f1f1f1; }
+.code-block textview text  { background-color: transparent; color: #f1f1f1; }
 .cmd-text {
-    background-color: rgba(13, 5, 9, 0.48);
-    border: 1px solid rgba(163, 162, 156, 0.36);
+    background-color: rgba(12, 5, 9, 0.48);
+    border: 1px solid rgba(155, 158, 160, 0.36);
     border-radius: 8px;
-    color: #d0cfcc;
+    color: #cbcdce;
 }
 .confirm-cmd {
-    background-color: rgba(13, 5, 9, 0.48);
-    border: 1px solid rgba(163, 162, 156, 0.36);
+    background-color: rgba(12, 5, 9, 0.48);
+    border: 1px solid rgba(155, 158, 160, 0.36);
     border-radius: 8px;
-    color: #e3e2e0;
+    color: #e0e1e1;
 }
 
 /* ---- Markdown blocks -------------------------------------------------
@@ -2957,33 +2954,33 @@ headerbar {
    changing its padding here is how you get text drawn outside its own
    background again. ---------------------------------------------------- */
 .md-heading-text {
-    color: #f2f3f1;
-    text-shadow: 0 0 12px rgba(153, 152, 147, 0.051), 0 1px 2px rgba(0, 0, 0, 0.72);
+    color: #f1f2f2;
+    text-shadow: 0 0 12px rgba(144, 148, 151, 0.051), 0 1px 2px rgba(0, 0, 0, 0.72);
 }
-.md-heading-rule { background-color: rgba(163, 162, 156, 0.40); }
-.md-rule         { background-color: rgba(236, 236, 234, 0.18); }
-.md-list-marker  { color: #b6b5b1; }
-.md-list-text    { color: #efefee; }
+.md-heading-rule { background-color: rgba(155, 158, 160, 0.40); }
+.md-rule         { background-color: rgba(234, 235, 235, 0.18); }
+.md-list-marker  { color: #afb2b4; }
+.md-list-text    { color: #edeeef; }
 .md-quote {
-    background-color: rgba(26, 25, 24, 0.32);
+    background-color: rgba(23, 24, 25, 0.32);
     background-image:
-        linear-gradient(180deg, rgba(248, 248, 248, 0.09) 0%,
-                        rgba(248, 248, 248, 0.0) 52%,
+        linear-gradient(180deg, rgba(247, 248, 248, 0.09) 0%,
+                        rgba(247, 248, 248, 0.0) 52%,
                         rgba(0, 0, 0, 0.14) 100%);
-    border: 1px solid rgba(236, 236, 234, 0.22);
+    border: 1px solid rgba(234, 235, 235, 0.22);
     border-radius: 10px;
 }
-.md-quote-rail { background-color: #9d9c96; }
-.md-quote-body { color: #dfdfdc; }
+.md-quote-rail { background-color: #94989a; }
+.md-quote-body { color: #dbddde; }
 
 /* Tables: sheet glass, header strip lit like the ring in the artwork */
 .md-table {
-    background-color: rgba(16, 15, 14, 0.42);
+    background-color: rgba(14, 14, 15, 0.42);
     background-image:
-        linear-gradient(180deg, rgba(248, 248, 248, 0.10) 0%,
-                        rgba(248, 248, 248, 0.0) 52%,
+        linear-gradient(180deg, rgba(247, 248, 248, 0.10) 0%,
+                        rgba(247, 248, 248, 0.0) 52%,
                         rgba(0, 0, 0, 0.18) 100%);
-    border: 1px solid rgba(236, 236, 234, 0.28);
+    border: 1px solid rgba(234, 235, 235, 0.28);
     border-radius: 12px;
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.18),
@@ -2992,67 +2989,67 @@ headerbar {
 .md-table scrolledwindow { background-color: transparent; }
 .md-table-grid           { background-color: transparent; }
 .md-th {
-    background-color: rgba(81, 79, 75, 0.40);
-    border-bottom: 2px solid rgba(163, 162, 156, 0.52);
-    border-right: 1px solid rgba(236, 236, 234, 0.16);
+    background-color: rgba(74, 76, 78, 0.40);
+    border-bottom: 2px solid rgba(155, 158, 160, 0.52);
+    border-right: 1px solid rgba(234, 235, 235, 0.16);
 }
-.md-th label { color: #f2f3f1; }
+.md-th label { color: #f1f2f2; }
 .md-td {
-    border-top: 1px solid rgba(236, 236, 234, 0.12);
-    border-right: 1px solid rgba(236, 236, 234, 0.09);
+    border-top: 1px solid rgba(234, 235, 235, 0.12);
+    border-right: 1px solid rgba(234, 235, 235, 0.09);
 }
-.md-td.odd   { background-color: rgba(236, 236, 234, 0.05); }
-.md-td label { color: #efefee; }
-.md-table-more { color: #acaaa6; }
+.md-td.odd   { background-color: rgba(234, 235, 235, 0.05); }
+.md-td label { color: #edeeef; }
+.md-table-more { color: #a4a7a9; }
 
 /* ---- Composer -------------------------------------------------------- */
 .input-frame {
-    background-color: rgba(19, 18, 17, 0.46);
+    background-color: rgba(17, 17, 18, 0.46);
     background-image:
         linear-gradient(180deg,
-            rgba(248, 248, 248, 0.18) 0%,
-            rgba(248, 248, 248, 0.05) 46%,
-            rgba(248, 248, 248, 0.0) 52%,
+            rgba(247, 248, 248, 0.18) 0%,
+            rgba(247, 248, 248, 0.05) 46%,
+            rgba(247, 248, 248, 0.0) 52%,
             rgba(0, 0, 0, 0.22) 100%);
-    border: 1px solid rgba(236, 236, 234, 0.32);
+    border: 1px solid rgba(234, 235, 235, 0.32);
     border-radius: 22px;
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.30),
         0 8px 22px rgba(0, 0, 0, 0.44),
-        0 0 18px rgba(130, 130, 125, 0.052);
+        0 0 18px rgba(121, 126, 129, 0.052);
 }
 .input-frame:focus-within {
-    background-color: rgba(27, 26, 25, 0.52);
-    border-color: rgba(168, 166, 162, 0.76);
+    background-color: rgba(24, 25, 26, 0.52);
+    border-color: rgba(160, 163, 165, 0.76);
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.36),
         0 8px 24px rgba(0, 0, 0, 0.46),
-        0 0 28px rgba(153, 152, 147, 0.12);
+        0 0 28px rgba(144, 148, 151, 0.12);
 }
 
 /* ---- Cards, chips, badges ------------------------------------------- */
 .card, .cmd-card {
-    background-color: rgba(19, 18, 17, 0.42);
+    background-color: rgba(17, 17, 18, 0.42);
     background-image:
-        linear-gradient(180deg, rgba(248, 248, 248, 0.11) 0%,
-                        rgba(248, 248, 248, 0.0) 52%,
+        linear-gradient(180deg, rgba(247, 248, 248, 0.11) 0%,
+                        rgba(247, 248, 248, 0.0) 52%,
                         rgba(0, 0, 0, 0.20) 100%);
-    border: 1px solid rgba(236, 236, 234, 0.28);
-    border-left: 4px solid rgba(157, 156, 150, 0.85);
+    border: 1px solid rgba(234, 235, 235, 0.28);
+    border-left: 4px solid rgba(148, 152, 154, 0.85);
     border-radius: 14px;
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.20),
         0 8px 22px rgba(0, 0, 0, 0.44);
 }
-.cmd-card-title { color: #c9c7c5; }
-.cmd-explain    { color: #d8d8d5; }
+.cmd-card-title { color: #c3c5c7; }
+.cmd-explain    { color: #d4d6d7; }
 .card-warn {
     background-color: rgba(229, 72, 77, 0.16);
     background-image:
-        linear-gradient(180deg, rgba(248, 248, 248, 0.12) 0%,
-                        rgba(248, 248, 248, 0.0) 52%,
+        linear-gradient(180deg, rgba(247, 248, 248, 0.12) 0%,
+                        rgba(247, 248, 248, 0.0) 52%,
                         rgba(0, 0, 0, 0.14) 100%);
-    border: 1px solid rgba(180, 179, 175, 0.56);
+    border: 1px solid rgba(173, 176, 178, 0.56);
     border-radius: 12px;
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18);
 }
@@ -3060,55 +3057,55 @@ headerbar {
 .notif-badge, .autorun-note, .watcher-banner, .media-panel,
 .media-placeholder, .attach-tray, .model-pick-row, .model-group-header {
     background-image:
-        linear-gradient(180deg, rgba(248, 248, 248, 0.15) 0%,
-                        rgba(248, 248, 248, 0.0) 52%,
+        linear-gradient(180deg, rgba(247, 248, 248, 0.15) 0%,
+                        rgba(247, 248, 248, 0.0) 52%,
                         rgba(0, 0, 0, 0.16) 100%);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.20);
 }
 .quick-chip, .attach-chip {
-    background-color: rgba(27, 26, 25, 0.40);
-    border: 1px solid rgba(236, 236, 234, 0.28);
+    background-color: rgba(24, 25, 26, 0.40);
+    border: 1px solid rgba(234, 235, 235, 0.28);
     border-radius: 999px;
 }
 .quick-chip:hover, .attach-chip:hover {
-    background-color: rgba(81, 79, 75, 0.36);
-    border-color: rgba(172, 171, 167, 0.60);
+    background-color: rgba(74, 76, 78, 0.36);
+    border-color: rgba(164, 168, 170, 0.60);
 }
 .effort-pill {
-    background-color: rgba(27, 26, 25, 0.40);
-    border: 1px solid rgba(236, 236, 234, 0.26);
+    background-color: rgba(24, 25, 26, 0.40);
+    border: 1px solid rgba(234, 235, 235, 0.26);
     border-radius: 999px;
 }
 .effort-seg:checked {
-    background-color: rgba(97, 96, 92, 0.56);
+    background-color: rgba(89, 93, 95, 0.56);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.30),
-                0 0 14px rgba(153, 152, 147, 0.109);
+                0 0 14px rgba(144, 148, 151, 0.109);
 }
 .media-panel, .media-placeholder, .attach-tray {
-    background-color: rgba(19, 18, 17, 0.40);
-    border: 1px solid rgba(236, 236, 234, 0.24);
+    background-color: rgba(17, 17, 18, 0.40);
+    border: 1px solid rgba(234, 235, 235, 0.24);
     border-radius: 14px;
 }
 
 /* ---- The activity feed / dock --------------------------------------- */
 .activity-feed, .activity-dock {
-    background-color: rgba(18, 17, 15, 0.42);
+    background-color: rgba(16, 16, 16, 0.42);
     background-image:
-        linear-gradient(180deg, rgba(248, 248, 248, 0.11) 0%,
-                        rgba(248, 248, 248, 0.0) 52%,
+        linear-gradient(180deg, rgba(247, 248, 248, 0.11) 0%,
+                        rgba(247, 248, 248, 0.0) 52%,
                         rgba(0, 0, 0, 0.20) 100%);
-    border: 1px solid rgba(236, 236, 234, 0.28);
+    border: 1px solid rgba(234, 235, 235, 0.28);
     border-radius: 16px;
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.20),
         0 8px 22px rgba(0, 0, 0, 0.44),
-        0 0 16px rgba(130, 130, 125, 0.046);
+        0 0 16px rgba(121, 126, 129, 0.046);
 }
-.activity-title   { color: #f9f8f8; }
-.activity-meta    { color: #acaaa6; }
+.activity-title   { color: #f8f8f8; }
+.activity-meta    { color: #a4a7a9; }
 .activity-preview-box {
-    background-color: rgba(13, 5, 9, 0.46);
-    border: 1px solid rgba(236, 236, 234, 0.18);
+    background-color: rgba(12, 5, 9, 0.46);
+    border: 1px solid rgba(234, 235, 235, 0.18);
     border-radius: 10px;
 }
 
@@ -3118,57 +3115,57 @@ headerbar {
    on - so it is deliberately the thickest in-window tint of the set.
    Any lower and stderr becomes unreadable over the artwork's neon. */
 .terminal-panel {
-    background-color: rgba(8, 7, 7, 0.80);
-    border-top: 1px solid rgba(163, 162, 156, 0.40);
+    background-color: rgba(7, 7, 7, 0.80);
+    border-top: 1px solid rgba(155, 158, 160, 0.40);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.11);
 }
 .terminal-panel-header {
-    background-color: rgba(81, 79, 75, 0.28);
+    background-color: rgba(74, 76, 78, 0.28);
     background-image:
-        linear-gradient(180deg, rgba(248, 248, 248, 0.13) 0%,
-                        rgba(248, 248, 248, 0.0) 52%,
+        linear-gradient(180deg, rgba(247, 248, 248, 0.13) 0%,
+                        rgba(247, 248, 248, 0.0) 52%,
                         rgba(0, 0, 0, 0.16) 100%);
-    border-bottom: 1px solid rgba(163, 162, 156, 0.34);
+    border-bottom: 1px solid rgba(155, 158, 160, 0.34);
 }
-.terminal-panel-title { color: #c9c7c5; }
+.terminal-panel-title { color: #c3c5c7; }
 .terminal-log-view, .terminal-log-view text {
     background-color: transparent;
-    color: #eae9e7;
+    color: #e7e8e8;
 }
 
 /* ---- Buttons: small panes of the same glass -------------------------- */
 button, .icon-button, .header-icon-button, .glyph-btn,
 menubutton.glyph-btn > button, .model-switch-btn, .terminal-toggle-btn,
 .menu-button, .wordmark-btn, .msg-speak-btn, .cmd-copy-btn, .mic-button {
-    background-color: rgba(30, 29, 28, 0.42);
+    background-color: rgba(27, 28, 29, 0.42);
     background-image:
         linear-gradient(180deg,
-            rgba(248, 248, 248, 0.18) 0%,
-            rgba(248, 248, 248, 0.05) 46%,
-            rgba(248, 248, 248, 0.0) 52%,
+            rgba(247, 248, 248, 0.18) 0%,
+            rgba(247, 248, 248, 0.05) 46%,
+            rgba(247, 248, 248, 0.0) 52%,
             rgba(0, 0, 0, 0.22) 100%);
-    border: 1px solid rgba(236, 236, 234, 0.30);
-    color: #f5f5f5;
+    border: 1px solid rgba(234, 235, 235, 0.30);
+    color: #f4f5f5;
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.24);
 }
 button:hover, .icon-button:hover, .header-icon-button:hover,
 .glyph-btn:hover, menubutton.glyph-btn > button:hover,
 .model-switch-btn:hover, .terminal-toggle-btn:hover,
 .msg-speak-btn:hover, .cmd-copy-btn:hover, .mic-button:hover {
-    background-color: rgba(92, 90, 87, 0.46);
-    border-color: rgba(172, 171, 167, 0.68);
+    background-color: rgba(84, 87, 90, 0.46);
+    border-color: rgba(164, 168, 170, 0.68);
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.34),
-        0 0 18px rgba(153, 152, 147, 0.109);
+        0 0 18px rgba(144, 148, 151, 0.109);
 }
 button:active, .glyph-btn:active, .icon-button:active {
-    background-color: rgba(60, 58, 56, 0.56);
+    background-color: rgba(54, 56, 58, 0.56);
     box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.50);
 }
 button:disabled {
-    background-color: rgba(30, 29, 28, 0.22);
-    border-color: rgba(236, 236, 234, 0.14);
-    color: #84837e;
+    background-color: rgba(27, 28, 29, 0.22);
+    border-color: rgba(234, 235, 235, 0.14);
+    color: #7b7f82;
 }
 button.flat {
     background-color: transparent;
@@ -3177,96 +3174,96 @@ button.flat {
     box-shadow: none;
 }
 button.flat:hover {
-    background-color: rgba(92, 90, 87, 0.36);
-    border-color: rgba(172, 171, 167, 0.50);
+    background-color: rgba(84, 87, 90, 0.36);
+    border-color: rgba(164, 168, 170, 0.50);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.24);
 }
 button.suggested-action, .primary-action, .cmd-run-btn {
-    background-color: rgba(103, 103, 97, 0.64);
+    background-color: rgba(95, 99, 101, 0.64);
     background-image:
         linear-gradient(180deg,
-            rgba(246, 246, 246, 0.32) 0%,
-            rgba(192, 191, 187, 0.11) 46%,
-            rgba(163, 162, 156, 0.0) 52%,
-            rgba(29, 28, 27, 0.28) 100%);
-    border: 1px solid rgba(190, 189, 185, 0.78);
-    color: #fbfafa;
+            rgba(245, 246, 246, 0.32) 0%,
+            rgba(185, 188, 190, 0.11) 46%,
+            rgba(155, 158, 160, 0.0) 52%,
+            rgba(26, 27, 28, 0.28) 100%);
+    border: 1px solid rgba(183, 186, 188, 0.78);
+    color: #fafafa;
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.46),
-        0 0 20px rgba(153, 152, 147, 0.109);
+        0 0 20px rgba(144, 148, 151, 0.109);
 }
 button.suggested-action:hover, .primary-action:hover, .cmd-run-btn:hover {
-    background-color: rgba(120, 119, 113, 0.72);
+    background-color: rgba(111, 115, 117, 0.72);
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.54),
-        0 0 28px rgba(153, 152, 147, 0.12);
+        0 0 28px rgba(144, 148, 151, 0.12);
 }
 /* The send button is pure PNG art - give it a lit glass pad, never a
    fill that would box the artwork in. */
 .send-button {
-    background-color: rgba(81, 79, 75, 0.28);
+    background-color: rgba(74, 76, 78, 0.28);
     background-image:
-        linear-gradient(180deg, rgba(246, 246, 246, 0.22) 0%,
-                        rgba(163, 162, 156, 0.0) 52%,
+        linear-gradient(180deg, rgba(245, 246, 246, 0.22) 0%,
+                        rgba(155, 158, 160, 0.0) 52%,
                         rgba(0, 0, 0, 0.16) 100%);
-    border: 1px solid rgba(178, 176, 172, 0.50);
+    border: 1px solid rgba(170, 173, 175, 0.50);
     border-radius: 16px;
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.30),
-        0 0 16px rgba(130, 130, 125, 0.086);
+        0 0 16px rgba(121, 126, 129, 0.086);
 }
 .send-button:hover {
-    background-color: rgba(103, 103, 97, 0.42);
-    border-color: rgba(192, 191, 187, 0.76);
+    background-color: rgba(95, 99, 101, 0.42);
+    border-color: rgba(185, 188, 190, 0.76);
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.40),
-        0 0 26px rgba(153, 152, 147, 0.12);
+        0 0 26px rgba(144, 148, 151, 0.12);
 }
 .unleash-button {
-    background-color: rgba(27, 26, 25, 0.36);
-    border: 1px solid rgba(236, 236, 234, 0.26);
+    background-color: rgba(24, 25, 26, 0.36);
+    border: 1px solid rgba(234, 235, 235, 0.26);
     border-radius: 999px;
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22);
 }
 .unleash-button.toggled {
-    background-color: rgba(109, 108, 102, 0.54);
-    border-color: rgba(190, 189, 185, 0.84);
+    background-color: rgba(100, 104, 106, 0.54);
+    border-color: rgba(183, 186, 188, 0.84);
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.40),
-        0 0 24px rgba(153, 152, 147, 0.12);
+        0 0 24px rgba(144, 148, 151, 0.12);
 }
 
 /* ---- Entries, search, switches -------------------------------------- */
 entry, searchentry, searchentry text, .sidebar-search, passwordentry,
 spinbutton entry {
-    background-color: rgba(14, 14, 12, 0.46);
+    background-color: rgba(13, 13, 13, 0.46);
     background-image:
         linear-gradient(180deg, rgba(0, 0, 0, 0.24) 0%,
                         rgba(0, 0, 0, 0.0) 40%);
-    border: 1px solid rgba(236, 236, 234, 0.28);
+    border: 1px solid rgba(234, 235, 235, 0.28);
     border-radius: 12px;
-    color: #f3f3f1;
+    color: #f2f2f2;
     box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.42);
 }
 entry:focus-within, searchentry:focus-within, .sidebar-search:focus-within {
-    border-color: rgba(168, 166, 162, 0.74);
+    border-color: rgba(160, 163, 165, 0.74);
     box-shadow:
         inset 0 1px 3px rgba(0, 0, 0, 0.42),
-        0 0 18px rgba(153, 152, 147, 0.103);
+        0 0 18px rgba(144, 148, 151, 0.103);
 }
 switch {
-    background-color: rgba(27, 26, 25, 0.52);
-    border: 1px solid rgba(236, 236, 234, 0.28);
+    background-color: rgba(24, 25, 26, 0.52);
+    border: 1px solid rgba(234, 235, 235, 0.28);
     box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.42);
 }
 switch:checked {
-    background-color: rgba(109, 108, 102, 0.68);
-    border-color: rgba(190, 189, 185, 0.76);
+    background-color: rgba(100, 104, 106, 0.68);
+    border-color: rgba(183, 186, 188, 0.76);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28),
-                0 0 14px rgba(153, 152, 147, 0.114);
+                0 0 14px rgba(144, 148, 151, 0.114);
 }
 switch > slider {
-    background-image: linear-gradient(180deg, #ffffff, #dcdbd8);
+    background-image: linear-gradient(180deg, #ffffff, #d8d9da);
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.50);
 }
 
@@ -3275,35 +3272,35 @@ switch > slider {
    higher alpha than the in-window panels: at 0.42 a dropdown was
    unreadable over the artwork.  Still glass, just thicker glass. ------- */
 popover > contents, popover > arrow, .popover-menu, menu, .menu {
-    background-color: rgba(16, 15, 14, 0.90);
+    background-color: rgba(14, 14, 15, 0.90);
     background-image:
-        linear-gradient(180deg, rgba(248, 248, 248, 0.13) 0%,
-                        rgba(248, 248, 248, 0.0) 52%,
+        linear-gradient(180deg, rgba(247, 248, 248, 0.13) 0%,
+                        rgba(247, 248, 248, 0.0) 52%,
                         rgba(0, 0, 0, 0.22) 100%);
-    border: 1px solid rgba(236, 236, 234, 0.30);
+    border: 1px solid rgba(234, 235, 235, 0.30);
     border-radius: 14px;
-    color: #f3f3f1;
+    color: #f2f2f2;
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.22),
         0 14px 34px rgba(0, 0, 0, 0.58);
 }
 popover row:selected, dropdown listview > row:selected,
 .model-pick-active {
-    background-color: rgba(109, 108, 102, 0.58);
+    background-color: rgba(100, 104, 106, 0.58);
     color: #ffffff;
 }
 /* A dialog sits over the conversation, not over the artwork, so it gets
    the thickest glass in the theme: enough to read a settings page through,
    with the gloss and the lit rim kept so it still belongs to the set. */
 window.dialog, dialog, .messagedialog, .dialog-content, .splash-window {
-    background-color: rgba(12, 12, 11, 0.90);
+    background-color: rgba(11, 11, 12, 0.90);
     background-image:
-        linear-gradient(180deg, rgba(248, 248, 248, 0.10) 0%,
-                        rgba(248, 248, 248, 0.0) 52%,
+        linear-gradient(180deg, rgba(247, 248, 248, 0.10) 0%,
+                        rgba(247, 248, 248, 0.0) 52%,
                         rgba(0, 0, 0, 0.20) 100%);
-    border: 1px solid rgba(236, 236, 234, 0.26);
+    border: 1px solid rgba(234, 235, 235, 0.26);
     border-radius: 18px;
-    color: #f3f3f1;
+    color: #f2f2f2;
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.20),
         0 18px 44px rgba(0, 0, 0, 0.62);
@@ -3311,45 +3308,45 @@ window.dialog, dialog, .messagedialog, .dialog-content, .splash-window {
 preferencespage, preferencesgroup {
     background-color: transparent;
     background-image: none;
-    color: #f3f3f1;
+    color: #f2f2f2;
 }
 list.boxed-list, list.boxed-list > row, row, comborow, .row {
-    background-color: rgba(30, 29, 28, 0.40);
-    color: #f3f3f1;
+    background-color: rgba(27, 28, 29, 0.40);
+    color: #f2f2f2;
 }
 list.boxed-list {
-    border: 1px solid rgba(236, 236, 234, 0.24);
+    border: 1px solid rgba(234, 235, 235, 0.24);
     border-radius: 14px;
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16);
 }
-row:hover { background-color: rgba(92, 90, 87, 0.30); }
-.settings-section-title { color: #c9c7c5; }
+row:hover { background-color: rgba(84, 87, 90, 0.30); }
+.settings-section-title { color: #c3c5c7; }
 dropdown > button {
-    background-color: rgba(30, 29, 28, 0.44);
-    border: 1px solid rgba(236, 236, 234, 0.28);
+    background-color: rgba(27, 28, 29, 0.44);
+    border: 1px solid rgba(234, 235, 235, 0.28);
     border-radius: 10px;
 }
 
 /* ---- Scrollbars: slivers of red glass -------------------------------- */
 scrollbar { background-color: transparent; }
 scrollbar slider {
-    background-color: rgba(236, 236, 234, 0.28);
+    background-color: rgba(234, 235, 235, 0.28);
     border: 1px solid rgba(255, 255, 255, 0.16);
     border-radius: 999px;
 }
-scrollbar slider:hover  { background-color: rgba(172, 171, 167, 0.56); }
-scrollbar slider:active { background-color: rgba(157, 156, 150, 0.80); }
+scrollbar slider:hover  { background-color: rgba(164, 168, 170, 0.56); }
+scrollbar slider:active { background-color: rgba(148, 152, 154, 0.80); }
 
 /* ---- Type: keep it legible on top of a photograph -------------------- */
-.chat-title, .app-title    { color: #f9f8f8; }
+.chat-title, .app-title    { color: #f8f8f8; }
 .chat-subtitle, .app-subtitle, .empty-state-body, .tool-indicator-label {
-    color: #b7b6b2;
+    color: #b0b3b5;
 }
-.empty-state-title { color: #f9f8f8; }
-.tao-quote         { color: #acaaa6; }
-.thoughts-text     { color: #d7d5d2; }
-.working-label     { color: #ebebe9; }
-.online-dot.online { color: #9d9c96; text-shadow: 0 0 9px rgba(153, 152, 147, 0.054); }
+.empty-state-title { color: #f8f8f8; }
+.tao-quote         { color: #a4a7a9; }
+.thoughts-text     { color: #d2d3d4; }
+.working-label     { color: #e9eaea; }
+.online-dot.online { color: #94989a; text-shadow: 0 0 9px rgba(144, 148, 151, 0.054); }
 
 /* ---- Text views: the last opaque rectangles ---------------------------
    A Gtk.TextView paints its own `text` node with the theme's view colour,
@@ -3364,10 +3361,10 @@ scrollbar slider:active { background-color: rgba(157, 156, 150, 0.80); }
 .input-frame viewport {
     background-color: transparent;
     background-image: none;
-    color: #f4f5f3;
+    color: #f3f4f4;
 }
 .input-frame textview text selection {
-    background-color: rgba(116, 115, 109, 0.55);
+    background-color: rgba(107, 111, 113, 0.55);
     color: #ffffff;
 }
 .code-block scrolledwindow,
@@ -3388,17 +3385,17 @@ textview.terminal-log-view text { background-color: transparent; }
    stops reading as a header. Nudged up until the grid survives the art
    behind it. Colour only - the cell padding stays exactly where the width
    measurement expects it. ---------------------------------------------- */
-.md-th     { background-color: rgba(88, 85, 81, 0.52); }
-.md-td.odd { background-color: rgba(242, 242, 240, 0.08); }
+.md-th     { background-color: rgba(80, 82, 84, 0.52); }
+.md-td.odd { background-color: rgba(240, 241, 241, 0.08); }
 
 /* ---- The burning status bar, cooled into the same glass -------------- */
 .working-row {
-    background-color: rgba(60, 58, 56, 0.36);
-    border: 1px solid rgba(172, 171, 167, 0.44);
+    background-color: rgba(54, 56, 58, 0.36);
+    border: 1px solid rgba(164, 168, 170, 0.44);
     border-radius: 12px;
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.24),
-        0 0 18px rgba(153, 152, 147, 0.091);
+        0 0 18px rgba(144, 148, 151, 0.091);
 }
 
 /* =====================================================================
@@ -3429,20 +3426,20 @@ textview.terminal-log-view text { background-color: transparent; }
     padding: 34px 44px 30px 44px;
     margin: 0 12px;
     border-radius: 26px 6px 26px 6px;
-    background-color: rgba(16, 15, 14, 0.44);
+    background-color: rgba(14, 14, 15, 0.44);
     background-image:
         linear-gradient(180deg,
-            rgba(248, 248, 248, 0.16) 0%,
-            rgba(248, 248, 248, 0.04) 46%,
-            rgba(248, 248, 248, 0.0) 52%,
+            rgba(247, 248, 248, 0.16) 0%,
+            rgba(247, 248, 248, 0.04) 46%,
+            rgba(247, 248, 248, 0.0) 52%,
             rgba(0, 0, 0, 0.26) 100%);
-    border: 1px solid rgba(236, 236, 234, 0.34);
+    border: 1px solid rgba(234, 235, 235, 0.34);
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.34),
-        inset 0 0 0 1px rgba(178, 176, 172, 0.034),
+        inset 0 0 0 1px rgba(170, 173, 175, 0.034),
         inset 0 -30px 50px rgba(0, 0, 0, 0.28),
         0 18px 44px rgba(0, 0, 0, 0.56),
-        0 0 34px rgba(130, 130, 125, 0.074);
+        0 0 34px rgba(121, 126, 129, 0.074);
 }
 .hero-emblem { margin-bottom: 12px; }
 .hero-eyebrow {
@@ -3450,7 +3447,7 @@ textview.terminal-log-view text { background-color: transparent; }
     font-size: 15px;
     font-weight: 700;
     letter-spacing: 6px;
-    color: #cac8c6;
+    color: #c4c6c8;
     margin-bottom: 2px;
 }
 .hero-title {
@@ -3458,10 +3455,10 @@ textview.terminal-log-view text { background-color: transparent; }
     font-size: 46px;
     font-weight: 900;
     letter-spacing: 8px;
-    color: #f9f9f9;
+    color: #f8f9f9;
     text-shadow:
-        0 0 26px rgba(153, 152, 147, 0.054),
-        0 0 60px rgba(143, 142, 137, 0.039),
+        0 0 26px rgba(144, 148, 151, 0.054),
+        0 0 60px rgba(134, 138, 141, 0.039),
         0 2px 3px rgba(0, 0, 0, 0.86);
 }
 /* The hairline under the wordmark. A Gtk.Box with no child has no natural
@@ -3478,63 +3475,63 @@ textview.terminal-log-view text { background-color: transparent; }
     min-width: 260px;
     margin: 15px 0 13px 0;
     background-image: linear-gradient(90deg,
-        rgba(163, 162, 156, 0.0) 0%,
-        rgba(180, 179, 175, 0.70) 26%,
-        rgba(242, 242, 240, 0.95) 50%,
-        rgba(180, 179, 175, 0.70) 74%,
-        rgba(163, 162, 156, 0.0) 100%);
-    box-shadow: 0 0 14px rgba(157, 156, 150, 0.12);
+        rgba(155, 158, 160, 0.0) 0%,
+        rgba(173, 176, 178, 0.70) 26%,
+        rgba(240, 241, 241, 0.95) 50%,
+        rgba(173, 176, 178, 0.70) 74%,
+        rgba(155, 158, 160, 0.0) 100%);
+    box-shadow: 0 0 14px rgba(148, 152, 154, 0.12);
 }
 .hero-subtitle {
     font-family: 'JetBrains Mono', monospace;
     font-size: 14px;
     font-weight: 700;
     letter-spacing: 4px;
-    color: #b7b6b2;
+    color: #b0b3b5;
     margin-bottom: 18px;
 }
 .hero-chip {
     padding: 8px 20px;
     border-radius: 999px;
-    background-color: rgba(81, 79, 75, 0.36);
+    background-color: rgba(74, 76, 78, 0.36);
     background-image:
-        linear-gradient(180deg, rgba(246, 246, 246, 0.24) 0%,
-                        rgba(163, 162, 156, 0.0) 52%,
+        linear-gradient(180deg, rgba(245, 246, 246, 0.24) 0%,
+                        rgba(155, 158, 160, 0.0) 52%,
                         rgba(0, 0, 0, 0.18) 100%);
-    border: 1px solid rgba(184, 183, 179, 0.60);
+    border: 1px solid rgba(177, 180, 182, 0.60);
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.34),
-        0 0 20px rgba(153, 152, 147, 0.097);
+        0 0 20px rgba(144, 148, 151, 0.097);
     margin-bottom: 20px;
 }
 .hero-chip-dot {
     font-size: 13px;
-    color: #9d9c96;
-    text-shadow: 0 0 10px rgba(153, 152, 147, 0.054);
+    color: #94989a;
+    text-shadow: 0 0 10px rgba(144, 148, 151, 0.054);
 }
 .hero-chip-label {
     font-family: 'JetBrains Mono', monospace;
     font-size: 18px;
     font-weight: 700;
     letter-spacing: 0.6px;
-    color: #f9f9f9;
+    color: #f8f9f9;
 }
 .hero-specs { margin-bottom: 18px; }
 .hero-spec-key {
     font-family: 'JetBrains Mono', monospace;
     font-size: 15px;
     letter-spacing: 1.4px;
-    color: #a09f9a;
+    color: #989b9e;
 }
 .hero-spec-val {
     font-family: 'JetBrains Mono', monospace;
     font-size: 15px;
     font-weight: 700;
-    color: #ececeb;
+    color: #eaebec;
 }
 .hero-hint {
     font-size: 14px;
-    color: #8e8c88;
+    color: #85888c;
     font-style: italic;
 }
 
@@ -3546,42 +3543,42 @@ textview.terminal-log-view text { background-color: transparent; }
     padding: 7px 18px 7px 14px;
     border-radius: 999px;
     min-height: 0;
-    background-color: rgba(30, 29, 28, 0.44);
+    background-color: rgba(27, 28, 29, 0.44);
     background-image:
         linear-gradient(180deg,
-            rgba(248, 248, 248, 0.18) 0%,
-            rgba(248, 248, 248, 0.05) 46%,
-            rgba(248, 248, 248, 0.0) 52%,
+            rgba(247, 248, 248, 0.18) 0%,
+            rgba(247, 248, 248, 0.05) 46%,
+            rgba(247, 248, 248, 0.0) 52%,
             rgba(0, 0, 0, 0.22) 100%);
-    border: 1px solid rgba(236, 236, 234, 0.32);
+    border: 1px solid rgba(234, 235, 235, 0.32);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.24);
 }
 .unleash-button:hover {
-    background-color: rgba(92, 90, 87, 0.44);
-    border-color: rgba(180, 179, 175, 0.68);
+    background-color: rgba(84, 87, 90, 0.44);
+    border-color: rgba(173, 176, 178, 0.68);
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.32),
-        0 0 20px rgba(153, 152, 147, 0.114);
+        0 0 20px rgba(144, 148, 151, 0.114);
 }
 .unleash-button.toggled {
-    background-color: rgba(112, 111, 105, 0.62);
+    background-color: rgba(103, 107, 109, 0.62);
     background-image:
         linear-gradient(180deg,
-            rgba(248, 248, 248, 0.38) 0%,
-            rgba(197, 196, 191, 0.12) 46%,
-            rgba(163, 162, 156, 0.0) 52%,
-            rgba(31, 30, 29, 0.30) 100%);
-    border-color: rgba(206, 205, 202, 0.90);
+            rgba(247, 248, 248, 0.38) 0%,
+            rgba(191, 193, 194, 0.12) 46%,
+            rgba(155, 158, 160, 0.0) 52%,
+            rgba(28, 29, 30, 0.30) 100%);
+    border-color: rgba(201, 203, 204, 0.90);
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.56),
-        inset 0 -10px 20px rgba(64, 63, 59, 0.34),
-        0 0 30px rgba(153, 152, 147, 0.12);
+        inset 0 -10px 20px rgba(58, 60, 62, 0.34),
+        0 0 30px rgba(144, 148, 151, 0.12);
 }
 .unleash-button.toggled:hover {
-    background-color: rgba(126, 126, 121, 0.70);
+    background-color: rgba(117, 122, 125, 0.70);
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.64),
-        0 0 40px rgba(153, 152, 147, 0.12);
+        0 0 40px rgba(144, 148, 151, 0.12);
 }
 .unleash-glyph { font-size: 19px; }
 .unleash-label {
@@ -3589,12 +3586,12 @@ textview.terminal-log-view text { background-color: transparent; }
     font-size: 14px;
     font-weight: 800;
     letter-spacing: 2.2px;
-    color: #dadad7;
+    color: #d6d8d9;
 }
-.unleash-button:hover .unleash-label { color: #f8f8f8; }
+.unleash-button:hover .unleash-label { color: #f7f8f8; }
 .unleash-button.toggled .unleash-label {
     color: #ffffff;
-    text-shadow: 0 0 12px rgba(225, 224, 222, 0.054);
+    text-shadow: 0 0 12px rgba(222, 223, 223, 0.054);
 }
 
 /* ---- Cut edges on the big surfaces ----------------------------------
@@ -3605,29 +3602,29 @@ textview.terminal-log-view text { background-color: transparent; }
     border-radius: 4px 20px 20px 20px;
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.34),
-        inset 0 0 0 1px rgba(236, 236, 234, 0.026),
-        inset 0 0 30px rgba(178, 176, 172, 0.02),
+        inset 0 0 0 1px rgba(234, 235, 235, 0.026),
+        inset 0 0 30px rgba(170, 173, 175, 0.02),
         inset 0 -18px 30px rgba(0, 0, 0, 0.24),
         0 10px 26px rgba(0, 0, 0, 0.48),
-        0 0 22px rgba(130, 130, 125, 0.057);
+        0 0 22px rgba(121, 126, 129, 0.057);
 }
 .msg-user {
     border-radius: 20px 20px 4px 20px;
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.38),
-        inset 0 0 0 1px rgba(225, 224, 222, 0.04),
-        inset 0 0 30px rgba(153, 152, 147, 0.04),
-        inset 0 -18px 30px rgba(54, 52, 50, 0.22),
+        inset 0 0 0 1px rgba(222, 223, 223, 0.04),
+        inset 0 0 30px rgba(144, 148, 151, 0.04),
+        inset 0 -18px 30px rgba(49, 50, 52, 0.22),
         0 10px 26px rgba(0, 0, 0, 0.46),
-        0 0 24px rgba(130, 130, 125, 0.086);
+        0 0 24px rgba(121, 126, 129, 0.086);
 }
 .input-frame {
     border-radius: 24px 8px 24px 8px;
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.30),
-        inset 0 0 0 1px rgba(236, 236, 234, 0.029),
+        inset 0 0 0 1px rgba(234, 235, 235, 0.029),
         0 8px 22px rgba(0, 0, 0, 0.44),
-        0 0 18px rgba(130, 130, 125, 0.052);
+        0 0 18px rgba(121, 126, 129, 0.052);
 }
 .code-block, .md-table, .activity-feed, .activity-dock,
 .card, .cmd-card, .md-quote {
@@ -3648,7 +3645,7 @@ window.dialog, dialog, .messagedialog, .dialog-content {
 .tao-quote {
     font-size: 15px;
     line-height: 1.5;
-    color: #a09f9a;
+    color: #989b9e;
 }
 
 /* =====================================================================
@@ -3704,32 +3701,32 @@ window.dialog, dialog, .messagedialog, .dialog-content {
     padding: 6px 12px;
     border-radius: 999px;
     min-height: 0;
-    background-color: rgba(22, 22, 21, 0.52);
+    background-color: rgba(20, 21, 22, 0.52);
     background-image:
-        linear-gradient(180deg, rgba(248, 248, 248, 0.13) 0%,
-                        rgba(248, 248, 248, 0.0) 52%,
+        linear-gradient(180deg, rgba(247, 248, 248, 0.13) 0%,
+                        rgba(247, 248, 248, 0.0) 52%,
                         rgba(0, 0, 0, 0.20) 100%);
-    border: 1px solid rgba(236, 236, 234, 0.16);
-    border-top-color: rgba(242, 243, 241, 0.28);
+    border: 1px solid rgba(234, 235, 235, 0.16);
+    border-top-color: rgba(241, 242, 242, 0.28);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.13);
 }
 .activity-header:hover,
 .activity-dock .activity-header:hover {
-    background-color: rgba(33, 31, 30, 0.60);
-    border-color: rgba(236, 236, 234, 0.26);
+    background-color: rgba(30, 30, 31, 0.60);
+    border-color: rgba(234, 235, 235, 0.26);
 }
 .activity-feed.live .activity-header {
-    border-color: rgba(185, 183, 179, 0.30);
-    border-top-color: rgba(215, 214, 211, 0.44);
+    border-color: rgba(178, 180, 182, 0.30);
+    border-top-color: rgba(210, 212, 213, 0.44);
 }
 .activity-title  {
-    color: #eaeae8;
+    color: #e8e9e9;
     font-weight: 600;
     font-size: 14px;
     letter-spacing: 0.2px;
 }
-.activity-meta   { color: #888682; font-size: 13px; letter-spacing: 0.3px; }
-.activity-chevron{ color: #7d7b77; font-size: 13px; }
+.activity-meta   { color: #7f8286; font-size: 13px; letter-spacing: 0.3px; }
+.activity-chevron{ color: #74777b; font-size: 13px; }
 .activity-spinner { min-width: 13px; min-height: 13px; }
 .activity-verdict { font-size: 13px; }
 
@@ -3741,7 +3738,7 @@ window.dialog, dialog, .messagedialog, .dialog-content {
    no drop shadow to lift it off a surface it is already part of. */
 .activity-panel-inline {
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.10);
-    background-color: rgba(18, 17, 15, 0.52);
+    background-color: rgba(16, 16, 16, 0.52);
 }
 .activity-panel {
     /* NEARLY OPAQUE, and that is not a style choice. Every other glass
@@ -3750,13 +3747,13 @@ window.dialog, dialog, .messagedialog, .dialog-content {
        the sentence underneath reads straight through the step list and
        both become unreadable. A panel you can see through is only glass
        when there is nothing behind it that matters. */
-    background-color: rgba(13, 13, 11, 0.965);
+    background-color: rgba(12, 12, 12, 0.965);
     background-image:
-        linear-gradient(180deg, rgba(248, 248, 248, 0.12) 0%,
-                        rgba(248, 248, 248, 0.0) 44%,
+        linear-gradient(180deg, rgba(247, 248, 248, 0.12) 0%,
+                        rgba(247, 248, 248, 0.0) 44%,
                         rgba(0, 0, 0, 0.24) 100%);
-    border: 1px solid rgba(236, 236, 234, 0.16);
-    border-top-color: rgba(242, 243, 241, 0.30);
+    border: 1px solid rgba(234, 235, 235, 0.16);
+    border-top-color: rgba(241, 242, 242, 0.30);
     border-radius: 14px;
     padding: 6px 8px;
     box-shadow:
@@ -3769,8 +3766,8 @@ window.dialog, dialog, .messagedialog, .dialog-content {
 }
 .activity-step        { padding: 4px 6px 4px 4px; }
 .activity-step-name   { letter-spacing: 0.2px; }
-.activity-step-detail { color: #979591; }
-.activity-step-time   { color: #7a7873; font-size: 13px; }
+.activity-step-detail { color: #8e9195; }
+.activity-step-time   { color: #717477; font-size: 13px; }
 
 /* THE NESTED BOX, REMOVED.  A tool result preview was drawn inside its own
    bordered, tinted, rounded panel INSIDE the feed panel INSIDE the docked
@@ -3781,13 +3778,13 @@ window.dialog, dialog, .messagedialog, .dialog-content {
     background-color: transparent;
     background-image: none;
     border: none;
-    border-left: 1px solid rgba(236, 236, 234, 0.16);
+    border-left: 1px solid rgba(234, 235, 235, 0.16);
     border-radius: 0;
     margin: 0 0 2px 16px;
     padding: 0 0 2px 10px;
 }
 .activity-preview {
-    color: #898884;
+    color: #808488;
     font-size: 14px;
 }
 
@@ -3799,24 +3796,24 @@ window.dialog, dialog, .messagedialog, .dialog-content {
    light and a soft lift - present, once you look for it.
    -------------------------------------------------------------------- */
 .input-frame {
-    border-color: rgba(236, 236, 234, 0.18);
-    border-top-color: rgba(242, 243, 241, 0.30);
+    border-color: rgba(234, 235, 235, 0.18);
+    border-top-color: rgba(241, 242, 242, 0.30);
 }
 .input-frame:focus-within {
-    border-color: rgba(189, 188, 184, 0.34);
-    border-top-color: rgba(215, 214, 211, 0.52);
+    border-color: rgba(182, 185, 187, 0.34);
+    border-top-color: rgba(210, 212, 213, 0.52);
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.26),
         0 8px 24px rgba(0, 0, 0, 0.46),
-        0 0 22px rgba(153, 152, 147, 0.077);
+        0 0 22px rgba(144, 148, 151, 0.077);
 }
 
 /* ---- Sidebar rows --------------------------------------------------- */
 /* The agent marker takes the palette because it is a geometric glyph, not
    an emoji - see the comment at its construction site. */
-.chat-row .pin-icon   { color: #918f8a; font-size: 12px; }
-.chat-row .agent-icon { color: #a8a7a3; }
-.chat-row .meta-line  { color: #7b7a76; }
+.chat-row .pin-icon   { color: #888b8e; font-size: 12px; }
+.chat-row .agent-icon { color: #a0a4a6; }
+.chat-row .meta-line  { color: #72767a; }
 
 /* ---- The hero nameplate ---------------------------------------------- */
 .hero-subtitle { margin-bottom: 6px; }
@@ -3824,16 +3821,16 @@ window.dialog, dialog, .messagedialog, .dialog-content {
    left on the card once the glows came down, which made "DeepSeek-V4-Flash"
    the second most prominent thing after the wordmark. */
 .hero-chip {
-    background-color: rgba(33, 31, 30, 0.52);
-    border: 1px solid rgba(236, 236, 234, 0.18);
-    border-top-color: rgba(242, 243, 241, 0.30);
+    background-color: rgba(30, 30, 31, 0.52);
+    border: 1px solid rgba(234, 235, 235, 0.18);
+    border-top-color: rgba(241, 242, 242, 0.30);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
 }
-.hero-chip-label { color: #dddcda; }
-.hero-chip-dot   { color: #a09f9a; }
+.hero-chip-label { color: #d9dadc; }
+.hero-chip-dot   { color: #979b9e; }
 .hero-armline {
     font-size: 14px;
-    color: #8c8b87;
+    color: #83878b;
     letter-spacing: 0.2px;
     margin-bottom: 16px;
 }
@@ -3850,32 +3847,32 @@ window.dialog, dialog, .messagedialog, .dialog-content {
    also how the asymmetric corners already distinguish them.
    -------------------------------------------------------------------- */
 .msg-user {
-    background-color: rgba(48, 47, 44, 0.34);
+    background-color: rgba(43, 45, 46, 0.34);
     background-image:
         linear-gradient(180deg,
-            rgba(246, 246, 246, 0.16) 0%,
-            rgba(216, 215, 212, 0.05) 46%,
-            rgba(163, 162, 156, 0.0) 52%,
-            rgba(13, 14, 12, 0.24) 100%);
-    border: 1px solid rgba(236, 236, 234, 0.20);
-    border-top-color: rgba(244, 245, 243, 0.34);
+            rgba(245, 246, 246, 0.16) 0%,
+            rgba(212, 213, 214, 0.05) 46%,
+            rgba(155, 158, 160, 0.0) 52%,
+            rgba(12, 13, 13, 0.24) 100%);
+    border: 1px solid rgba(234, 235, 235, 0.20);
+    border-top-color: rgba(243, 244, 244, 0.34);
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.24),
-        inset 0 -18px 30px rgba(19, 19, 18, 0.20),
+        inset 0 -18px 30px rgba(17, 18, 19, 0.20),
         0 8px 22px rgba(0, 0, 0, 0.42);
 }
 .msg-user:hover {
-    background-color: rgba(55, 54, 51, 0.38);
-    border-color: rgba(236, 236, 234, 0.28);
-    border-top-color: rgba(244, 245, 243, 0.42);
+    background-color: rgba(50, 52, 53, 0.38);
+    border-color: rgba(234, 235, 235, 0.28);
+    border-top-color: rgba(243, 244, 244, 0.42);
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.28),
-        inset 0 -18px 30px rgba(19, 19, 18, 0.22),
+        inset 0 -18px 30px rgba(17, 18, 19, 0.22),
         0 10px 26px rgba(0, 0, 0, 0.44);
 }
 .msg-assistant {
-    border-color: rgba(236, 236, 234, 0.16);
-    border-top-color: rgba(242, 243, 241, 0.26);
+    border-color: rgba(234, 235, 235, 0.16);
+    border-top-color: rgba(241, 242, 242, 0.26);
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.16),
         inset 0 -18px 30px rgba(0, 0, 0, 0.24),
@@ -3887,7 +3884,7 @@ window.dialog, dialog, .messagedialog, .dialog-content {
    place, so a later rule cannot quietly promote a label to the weight of
    an answer. */
 .chat-subtitle, .app-subtitle, .md-table-more, .code-lang {
-    color: #898783;
+    color: #808387;
     letter-spacing: 0.4px;
 }
 
@@ -3926,34 +3923,34 @@ window.dialog, dialog, .messagedialog, .dialog-content {
 /* ---- 1. the ground drops ------------------------------------------- */
 .activity-panel-frame,
 .activity-dock .activity-panel-frame {
-    background-color: rgba(8, 7, 8, 0.975);
+    background-color: rgba(7, 7, 8, 0.975);
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.10),
         0 14px 40px rgba(0, 0, 0, 0.60);
-    border: 1px solid rgba(226, 225, 224, 0.11);
-    border-top-color: rgba(237, 237, 236, 0.20);
+    border: 1px solid rgba(223, 224, 225, 0.11);
+    border-top-color: rgba(235, 236, 237, 0.20);
 }
 .activity-header,
 .activity-dock .activity-header {
-    background-color: rgba(14, 14, 13, 0.60);
-    border: 1px solid rgba(226, 225, 224, 0.11);
-    border-top-color: rgba(237, 237, 236, 0.19);
+    background-color: rgba(13, 13, 14, 0.60);
+    border: 1px solid rgba(223, 224, 225, 0.11);
+    border-top-color: rgba(235, 236, 237, 0.19);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 .activity-header:hover,
 .activity-dock .activity-header:hover {
-    background-color: rgba(25, 24, 23, 0.70);
-    border-color: rgba(226, 225, 224, 0.17);
+    background-color: rgba(22, 23, 24, 0.70);
+    border-color: rgba(223, 224, 225, 0.17);
 }
 
 /* ---- 2. chrome goes neutral ---------------------------------------- */
-.activity-title    { color: #b8b6b2; letter-spacing: 0.2px; }
-.activity-meta     { color: #72706b; font-size: 13px; }
-.activity-chevron  { color: #6a6964; }
-.activity-step-detail { color: #898884; }
-.activity-step-time   { color: #716f6a; }
-.activity-preview     { color: #7c7b77; }
-.activity-preview-box { border-left-color: rgba(226, 225, 224, 0.12); }
+.activity-title    { color: #b1b3b5; letter-spacing: 0.2px; }
+.activity-meta     { color: #696c6f; font-size: 13px; }
+.activity-chevron  { color: #616568; }
+.activity-step-detail { color: #808488; }
+.activity-step-time   { color: #686b6e; }
+.activity-preview     { color: #73777b; }
+.activity-preview-box { border-left-color: rgba(223, 224, 225, 0.12); }
 
 /* ---- 3. shadows only where something floats ------------------------ */
 .msg-user, .msg-assistant {
@@ -3963,18 +3960,18 @@ window.dialog, dialog, .messagedialog, .dialog-content {
     /* The operator's own words were the most saturated object on screen.
        Depth, not volume: a hair lighter than the assistant pane, with the
        same near-neutral hairline. */
-    background-color: rgba(37, 36, 34, 0.42);
-    border-color: rgba(226, 225, 224, 0.14);
-    border-top-color: rgba(237, 237, 236, 0.24);
+    background-color: rgba(33, 34, 36, 0.42);
+    border-color: rgba(223, 224, 225, 0.14);
+    border-top-color: rgba(235, 236, 237, 0.24);
 }
 .msg-user:hover {
-    background-color: rgba(43, 42, 40, 0.48);
-    border-color: rgba(226, 225, 224, 0.20);
+    background-color: rgba(39, 40, 42, 0.48);
+    border-color: rgba(223, 224, 225, 0.20);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.13);
 }
 .msg-assistant {
-    border-color: rgba(226, 225, 224, 0.10);
-    border-top-color: rgba(237, 237, 236, 0.18);
+    border-color: rgba(223, 224, 225, 0.10);
+    border-top-color: rgba(235, 236, 237, 0.18);
 }
 
 /* ---- 4. two things the quiet pass got wrong, corrected after looking
@@ -3997,27 +3994,27 @@ window.dialog, dialog, .messagedialog, .dialog-content {
    appearance is "something is shouting at you".
    -------------------------------------------------------------------- */
 .chat-row.selected, .chat-row:selected {
-    background-color: rgba(37, 36, 34, 0.44);
+    background-color: rgba(33, 34, 36, 0.44);
     background-image: none;
-    border-left: 3px solid #878681;
+    border-left: 3px solid #7e8285;
     box-shadow: none;
 }
 .chat-row.selected .title-line, .chat-row:selected .title-line {
-    color: #efefed;
+    color: #edeeee;
 }
 .input-frame {
-    background-color: rgba(18, 17, 15, 0.62);
+    background-color: rgba(16, 16, 16, 0.62);
     background-image:
-        linear-gradient(180deg, rgba(248, 248, 248, 0.07) 0%,
-                        rgba(248, 248, 248, 0.0) 50%,
+        linear-gradient(180deg, rgba(247, 248, 248, 0.07) 0%,
+                        rgba(247, 248, 248, 0.0) 50%,
                         rgba(0, 0, 0, 0.18) 100%);
-    border: 1px solid rgba(226, 225, 224, 0.24);
-    border-top-color: rgba(237, 237, 236, 0.30);
+    border: 1px solid rgba(223, 224, 225, 0.24);
+    border-top-color: rgba(235, 236, 237, 0.30);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.09);
 }
 .input-frame:focus-within {
-    background-color: rgba(22, 22, 21, 0.70);
-    border-color: rgba(172, 171, 167, 0.44);
+    background-color: rgba(20, 21, 22, 0.70);
+    border-color: rgba(164, 168, 170, 0.44);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
 }
 
@@ -4038,7 +4035,7 @@ window.dialog, dialog, .messagedialog, .dialog-content {
 .activity-plan {
     padding: 2px 6px 6px 4px;
     margin: 0 0 4px 0;
-    border-bottom: 1px solid rgba(226, 225, 224, 0.10);
+    border-bottom: 1px solid rgba(223, 224, 225, 0.10);
     background-color: transparent;
     background-image: none;
     border-radius: 0;
@@ -4048,13 +4045,13 @@ window.dialog, dialog, .messagedialog, .dialog-content {
     padding: 2px 2px 4px 2px;
 }
 .activity-plan-title {
-    color: #7c7b77;
+    color: #73777b;
     font-size: 12px;
     letter-spacing: 1.2px;
     text-transform: uppercase;
 }
 .activity-plan-count {
-    color: #7c7b77;
+    color: #73777b;
     font-size: 12px;
 }
 .activity-plan-row {
@@ -4063,35 +4060,35 @@ window.dialog, dialog, .messagedialog, .dialog-content {
 .activity-plan-glyph {
     font-size: 12px;
     min-width: 14px;
-    color: #6e6c67;
+    color: #65686b;
 }
 .activity-plan-name {
-    color: #a7a5a2;
+    color: #9fa2a5;
     letter-spacing: 0.2px;
 }
 .activity-plan-note {
-    color: #7c7b77;
+    color: #73777b;
     font-size: 13px;
 }
 /* OPEN: present, not yet earning attention. */
-.activity-plan-row.plan-open .activity-plan-name  { color: #9a9894; }
+.activity-plan-row.plan-open .activity-plan-name  { color: #919498; }
 /* DOING: the one line worth looking at, so it is the only lit one. */
-.activity-plan-row.plan-doing .activity-plan-glyph { color: #b8b8b3; }
+.activity-plan-row.plan-doing .activity-plan-glyph { color: #b1b5b6; }
 .activity-plan-row.plan-doing .activity-plan-name  {
-    color: #e8e7e6;
+    color: #e5e6e7;
     font-weight: 600;
 }
 /* DONE: keeps its tick and steps back.  Finished work should be
    countable at a glance and should not compete with what is live. */
-.activity-plan-row.plan-done .activity-plan-glyph { color: #6e6c67; }
-.activity-plan-row.plan-done .activity-plan-name  { color: #787671; }
+.activity-plan-row.plan-done .activity-plan-glyph { color: #65686b; }
+.activity-plan-row.plan-done .activity-plan-name  { color: #6f7275; }
 /* BLOCKED: the one place red belongs here - it is a real problem, and
    red means danger and nothing else in this theme. */
 .activity-plan-row.plan-blocked .activity-plan-glyph { color: #e5484d; }
 .activity-plan-row.plan-blocked .activity-plan-name  { color: #c9a9ab; }
 /* DROPPED: deliberately not done.  Dim, not alarming. */
-.activity-plan-row.plan-dropped .activity-plan-glyph { color: #62605d; }
-.activity-plan-row.plan-dropped .activity-plan-name  { color: #6b6a65; }
+.activity-plan-row.plan-dropped .activity-plan-glyph { color: #5a5d60; }
+.activity-plan-row.plan-dropped .activity-plan-name  { color: #626669; }
 """
 
 
@@ -13278,7 +13275,6 @@ class MainWindow(Adw.ApplicationWindow):
             self._tools_locked = False
             self._force_answer_tries = 0
             self._forged_retries = 0
-            self._bad_propose_retries = 0
             # Per-request, like the counters above: a stall on the LAST question
             # must not spend this question's nudges.
             self._answer_stall_nudges = 0
@@ -16402,10 +16398,6 @@ class MainWindow(Adw.ApplicationWindow):
                             "• autonomous: applying file write directly"
                             + (" (append)" if _mode.lower().startswith("a")
                                else ""), "dim")
-                        # A chunk landed — reset the failure budget so the NEXT
-                        # chunk (append) is judged on its own, not starved by an
-                        # earlier truncated attempt.
-                        self._bad_propose_retries = 0
                         self._run_proposed_edit(_p, str(_c), mode=_mode)
                         return
                 # args unusable — fall through to the normal re-emit handling
@@ -16427,62 +16419,25 @@ class MainWindow(Adw.ApplicationWindow):
                 what = "file proposal (diff card)"
             if not card_ok:
                 retries = getattr(self, "_bad_propose_retries", 0)
-                # ── WHY IT FAILED DECIDES THE FIX ──
-                # The commonest cause is NOT bad escaping — it is the call being
-                # CUT OFF at the token cap because the whole file was crammed
-                # into one `content` string. Telling the model to "re-send it as
-                # a single well-formed call" then makes it re-send the same
-                # giant blob and hit the same cap: the exact loop the operator
-                # filmed. So read the cut reason the host already has and, either
-                # way, MANDATE small append chunks — a call that only ever
-                # carries ~40 lines cannot be truncated.
-                _truncated = bool(getattr(self, "_last_stream_truncated", False)
-                                  or self._last_stream_cut_by == "length")
-                _timecut = self._last_stream_cut_by == "time"
-                # Recover the intended path even from an unparsed/truncated call,
-                # so the recipe can name the real file.
-                _rec_path = (call.args.get("path") or "").strip()
-                if not _rec_path:
-                    _raw = str(call.args.get("_raw") or "")
-                    _mp = re.search(r'"path"\s*:\s*"([^"\\]+)"', _raw)
-                    if _mp:
-                        _rec_path = _mp.group(1)
-                _pth = _rec_path or "<path>"
-                if retries < 4:
+                if retries < 2:
                     self._bad_propose_retries = retries + 1
-                    if _truncated:
-                        _why = ("was CUT OFF at the response-token cap part-way "
-                                "through the file — the JSON never closed, so "
-                                "nothing was written")
-                    elif _timecut:
-                        _why = ("was cut off at the per-turn TIME limit mid-file "
-                                "— nothing was written")
-                    else:
-                        _why = ("could not be parsed (an unescaped \" or a "
-                                "control character in \"content\") — nothing "
-                                "was written")
                     self.terminal_log(
-                        f"✗ {call.name} did not render ({'truncated' if _truncated or _timecut else 'unparseable args'})"
-                        f" — steering it to small append chunks", "error")
+                        f"✗ {call.name} did not render (unparseable args) — "
+                        f"asking model to re-emit", "error")
                     self._feed_tool_result(
-                        f"Your {call.name} {_why}. NO {what} is on screen.\n\n"
-                        f"WRITE THE FILE IN SMALL CHUNKS — a call that carries "
-                        f"only a few dozen lines can never be cut off:\n"
-                        f'  1. write_file  {{"path": "{_pth}", "content": '
-                        f'"<first ~40 lines>", "mode": "create"}}\n'
-                        f'  2. write_file  {{"path": "{_pth}", "content": '
-                        f'"<next ~40 lines>", "mode": "append"}}\n'
-                        f"  3. repeat step 2 until the file is complete, then "
-                        f"verify.\n"
-                        f"Rules: keep EVERY chunk to about 40 lines or fewer; "
-                        f"never put a whole file in one call; do not use "
-                        f"propose_edit for a brand-new file; escape \" as \\\" "
-                        f"and newlines as \\n inside content. Start with the "
-                        f"create chunk now.")
+                        f"Your {call.name} did NOT render — its arguments "
+                        f"could not be parsed (most likely an unescaped \" or "
+                        f"a stray control character inside the \"content\" "
+                        f"string). NO {what} is on screen and NOTHING was "
+                        f"written or proposed. Re-send it now as a single "
+                        f"well-formed tool call: the JSON must be valid — "
+                        f"escape every \" inside content as \\\" and use \\n "
+                        f"for newlines. Until the card actually renders, do "
+                        f"not tell the operator that a proposal or diff card "
+                        f"exists.")
                     return
-                # Exhausted the guided retries — stop bouncing and let the turn
-                # end so we don't loop.  The recipe is in context for next turn.
-                self._bad_propose_retries = 0
+                # Gave it two honest shots; stop bouncing and let the turn end
+                # so we don't loop.  The error is in context for next turn.
                 self.terminal_log(
                     f"✗ {call.name} still unparseable after retries — "
                     f"ending turn", "error")
