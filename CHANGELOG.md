@@ -1,3 +1,33 @@
+# v1.2.0.6
+
+**Claude-coloured theme, Camoufox fixed, code-writing loop killed at the root.**
+
+GUI: the accent's grey band (#45484a/#292a2b + their rgba glows, ~90 hardcoded
+uses a token-only change never reached — why it "still looked black and grey")
+is migrated to Claude's clay/coral: #d97757 on every highlight, #c15f3c fill on
+suggested-action buttons, neutrals warmed toward charcoal. Red/amber/green
+semantic, untouched. Parses under GTK 4.14, ASCII-only, pinned by test_theme.py.
+
+Camoufox: new "camoufox-bin" engine drives an on-disk Camoufox
+(~/.cache/camoufox) through Playwright's executable_path when the camoufox python
+package isn't importable — the reported "browser on disk but import camoufox
+returns None -> fell back to HTTP" case. Ladder: camoufox -> camoufox-bin ->
+firefox -> chromium -> HTTP; browser_status reports the binary path and the exact
+fix; install.sh sets up playwright + camoufox.
+
+Code-writing: "propose_edit did not render (unparseable args)" was a truncation
+loop — a big file crammed into one call hit the token cap, the JSON never closed,
+and the correction told the model to re-send it as one call (same blob, same
+truncation, forever). Now the host reads the cut reason and mandates small append
+chunks (create-then-append, ~40 lines each, target path recovered from the
+truncated call). The persona's self-contradicting "content is the WHOLE file"
+line is replaced by a chunk-first rule.
+
+**4,994 assertions across 82 suites**, zero red. New: test_theme.py; camoufox-bin
++ chunk-steering coverage. GUARDRAIL byte-identical.
+
+---
+
 # v1.2.0.5
 
 **Three models, a loop bug fixed, an aggressive debug pass.** The catalogue is

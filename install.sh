@@ -404,6 +404,44 @@ else
   warn "   python3 -m pip install --user --break-system-packages headroom-ai"
 fi
 
+step "Real browser for web_read (Camoufox / Playwright, optional)"
+# web_read renders JavaScript pages and passes bot checks in a REAL browser,
+# falling back to plain HTTP only when none is available. Two things must be
+# importable in the SAME interpreter Basilisk runs under:
+#   • playwright — the API Basilisk drives every engine through. This ALONE is
+#     enough to drive a Camoufox browser that is already on disk in
+#     ~/.cache/camoufox (the "camoufox-bin" engine) — the common case where a
+#     `camoufox fetch` left the browser on disk but its python package is not
+#     importable here, so web_read was silently dropping to HTTP.
+#   • camoufox — the hardened-Firefox launcher, for the full anti-fingerprint
+#     path. Best value, so tried too; its browser build is fetched separately.
+# All best-effort and NON-fatal: the app runs without them, just on HTTP.
+_pipq() { python3 -m pip install --user --quiet "$@" 2>/dev/null \
+          || python3 -m pip install --user --break-system-packages --quiet "$@" 2>/dev/null; }
+if python3 -c "import playwright" 2>/dev/null; then
+  ok "playwright already present (can drive an on-disk Camoufox)"
+elif _pipq playwright; then
+  ok "playwright installed — Basilisk can now drive a real browser"
+else
+  warn "playwright not installed — web_read uses plain HTTP until you add it:"
+  warn "   python3 -m pip install --user --break-system-packages playwright"
+fi
+if python3 -c "import camoufox" 2>/dev/null; then
+  ok "camoufox python package already present"
+elif _pipq camoufox; then
+  ok "camoufox installed"
+  # Fetch the hardened-Firefox build so the full launcher works (best-effort).
+  if python3 -m camoufox fetch >/dev/null 2>&1; then
+    ok "camoufox browser build fetched"
+  else
+    warn "camoufox package installed but 'python3 -m camoufox fetch' failed —"
+    warn "run it yourself later; until then the on-disk browser is still used."
+  fi
+else
+  warn "camoufox launcher not installed (optional). If a Camoufox browser is"
+  warn "already in ~/.cache/camoufox, playwright above is enough to use it."
+fi
+
 # ── 4. Optional desktop-control helpers ──────────────────────────
 #
 # Basilisk's device-control tools (launch apps, type/click, screenshots,
