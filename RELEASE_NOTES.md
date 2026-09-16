@@ -1,3 +1,97 @@
+# v1.2.0.5
+
+**Three models, a real loop-termination bug fixed, and an aggressive debug pass.**
+
+**The catalogue is now three models, on purpose.** The operator cut it to the
+three he actually runs: **DeepSeek-V4.1-Flash** (the new default and the best of
+them), **DeepSeek-V4-Flash** (the measured 87/113 build, immediate fallback),
+and **GLM-5.3-Flash** (the one-click alternative). Everything else is gone from
+the picker and the fallback chain. `hard_engagement_model` ships empty — there
+is no heavier sibling to escalate to now, so a heavy turn just deepens the
+reasoning dial (on GLM) or keeps the bigger token budget (on DeepSeek, which
+steers with `enable_thinking`, not a depth dial). The vision picker and the
+default vision model point at GLM-5.3-Flash, the one kept model that takes
+images. The live-catalogue recovery still exists, so a hand-typed id that 404s
+still self-heals.
+
+**The bug that made it "full of bugs": the degraded-reply loop didn't stop when
+it said it did.** When the model returned empty several times (a provider
+hiccup, a blocked fetch — the "cant even fetch news" case), the retries-exhausted
+branch wrote "I couldn't get a usable reply — tap send to try again" and then
+**fell through** into the force-answer path: it orphaned that message, re-locked
+tools, and kicked up to two more turns — each re-entering the degraded block with
+a **fresh** three-retry budget. A three-retry ceiling was really about eleven
+round-trips, and the app printed "giving up" while visibly carrying on. It now
+finishes the turn and returns where it says it does. And both degraded dead-ends
+write a visible, honest message into the reply instead of leaving a blank bubble.
+
+**Aggressive debug pass** (a subagent audited every changed path and ran the full
+suite):
+
+- Native-tools rejection now degrades on **422** as well as 400 (some
+  OpenAI-compatible servers reject an unsupported `tools` field with 422), so it
+  still falls back to the text protocol instead of dying.
+- The repeat-guard content fingerprint now also covers `workspace_replace`'s
+  alias argument names (`new_str`/`old_str`/`replace`/`find`), closing the last
+  gap where three distinct alias-form edits of one file could false-block.
+- Confirmed no dangling runtime reference to any removed model, no double
+  dispatch across the structured + text tool channels, and that the
+  reasoning-stream recovery never fires on an ordinary prose reply.
+
+**4,965 assertions across 81 suites**, zero red. GUARDRAIL byte-identical.
+
+---
+
+# v1.2.0.4
+
+**Native function-calling — driving the model the way DeepSeek says to, and the
+way Claude Code / opencode / DeepSeek's own app do.**
+
+v1.2.0.3 stopped the empty-reply loop. This makes the model *good* at tool use
+instead of merely surviving it. DeepSeek's V4/V4.1 family is trained for the
+OpenAI `tools` flow: the harness declares the tools as function schemas in the
+request, and the model replies with structured `tool_calls`. Basilisk had only
+ever used a text `<tool>` protocol and never sent a `tools` array — so the model
+was guessing a convention instead of doing what it was trained for, which is
+where a lot of the "dumb shit on screen" came from.
+
+Now Basilisk sends a real `tools` schema, **built from the same system prompt
+the model is about to read** — so it lists exactly the tools the model was told
+about (the leashed and armed tool sets track automatically) and can never
+advertise a phantom one. Each tool's parameters and types are lifted from the
+persona's own example JSON; the `//` comment becomes the description.
+
+Three properties make this safe rather than a gamble:
+
+- **The text protocol is still the floor.** The persona still documents it, the
+  canonicaliser still parses it, and the dispatcher's argument aliasing still
+  absorbs any drift — so nothing regresses if the model mixes channels (which
+  DeepSeek's own tracker notes it sometimes does).
+- **A provider that rejects `tools` degrades automatically.** A 400 naming the
+  tools field strips it, retries the *same* model on the text protocol, and
+  remembers not to send it again that session — the model is never abandoned
+  over an unsupported field.
+- **It is a setting.** `native_tool_calls` is on by default and off in one flip;
+  sidecar completions never send tools.
+
+Combined with v1.2.0.3's structured-`tool_calls` reader and reasoning-stream
+recovery, the model is now driven, and read back, exactly the way the reference
+harnesses do it.
+
+**GUI:** the brief was "pro coding-terminal vibes, not a black-and-white movie —
+change colour and texture a bit, keep the structure." So the v1.2.0.3 serif
+title-card experiment is reverted, a **muted phosphor-green terminal accent**
+(desaturated, restrained to highlights — focus, links, switches, the ready-dot)
+replaces the flat grey, and the near-black surfaces get a **faint top-to-bottom
+gradient** for depth instead of a flat fill. Danger red and warning amber are
+untouched. Verified: parses clean under real GTK 4.14, ASCII-only bytes literal.
+
+**4,961 assertions across 81 suites**, zero red. New suite:
+`test_nativetools.py` (schema build, payload wiring, the reject-and-degrade
+path, the router gates). GUARDRAIL byte-identical.
+
+---
+
 # v1.2.0.3
 
 **The one where V4.1-Flash actually builds the game. From a live build the

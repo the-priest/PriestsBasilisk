@@ -122,7 +122,7 @@ from basilisk_core import (
     parse_tool_calls, strip_tool_calls, shell_block_command,
     looks_like_failed_tool_call, scrub_tool_debris,
     contains_tool_markup,
-    _normalise_tool_syntax,
+    _normalise_tool_syntax, build_tools_schema,
     extract_think_blocks, strip_think_blocks, speakable_text,
     stream_visible_text,
     is_online, is_sensitive_path, command_needs_sudo, is_catastrophic_command,
@@ -190,7 +190,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.basilisk"
 APP_NAME = "Basilisk"
-VERSION = "1.2.0.3"
+VERSION = "1.2.0.5"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -372,9 +372,14 @@ CSS = b"""
    the user's Plasma accent - which is exactly what made the UI look
    inconsistent.  Retint them ALL to the Basilisk palette in one place. */
 
-@define-color accent_color              #45484a;
-@define-color accent_bg_color           #292a2b;
-@define-color accent_fg_color           #ffffff;
+/* Accent: a muted phosphor-green terminal highlight -- the "pro coding
+   terminal" signal, kept desaturated so it reads professional, not neon, and
+   restrained to highlights (focus rings, links, switches, selection). The
+   button surface stays a near-neutral graphite with the faintest green cast so
+   it ties in without going loud. Danger red and warning amber are untouched. */
+@define-color accent_color              #55c295;
+@define-color accent_bg_color           #21302a;
+@define-color accent_fg_color           #eafff6;
 
 @define-color destructive_color         #e5484d;
 @define-color destructive_bg_color      #e5484d;
@@ -410,14 +415,20 @@ CSS = b"""
 
 /* ===== Base ===== */
 
+/* Texture: a very faint top-to-bottom gradient on the big surfaces gives the
+   near-black grounds real depth instead of a flat fill -- the "pro terminal"
+   feel -- without touching the structure or the palette. The deltas are a
+   couple of points of lightness, so it reads as depth, not as a colour. */
 window, .background {
     background-color: #09090a;
+    background-image: linear-gradient(to bottom, #0b0b0d, #08080a 60%);
     color: #dbdcdd;
     font-family: 'Inter', 'Cantarell', 'SF Pro Text', sans-serif;
 }
 
 headerbar {
     background-color: #0f0f10;
+    background-image: linear-gradient(to bottom, #141416, #0e0e10);
     color: #dbdcdd;
     border-bottom: 1px solid #202021;
     min-height: 56px;
@@ -426,6 +437,7 @@ headerbar {
 
 .sidebar {
     background-color: #0c0c0d;
+    background-image: linear-gradient(to bottom, #0e0e10, #0a0a0b);
     border-right: 1px solid #202021;
 }
 
@@ -435,9 +447,8 @@ headerbar {
     font-size: 27px;
     font-weight: 900;
     font-family: 'JetBrains Mono', 'Fira Code', monospace;
-    /* warm ivory rather than cold white -- the brand mono, lit like old film */
-    color: #ece8df;
-    letter-spacing: 4px;
+    color: #e4e4e5;
+    letter-spacing: 3px;
     text-shadow: 0 2px 3px rgba(0, 0, 0, 0.9), 0 0 11px rgba(161, 164, 167, 0.041);
 }
 /* Connectivity dot beside BASILISK: green online, red offline */
@@ -446,8 +457,8 @@ headerbar {
     margin-top: 2px;
 }
 .online-dot.online {
-    color: #45484a;
-    text-shadow: 0 0 7px rgba(69, 72, 74, 0.054);
+    color: #55c295;
+    text-shadow: 0 0 8px rgba(85, 194, 149, 0.45);
 }
 .online-dot.offline {
     color: #717477;
@@ -2151,28 +2162,15 @@ headerbar {
 }
 
 /* ---- Headings: sections you can scan ---- */
-.md-heading { margin: 16px 0 7px 0; }
+.md-heading { margin: 14px 0 6px 0; }
 .md-heading:first-child { margin-top: 2px; }
-/* == Title-card typography: a classic serif display face on the big
-   headings, warm ivory on the near-black ground -- the look of a 1930s
-   film's intertitle, kept dark and minimal. Falls back through common
-   serifs to the generic 'serif', so it renders even where none of the
-   named faces are installed. The body and the terminal chrome stay
-   monospace; only the display headings carry the cinema. */
 .md-heading-text {
     color: #d4d6d6;
     font-weight: 800;
     letter-spacing: 0.3px;
 }
-.md-heading.h1 .md-heading-text,
-.md-heading.h2 .md-heading-text {
-    font-family: 'Playfair Display', 'Cormorant Garamond', 'Bodoni Moda',
-                 'DejaVu Serif', Georgia, serif;
-    color: #ece7db;
-    font-weight: 700;
-}
-.md-heading.h1 .md-heading-text { font-size: 42px; letter-spacing: 0.6px; }
-.md-heading.h2 .md-heading-text { font-size: 36px; letter-spacing: 0.4px; }
+.md-heading.h1 .md-heading-text { font-size: 40px; }
+.md-heading.h2 .md-heading-text { font-size: 35px; }
 .md-heading.h3 .md-heading-text { font-size: 31px; color: #c6c9c9; }
 .md-heading.h4 .md-heading-text,
 .md-heading.h5 .md-heading-text,
@@ -6138,8 +6136,12 @@ _CONTENT_WRITE_TOOLS = frozenset({
     "write_file", "workspace_write", "workspace_append", "workspace_insert",
     "workspace_replace", "workspace_edits", "workspace_import", "propose_edit",
 })
-# The argument keys that carry that mutating payload, across the tools above.
-_CONTENT_ARG_KEYS = ("content", "text", "edits", "new", "diff", "data", "body")
+# The argument keys that carry that mutating payload, across the tools above —
+# including workspace_replace's accepted aliases (new_str/old_str/replace/find),
+# so an alias-form replace is still fingerprinted by content and never
+# false-blocked on the third distinct edit of one file.
+_CONTENT_ARG_KEYS = ("content", "text", "edits", "new", "diff", "data", "body",
+                     "new_str", "old_str", "replace", "find", "old")
 
 
 def _action_changes_state(label: str) -> bool:
@@ -14105,6 +14107,27 @@ class MainWindow(Adw.ApplicationWindow):
             if _live():
                 GLib.idle_add(self._on_stream_reasoning, tok, _epoch)
 
+        # ── NATIVE TOOL SCHEMA FOR THIS TURN ──
+        # Built from the SAME system prompt the model is about to read, so it
+        # lists exactly the tools it was told about (leashed vs armed tracks
+        # automatically) and never a phantom one. Agent mode only — the model
+        # can only act then — and cached by prompt so it is parsed once, not
+        # every turn. The backend degrades to the text protocol if the provider
+        # rejects it, so this is the primary path with the old one as the floor.
+        _tools = None
+        if self.current_agent_mode and self.settings.get(
+                "native_tool_calls", True):
+            try:
+                _ph = hash(sysprompt)
+                _c = getattr(self, "_tools_cache", None)
+                if _c and _c[0] == _ph:
+                    _tools = _c[1]
+                else:
+                    _tools = build_tools_schema(sysprompt) or None
+                    self._tools_cache = (_ph, _tools)
+            except Exception:
+                _tools = None
+
         def _bg():
             # The turn advances ONLY through _on_done / _on_err.  router.
             # stream_chat calls one of them on every path it knows about, but if
@@ -14120,7 +14143,8 @@ class MainWindow(Adw.ApplicationWindow):
                                         on_reasoning=_on_reason,
                                         effort=_effort,
                                         max_tokens_override=_mt_override,
-                                        reasoning_override=_re_override)
+                                        reasoning_override=_re_override,
+                                        tools=_tools)
             except Exception as e:
                 log(f"stream worker died: {traceback.format_exc()}")
                 _on_err(f"internal error starting the reply: "
@@ -14916,14 +14940,40 @@ class MainWindow(Adw.ApplicationWindow):
                     self._schedule_kick(600)
                     return
                 else:
-                    # Retries exhausted. Don't loop — just note it. If the model
-                    # is actually done, Rule 1/Rule 2 at the top of this branch
-                    # end the mission within a couple of quiet turns; if a human
-                    # is driving, they tap send.
+                    # Retries exhausted. Don't loop — and NEVER leave the
+                    # operator staring at a blank bubble. Write an honest,
+                    # visible message into the reply itself (the old code only
+                    # flashed a toast, so the turn ended with an empty bubble —
+                    # the "cant even fetch news" the operator saw). The counter
+                    # resets, so tapping send genuinely retries.
                     self._degraded_retries = 0
+                    _msg = (
+                        "I couldn't get a usable reply together for that — the "
+                        "model returned an empty response several times in a "
+                        "row. That's usually a provider hiccup or a fetch that "
+                        "got blocked, not your question. Tap send to try again, "
+                        "or switch the model in Settings → Backends.")
+                    try:
+                        if self.streaming_msg_widget is not None:
+                            self.streaming_msg_widget.set_content(_msg)
+                        if self.streaming_msg_db_id:
+                            self.store.update_message(
+                                self.streaming_msg_db_id, _msg)
+                    except Exception:
+                        pass
                     self._show_toast(
                         "That reply looked degraded after retries. Tap send to "
                         "try again.", timeout=6)
+                    # END THE TURN HERE. Without this return, control fell
+                    # through to the empty-answer force-answer block below, which
+                    # orphaned the message just written, re-locked tools, and
+                    # kicked up to two more turns — each re-entering this degraded
+                    # block with a FRESH 3-retry budget because the counter was
+                    # just reset. That turned a 3-retry ceiling into ~11 round
+                    # trips and printed "giving up" while visibly continuing. The
+                    # block's own contract is "Retries exhausted. Don't loop."
+                    self._finish_turn_cleanup()
+                    return False
             # ── the two dead ends that lose an answer ──
             # (a) tools were locked and the model still called one, or
             # (b) the reply is ALL tool call and no prose,
@@ -15077,6 +15127,20 @@ class MainWindow(Adw.ApplicationWindow):
                 self.terminal_log(
                     "⚠ the model kept emitting an unreadable tool call — "
                     "giving up on this turn", "error")
+                # Never a blank bubble: put an honest line where the answer
+                # should have been, so the operator sees WHY, not nothing.
+                _msg = (
+                    "I couldn't complete that — the model's replies came back "
+                    "unreadable after a couple of attempts (an empty response "
+                    "or a malformed tool call). Tap send to retry, or switch "
+                    "the model in Settings → Backends.")
+                try:
+                    if self.streaming_msg_widget is not None:
+                        self.streaming_msg_widget.set_content(_msg)
+                    if self.streaming_msg_db_id:
+                        self.store.update_message(self.streaming_msg_db_id, _msg)
+                except Exception:
+                    pass
                 self._show_toast(
                     "The model's tool calls couldn't be read after 2 "
                     "attempts. Tap send to retry, or switch model in "

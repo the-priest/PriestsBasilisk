@@ -1,3 +1,58 @@
+# v1.2.0.5
+
+**Three models, a loop bug fixed, an aggressive debug pass.** The catalogue is
+cut to the three the operator runs: DeepSeek-V4.1-Flash (new default, the best of
+them), DeepSeek-V4-Flash (measured 87/113 fallback), GLM-5.3-Flash (one-click
+alternative). Everything else removed from picker and chain. hard_engagement_model
+ships empty (no heavier sibling to escalate to); a heavy turn deepens the reasoning
+dial on GLM and keeps the bigger token budget on DeepSeek. Vision picker + default
+vision model point at GLM-5.3-Flash.
+
+Fixed the loop that made it feel "full of bugs": the degraded/empty-reply
+retries-exhausted branch wrote "giving up — tap send" and then FELL THROUGH into
+the force-answer path, orphaning that message, re-locking tools, and kicking up to
+two more turns — each re-entering the degraded block with a fresh 3-retry budget
+(~11 round-trips instead of 3, "giving up" printed while it kept going). It now
+finishes the turn and returns; both degraded dead-ends leave a visible honest
+message, never a blank bubble.
+
+Aggressive debug pass (subagent audit + full suite): native-tools rejection now
+degrades on 422 as well as 400; the repeat-guard fingerprint now covers
+workspace_replace's alias arg names (new_str/old_str/replace/find); confirmed no
+dangling removed-model reference, no double dispatch across the structured+text
+channels, and the reasoning-recovery never fires on prose.
+
+**4,965 assertions across 81 suites**, zero red. GUARDRAIL byte-identical.
+
+---
+
+# v1.2.0.4
+
+**Native function-calling.** DeepSeek's V4/V4.1 family is trained for the OpenAI
+`tools` flow (declare tools as function schemas, model replies with structured
+`tool_calls`) — the flow Claude Code, opencode and DeepSeek's own app use.
+Basilisk had only a text `<tool>` protocol and never sent a `tools` array, so the
+model guessed a convention instead of doing what it was trained for. Now it
+sends a real `tools` schema built from the SAME system prompt the model reads
+(so it can never list a phantom tool; parameters and types are lifted from the
+persona's example JSON, the `//` comment becomes the description). The text
+protocol stays as the floor (canonicaliser + argument aliasing), a provider that
+rejects the tools field strips it and retries the same model on the text
+protocol and remembers, and it is a setting (`native_tool_calls`, default on;
+sidecars never send tools). Together with v1.2.0.3's structured-call reader and
+reasoning recovery, the model is now driven and read back the way the reference
+harnesses do it.
+
+**GUI:** reverted the v1.2.0.3 serif title-card look ("not a black-and-white
+movie"); added a muted phosphor-green terminal accent (desaturated, highlights
+only) over the flat grey, and a faint top-to-bottom gradient on the near-black
+surfaces for depth. Red/amber untouched. Parses under real GTK 4.14, ASCII-only.
+
+**4,961 assertions across 81 suites**, zero red. New suite:
+`test_nativetools.py`. GUARDRAIL byte-identical.
+
+---
+
 # v1.2.0.3
 
 **The one where V4.1-Flash actually builds the game.** From a live build the

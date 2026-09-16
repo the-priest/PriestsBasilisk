@@ -199,6 +199,22 @@ ck("the stream-done handler recovers a call from the reasoning stream",
 ck("...gated on there being no visible answer and no call already found",
    "not executable and not calls and not cancelled" in _BSRC)
 
+# v1.2.0.5: the degraded-exhausted branch must TERMINATE the turn, not fall
+# through into the empty-answer force-answer block below it (which re-kicked the
+# turn with a fresh 3-retry budget — an ~11-round-trip loop that printed
+# "giving up" while it visibly kept going). Pin that it finishes and returns
+# before reaching the "dead ends that lose an answer" block.
+_exh = _BSRC.split("Retries exhausted. Don't loop.", 1)
+ck("the degraded-exhausted branch is present", len(_exh) == 2)
+_tail = _exh[1] if len(_exh) == 2 else ""
+_deadends = _tail.find("dead ends that lose an answer")
+_cleanup = _tail.find("_finish_turn_cleanup()")
+_ret = _tail.find("return False")
+ck("degraded-exhausted finishes the turn and returns before the force-answer "
+   "block (no fall-through loop)",
+   0 <= _cleanup < _deadends and 0 <= _ret < _deadends,
+   f"cleanup={_cleanup} return={_ret} deadends={_deadends}")
+
 
 # ── 4. the repeat-guard content fingerprint ──────────────────────────
 print("\n== iterating on one file is not a repeat; re-writing bytes is ==")

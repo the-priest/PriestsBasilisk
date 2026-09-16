@@ -77,10 +77,15 @@ ck("DEFAULT_SETTINGS model matches the chain head",
 # outage slower.  Every chain entry is one more full round-trip the
 # operator waits through, each bounded by STREAM_IDLE_TIMEOUT_S.
 print("\n== catalogue vs fallback chain ==")
-ck("catalogue is populated", len(SF.catalogue) >= 12, str(len(SF.catalogue)))
+# v1.2.0.5: the catalogue was trimmed to the three models the operator runs —
+# V4.1-Flash (default), V4-Flash (fallback), GLM-5.3-Flash (alternative). The
+# picker IS the chain now, on purpose.
+ck("catalogue is exactly the three kept models", len(SF.catalogue) == 3,
+   str([m.id for m in SF.catalogue]))
 ck("fallback chain stays SHORT", len(SF.chain) <= 5, str(len(SF.chain)))
-ck("catalogue is strictly bigger than the chain",
-   len(SF.catalogue) > len(SF.chain))
+ck("catalogue and chain are the same three models",
+   {m.id for m in SF.catalogue} == set(SF.chain),
+   str({m.id for m in SF.catalogue} ^ set(SF.chain)))
 _chain_not_in_cat = [m for m in SF.chain if SF.info(m) is None]
 ck("every chain model has catalogue metadata",
    not _chain_not_in_cat, str(_chain_not_in_cat))
@@ -186,21 +191,21 @@ ck("GLM family gets its agentic sampling recommendation",
 if _glm:
     ck("GLM-5.3-Flash has no think toggle (architectural reasoning)",
        _glm.think_off is None, str(_glm.think_off))
-_glm52 = SF.info("zai-org/GLM-5.2")
-ck("GLM-5.2 keeps its think toggle (hybrid)",
-   _glm52 is not None and _glm52.think_off is not None)
+# v1.2.0.5: GLM-5.2 was removed from the trimmed catalogue.
+ck("GLM-5.2 is gone from the trimmed catalogue",
+   SF.info("zai-org/GLM-5.2") is None)
 # Natively multimodal, so it must be offered as a vision model too.
 ck("GLM-5.3-Flash is a pickable vision model",
    "zai-org/GLM-5.3-Flash" in C.VISION_MODELS.get("siliconflow", []))
-# v1.2.0.0: the default is V4.1-Flash (operator's instruction), a same-vendor
-# same-dialect refresh of V4-Flash. The measured 87/113 build stays one hop
-# away as chain[1] and its blurb keeps the benchmark provenance — nobody has
-# run the board on V4.1 yet, so those numbers are NOT restated as V4.1's.
+# v1.2.0.5: the default is V4.1-Flash (operator's instruction — the best of the
+# three kept models) and it is now the FIRST pick in the picker too. The
+# measured 87/113 build (V4-Flash) stays one hop away as chain[1] and its blurb
+# keeps the benchmark provenance — nobody has run the board on V4.1 yet.
 ck("the pin is DeepSeek-V4.1-Flash and the chain head agrees",
    SF.chain[0] == PINNED and PINNED == "deepseek-ai/DeepSeek-V4.1-Flash")
-ck("GLM-5.3-Flash is still the FIRST pick in the catalogue",
-   SF.pick_ids[0] == "zai-org/GLM-5.3-Flash", SF.pick_ids[0])
-ck("...and is in the fallback walk behind both DeepSeek workhorses",
+ck("DeepSeek-V4.1-Flash is now the FIRST pick in the catalogue",
+   SF.pick_ids[0] == "deepseek-ai/DeepSeek-V4.1-Flash", SF.pick_ids[0])
+ck("GLM-5.3-Flash is still in the fallback walk behind both DeepSeek models",
    "zai-org/GLM-5.3-Flash" in SF.chain[2:], str(SF.chain))
 # THE BENCHMARK ROWS DO NOT MOVE WITH THE PIN. Every README score was produced
 # driving DeepSeek-V4-Flash; that model stays in the catalogue, stays the
@@ -379,7 +384,9 @@ ck("every model says what it is for", not _nonote, str(_nonote))
 _badtier = [m.id for m in SF.catalogue
             if m.tier not in ("flagship", "workhorse", "budget")]
 ck("every tier is a known tier", not _badtier, str(_badtier))
-for tier in ("flagship", "workhorse", "budget"):
+# v1.2.0.5: the catalogue is three Flash-class models, so only the tiers those
+# occupy are populated; there is no longer a 'budget' rung.
+for tier in ("flagship", "workhorse"):
     ck(f"tier '{tier}' is non-empty",
        any(m.tier == tier for m in SF.catalogue))
 
@@ -389,17 +396,21 @@ for tier in ("flagship", "workhorse", "budget"):
 # alone, so a valid heavy model picked from the catalogue was silently
 # ignored: the escalation never fired and looked exactly like it had.
 print("\n== knows() / effort escalation ==")
+# v1.2.0.5: hard_engagement_model now ships EMPTY (no heavier sibling to
+# escalate to — V4.1-Flash is the best of the three). Empty is valid: a heavy
+# turn deepens reasoning / raises the token budget instead of swapping model.
 _heavy = C.DEFAULT_SETTINGS.get("hard_engagement_model", "")
-ck("default hard_engagement_model is recognised", SF.knows(_heavy), _heavy)
+ck("default hard_engagement_model is empty (no cross-model escalation)",
+   _heavy == "", repr(_heavy))
 _unknown = [m.id for m in SF.catalogue if not SF.knows(m.id)]
 ck("knows() accepts every catalogue model", not _unknown, str(_unknown))
 ck("knows() accepts every chain model",
    all(SF.knows(m) for m in SF.chain))
 ck("knows() rejects a bogus id", not SF.knows("acme/DefinitelyNotAModel"))
-_cat_only = [m.id for m in SF.catalogue if m.id not in SF.chain]
-ck("a catalogue-only model is a valid heavy pick",
-   bool(_cat_only) and SF.knows(_cat_only[0]),
-   str(_cat_only[:1]))
+# v1.2.0.5: the picker IS the chain now (three models, no catalogue-only
+# extras), so every pickable id is also a live fallback and vice versa.
+ck("the picker and the fallback chain are the same set",
+   set(SF.pick_ids) == set(SF.chain), str(set(SF.pick_ids) ^ set(SF.chain)))
 
 
 # ── 6. providers without a catalogue are unaffected ──────────────────
@@ -433,9 +444,12 @@ for key, prov in C.PROVIDERS_BY_KEY.items():
 # voices and image generators, every one of which 400s on a chat call.
 print("\n== live /models filter ==")
 B = C.OpenAICompatBackend(SF)
+# _is_chat_model is a content filter (drops embeddings/rerankers/TTS/image
+# ids), NOT a catalogue membership test, so any real chat id survives it —
+# including ids outside the trimmed catalogue.
 _should_keep = [
-    "deepseek-ai/DeepSeek-V4-Pro", "zai-org/GLM-5.2", "tencent/Hy3",
-    "Qwen/Qwen3.6-27B", "moonshotai/Kimi-K3",
+    "deepseek-ai/DeepSeek-V4.1-Flash", "deepseek-ai/DeepSeek-V4-Flash",
+    "zai-org/GLM-5.3-Flash", "some-vendor/Some-Chat-Model",
 ]
 _should_drop = [
     "Qwen/Qwen3-Embedding-8B", "Qwen/Qwen3-Reranker-0.6B",
@@ -449,18 +463,16 @@ ck("non-chat models are filtered out", not _kept_wrong, str(_kept_wrong))
 _dropped_wrong = [m for m in _should_keep if not B._is_chat_model(m)]
 ck("chat models survive the filter", not _dropped_wrong, str(_dropped_wrong))
 
-_ranked = B._rank_live(["zzz/Unknown", "deepseek-ai/DeepSeek-V4-Pro",
-                        "aaa/Unknown", "zai-org/GLM-5.2"])
+_ranked = B._rank_live(["zzz/Unknown", "deepseek-ai/DeepSeek-V4-Flash",
+                        "aaa/Unknown", "zai-org/GLM-5.3-Flash"])
 ck("catalogue models rank above unknown ones",
-   _ranked.index("zai-org/GLM-5.2") < _ranked.index("aaa/Unknown"),
+   _ranked.index("zai-org/GLM-5.3-Flash") < _ranked.index("aaa/Unknown"),
    str(_ranked))
 ck("unknown models still sort A-Z among themselves",
    _ranked.index("aaa/Unknown") < _ranked.index("zzz/Unknown"))
-ck("ranking preserves catalogue order",
-   _ranked.index("zai-org/GLM-5.2")
-   < _ranked.index("deepseek-ai/DeepSeek-V4-Pro")
-   or [m.id for m in SF.catalogue].index("zai-org/GLM-5.2")
-   > [m.id for m in SF.catalogue].index("deepseek-ai/DeepSeek-V4-Pro"))
+ck("ranking preserves catalogue order (V4-Flash before GLM-5.3-Flash)",
+   _ranked.index("deepseek-ai/DeepSeek-V4-Flash")
+   < _ranked.index("zai-org/GLM-5.3-Flash"))
 ck("ranking is total (nothing lost)", len(_ranked) == 4)
 
 # The cache must not serve another account's catalogue after a key swap.
@@ -529,8 +541,8 @@ ck("picker order == curated catalogue order", _order == list(SF.pick_ids))
 ck("pinned default is NOT last in the picker",
    _order.index(PINNED) < len(_order) - 1,
    f"{_order.index(PINNED)} of {len(_order)}")
-ck("a flagship model outranks the legacy 72B",
-   _order.index("zai-org/GLM-5.2") < _order.index("Qwen/Qwen2.5-72B-Instruct"))
+ck("the pinned default is first in the picker",
+   _order[0] == PINNED, _order[0])
 
 # The old heuristic, reproduced, so the regression is pinned not described.
 _old = sorted(
@@ -539,8 +551,11 @@ _old = sorted(
                           re.findall(r"(\d+(?:\.\d+)?)\s*[bB]\b", im[1])),
                          default=0.0), im[0]))
 _old_ids = [m for _i, m in _old]
-ck("the OLD sort would have buried the pinned default",
-   _old_ids.index(PINNED) > _order.index(PINNED),
+# With the trimmed 3-model catalogue there is no big-parameter model to bury
+# the pin behind, so the curated order simply must never rank the pin WORSE
+# than the old size heuristic would have.
+ck("the curated order never ranks the pin below the old size heuristic",
+   _old_ids.index(PINNED) >= _order.index(PINNED),
    f"old={_old_ids.index(PINNED)} new={_order.index(PINNED)}")
 
 # A provider with no catalogue must still get the old regex path.
@@ -566,7 +581,7 @@ ck("no-catalogue providers still get the size heuristic",
    and len(_bare_order) == len(_BARE.chain))
 
 _tiers = _pick._models_by_tier(SF)
-ck("tier grouping produces labelled groups", len(_tiers) >= 3)
+ck("tier grouping produces labelled groups", len(_tiers) >= 2)
 ck("tier grouping loses nothing",
    sorted(m for _lbl, ids in _tiers for m in ids) == sorted(SF.pick_ids))
 ck("flagship group comes first", "FLAGSHIP" in (_tiers[0][0] or ""))
@@ -579,7 +594,14 @@ ck("groq NOW gets labelled tier groups like any catalogued provider",
 _d = _pick._model_detail(SF, PINNED)
 ck("detail line carries context and price", "ctx" in _d and "$" in _d, _d)
 ck("1M context renders as M not K", "1M ctx" in _d, _d)
-_free = _pick._model_detail(SF, "nex-agi/Nex-N2-Pro")
+# No $0 model ships in the trimmed catalogue, so exercise the 'free' price
+# formatting through a synthetic spec that has one.
+_FREESPEC = C.ProviderSpec(
+    key="_free", label="Free", blurb="synthetic", base_url="https://x/v1",
+    chain=["vendor/free-model"], key_url="",
+    catalogue=(C.ModelInfo("vendor/free-model", "Free", 262, 0.0, 0.0,
+                           "promo, listed at $0"),))
+_free = _pick._model_detail(_FREESPEC, "vendor/free-model")
 ck("a $0 model reads 'free' not '$0/$0'", "free" in _free, _free)
 ck("detail is empty for an unknown id",
    _pick._model_detail(SF, "acme/Nope") == "")
