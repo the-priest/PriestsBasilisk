@@ -278,5 +278,39 @@ ck("the ceiling is generous enough for a real job but finite",
    _tot.group(1) if _tot else "absent")
 
 
+# ── THE FOLLOW-THROUGH GATE (v1.2.0.7) ───────────────────────────────
+# The filmed loop: the forced search ran, came back a page of news SITES
+# (links, no stories), and the model then narrated "let me read a real news
+# page" turn after turn without ever emitting web_read. The promise gate can't
+# re-fire once a web tool has run, so the host now follows the TOP result of the
+# search it already ran — the thing the model kept saying it would do.
+print("\n== follow-through: read the top result, not the search again ==")
+G = Bk.first_result_url
+# DuckDuckGo wraps every hit in a uddg= redirect — the real URL is decodable.
+_ddg = ('<a href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.bbc.com%2Fnews'
+        '%2Fx1&rut=z">BBC</a><a href="//duckduckgo.com/l/?uddg=https%3A%2F'
+        '%2Fapnews.com%2Fa">AP</a>')
+ck("top result is decoded from a DuckDuckGo results page",
+   G(_ddg) == "https://www.bbc.com/news/x1", G(_ddg))
+ck("search engines/self are skipped, first real link wins",
+   "reuters.com" in (G("x https://duckduckgo.com/y.js?ad "
+                       "https://www.reuters.com/world/s https://google.com/z")
+                     or ""))
+ck("asset links are skipped", G("https://cdn.x.com/a.png https://real.org/s")
+   == "https://real.org/s")
+for junk in ("", None, "no links", 123, [], "duckduckgo.com only https://google.com/x"):
+    r = G(junk)
+    ck(f"junk -> None/skip ({type(junk).__name__})", r is None or r.startswith("http"))
+ck("the follow-through gate is wired into the stream-done handler",
+   "FOLLOW-THROUGH GATE" in SRC and "first_result_url(" in SRC)
+ck("...gated on an intended fetch after a web tool already ran",
+   "reply_intends_action(final)" in SRC and "_WEB_TOOL_NAMES" in SRC
+   and "_forced_followthrough" in SRC)
+ck("...bounded so it can't become its own loop",
+   "_forced_followthrough\", 0) < 2" in SRC)
+ck("the last web result is captured for it to mine",
+   "self._last_web_result = result_text" in SRC)
+
+
 print(f"\npromise_gate: {_p} passed, {_f} failed")
 sys.exit(1 if _f else 0)

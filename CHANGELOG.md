@@ -1,3 +1,61 @@
+# v1.2.0.8
+
+**Native function-calling done whole (the DeepSeek way), mic button back,
+Camoufox from its on-disk binary, follow-through gate.**
+
+Native tools: the earlier half-measure sent the `tools` schema but fed history
+back as `<tool_result>` TEXT — two conflicting channels, so the model narrated
+"let me read the page" and never called. Fixed at the cause: when tools are in
+play the whole conversation is structured (assistant.tool_calls + role:tool with
+matching tool_call_id, via structure_tool_messages), one consistent channel like
+DeepSeek's own harness. Valid by construction (nothing unpairable is structured,
+so no dangling tool_calls / orphan role:tool → no 400s); text protocol stays as
+fallback; back ON by default.
+
+Follow-through gate: if the reply intends a fetch, a search already ran, and no
+call is emitted, the host follows the top result itself (decoding the real URL
+from the results page) — so a search always becomes a read. Bounded.
+
+Mic button restored to the composer (record→transcribe→insert→autosend was all
+still there; only the button had been removed). Camoufox: new camoufox-bin
+engine drives an on-disk ~/.cache/camoufox build through Playwright when the
+python package isn't importable. Security: restored the settings.json line in
+.gitignore (API keys must not be committable).
+
+**5,025 assertions across 82 suites**, zero red. GUARDRAIL byte-identical.
+
+---
+
+# v1.2.0.6
+
+**Claude-coloured theme, Camoufox fixed, code-writing loop killed at the root.**
+
+GUI: the accent's grey band (#45484a/#292a2b + their rgba glows, ~90 hardcoded
+uses a token-only change never reached — why it "still looked black and grey")
+is migrated to Claude's clay/coral: #d97757 on every highlight, #c15f3c fill on
+suggested-action buttons, neutrals warmed toward charcoal. Red/amber/green
+semantic, untouched. Parses under GTK 4.14, ASCII-only, pinned by test_theme.py.
+
+Camoufox: new "camoufox-bin" engine drives an on-disk Camoufox
+(~/.cache/camoufox) through Playwright's executable_path when the camoufox python
+package isn't importable — the reported "browser on disk but import camoufox
+returns None -> fell back to HTTP" case. Ladder: camoufox -> camoufox-bin ->
+firefox -> chromium -> HTTP; browser_status reports the binary path and the exact
+fix; install.sh sets up playwright + camoufox.
+
+Code-writing: "propose_edit did not render (unparseable args)" was a truncation
+loop — a big file crammed into one call hit the token cap, the JSON never closed,
+and the correction told the model to re-send it as one call (same blob, same
+truncation, forever). Now the host reads the cut reason and mandates small append
+chunks (create-then-append, ~40 lines each, target path recovered from the
+truncated call). The persona's self-contradicting "content is the WHOLE file"
+line is replaced by a chunk-first rule.
+
+**4,994 assertions across 82 suites**, zero red. New: test_theme.py; camoufox-bin
++ chunk-steering coverage. GUARDRAIL byte-identical.
+
+---
+
 # v1.2.0.5
 
 **Three models, a loop bug fixed, an aggressive debug pass.** The catalogue is

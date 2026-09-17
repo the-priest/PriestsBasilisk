@@ -236,12 +236,19 @@ def _run_router(router, tools, single_model=False):
         C.urllib.request.urlopen = real
 
 
+# v1.2.0.8: native tools ship ON — but done WHOLE (structured request AND
+# structured history), so the default request carries the tools array.
+ck("native_tool_calls defaults to ON",
+   C.DEFAULT_SETTINGS.get("native_tool_calls") is True,
+   str(C.DEFAULT_SETTINGS.get("native_tool_calls")))
 _run_router(_router(), _TOOLS)
-ck("native_tool_calls default ON -> tools sent",
-   _SENT and _SENT[0].get("tools") == _TOOLS, str(_SENT[0].get("tools") if _SENT else None))
+ck("default (ON) -> tools sent",
+   _SENT and _SENT[0].get("tools") == _TOOLS,
+   str(_SENT[0].get("tools") if _SENT else None))
 
 _run_router(_router(native_tool_calls=False), _TOOLS)
-ck("native_tool_calls OFF -> no tools sent", "tools" not in (_SENT[0] if _SENT else {}),
+ck("native_tool_calls=False -> no tools sent (opt-out works)",
+   "tools" not in (_SENT[0] if _SENT else {}),
    str(sorted(_SENT[0])) if _SENT else "no request")
 
 _run_router(_router(), _TOOLS, single_model=True)
@@ -250,6 +257,153 @@ ck("a sidecar (single_model) call never sends tools",
 
 _run_router(_router(), None)
 ck("no tools built -> no tools sent", "tools" not in (_SENT[0] if _SENT else {}))
+
+
+# ── 4. structured round-trip: history is structured when tools go out ──
+# The core of "the DeepSeek way": the model must see ONE channel. When tools
+# are sent, the text tool history is rewritten to assistant.tool_calls +
+# role:tool so there is no mixed signal. This is what actually fixes the
+# narrate-instead-of-call loop.
+print("\n== the conversation the model sees is fully structured ==")
+
+
+def _msgs_sent_with_history(history, native=True):
+    r = _router() if native else _router(native_tool_calls=False)
+    _SENT2 = {}
+
+    def fake_urlopen(req, timeout=None):
+        _SENT2["payload"] = json.loads(req.data.decode())
+        return _R()
+    real = C.urllib.request.urlopen
+    C.urllib.request.urlopen = fake_urlopen
+    try:
+        r.stream_chat(history, on_token=lambda t: None,
+                      on_done=lambda d: None, on_error=lambda e: None,
+                      tools=_TOOLS)
+    finally:
+        C.urllib.request.urlopen = real
+    return _SENT2.get("payload", {}).get("messages", [])
+
+
+_hist = [
+    {"role": "user", "content": "get me news"},
+    {"role": "assistant",
+     "content": '<tool name="web_read">{"url":"http://x"}</tool>'},
+    {"role": "user",
+     "content": "<tool_result>\n[tool: web_read]\nHEADLINES\n</tool_result>"},
+    {"role": "assistant", "content": "Here is the news."},
+]
+_out = _msgs_sent_with_history(_hist, native=True)
+_asst_tc = [m for m in _out if m.get("role") == "assistant" and m.get("tool_calls")]
+_toolmsgs = [m for m in _out if m.get("role") == "tool"]
+ck("the assistant tool call is sent as structured tool_calls",
+   len(_asst_tc) == 1 and _asst_tc[0]["tool_calls"][0]["function"]["name"] == "web_read",
+   str(_asst_tc))
+ck("the result is sent as a role:tool message with the matching id",
+   len(_toolmsgs) == 1
+   and _toolmsgs[0]["tool_call_id"] == _asst_tc[0]["tool_calls"][0]["id"]
+   and "HEADLINES" in _toolmsgs[0]["content"],
+   str(_toolmsgs))
+ck("no raw <tool_result> text leaks into the structured request",
+   not any("<tool_result>" in (m.get("content") or "") for m in _out))
+# with native OFF, the SAME history stays as text (no structuring)
+_out_off = _msgs_sent_with_history(_hist, native=False)
+ck("with tools off, history is left as text (no structuring)",
+   any("<tool_result>" in (m.get("content") or "") for m in _out_off)
+   and not any(m.get("role") == "tool" for m in _out_off))
+
+
+# ── 5. robustness of the structured transform + fallback ─────────────
+print("\n== the transform is valid by construction and degrades coherently ==")
+S = C.structure_tool_messages
+D = C.destructure_tool_messages
+
+
+def _valid(msgs):
+    """No assistant.tool_calls without matching following role:tool; no orphan
+    role:tool — the two shapes an API 400s on."""
+    i, n = 0, len(msgs)
+    while i < n:
+        m = msgs[i]
+        if m.get("role") == "assistant" and m.get("tool_calls"):
+            ids = [t["id"] for t in m["tool_calls"]]
+            for k, cid in enumerate(ids):
+                if i + 1 + k >= n:
+                    return False
+                nxt = msgs[i + 1 + k]
+                if nxt.get("role") != "tool" or nxt.get("tool_call_id") != cid:
+                    return False
+            i += 1 + len(ids)
+            continue
+        if m.get("role") == "tool":
+            return False
+        i += 1
+    return True
+
+
+# a pre-structured / malformed INPUT (orphan role:tool, dangling tool_calls) is
+# normalised so the OUTPUT is always valid — the unconditional guarantee.
+_bad = [{"role": "tool", "tool_call_id": "x", "content": "orphan"},
+        {"role": "assistant", "tool_calls": [
+            {"id": "y", "type": "function",
+             "function": {"name": "a", "arguments": "{}"}}]},
+        {"role": "user", "content": "hi"}]
+ck("pre-structured/malformed input is normalised to a VALID structure",
+   _valid(S(_bad)))
+# a clean pair round-trips: structure -> destructure -> pure text again
+_pair = [{"role": "assistant", "content": '<tool name="run">{"command":"ls"}</tool>'},
+         {"role": "user", "content": "<tool_result>\nOUT\n</tool_result>"}]
+_st = S(_pair)
+ck("a clean pair structures and is valid",
+   _valid(_st) and any(m.get("tool_calls") for m in _st))
+_ds = D(_st)
+ck("destructure folds it back to text (no structured messages remain)",
+   not any(m.get("role") == "tool" or m.get("tool_calls") for m in _ds)
+   and any("<tool_result>" in (m.get("content") or "") for m in _ds))
+# a human message that merely QUOTES <tool_result> is not eaten as a result
+_hq = [{"role": "assistant", "content": '<tool name="run">{}</tool>'},
+       {"role": "user", "content": "why is <tool_result> in the log?"}]
+ck("a human message quoting <tool_result> is not folded into a role:tool",
+   not any(m.get("tool_calls") for m in S(_hq)))
+
+# HIGH fix: once a model is in _tools_rejected, the router sends NO tools AND
+# leaves the history as text — the fallback is coherent, not split.
+_r = _router()
+_bk = _r.active_cloud()[0]
+_bk._tools_rejected.add("deepseek-ai/DeepSeek-V4.1-Flash")
+_SENT.clear()
+_run_router_hist = None
+
+
+def _sent_payload(router, history):
+    box = {}
+
+    def fake(req, timeout=None):
+        box["p"] = json.loads(req.data.decode())
+        return _R()
+    real = C.urllib.request.urlopen
+    C.urllib.request.urlopen = fake
+    try:
+        router.stream_chat(history, on_token=lambda t: None,
+                           on_done=lambda d: None, on_error=lambda e: None,
+                           tools=_TOOLS)
+    finally:
+        C.urllib.request.urlopen = real
+    return box.get("p", {})
+
+
+_p_rej = _sent_payload(_r, [
+    {"role": "user", "content": "go"},
+    {"role": "assistant", "content": '<tool name="run">{"command":"ls"}</tool>'},
+    {"role": "user", "content": "<tool_result>\nOUT\n</tool_result>"}])
+ck("a tools-rejected model gets NO tools field",
+   "tools" not in _p_rej, str(sorted(_p_rej)))
+ck("...and its history stays TEXT (no structured tool messages)",
+   not any(m.get("role") == "tool" or m.get("tool_calls")
+           for m in _p_rej.get("messages", []))
+   and any("<tool_result>" in (m.get("content") or "")
+           for m in _p_rej.get("messages", [])),
+   "coherent text fallback")
 
 
 print(f"\nnativetools: {_p} passed, {_f} failed")

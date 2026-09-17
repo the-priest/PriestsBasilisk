@@ -1,3 +1,102 @@
+# v1.2.0.8
+
+**Native function-calling done the way DeepSeek actually specifies — whole, not
+half. Plus the mic button back, Camoufox driven from its on-disk binary, and a
+follow-through gate so a search always becomes a read.**
+
+**Native tool-calling, done right.** The earlier attempt sent the OpenAI `tools`
+schema but still fed the conversation *history* back as `<tool_result>` TEXT — so
+the model saw two conflicting channels (schema says "call", history says
+"narrate") and did the worst thing: it wrote "let me read the page" turn after
+turn and never emitted the call. That is now fixed at the cause. When tools are
+in play, the **entire conversation the model sees is structured**: every prior
+tool call is an `assistant.tool_calls` message and every result a `role:"tool"`
+message with the matching `tool_call_id` (`structure_tool_messages`). One
+consistent channel, exactly as DeepSeek's own harness drives the V4/V4.1 family.
+
+The transform is **valid by construction** — an assistant call is only
+structured when the exact tool-result messages it needs immediately follow it;
+anything that can't be paired (an in-flight call, a bare system note) is left as
+text — so the request can never contain a dangling `tool_calls` or an orphan
+`role:"tool"`, the two shapes an API rejects. The text `<tool>` protocol stays
+wired as an automatic fallback and a provider that rejects the field
+strips-and-retries onto plain text, so it is the native path with a floor under
+it. It's back ON by default.
+
+**A follow-through gate so a search always becomes a read.** Even with the
+channel fixed, an open-ended "give me news" could leave the model with a page of
+search *results* (sites, not stories). If the reply intends a fetch, a search
+already ran, and the model emits no call, the host now **follows the top result
+itself** (decoding the real URL out of the results page) — the exact step the
+model kept saying it would take and didn't. Bounded so it advances the read
+without becoming its own loop.
+
+**The mic button is back.** It had been removed from the composer while all the
+record→transcribe machinery stayed, so the feature existed with no way to reach
+it. Tap to record, tap to stop → the clip is transcribed (SiliconFlow SenseVoice
+or Groq Whisper, per Settings → Voice) and dropped into the composer; with
+Auto-send on it sends straight away. Pinned by a test so it can't vanish again.
+
+**Camoufox works from its on-disk binary.** The reported case — the browser
+present in `~/.cache/camoufox` but `import camoufox` returning `None`, so
+`web_read` fell back to plain HTTP — is fixed by a new `camoufox-bin` engine that
+drives that binary directly through Playwright. `browser_status` reports the
+path, the diagnostic names the one-line fix, and `install.sh` sets up the browser
+stack on a fresh box.
+
+**Security fix:** the `.gitignore` on the pushed repo was missing the
+`settings.json` exclusion (which holds API keys). Restored — keys can't be
+committed.
+
+**5,025 assertions across 82 suites**, zero red. GUARDRAIL byte-identical.
+
+---
+
+# v1.2.0.6
+
+**Claude-coloured dark theme, the Camoufox browser fixed, and the code-writing
+loop killed at the root.**
+
+**The GUI is Claude-coloured now.** The accent had migrated red -> blue -> grey
+and a token-only change last round left the *thirty-two* hardcoded grey accent
+hexes (`#45484a`, `#292a2b`, and their `rgba(69,72,74,…)` glows, 90 uses in all)
+untouched in the custom widgets — which is exactly why it "still looked black and
+grey." Those are now Claude's clay/coral: `#d97757` carries every highlight
+(focus, links, switches, selection, glows, the ready-dot), suggested-action
+buttons fill with `#c15f3c` on white, and the near-black neutrals are warmed a
+touch toward charcoal. Danger red, warning amber and success green are semantic
+and were left untouched. Verified: parses under real GTK 4.14, ASCII-only, and
+pinned by a new `test_theme.py` so it can't silently revert.
+
+**Camoufox works when the browser is on disk but the package isn't.** The
+reported case: `~/.cache/camoufox` held the whole Firefox tree (`camoufox-bin`,
+`libxul.so`, …) but `import camoufox` returned `None`, so `web_read` dropped to
+plain HTTP. New **`camoufox-bin`** engine tier drives that on-disk binary
+directly through Playwright's `executable_path` — the browser you already have,
+no package import needed. It sits second in the ladder
+(camoufox -> camoufox-bin -> firefox -> chromium -> HTTP), `browser_status` now
+reports the binary path, and the diagnostic tells you the one-line fix
+(`pip install playwright` alone is enough to drive it). `install.sh` now sets up
+playwright + camoufox so a fresh box has a real browser on day one.
+
+**The code-writing loop ("propose_edit did not render (unparseable args)") is
+fixed at the root.** When a big file was crammed into one call, the token cap cut
+the JSON off mid-file and the call was unparseable — and the old correction told
+the model to *re-send it as a single call*, so it re-sent the same giant blob and
+truncated again, forever. Now the host reads the cut reason it already has and,
+either way, **mandates small append chunks** — a concrete `write_file`
+create-then-append recipe, with the target path recovered even from the
+truncated call, so a call that only ever carries ~40 lines can never be cut off.
+The persona was rewritten to match: the self-contradicting "content is the WHOLE
+file, never a fragment" line (the thing that caused the giant blobs) is gone,
+replaced by a chunk-first rule with a hard ~40-line ceiling.
+
+**4,994 assertions across 82 suites**, zero red. New suites: `test_theme.py`;
+new coverage in `test_browsersearch.py` (camoufox-bin) and `test_truncwrite.py`
+(the chunk-steering correction). GUARDRAIL byte-identical.
+
+---
+
 # v1.2.0.5
 
 **Three models, a real loop-termination bug fixed, and an aggressive debug pass.**

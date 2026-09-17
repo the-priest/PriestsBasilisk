@@ -203,5 +203,27 @@ ck("plain prose passes through untouched",
    speakable_text("Port 22 is open.") == "Port 22 is open.")
 
 
+# ── the MIC BUTTON is wired into the composer ────────────────────────
+# It was silently removed once ("the composer leads with a single big Send
+# button instead") while all the record→transcribe machinery stayed — so the
+# feature existed but the operator had no way to reach it. Pin it back in.
+print("\n== the mic button lives in the composer ==")
+import os as _os
+_APP = open(_os.path.join(_os.path.dirname(_os.path.dirname(
+    _os.path.abspath(__file__))), "basilisk.py"), encoding="utf-8").read()
+ck("a mic button is created (not set to None)",
+   "self.mic_btn = Gtk.Button()" in _APP
+   and "self.mic_btn = None\n" not in _APP)
+ck("it is packed into the composer row",
+   "ibox.append(self.mic_btn)" in _APP)
+ck("it is wired to the record/transcribe handler",
+   "_on_mic_clicked" in _APP and 'connect("clicked"' in _APP)
+ck("it uses the microphone icon",
+   "audio-input-microphone-symbolic" in _APP)
+ck("the record→transcribe→insert flow is intact",
+   "def _on_mic_clicked" in _APP and "def _transcribe_worker" in _APP
+   and "def _apply_transcript" in _APP)
+
+
 print(f"\nspeech: {_p} passed, {_f} failed")
 sys.exit(1 if _f else 0)

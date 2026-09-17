@@ -493,14 +493,19 @@ DEFAULT_SETTINGS = {
     # sent False on EVERY turn. Flip this True to let them think again (and pay
     # for it). GLM-5.3-Flash is unaffected — its reasoning has no switch.
     "deepseek_thinking": False,
-    # ── NATIVE FUNCTION-CALLING ──
-    # Send the tool set as a proper OpenAI `tools` schema so the model replies
-    # with structured `tool_calls` — the flow Claude Code, opencode and
-    # DeepSeek's own app use, and the one the V4/V4.1 family is trained for.
-    # The text `<tool>` protocol stays as the fallback (the persona still
-    # documents it, the canonicaliser still parses it, and a provider that
-    # rejects the tools field degrades to it automatically), so this is upside
-    # with a floor under it. Default ON.
+    # ── NATIVE FUNCTION-CALLING — the DeepSeek way, done whole ──
+    # DeepSeek's V4/V4.1 family is trained for the OpenAI `tools` flow, and this
+    # is it: the tool set is sent as function schemas, the model replies with
+    # structured `tool_calls`, and — the part that MUST NOT be skipped — the
+    # whole conversation the model sees is structured too: each prior call is an
+    # `assistant.tool_calls` message and each result a `role:"tool"` message
+    # (see structure_tool_messages). The earlier half-measure sent the schema
+    # but fed history back as `<tool_result>` TEXT, so the model saw two
+    # conflicting channels and narrated instead of calling. With one consistent
+    # structured channel that is gone. The text `<tool>` protocol stays wired as
+    # an automatic fallback (the parser + the transform read it), and a provider
+    # that rejects the tools field strips-and-retries onto plain text — so this
+    # is the native path with a floor under it. Default ON.
     "native_tool_calls": True,
     # No cross-model heavy escalation by default: the catalogue is now three
     # Flash-class models and V4.1-Flash IS the best of them, so a "heavier
@@ -1441,6 +1446,187 @@ def build_tools_schema(system_prompt: str) -> List[Dict[str, Any]]:
     return list(seen.values())
 
 
+def _is_tool_result_msg(m: Dict[str, Any]) -> bool:
+    """A stored tool RESULT — a user message wrapping <tool_result>…</tool_result>.
+
+    Tightened so a HUMAN message that merely quotes the string "<tool_result>"
+    (asking about the protocol, pasting a log) is not mistaken for a real result
+    and folded into a role:"tool": a genuine envelope opens with the tag, aside
+    from leading whitespace."""
+    try:
+        if m.get("role") != "user":
+            return False
+        c = (m.get("content") or "").lstrip()
+        return c.startswith("<tool_result>")
+    except Exception:
+        return False
+
+
+def destructure_tool_messages(
+        messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """The inverse of structure_tool_messages: fold structured tool messages
+    back into the TEXT protocol.
+
+    Used on the fallback path — a model that rejected the `tools` field must not
+    then be sent `assistant.tool_calls`/`role:"tool"` messages a strict server
+    could also reject; text `<tool>`/`<tool_result>` is universally accepted. A
+    plain text history passes through untouched, so this is safe to run whenever
+    tools are not being sent."""
+    try:
+        src = list(messages or [])
+    except Exception:
+        return messages
+    out: List[Dict[str, Any]] = []
+    for m in src:
+        if not isinstance(m, dict):
+            out.append(m)
+            continue
+        role = m.get("role")
+        if role == "assistant" and m.get("tool_calls"):
+            parts = []
+            c = m.get("content")
+            if c:
+                parts.append(str(c))
+            for tc in m.get("tool_calls") or []:
+                fn = (tc or {}).get("function") or {}
+                name = fn.get("name") or ""
+                args = fn.get("arguments")
+                if not isinstance(args, str):
+                    try:
+                        args = json.dumps(args or {})
+                    except Exception:
+                        args = "{}"
+                parts.append('<tool name="%s">%s</tool>' % (name, args))
+            out.append({"role": "assistant", "content": "\n".join(parts)})
+        elif role == "tool":
+            out.append({"role": "user",
+                        "content": "<tool_result>\n"
+                        + (m.get("content") or "") + "\n</tool_result>"})
+        else:
+            out.append(m)
+    return out
+
+
+_TOOL_RESULT_ENVELOPE = re.compile(
+    r"<tool_result>\s*(.*?)\s*</tool_result>", re.S)
+_TOOL_RESULT_HDR = re.compile(r"^\s*\[tool:[^\]]*\]\s*", re.S)
+
+
+def _tool_result_body(content: str) -> str:
+    """The inner text of a <tool_result> envelope, header line stripped.
+
+    role:"tool" content wants the result itself, not Basilisk's transport
+    wrapper. Falls back to the whole string if the envelope isn't found, so a
+    result is never lost."""
+    try:
+        m = _TOOL_RESULT_ENVELOPE.search(content or "")
+        inner = m.group(1) if m else (content or "")
+        return _TOOL_RESULT_HDR.sub("", inner).strip() or (content or "")
+    except Exception:
+        return content or ""
+
+
+def structure_tool_messages(
+        messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Rewrite Basilisk's TEXT tool history into OpenAI structured form.
+
+    This is what makes native function-calling behave the way DeepSeek's own
+    harness does: the model must see ONE consistent channel. Basilisk stores an
+    assistant tool call as `<tool name=…>{…}</tool>` text and its result as a
+    `<tool_result>…</tool_result>` user message; sending the `tools` schema while
+    feeding that text back is the mixed signal that made the model narrate "let
+    me read the page" instead of emitting the call. So, only when tools are in
+    play, every assistant tool call becomes an `assistant.tool_calls` message and
+    each following result becomes a `role:"tool"` message carrying the matching
+    `tool_call_id`.
+
+    STRICTLY VALID BY CONSTRUCTION: an assistant message is only structured when
+    the exact number of tool-result messages that its calls need immediately
+    follows it. Anything that cannot be paired cleanly (an in-flight call whose
+    result has not arrived, a bare system `<tool_result>` note with no preceding
+    call) is passed through UNCHANGED as text. So the output never contains a
+    dangling `tool_calls` without responses or an orphan `role:"tool"` — the two
+    shapes an OpenAI-compatible API rejects with a 400. Pure and total.
+    """
+    try:
+        src = list(messages or [])
+    except Exception:
+        return messages
+    # NORMALISE FIRST so the validity guarantee is unconditional: if the input
+    # already carries structured tool messages (a resumed history, a second
+    # pass, an MCP-sourced history), fold them back to text before re-deriving,
+    # so a stray role:"tool" or a dangling tool_calls in the INPUT can never
+    # survive into the OUTPUT. On the normal all-text history this is a no-op.
+    try:
+        if any(isinstance(_m, dict)
+               and (_m.get("role") == "tool" or _m.get("tool_calls"))
+               for _m in src):
+            src = destructure_tool_messages(src)
+    except Exception:
+        pass
+    out: List[Dict[str, Any]] = []
+    i = 0
+    n = len(src)
+    counter = 0
+    while i < n:
+        m = src[i] if isinstance(src[i], dict) else None
+        if m is None:
+            out.append(src[i])
+            i += 1
+            continue
+        if m.get("role") == "assistant":
+            content = m.get("content") or ""
+            try:
+                calls = parse_tool_calls(content)
+            except Exception:
+                calls = []
+            if calls:
+                # count the run of tool-result messages that immediately follows
+                results = []
+                j = i + 1
+                while (j < n and isinstance(src[j], dict)
+                       and _is_tool_result_msg(src[j])
+                       and len(results) < len(calls)):
+                    results.append(src[j])
+                    j += 1
+                if len(results) == len(calls):
+                    tcs = []
+                    ids = []
+                    for c in calls:
+                        counter += 1
+                        cid = "call_%d" % counter
+                        ids.append(cid)
+                        try:
+                            _args = json.dumps(getattr(c, "args", {}) or {})
+                        except Exception:
+                            _args = "{}"
+                        tcs.append({
+                            "id": cid, "type": "function",
+                            "function": {"name": getattr(c, "name", "") or "",
+                                         "arguments": _args}})
+                    try:
+                        visible = strip_tool_calls(content).strip()
+                    except Exception:
+                        visible = ""
+                    out.append({"role": "assistant",
+                                "content": visible or None,
+                                "tool_calls": tcs})
+                    for cid, rmsg in zip(ids, results):
+                        out.append({
+                            "role": "tool", "tool_call_id": cid,
+                            "content": _tool_result_body(
+                                rmsg.get("content") or "")})
+                    i = j
+                    continue
+            # not a tool call, or could not be paired cleanly → pass through
+            out.append(m)
+            i += 1
+            continue
+        out.append(m)
+        i += 1
+    return out
+
+
 class OpenAICompatBackend:
     """Generic backend for any OpenAI-compatible /chat/completions API.
 
@@ -1637,6 +1823,17 @@ class OpenAICompatBackend:
             if not sent_tools:
                 payload.pop("tools", None)
                 payload.pop("tool_choice", None)
+                # No schema this attempt -> the history must not be structured
+                # either, or a strict server 400s on role:"tool"/tool_calls with
+                # no tools field. Fold it back to the universally-accepted text
+                # protocol. A plain-text history passes through untouched, so
+                # this is a no-op on the common path and the coherent fallback
+                # on the tools-rejected retry.
+                if any(isinstance(_m, dict)
+                       and (_m.get("role") == "tool" or _m.get("tool_calls"))
+                       for _m in payload.get("messages") or ()):
+                    payload["messages"] = destructure_tool_messages(
+                        payload["messages"])
             sent_extras = bool(
                 extra_body
                 and attempt_model not in getattr(self, "_extras_rejected", ()))
@@ -1729,13 +1926,24 @@ class OpenAICompatBackend:
                         _tcs = delta.get("tool_calls")
                         if _tcs:
                             for _tc in _tcs:
-                                try:
-                                    _i = int(_tc.get("index", 0) or 0)
-                                except Exception:
-                                    _i = 0
+                                # Prefer the provider's index; if it omits one, a
+                                # fragment that carries a NEW name opens the next
+                                # slot, otherwise it extends the last — so two
+                                # index-less calls don't collapse into one.
+                                _fn = _tc.get("function") or {}
+                                _idx = _tc.get("index")
+                                if _idx is None:
+                                    if _fn.get("name") or not _tc_acc:
+                                        _i = len(_tc_acc)
+                                    else:
+                                        _i = max(_tc_acc)
+                                else:
+                                    try:
+                                        _i = int(_idx)
+                                    except Exception:
+                                        _i = len(_tc_acc)
                                 _slot = _tc_acc.setdefault(
                                     _i, {"name": "", "args": ""})
-                                _fn = _tc.get("function") or {}
                                 if _fn.get("name"):
                                     _slot["name"] = _fn["name"]
                                 if _fn.get("arguments"):
@@ -2176,10 +2384,21 @@ class BackendRouter:
         if _extra:
             opts["extra_body"] = _extra
         # Native function-calling: hand the backend the tools schema so the
-        # model can reply with structured tool_calls. Off by setting, or for a
-        # sidecar completion (those ask for a line of JSON, never a tool call).
-        if (tools and not single_model
-                and self.settings.get("native_tool_calls", True)):
+        # model can reply with structured tool_calls. Off by setting, for a
+        # sidecar completion (those ask for a line of JSON, never a tool call),
+        # or for a model that has ALREADY rejected the tools field this session
+        # — in that last case we must fall back to the pure TEXT protocol
+        # coherently: no schema AND no structured history. Gating both on the
+        # same `_send_native` flag is what keeps the two in lockstep, so a
+        # tools-incapable model is never fed a structured history with the
+        # schema stripped out from under it (the incoherent state a split
+        # decision would leave behind).
+        _send_native = bool(
+            tools and not single_model
+            and self.settings.get("native_tool_calls", True)
+            and backend is not None
+            and model not in getattr(backend, "_tools_rejected", ()))
+        if _send_native:
             opts["tools"] = tools
         if backend is None:
             on_error("No provider configured. Add an API key in Settings.")
@@ -2194,6 +2413,17 @@ class BackendRouter:
                     messages, self.settings, log)
             except Exception as _e:
                 log(f"headroom: skipped ({_e})")
+        # ── NATIVE MODE: one consistent structured channel ──
+        # When the tools schema is going out, the HISTORY must be structured too
+        # or the model sees a mixed signal (schema says "call", text history says
+        # "narrate"). Runs AFTER headroom (which keys on <tool_result> text) and
+        # is provably valid — anything it can't pair cleanly is left as text — so
+        # it can only ever help. Fail-open: any error leaves the text messages.
+        if opts.get("tools"):
+            try:
+                messages = structure_tool_messages(messages)
+            except Exception as _e:
+                log(f"structure_tool_messages: skipped ({_e})")
         backend.stream_chat(model, messages, on_token, on_done, on_error,
                             opts, cancel_event, on_reasoning=on_reasoning,
                             single_model=single_model)
