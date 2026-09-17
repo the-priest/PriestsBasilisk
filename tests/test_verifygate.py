@@ -138,9 +138,8 @@ ck("the wiring carries a one-shot flag",
    "_forced_verify_done" in SRC
    and "self._forced_verify_done = True" in SRC)
 ck("...reset per operator request, beside the other one-shots",
-   re.search(r"self\._forced_fetch_done = False\n"
-             r"(?:\s*self\._[a-z_]+ = .+\n)*"
-             r"\s*self\._forced_verify_done = False", SRC) is not None)
+   re.search(r"self\._forced_fetch_done = False\n\s*"
+             r"self\._forced_verify_done = False", SRC) is not None)
 
 
 # ── 4. PURE AND TOTAL ────────────────────────────────────────────────

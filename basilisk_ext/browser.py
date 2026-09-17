@@ -82,70 +82,13 @@ _STATE: Dict[str, Any] = {
     "failed": "",        # why launch failed last time, for the report
 }
 
-# "camoufox-bin" sits second on purpose: it is the SAME Camoufox Firefox build,
-# launched straight from its on-disk binary via Playwright's executable_path,
-# for the very common case where the operator ran `camoufox fetch` (so the
-# browser tree is in ~/.cache/camoufox) but the `camoufox` PYTHON package is not
-# importable in the interpreter Basilisk runs under. Without this tier that
-# setup skipped all the way down to plain Playwright Firefox/Chromium — which
-# the operator usually has NOT fetched — and fell to bare HTTP. That is the
-# "camoufox doesn't work right" the operator saw: the browser was on disk the
-# whole time, just behind a missing import.
-_ENGINE_ORDER = ("camoufox", "camoufox-bin", "firefox", "chromium")
+_ENGINE_ORDER = ("camoufox", "firefox", "chromium")
 
 
 def _env_engine() -> str:
-    """BASILISK_BROWSER=camoufox|camoufox-bin|firefox|chromium|off overrides."""
+    """BASILISK_BROWSER=camoufox|firefox|chromium|off overrides the ladder."""
     v = (os.environ.get("BASILISK_BROWSER") or "").strip().lower()
     return v if v in _ENGINE_ORDER or v in ("off", "none") else ""
-
-
-def _find_camoufox_binary() -> str:
-    """Absolute path to an on-disk Camoufox Firefox executable, or "".
-
-    Read-only and cheap: it does not import camoufox and does not launch
-    anything. Tries the package's own resolver first (when importable), then
-    the standard cache/opt locations Camoufox fetches into, on every OS.
-    """
-    # 1. If the package IS importable, ask it where the browser lives.
-    try:
-        from camoufox.pkgman import installed_path  # type: ignore
-        p = str(installed_path() or "").strip()
-        if p and os.path.isfile(p) and os.access(p, os.X_OK):
-            return p
-        if p and os.path.isdir(p):
-            for nm in ("camoufox-bin", "camoufox", "firefox"):
-                q = os.path.join(p, nm)
-                if os.path.isfile(q) and os.access(q, os.X_OK):
-                    return q
-    except Exception:
-        pass
-    # 2. Known install roots (Linux ~/.cache, macOS Caches, Windows LOCALAPPDATA,
-    #    an explicit override, and the common system dirs).
-    import glob
-    home = os.path.expanduser("~")
-    roots = [
-        os.environ.get("CAMOUFOX_PATH", ""),
-        os.path.join(home, ".cache", "camoufox"),
-        os.path.join(home, "Library", "Caches", "camoufox"),
-        os.path.join(os.environ.get("LOCALAPPDATA", ""), "camoufox"),
-        "/opt/camoufox", "/usr/local/share/camoufox", "/usr/share/camoufox",
-    ]
-    names = ("camoufox-bin", "camoufox", "firefox", "camoufox.exe",
-             "firefox.exe")
-    for r in roots:
-        if not r or not os.path.isdir(r):
-            continue
-        for nm in names:
-            q = os.path.join(r, nm)
-            if os.path.isfile(q) and os.access(q, os.X_OK):
-                return q
-        # one level of nesting (some builds unpack into a versioned subdir)
-        for nm in names:
-            for q in glob.glob(os.path.join(r, "*", nm)):
-                if os.path.isfile(q) and os.access(q, os.X_OK):
-                    return q
-    return ""
 
 
 def available(prefer: str = "") -> bool:
@@ -181,16 +124,6 @@ def _pick_engine(prefer: str = "") -> str:
                 if not str(installed_verstr() or "").strip():
                     continue
                 return "camoufox"
-            elif name == "camoufox-bin":
-                # The Camoufox browser is on disk but the python package is not
-                # usable here — drive the binary directly through Playwright.
-                # Needs the Playwright API (not its browser downloads) plus the
-                # Camoufox executable; both are checked before we commit to it,
-                # so this never becomes a slow failed-launch tier.
-                import playwright.sync_api  # noqa: F401
-                if not _find_camoufox_binary():
-                    continue
-                return "camoufox-bin"
             else:
                 import playwright.sync_api  # noqa: F401
                 return name
@@ -222,14 +155,6 @@ def probe() -> Dict[str, Any]:
                 except Exception as e:
                     v = f"python package present, browser NOT fetched ({e})"
                 out["engines"]["camoufox"] = v or "present"
-            elif name == "camoufox-bin":
-                # Report the on-disk binary path if we can find one AND the
-                # Playwright API is importable to drive it.
-                import playwright  # noqa: F401
-                binpath = _find_camoufox_binary()
-                out["engines"]["camoufox-bin"] = (
-                    f"on-disk binary: {binpath}" if binpath
-                    else "no camoufox binary found on disk")
             else:
                 import playwright  # noqa: F401
                 out["engines"][name] = getattr(playwright, "__version__",
@@ -237,29 +162,15 @@ def probe() -> Dict[str, Any]:
         except Exception as e:
             out["engines"][name] = f"absent ({type(e).__name__})"
     out["chosen"] = _pick_engine()
-    out["camoufox_binary"] = _find_camoufox_binary()
     with _LOCK:
         out["running"] = _STATE["engine"] if _STATE["browser"] else ""
         if _STATE["failed"]:
             out["last_launch_error"] = _STATE["failed"]
     if not out["chosen"]:
-        if out["camoufox_binary"]:
-            # The browser IS on disk; what's missing is the Playwright API to
-            # drive it. This is the precise, actionable version of the message.
-            out["note"] = (
-                "A Camoufox browser is on disk at "
-                f"{out['camoufox_binary']}, but neither the camoufox python "
-                "package nor Playwright is importable in the interpreter "
-                "Basilisk runs under, so web_read fell back to plain HTTP. "
-                "Fix with:  pip install playwright   (that alone lets Basilisk "
-                "drive the on-disk Camoufox), or  pip install camoufox && "
-                "python3 -m camoufox fetch  for the full launcher.")
-        else:
-            out["note"] = (
-                "No browser engine available — web_read falls back to a plain "
-                "HTTP fetch, which cannot render JavaScript or pass a bot "
-                "check. Install with: pip install camoufox && python3 -m "
-                "camoufox fetch")
+        out["note"] = ("No browser engine available — web_read falls back to "
+                       "a plain HTTP fetch, which cannot render JavaScript or "
+                       "pass a bot check. Install with: pip install camoufox "
+                       "&& python3 -m camoufox fetch")
     return out
 
 
@@ -395,20 +306,7 @@ def _launch(prefer: str = "") -> Tuple[Any, str]:
         kw = {"headless": True}
         if proxy:
             kw["proxy"] = proxy
-        if name == "camoufox-bin":
-            # Same Camoufox Firefox build, launched from its on-disk binary.
-            # It renders JavaScript and carries Camoufox's compiled-in
-            # anti-fingerprinting; what it does NOT get is the python launcher's
-            # per-run fingerprint randomisation, so the reader labels it
-            # "camoufox-bin", distinct from a full "camoufox" run.
-            binpath = _find_camoufox_binary()
-            if not binpath:
-                raise RuntimeError("camoufox binary vanished between pick and "
-                                   "launch")
-            kw["executable_path"] = binpath
-            browser = pw.firefox.launch(**kw)
-        else:
-            browser = getattr(pw, name).launch(**kw)
+        browser = getattr(pw, name).launch(**kw)
     _STATE["browser"] = browser
     _STATE["engine"] = name
     _STATE["failed"] = ""

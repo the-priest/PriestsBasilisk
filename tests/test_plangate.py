@@ -253,10 +253,8 @@ print("\n== the gate-forced continuation says the answer is already on screen ==
 NOTE = Bk._GATE_CONTINUATION_NOTE
 ck("the note exists as ONE constant (two copies would drift)",
    SRC.count("_GATE_CONTINUATION_NOTE = (") == 1)
-# v1.2.0.7: three gates now share the note — the forced-fetch, the
-# follow-through (read the top result), and the verify gate.
-ck("…and is used by all three gates",
-   SRC.count("+ _GATE_CONTINUATION_NOTE)") == 3)
+ck("…and is used by BOTH gates",
+   SRC.count("+ _GATE_CONTINUATION_NOTE)") == 2)
 ck("it states the reply is already on screen",
    "ALREADY ON SCREEN" in NOTE)
 ck("…and that the operator has read it", "operator has read it" in NOTE)

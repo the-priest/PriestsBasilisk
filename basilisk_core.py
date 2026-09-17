@@ -222,23 +222,62 @@ class ModelInfo:
 
 
 SILICONFLOW_CATALOGUE: List[ModelInfo] = [
-    # ── THREE MODELS, ON PURPOSE (v1.2.0.5) ──────────────────────────────
-    # The operator cut the catalogue to the three he actually runs and trusts.
-    # A short, curated list beats a wall of models he has to second-guess: the
-    # picker shows exactly these, the live-catalogue recovery still exists for a
-    # wrong id, and nothing is auto-selected for him.
-    #   1. DeepSeek-V4.1-Flash — PINNED DEFAULT and chain[0]. The best of the
-    #      three and what he builds on.
-    #   2. DeepSeek-V4-Flash   — the measured 87/113 build, immediate fallback.
-    #   3. GLM-5.3-Flash       — the one-click alternative, fully supported.
+    # ── Flagship: reach for these when the target is genuinely hard ──
+    ModelInfo("zai-org/GLM-5.3-Flash", "GLM-5.3-Flash", 1049, 0.15, 0.50,
+              "Tops this provider's intelligence board. "
+              "320B/18B MoE, native multimodal, built for efficient coding "
+              "+ long-horizon agents. Flagship quality at workhorse money.",
+              vision=True, tier="flagship",
+              cached_in_usd=0.03),
+              # think_off is deliberately None: GLM-5.3-Flash's reasoning is
+              # ARCHITECTURAL, not a mode — there is no enable_thinking switch,
+              # its cost lever is reasoning_effort. Sending enable_thinking:False
+              # on a light turn (as the 5.2 hybrid entry does) would be a param
+              # the model ignores at best and 400s at worst, buying one wasted
+              # round-trip per session for nothing.
+    ModelInfo("moonshotai/Kimi-K3", "Kimi-K3", 1049, 3.0, 15.0,
+              "2.8T params, biggest open model. Deep reasoning + vision.",
+              vision=True, tier="flagship"),
+    ModelInfo("deepseek-ai/DeepSeek-V4-Pro", "DeepSeek-V4-Pro", 1049,
+              1.50, 3.14,
+              "1.6T/49B MoE. Frontier reasoning and code. Same family as "
+              "the default, so prompts port with no retuning.",
+              tier="flagship",
+              think_off={"enable_thinking": False}),
+    ModelInfo("zai-org/GLM-5.2", "GLM-5.2", 1049, 1.30, 4.09,
+              "Long-horizon agentic engineering; holds project state across a "
+              "long run. Heavier, pricier sibling of the 5.3-Flash default.",
+              tier="flagship",
+              think_off={"enable_thinking": False}),
+    ModelInfo("meituan-longcat/LongCat-2.0", "LongCat-2.0", 1049, 0.75, 2.95,
+              "1.6T/48B. Leads SWE-bench Pro; built for agentic coding.",
+              tier="flagship"),
+    ModelInfo("moonshotai/Kimi-K2.6", "Kimi-K2.6", 262, 0.77, 3.40,
+              "Sustains 4000+ tool calls over 12h+ runs. The pick for a "
+              "long unattended engagement.",
+              vision=True, tier="flagship"),
+    ModelInfo("moonshotai/Kimi-K2.7-Code", "Kimi-K2.7-Code", 262, 0.86, 3.80,
+              "Coding-focused K2.6 derivative, ~30% fewer thinking tokens.",
+              tier="flagship"),
+    ModelInfo("MiniMaxAI/MiniMax-M3", "MiniMax-M3", 1049, 0.30, 1.20,
+              "1M context at flagship quality for workhorse money — sparse "
+              "attention. (inferred id)",
+              vision=True, tier="flagship"),
+    ModelInfo("nex-agi/Nex-N2-Pro", "Nex-N2-Pro", 262, 0.0, 0.0,
+              "397B agentic-thinking MoE, adaptive reasoning depth. Listed "
+              "at $0 — free while the promo lasts.",
+              vision=True, tier="flagship"),
+
+    # ── Workhorse: the everyday tier. The pinned default lives here ──
     ModelInfo("deepseek-ai/DeepSeek-V4.1-Flash", "DeepSeek-V4.1-Flash",
               1049,
               0.13, 0.28,
-              "PINNED DEFAULT. DeepSeek's Sep-2026 refresh of the V4-Flash "
-              "line — new causal encoder-decoder MoE (552B, ~8B active in / "
-              "16B out), smarter and cheaper per token, same vendor and same "
-              "tool-call dialect so prompts port unchanged. Trained for the "
-              "OpenAI tools function-calling flow. Falls back to V4-Flash.",
+              "PINNED DEFAULT (v1.2.0.0). DeepSeek's Sep-2026 refresh of the "
+              "V4-Flash line — new causal encoder-decoder MoE (552B, ~8B "
+              "active in / 16B out), smarter and cheaper per token, same "
+              "vendor and same tool-call dialect so prompts port unchanged. "
+              "Falls back to V4-Flash, the build every benchmark was measured "
+              "on.",
               tier="workhorse",
               cached_in_usd=0.028,
               # SAME family as V4-Flash, which honours enable_thinking, and on
@@ -258,16 +297,48 @@ SILICONFLOW_CATALOGUE: List[ModelInfo] = [
               tier="workhorse",
               cached_in_usd=0.028,
               think_off={"enable_thinking": False}),
-    ModelInfo("zai-org/GLM-5.3-Flash", "GLM-5.3-Flash", 1049, 0.15, 0.50,
-              "Tops this provider's intelligence board. "
-              "320B/18B MoE, native multimodal, built for efficient coding "
-              "+ long-horizon agents. The one-click alternative to the "
-              "DeepSeek default, fully supported.",
-              vision=True, tier="flagship",
-              cached_in_usd=0.03),
-              # think_off is deliberately None: GLM-5.3-Flash's reasoning is
-              # ARCHITECTURAL, not a mode — there is no enable_thinking switch,
-              # its cost lever is reasoning_effort.
+    ModelInfo("tencent/Hy3", "Hy3", 262, 0.13, 0.53,
+              "295B/21B MoE with three reasoning modes. Cheapest credible "
+              "agentic model on the platform.",
+              tier="workhorse",
+              think_off={"enable_thinking": False}),
+    ModelInfo("MiniMaxAI/MiniMax-M2.5", "MiniMax-M2.5", 197, 0.30, 1.20,
+              "80.2% SWE-bench Verified. (inferred id)",
+              tier="workhorse"),
+    ModelInfo("Qwen/Qwen3.5-397B-A17B", "Qwen3.5-397B-A17B", 262, 0.39, 2.34,
+              "Largest Qwen3.5 MoE, natively multimodal. (inferred id)",
+              vision=True, tier="workhorse",
+              think_off={"enable_thinking": False}),
+    ModelInfo("Qwen/Qwen3.6-27B", "Qwen3.6-27B", 262, 0.30, 3.20,
+              "Dense, tuned for code + agent workflows; keeps reasoning "
+              "context across turns.",
+              vision=True, tier="workhorse",
+              think_off={"enable_thinking": False}),
+    ModelInfo("Qwen/Qwen3.5-122B-A10B", "Qwen3.5-122B-A10B", 262, 0.26, 2.08,
+              "122B/10B hybrid MoE, multimodal. (inferred id)",
+              vision=True, tier="workhorse",
+              think_off={"enable_thinking": False}),
+    ModelInfo("deepseek-ai/DeepSeek-V3.2", "DeepSeek-V3.2", 164, 0.27, 0.42,
+              "Previous generation. Keep as a known-good comparison run.",
+              tier="workhorse",
+              think_off={"enable_thinking": False}),
+
+    # ── Budget: triage, bulk parsing, log summarisation ──
+    ModelInfo("Qwen/Qwen3.6-35B-A3B", "Qwen3.6-35B-A3B", 262, 0.20, 1.60,
+              "35B/3B MoE, thinking + non-thinking modes.",
+              tier="budget",
+              think_off={"enable_thinking": False}),
+    ModelInfo("zai-org/GLM-4.5-Air", "GLM-4.5-Air", 131, 0.14, 0.86,
+              "106B/12B hybrid reasoning. Old but cheap and steady.",
+              tier="budget",
+              think_off={"enable_thinking": False}),
+    ModelInfo("Qwen/Qwen3.5-9B", "Qwen3.5-9B", 262, 0.10, 0.15,
+              "Cheapest sane option. Bulk work only. (inferred id)",
+              vision=True, tier="budget",
+              think_off={"enable_thinking": False}),
+    ModelInfo("Qwen/Qwen2.5-72B-Instruct", "Qwen2.5-72B", 33, 0.59, 0.59,
+              "Legacy. 33K context — it WILL truncate a long engagement.",
+              tier="budget"),
 ]
 
 # The runtime rate-limit / outage fallback walk.  DELIBERATELY SHORT: every
@@ -321,6 +392,8 @@ SILICONFLOW_CHAIN = [
     "deepseek-ai/DeepSeek-V4.1-Flash",
     "deepseek-ai/DeepSeek-V4-Flash",
     "zai-org/GLM-5.3-Flash",
+    "deepseek-ai/DeepSeek-V4-Pro",
+    "tencent/Hy3",
 ]
 
 
@@ -394,11 +467,13 @@ PROVIDERS_BY_KEY: Dict[str, ProviderSpec] = {p.key: p for p in PROVIDERS}
 # natively (vision=True) — those are listed first so the vision picker and
 # the chat picker can be the same model and save an API key round-trip.
 VISION_MODELS: Dict[str, List[str]] = {
-    # Only the kept catalogue's vision-capable model is suggested now; the
-    # field stays free-text, so any current SiliconFlow vision id can still be
-    # typed by hand if the line-up shifts.
     "siliconflow": [
         "zai-org/GLM-5.3-Flash",
+        "moonshotai/Kimi-K2.6",
+        "Qwen/Qwen3-VL-32B-Instruct",
+        "Qwen/Qwen3-VL-30B-A3B-Instruct",
+        "Qwen/Qwen3-VL-8B-Instruct",
+        "zai-org/GLM-4.5V",
     ],
 }
 CLOUD_PROVIDER_KEYS = [p.key for p in PROVIDERS]
@@ -493,27 +568,7 @@ DEFAULT_SETTINGS = {
     # sent False on EVERY turn. Flip this True to let them think again (and pay
     # for it). GLM-5.3-Flash is unaffected — its reasoning has no switch.
     "deepseek_thinking": False,
-    # ── NATIVE FUNCTION-CALLING — OFF by default; the TEXT protocol is what
-    #    actually works on this stack. ──
-    # The full structured implementation is here and correct (schema out,
-    # structured `tool_calls` in, and structure_tool_messages makes the whole
-    # conversation structured so there is no mixed signal). But on the live
-    # SiliconFlow · DeepSeek-V4.1-Flash setup the operator runs, turning it on
-    # made the model emit malformed/empty call wrappers and then go silent —
-    # WORSE than the text protocol, which drove tool calls reliably before any
-    # of this. So the reliable path ships as the default: the model writes a
-    # text tool tag (the tool name in a name= attribute, JSON in the body), the
-    # canonicaliser parses every dialect, and results go back as tool_result
-    # text. Flip this ON to use the structured path (it is complete and safe —
-    # text stays as the automatic fallback); it is left available, not removed,
-    # so it can be revisited when the provider's structured calling is verified.
-    "native_tool_calls": False,
-    # No cross-model heavy escalation by default: the catalogue is now three
-    # Flash-class models and V4.1-Flash IS the best of them, so a "heavier
-    # sibling" to escalate to no longer exists. A heavy turn just gets the
-    # bigger token budget (and, on GLM, the deepest reasoning dial). Empty =
-    # stay on the operator's model; he can still name one in Settings.
-    "hard_engagement_model": "",
+    "hard_engagement_model": "deepseek-ai/DeepSeek-V4-Pro",  # heavier sibling
 
     # Behaviour
     "system_prompt": "",
@@ -603,7 +658,7 @@ DEFAULT_SETTINGS = {
     # catalogue actually carries AND advertises as vision-capable, and
     # _resolve_vision_model() below re-checks that at call time so a stale
     # value saved by an older build repairs itself instead of failing.
-    "vision_model":            "zai-org/GLM-5.3-Flash",  # vision-capable
+    "vision_model":            "Qwen/Qwen3.5-9B",  # vision-capable
                                         # model on the active OpenAI-compatible
                                         # provider (SiliconFlow); lets Basilisk SEE
                                         # images.  Change to any VL model the
@@ -1370,264 +1425,6 @@ def _render_native_tool_calls(acc: Dict[int, Dict[str, str]]) -> str:
     return "\n".join(out)
 
 
-_TOOL_DECL_RE = re.compile(
-    r'<tool\s+name="([a-zA-Z0-9_]+)"\s*>(.*?)</tool>([^\n]*)',
-    re.DOTALL)
-
-
-def _infer_json_type(v: Any) -> str:
-    if isinstance(v, bool):
-        return "boolean"
-    if isinstance(v, int):
-        return "integer"
-    if isinstance(v, float):
-        return "number"
-    if isinstance(v, list):
-        return "array"
-    if isinstance(v, dict):
-        return "object"
-    return "string"
-
-
-def build_tools_schema(system_prompt: str) -> List[Dict[str, Any]]:
-    """Build an OpenAI `tools` array from the persona's own `<tool …>` lines.
-
-    This is how the reference harnesses (Claude Code, opencode, DeepSeek's own
-    app) drive the model: the tools are declared as function schemas in the
-    request, and the model replies with structured `tool_calls`. DeepSeek's
-    V4/V4.1 family is TRAINED for exactly that flow, so feeding it only a text
-    protocol and hoping for `<tool>` tags is fighting the model — which is what
-    produced the empty/looping turns.
-
-    The single source of truth is the SAME system prompt the model is about to
-    read, so the schema can never list a tool the model was not told about, and
-    it tracks the leashed/armed variants automatically. Each declaration line
-    is `<tool name="X">{example args}</tool>  // description`; the example JSON,
-    when it parses, gives the property names and their types, and the `//`
-    comment gives the description. A line whose example does not parse degrades
-    to a permissive object — the dispatcher's argument aliasing absorbs any
-    drift either way, so a loose schema never costs a failed call.
-    """
-    if not system_prompt:
-        return []
-    seen: Dict[str, Dict[str, Any]] = {}
-    for m in _TOOL_DECL_RE.finditer(system_prompt):
-        name = m.group(1)
-        if not name or name in seen:
-            continue
-        body = (m.group(2) or "").strip()
-        rest = m.group(3) or ""
-        # the human description is the `// ...` comment after the tag, if any
-        desc = ""
-        if "//" in rest:
-            desc = rest.split("//", 1)[1].strip()
-        # trim a long description to something the model can skim
-        if len(desc) > 220:
-            desc = desc[:217].rstrip() + "..."
-        params: Dict[str, Any] = {"type": "object"}
-        try:
-            example = json.loads(body) if body else None
-        except Exception:
-            example = None
-        if isinstance(example, dict) and example:
-            props = {}
-            for k, v in example.items():
-                if isinstance(k, str) and k:
-                    props[k] = {"type": _infer_json_type(v)}
-            if props:
-                params = {"type": "object", "properties": props}
-        seen[name] = {
-            "type": "function",
-            "function": {
-                "name": name,
-                "description": desc or ("Basilisk tool: " + name),
-                "parameters": params,
-            },
-        }
-    return list(seen.values())
-
-
-def _is_tool_result_msg(m: Dict[str, Any]) -> bool:
-    """A stored tool RESULT — a user message wrapping <tool_result>…</tool_result>.
-
-    Tightened so a HUMAN message that merely quotes the string "<tool_result>"
-    (asking about the protocol, pasting a log) is not mistaken for a real result
-    and folded into a role:"tool": a genuine envelope opens with the tag, aside
-    from leading whitespace."""
-    try:
-        if m.get("role") != "user":
-            return False
-        c = (m.get("content") or "").lstrip()
-        return c.startswith("<tool_result>")
-    except Exception:
-        return False
-
-
-def destructure_tool_messages(
-        messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """The inverse of structure_tool_messages: fold structured tool messages
-    back into the TEXT protocol.
-
-    Used on the fallback path — a model that rejected the `tools` field must not
-    then be sent `assistant.tool_calls`/`role:"tool"` messages a strict server
-    could also reject; text `<tool>`/`<tool_result>` is universally accepted. A
-    plain text history passes through untouched, so this is safe to run whenever
-    tools are not being sent."""
-    try:
-        src = list(messages or [])
-    except Exception:
-        return messages
-    out: List[Dict[str, Any]] = []
-    for m in src:
-        if not isinstance(m, dict):
-            out.append(m)
-            continue
-        role = m.get("role")
-        if role == "assistant" and m.get("tool_calls"):
-            parts = []
-            c = m.get("content")
-            if c:
-                parts.append(str(c))
-            for tc in m.get("tool_calls") or []:
-                fn = (tc or {}).get("function") or {}
-                name = fn.get("name") or ""
-                args = fn.get("arguments")
-                if not isinstance(args, str):
-                    try:
-                        args = json.dumps(args or {})
-                    except Exception:
-                        args = "{}"
-                parts.append('<tool name="%s">%s</tool>' % (name, args))
-            out.append({"role": "assistant", "content": "\n".join(parts)})
-        elif role == "tool":
-            out.append({"role": "user",
-                        "content": "<tool_result>\n"
-                        + (m.get("content") or "") + "\n</tool_result>"})
-        else:
-            out.append(m)
-    return out
-
-
-_TOOL_RESULT_ENVELOPE = re.compile(
-    r"<tool_result>\s*(.*?)\s*</tool_result>", re.S)
-_TOOL_RESULT_HDR = re.compile(r"^\s*\[tool:[^\]]*\]\s*", re.S)
-
-
-def _tool_result_body(content: str) -> str:
-    """The inner text of a <tool_result> envelope, header line stripped.
-
-    role:"tool" content wants the result itself, not Basilisk's transport
-    wrapper. Falls back to the whole string if the envelope isn't found, so a
-    result is never lost."""
-    try:
-        m = _TOOL_RESULT_ENVELOPE.search(content or "")
-        inner = m.group(1) if m else (content or "")
-        return _TOOL_RESULT_HDR.sub("", inner).strip() or (content or "")
-    except Exception:
-        return content or ""
-
-
-def structure_tool_messages(
-        messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Rewrite Basilisk's TEXT tool history into OpenAI structured form.
-
-    This is what makes native function-calling behave the way DeepSeek's own
-    harness does: the model must see ONE consistent channel. Basilisk stores an
-    assistant tool call as `<tool name=…>{…}</tool>` text and its result as a
-    `<tool_result>…</tool_result>` user message; sending the `tools` schema while
-    feeding that text back is the mixed signal that made the model narrate "let
-    me read the page" instead of emitting the call. So, only when tools are in
-    play, every assistant tool call becomes an `assistant.tool_calls` message and
-    each following result becomes a `role:"tool"` message carrying the matching
-    `tool_call_id`.
-
-    STRICTLY VALID BY CONSTRUCTION: an assistant message is only structured when
-    the exact number of tool-result messages that its calls need immediately
-    follows it. Anything that cannot be paired cleanly (an in-flight call whose
-    result has not arrived, a bare system `<tool_result>` note with no preceding
-    call) is passed through UNCHANGED as text. So the output never contains a
-    dangling `tool_calls` without responses or an orphan `role:"tool"` — the two
-    shapes an OpenAI-compatible API rejects with a 400. Pure and total.
-    """
-    try:
-        src = list(messages or [])
-    except Exception:
-        return messages
-    # NORMALISE FIRST so the validity guarantee is unconditional: if the input
-    # already carries structured tool messages (a resumed history, a second
-    # pass, an MCP-sourced history), fold them back to text before re-deriving,
-    # so a stray role:"tool" or a dangling tool_calls in the INPUT can never
-    # survive into the OUTPUT. On the normal all-text history this is a no-op.
-    try:
-        if any(isinstance(_m, dict)
-               and (_m.get("role") == "tool" or _m.get("tool_calls"))
-               for _m in src):
-            src = destructure_tool_messages(src)
-    except Exception:
-        pass
-    out: List[Dict[str, Any]] = []
-    i = 0
-    n = len(src)
-    counter = 0
-    while i < n:
-        m = src[i] if isinstance(src[i], dict) else None
-        if m is None:
-            out.append(src[i])
-            i += 1
-            continue
-        if m.get("role") == "assistant":
-            content = m.get("content") or ""
-            try:
-                calls = parse_tool_calls(content)
-            except Exception:
-                calls = []
-            if calls:
-                # count the run of tool-result messages that immediately follows
-                results = []
-                j = i + 1
-                while (j < n and isinstance(src[j], dict)
-                       and _is_tool_result_msg(src[j])
-                       and len(results) < len(calls)):
-                    results.append(src[j])
-                    j += 1
-                if len(results) == len(calls):
-                    tcs = []
-                    ids = []
-                    for c in calls:
-                        counter += 1
-                        cid = "call_%d" % counter
-                        ids.append(cid)
-                        try:
-                            _args = json.dumps(getattr(c, "args", {}) or {})
-                        except Exception:
-                            _args = "{}"
-                        tcs.append({
-                            "id": cid, "type": "function",
-                            "function": {"name": getattr(c, "name", "") or "",
-                                         "arguments": _args}})
-                    try:
-                        visible = strip_tool_calls(content).strip()
-                    except Exception:
-                        visible = ""
-                    out.append({"role": "assistant",
-                                "content": visible or None,
-                                "tool_calls": tcs})
-                    for cid, rmsg in zip(ids, results):
-                        out.append({
-                            "role": "tool", "tool_call_id": cid,
-                            "content": _tool_result_body(
-                                rmsg.get("content") or "")})
-                    i = j
-                    continue
-            # not a tool call, or could not be paired cleanly → pass through
-            out.append(m)
-            i += 1
-            continue
-        out.append(m)
-        i += 1
-    return out
-
-
 class OpenAICompatBackend:
     """Generic backend for any OpenAI-compatible /chat/completions API.
 
@@ -1651,10 +1448,6 @@ class OpenAICompatBackend:
         # losing one model's rejection memo and costing a wasted round-trip.
         # set.add is atomic under the GIL, so no lock is needed once it exists.
         self._extras_rejected: set = set()
-        # Models that have 400'd on the native `tools` field — degrade them to
-        # the text `<tool>` protocol for the rest of the session, same memo
-        # pattern as _extras_rejected.
-        self._tools_rejected: set = set()
         # Largest max_tokens a given model has been proven to ACCEPT, learned
         # the only way a client can learn it: by being told no. Asking for a
         # whole-file write needs a big output budget, but "big" is per-model
@@ -1775,17 +1568,6 @@ class OpenAICompatBackend:
             "max_tokens": opts.get("max_tokens", 2048),
             "stream": True,
         }
-        # ── NATIVE TOOLS ──
-        # A proper OpenAI `tools` schema, so the model replies with structured
-        # tool_calls (the flow the V4/V4.1 family is trained for). Standard
-        # fields, sent in the body — but a provider that does not support them
-        # is handled by the tool-specific strip-and-retry below, which degrades
-        # to the text `<tool>` protocol rather than killing the turn. Tracked
-        # separately from extra_body so a max_tokens 400 never strips the tools.
-        _tools = opts.get("tools")
-        if _tools:
-            body_base["tools"] = _tools
-            body_base["tool_choice"] = opts.get("tool_choice", "auto")
         # Optional non-standard fields (currently the thinking toggle).  These
         # are NOT part of the OpenAI schema, so a provider is entitled to 400
         # on them -- see the strip-and-retry in the HTTPError handler.  Once a
@@ -1816,25 +1598,6 @@ class OpenAICompatBackend:
             if _cap:
                 payload["max_tokens"] = min(
                     int(payload.get("max_tokens") or 2048), int(_cap))
-            # Drop native tools for a model that already rejected them this
-            # session — degrade to the text protocol without re-paying the probe.
-            sent_tools = bool(
-                payload.get("tools")
-                and attempt_model not in getattr(self, "_tools_rejected", ()))
-            if not sent_tools:
-                payload.pop("tools", None)
-                payload.pop("tool_choice", None)
-                # No schema this attempt -> the history must not be structured
-                # either, or a strict server 400s on role:"tool"/tool_calls with
-                # no tools field. Fold it back to the universally-accepted text
-                # protocol. A plain-text history passes through untouched, so
-                # this is a no-op on the common path and the coherent fallback
-                # on the tools-rejected retry.
-                if any(isinstance(_m, dict)
-                       and (_m.get("role") == "tool" or _m.get("tool_calls"))
-                       for _m in payload.get("messages") or ()):
-                    payload["messages"] = destructure_tool_messages(
-                        payload["messages"])
             sent_extras = bool(
                 extra_body
                 and attempt_model not in getattr(self, "_extras_rejected", ()))
@@ -1927,24 +1690,13 @@ class OpenAICompatBackend:
                         _tcs = delta.get("tool_calls")
                         if _tcs:
                             for _tc in _tcs:
-                                # Prefer the provider's index; if it omits one, a
-                                # fragment that carries a NEW name opens the next
-                                # slot, otherwise it extends the last — so two
-                                # index-less calls don't collapse into one.
-                                _fn = _tc.get("function") or {}
-                                _idx = _tc.get("index")
-                                if _idx is None:
-                                    if _fn.get("name") or not _tc_acc:
-                                        _i = len(_tc_acc)
-                                    else:
-                                        _i = max(_tc_acc)
-                                else:
-                                    try:
-                                        _i = int(_idx)
-                                    except Exception:
-                                        _i = len(_tc_acc)
+                                try:
+                                    _i = int(_tc.get("index", 0) or 0)
+                                except Exception:
+                                    _i = 0
                                 _slot = _tc_acc.setdefault(
                                     _i, {"name": "", "args": ""})
+                                _fn = _tc.get("function") or {}
                                 if _fn.get("name"):
                                     _slot["name"] = _fn["name"]
                                 if _fn.get("arguments"):
@@ -2041,28 +1793,6 @@ class OpenAICompatBackend:
                              f"(HTTP {e.code}). Check the API key for this "
                              f"provider in Settings → Backends.")
                     return
-
-                # NATIVE TOOLS REJECTED.  A provider or model that does not
-                # accept the `tools` schema must degrade to the text protocol,
-                # not die — and the retry is the SAME model without tools, so a
-                # model that is otherwise fine is never abandoned over this.
-                # Checked before the generic extras strip so the reason logged
-                # is the true one.  The word test is broad on purpose: providers
-                # word this rejection many ways ("tools", "function", "tool_choice",
-                # "not support ... tool").
-                _tool_words = ("tool", "function call", "function_call",
-                               "tool_choice", "tools")
-                # 422 as well as 400: some OpenAI-compatible servers (vLLM, a few
-                # gateways) reject an unsupported `tools` field with 422
-                # Unprocessable Entity rather than 400.
-                if (e.code in (400, 422) and sent_tools
-                        and any(w in low for w in _tool_words)):
-                    self._tools_rejected.add(attempt_model)
-                    log(f"{self.name} {attempt_model} rejected native tools "
-                        f"-> retrying on the text protocol "
-                        f"(and not sending tools again this session)")
-                    idx -= 1            # retry this same model
-                    continue
 
                 # OUR OWN FAULT FIRST.  If we added a non-standard field and
                 # the provider 400'd, that is the likeliest cause -- strip it
@@ -2215,9 +1945,7 @@ class BackendRouter:
                     effort: str = "standard",
                     max_tokens_override: Optional[int] = None,
                     single_model: bool = False,
-                    reasoning_override: Optional[str] = None,
-                    tools: Optional[List[Dict[str, Any]]] = None
-                    ) -> Tuple[str, str]:
+                    reasoning_override: Optional[str] = None) -> Tuple[str, str]:
         """Route one streamed completion to the active provider.
 
         max_tokens_override / single_model exist for the SIDECAR completions
@@ -2289,38 +2017,35 @@ class BackendRouter:
                 # never fired — a no-op that looks exactly like a working
                 # feature from the outside.
                 _spec = PROVIDERS_BY_KEY.get(getattr(backend, "name", ""))
-                _ok = (bool(heavy) and (_spec.knows(heavy) if _spec is not None
+                _ok = (_spec.knows(heavy) if _spec is not None
                        else heavy in (getattr(backend, "fallback_chain", None)
-                                      or [])))
-                # ── HEAVY = DEEPER, NOT A FAMILY SWAP ──
-                # The catalogue is now three Flash-class models and V4.1-Flash
-                # is the best of them, so `hard_engagement_model` ships EMPTY —
-                # there is no heavier sibling to escalate to. A heavy turn
-                # therefore means: the bigger token budget above, PLUS the
-                # deepest reasoning on any model that has a dial (GLM). DeepSeek
-                # has no depth dial (it uses enable_thinking), so it just keeps
-                # the bigger budget.
-                #
-                # An operator who NAMES a hard_engagement_model can still force
-                # an escalation: a valid SAME-FAMILY sibling swaps the model id;
-                # a valid cross-family one is only taken when the current model
-                # has no reasoning dial to raise instead (never a silent
-                # family swap when raising the dial would do).
-                _same_family = _ok and _model_family(heavy) == _model_family(model)
+                                      or []))
+                # ── AN ESCALATION MUST NOT BE A DOWNGRADE ──
+                # hard_engagement_model ships as DeepSeek-V4-Pro, which was the
+                # right heavier sibling when the pin was DeepSeek-V4-Flash. With
+                # GLM-5.3-Flash selected it is neither heavier (the catalogue
+                # calls GLM the top of this provider's board) nor cheaper —
+                # 1.50/3.14 against 0.15/0.50, a 10x jump — and it swaps model
+                # FAMILY silently, mid-run, taking the prompt tuning and the
+                # tool dialect with it. So a cross-family swap is refused; on a
+                # model that has a reasoning dial, "heavy" means the bigger
+                # token budget above plus the deepest reasoning, which is the
+                # same escalation expressed in the knob the model actually has.
+                _same_family = _model_family(heavy) == _model_family(model)
                 if heavy and heavy != model and _ok and _same_family:
                     log(f"effort: escalating {model} -> {heavy} "
                         f"(deep engagement)")
                     model = heavy
-                elif supports_reasoning_effort(model):
-                    _heavy_reasoning = True
-                    if heavy and heavy != model and _ok:
+                elif heavy and heavy != model and _ok and not _same_family:
+                    if supports_reasoning_effort(model):
+                        _heavy_reasoning = True
                         log(f"effort: heavy turn stays on {model} "
                             f"(hard_engagement_model {heavy} is another "
                             f"family) — raising reasoning depth instead")
-                elif heavy and heavy != model and _ok:
-                    log(f"effort: escalating {model} -> {heavy} "
-                        f"(deep engagement, no reasoning dial to raise)")
-                    model = heavy
+                    else:
+                        log(f"effort: escalating {model} -> {heavy} "
+                            f"(deep engagement, no reasoning dial to raise)")
+                        model = heavy
         if max_tokens_override:
             # An explicit ask wins over the effort ladder's clamps — the ladder
             # tunes a CHAT turn, and this is not one.
@@ -2384,23 +2109,6 @@ class BackendRouter:
         }
         if _extra:
             opts["extra_body"] = _extra
-        # Native function-calling: hand the backend the tools schema so the
-        # model can reply with structured tool_calls. Off by setting, for a
-        # sidecar completion (those ask for a line of JSON, never a tool call),
-        # or for a model that has ALREADY rejected the tools field this session
-        # — in that last case we must fall back to the pure TEXT protocol
-        # coherently: no schema AND no structured history. Gating both on the
-        # same `_send_native` flag is what keeps the two in lockstep, so a
-        # tools-incapable model is never fed a structured history with the
-        # schema stripped out from under it (the incoherent state a split
-        # decision would leave behind).
-        _send_native = bool(
-            tools and not single_model
-            and self.settings.get("native_tool_calls", False)
-            and backend is not None
-            and model not in getattr(backend, "_tools_rejected", ()))
-        if _send_native:
-            opts["tools"] = tools
         if backend is None:
             on_error("No provider configured. Add an API key in Settings.")
             return "none", ""
@@ -2414,17 +2122,6 @@ class BackendRouter:
                     messages, self.settings, log)
             except Exception as _e:
                 log(f"headroom: skipped ({_e})")
-        # ── NATIVE MODE: one consistent structured channel ──
-        # When the tools schema is going out, the HISTORY must be structured too
-        # or the model sees a mixed signal (schema says "call", text history says
-        # "narrate"). Runs AFTER headroom (which keys on <tool_result> text) and
-        # is provably valid — anything it can't pair cleanly is left as text — so
-        # it can only ever help. Fail-open: any error leaves the text messages.
-        if opts.get("tools"):
-            try:
-                messages = structure_tool_messages(messages)
-            except Exception as _e:
-                log(f"structure_tool_messages: skipped ({_e})")
         backend.stream_chat(model, messages, on_token, on_done, on_error,
                             opts, cancel_event, on_reasoning=on_reasoning,
                             single_model=single_model)
@@ -11039,15 +10736,6 @@ _WRAPPER_TAG_RE = re.compile(
     r"<\s*/?\s*(?:tool_calls|toolcalls|function_calls|antml:function_calls)"
     r"\s*/?\s*>", re.I)
 
-# An EMPTY bare `<calls></calls>` (or `<call></call>`) wrapper — with nothing
-# but whitespace between — is the degenerate call some DeepSeek builds emit and
-# the operator saw printed in a reply. It is matched ONLY as an empty pair, and
-# ONLY applied to the VISIBLE text after real tool calls are parsed out (see
-# scrub_tool_debris), never to tool-call CONTENT — a source file that merely
-# contains the string `<calls>` must round-trip byte-for-byte.
-_EMPTY_CALLS_WRAPPER_RE = re.compile(
-    r"<\s*(calls?|tool_calls?)\s*>\s*</\s*(calls?|tool_calls?)\s*>", re.I)
-
 # A partially-arrived tag is worth hiding for a frame; a fragment of ORDINARY
 # PROSE is not. Below this length the two are indistinguishable: "t" and "f"
 # are prefixes of tool_calls and function_calls AND the first letter of half
@@ -11665,10 +11353,6 @@ def scrub_tool_debris(text: str) -> str:
                      r"|invoke)\b[^>]*>", "", out, flags=re.I)
         out = re.sub(r"<\s*function\s*=[^>]*>|<\s*/\s*function\s*>", "",
                      out, flags=re.I)
-        # An empty <calls></calls> wrapper the model emitted as its whole reply
-        # (a degenerate structured call) — safe here because this runs on the
-        # VISIBLE text only, after real calls are parsed out.
-        out = _EMPTY_CALLS_WRAPPER_RE.sub("", out)
         return out
 
     # ── A FENCE IS THE ONE PLACE THIS MUST NOT TOUCH ──

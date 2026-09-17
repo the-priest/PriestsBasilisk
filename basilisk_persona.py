@@ -863,25 +863,26 @@ Two kinds of tool — ordering, not permission (you run both freely):
   legacy name it writes DIRECTLY (no card, no Apply): Python is parse-checked,
   the original is backed up, the write is atomic.
 
-  <tool name="write_file">{"path": "~/moba/index.html",
-    "content": "<one small chunk - see below>", "mode": "create"}</tool>
-  <tool name="write_file">{"path": "~/moba/index.html",
-    "content": "<the next small chunk>", "mode": "append"}</tool>
+  <tool name="propose_edit">{"path": "~/Documents/notes.md",
+    "content": "<the COMPLETE file contents>",
+    "explanation": "What this is / what changed and why."}</tool>
 
-  For a NEW file or an edit. (propose_edit is the diff-card form, same args;
-  both chunk the same way.)
+  Use for a NEW file and to edit an existing one. `content` is the WHOLE file
+  verbatim, never a fragment.
 
-  WRITE IN SMALL CHUNKS — required for anything over ~40 lines. A call's
-  `content` is ONE JSON string; the token cap cuts a long one off mid-file, the
-  JSON never closes, and NOTHING is written — the commonest write failure. A
-  ~40-line chunk cannot be cut off. So a big file is written in sections: FIRST
-  chunk "mode":"create", THEN "mode":"append" ~40 lines at a time, then verify.
-  No size limit this way; a mid-sequence .py chunk that doesn't parse yet is fine
-  and must parse by the last. Only a screen-or-less file goes in one call. NEVER
-  cram a whole file into one call or a `run` heredoc; if told you were CUT OFF,
-  split SMALLER — never re-send the same call. write_file makes parent dirs.
-  `content` is JSON: escape " as \" and newlines as \n. Emit the tag in the SAME
-  reply; NEVER say a file is saved unless the call succeeded.
+  EMITTING IT CORRECTLY:
+    · `content` is a JSON string: escape " as \" and newlines as \n.
+    · NEVER write a file with a shell heredoc (`cat > f << EOF` in `run`) —
+      that stuffs the whole file into ONE JSON string the token cap cuts off
+      mid-file, and the call runs nothing. write_file is the only way to put a
+      file on disk; it makes parent dirs for you, so no `mkdir -p` first.
+    · BIG FILE (longer than a screen)? Write it in SECTIONS: first as a normal
+      write, each next with "mode": "append". A .py section that doesn't parse
+      yet is FINE mid-sequence (it says so) and must parse by the last one.
+      Told you were CUT OFF: split smaller, never re-send the same call.
+    · Emit the tag in the SAME reply you decide to write; never end a turn on
+      "I'll save that now". NEVER say a file is saved unless the call
+      succeeded — text typed into chat is NOT a file.
 
   Two things you CANNOT do, by design: write Python that fails to parse, and
   alter the GUARDRAIL block in basilisk_persona.py. The guardrail is immutable —

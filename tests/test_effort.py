@@ -240,14 +240,11 @@ ck("stale id: the turn still completed", out.get("text") == "ok",
 # ── 5. the escalation gate still behaves ─────────────────────────────
 print("\n== effort escalation ==")
 SENT.clear()
-# v1.2.0.5: an operator-named SAME-FAMILY heavier sibling still escalates the
-# model id. PINNED is DeepSeek-V4-Flash; V4.1-Flash is same-family and valid.
 _run(_settings(approval_mode="manual",
-               hard_engagement_model="deepseek-ai/DeepSeek-V4.1-Flash"),
+               hard_engagement_model="zai-org/GLM-5.2"),
      "heavy", _urlopen_factory())
-ck("heavy: a named same-family sibling still escalates the model id",
-   SENT[0].get("model") == "deepseek-ai/DeepSeek-V4.1-Flash",
-   str(SENT[0].get("model")))
+ck("heavy: escalates to a CATALOGUE-only model (v7.9.3 fix holds)",
+   SENT[0].get("model") == "zai-org/GLM-5.2", str(SENT[0].get("model")))
 SENT.clear()
 _run(_settings(approval_mode="manual",
                hard_engagement_model="acme/NotAModel"),
@@ -297,15 +294,9 @@ ck("GLM: a HEAVY turn stays on the operator's model instead of swapping "
 ck("GLM: ...and escalates the reasoning dial instead",
    _glm_heavy.get("reasoning_effort") == "max",
    str(_glm_heavy.get("reasoning_effort")))
-# v1.2.0.5: hard_engagement_model ships empty, so a default heavy turn on the
-# DeepSeek default no longer swaps models — V4.1-Flash IS the best of the three.
-# It has no reasoning dial (it uses enable_thinking), so heavy just keeps the
-# bigger token budget and stays on the model.
-SENT.clear()
 _run(_settings(), "heavy", _urlopen_factory())
-ck("DeepSeek: a default heavy turn stays on the model (no sibling to escalate)",
-   SENT[0].get("model") == PINNED, str(SENT[0].get("model")))
-ck("DeepSeek: ...and does not sprout a reasoning_effort dial it lacks",
-   "reasoning_effort" not in SENT[0], str(sorted(SENT[0])))
+ck("DeepSeek: a heavy turn STILL escalates to its same-family sibling",
+   SENT[0].get("model") == C.DEFAULT_SETTINGS["hard_engagement_model"],
+   str(SENT[0].get("model")))
 print(f"\neffort: {_p} passed, {_f} failed")
 sys.exit(1 if _f else 0)
