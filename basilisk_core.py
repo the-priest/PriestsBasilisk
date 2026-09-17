@@ -493,20 +493,21 @@ DEFAULT_SETTINGS = {
     # sent False on EVERY turn. Flip this True to let them think again (and pay
     # for it). GLM-5.3-Flash is unaffected — its reasoning has no switch.
     "deepseek_thinking": False,
-    # ── NATIVE FUNCTION-CALLING — the DeepSeek way, done whole ──
-    # DeepSeek's V4/V4.1 family is trained for the OpenAI `tools` flow, and this
-    # is it: the tool set is sent as function schemas, the model replies with
-    # structured `tool_calls`, and — the part that MUST NOT be skipped — the
-    # whole conversation the model sees is structured too: each prior call is an
-    # `assistant.tool_calls` message and each result a `role:"tool"` message
-    # (see structure_tool_messages). The earlier half-measure sent the schema
-    # but fed history back as `<tool_result>` TEXT, so the model saw two
-    # conflicting channels and narrated instead of calling. With one consistent
-    # structured channel that is gone. The text `<tool>` protocol stays wired as
-    # an automatic fallback (the parser + the transform read it), and a provider
-    # that rejects the tools field strips-and-retries onto plain text — so this
-    # is the native path with a floor under it. Default ON.
-    "native_tool_calls": True,
+    # ── NATIVE FUNCTION-CALLING — OFF by default; the TEXT protocol is what
+    #    actually works on this stack. ──
+    # The full structured implementation is here and correct (schema out,
+    # structured `tool_calls` in, and structure_tool_messages makes the whole
+    # conversation structured so there is no mixed signal). But on the live
+    # SiliconFlow · DeepSeek-V4.1-Flash setup the operator runs, turning it on
+    # made the model emit malformed/empty call wrappers and then go silent —
+    # WORSE than the text protocol, which drove tool calls reliably before any
+    # of this. So the reliable path ships as the default: the model writes a
+    # text tool tag (the tool name in a name= attribute, JSON in the body), the
+    # canonicaliser parses every dialect, and results go back as tool_result
+    # text. Flip this ON to use the structured path (it is complete and safe —
+    # text stays as the automatic fallback); it is left available, not removed,
+    # so it can be revisited when the provider's structured calling is verified.
+    "native_tool_calls": False,
     # No cross-model heavy escalation by default: the catalogue is now three
     # Flash-class models and V4.1-Flash IS the best of them, so a "heavier
     # sibling" to escalate to no longer exists. A heavy turn just gets the
@@ -2395,7 +2396,7 @@ class BackendRouter:
         # decision would leave behind).
         _send_native = bool(
             tools and not single_model
-            and self.settings.get("native_tool_calls", True)
+            and self.settings.get("native_tool_calls", False)
             and backend is not None
             and model not in getattr(backend, "_tools_rejected", ()))
         if _send_native:
@@ -11038,6 +11039,15 @@ _WRAPPER_TAG_RE = re.compile(
     r"<\s*/?\s*(?:tool_calls|toolcalls|function_calls|antml:function_calls)"
     r"\s*/?\s*>", re.I)
 
+# An EMPTY bare `<calls></calls>` (or `<call></call>`) wrapper — with nothing
+# but whitespace between — is the degenerate call some DeepSeek builds emit and
+# the operator saw printed in a reply. It is matched ONLY as an empty pair, and
+# ONLY applied to the VISIBLE text after real tool calls are parsed out (see
+# scrub_tool_debris), never to tool-call CONTENT — a source file that merely
+# contains the string `<calls>` must round-trip byte-for-byte.
+_EMPTY_CALLS_WRAPPER_RE = re.compile(
+    r"<\s*(calls?|tool_calls?)\s*>\s*</\s*(calls?|tool_calls?)\s*>", re.I)
+
 # A partially-arrived tag is worth hiding for a frame; a fragment of ORDINARY
 # PROSE is not. Below this length the two are indistinguishable: "t" and "f"
 # are prefixes of tool_calls and function_calls AND the first letter of half
@@ -11655,6 +11665,10 @@ def scrub_tool_debris(text: str) -> str:
                      r"|invoke)\b[^>]*>", "", out, flags=re.I)
         out = re.sub(r"<\s*function\s*=[^>]*>|<\s*/\s*function\s*>", "",
                      out, flags=re.I)
+        # An empty <calls></calls> wrapper the model emitted as its whole reply
+        # (a degenerate structured call) — safe here because this runs on the
+        # VISIBLE text only, after real calls are parsed out.
+        out = _EMPTY_CALLS_WRAPPER_RE.sub("", out)
         return out
 
     # ── A FENCE IS THE ONE PLACE THIS MUST NOT TOUCH ──

@@ -1,3 +1,53 @@
+# v1.2.0.9
+
+**Native function-calling is off by default again — because on the live setup it
+made things worse, not better. The text protocol is the default it always was,
+back to the behaviour that worked before any of this. Native stays wired as an
+opt-in for anyone who wants it.**
+
+**The honest version of what happened.** v1.2.0.8 turned native tool-calling ON
+by default and made it "whole" — the whole conversation restructured into
+`assistant.tool_calls` + `role:"tool"` messages, exactly the way DeepSeek's own
+harness drives the family. On paper that is the correct way to drive V4/V4.1. On
+*this* operator's live SiliconFlow endpoint it regressed: the model emitted empty
+`<calls></calls>` wrappers and fell back into the say-nothing loop — the exact
+failure the whole effort was meant to kill. The reference-correct path and the
+path that actually works on the wire were not the same path. So this release
+**treats the cause, not the symptom, and reverts the default**: `native_tool_calls`
+is **OFF**, the text `<tool>` protocol is the driver again — the behaviour from
+before any of these changes went in, which is what the operator reported working.
+Native is still fully wired (`structure_tool_messages`, the reject-and-degrade
+floor, the structured-`tool_calls` reader) and one flip away in **Settings →
+Backends** for an endpoint where it helps; it is just no longer forced on
+everyone by default.
+
+**Empty `<calls></calls>` wrappers are scrubbed from what you see.** If a model
+ever emits a bare, argument-less `<calls>`/`<tool_calls>` wrapper — nothing to
+dispatch — it is stripped from the visible reply instead of being rendered as
+debris. This is a **display-only** clean-up in `scrub_tool_debris`; it does not
+touch the parse path, so a real tool call carrying a body is unaffected, and
+content that legitimately contains the literal text `<calls>` is not corrupted
+(the earlier, too-aggressive global strip that broke round-tripping was reverted
+in favour of this narrow, empty-wrapper-only rule).
+
+**The follow-through gate skips consent-wall and aggregator hosts.** The gate
+that turns a search into a read (so "give me news" ends on a story, not a page of
+links) now skips `yahoo.com`, `msn.com`, `reddit.com` and known consent/redirect
+walls when it picks the top result to follow itself — those hosts return a cookie
+wall or an interstitial with HTTP 200, which is not a real read. It follows the
+first result that is an actual article.
+
+**Deep debug pass.** Full suite re-run green after the revert; ruff `F,E9` scan
+clean (no undefined names, no syntax errors anywhere); GUARDRAIL byte-identical;
+CSS parses under real GTK and stays ASCII-only. The self-referential
+`test_repofix` failure (a comment in `basilisk_core.py` that literally contained
+a `<tool …>{…}</tool>` tag, which the test embeds and re-parses) was fixed by
+rewording the comment.
+
+**5,104 assertions across 82 suites**, zero red. GUARDRAIL byte-identical.
+
+---
+
 # v1.2.0.8
 
 **Native function-calling done the way DeepSeek actually specifies — whole, not

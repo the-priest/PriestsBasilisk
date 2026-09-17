@@ -1,3 +1,37 @@
+# v1.2.0.9
+
+**Native tool-calling reverted to OFF by default — it regressed on the live
+setup. Text protocol restored (the behaviour that worked before). Empty
+`<calls></calls>` scrubbed from display; follow-through skips consent-wall hosts.**
+
+Native tools: v1.2.0.8 forced native ON by default and restructured the whole
+conversation the DeepSeek-harness way. Reference-correct, but on this operator's
+live SiliconFlow endpoint it regressed — empty `<calls></calls>` wrappers and the
+say-nothing loop, the exact failure it was meant to kill. Cause, not symptom:
+`native_tool_calls` is back to **False** (default), the text `<tool>` protocol is
+the driver again — the behaviour from before these changes. Native stays fully
+wired (structure_tool_messages, reject-and-degrade floor, structured-tool_calls
+reader) and is one flip away in Settings → Backends for an endpoint where it
+helps.
+
+Empty-wrapper scrub: a bare argument-less `<calls>`/`<tool_calls>` wrapper is
+stripped from the visible reply (display-only, in scrub_tool_debris — the parse
+path is untouched, and content that legitimately contains the literal `<calls>`
+is not corrupted; the earlier too-aggressive global strip that broke round-trips
+was reverted for this narrow rule).
+
+Follow-through gate now skips yahoo.com/msn.com/reddit.com and consent/redirect
+walls when it picks the top result to follow — those return a cookie wall at HTTP
+200, not a real read — and follows the first actual article instead.
+
+Deep debug pass: suite green after the revert; ruff F,E9 clean; a self-referential
+test_repofix failure (a comment in basilisk_core.py containing a literal
+`<tool …>{…}</tool>` the test re-parses) fixed by rewording the comment.
+
+**5,104 assertions across 82 suites**, zero red. GUARDRAIL byte-identical.
+
+---
+
 # v1.2.0.8
 
 **Native function-calling done whole (the DeepSeek way), mic button back,

@@ -236,20 +236,21 @@ def _run_router(router, tools, single_model=False):
         C.urllib.request.urlopen = real
 
 
-# v1.2.0.8: native tools ship ON — but done WHOLE (structured request AND
-# structured history), so the default request carries the tools array.
-ck("native_tool_calls defaults to ON",
-   C.DEFAULT_SETTINGS.get("native_tool_calls") is True,
+# v1.2.0.9: native tools ship OFF — the text `<tool>` protocol is the reliable
+# default on the live stack. The structured implementation stays wired and
+# correct as an opt-in (tested below), but the default request carries NO tools.
+ck("native_tool_calls defaults to OFF",
+   C.DEFAULT_SETTINGS.get("native_tool_calls") is False,
    str(C.DEFAULT_SETTINGS.get("native_tool_calls")))
 _run_router(_router(), _TOOLS)
-ck("default (ON) -> tools sent",
-   _SENT and _SENT[0].get("tools") == _TOOLS,
-   str(_SENT[0].get("tools") if _SENT else None))
-
-_run_router(_router(native_tool_calls=False), _TOOLS)
-ck("native_tool_calls=False -> no tools sent (opt-out works)",
+ck("default (OFF) -> no tools sent, model uses the text protocol",
    "tools" not in (_SENT[0] if _SENT else {}),
    str(sorted(_SENT[0])) if _SENT else "no request")
+
+_run_router(_router(native_tool_calls=True), _TOOLS)
+ck("native_tool_calls=True -> tools sent (opt-in still works)",
+   _SENT and _SENT[0].get("tools") == _TOOLS,
+   str(_SENT[0].get("tools") if _SENT else None))
 
 _run_router(_router(), _TOOLS, single_model=True)
 ck("a sidecar (single_model) call never sends tools",
@@ -268,7 +269,8 @@ print("\n== the conversation the model sees is fully structured ==")
 
 
 def _msgs_sent_with_history(history, native=True):
-    r = _router() if native else _router(native_tool_calls=False)
+    # native tools ship OFF, so exercise the structured path via explicit opt-in
+    r = _router(native_tool_calls=True) if native else _router(native_tool_calls=False)
     _SENT2 = {}
 
     def fake_urlopen(req, timeout=None):
@@ -366,9 +368,9 @@ _hq = [{"role": "assistant", "content": '<tool name="run">{}</tool>'},
 ck("a human message quoting <tool_result> is not folded into a role:tool",
    not any(m.get("tool_calls") for m in S(_hq)))
 
-# HIGH fix: once a model is in _tools_rejected, the router sends NO tools AND
-# leaves the history as text — the fallback is coherent, not split.
-_r = _router()
+# HIGH fix: with native ON, once a model is in _tools_rejected the router sends
+# NO tools AND leaves the history as text — the fallback is coherent, not split.
+_r = _router(native_tool_calls=True)
 _bk = _r.active_cloud()[0]
 _bk._tools_rejected.add("deepseek-ai/DeepSeek-V4.1-Flash")
 _SENT.clear()

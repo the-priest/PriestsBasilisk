@@ -190,7 +190,7 @@ except Exception as _ve:  # noqa
 
 APP_ID  = "org.thepriest.basilisk"
 APP_NAME = "Basilisk"
-VERSION = "1.2.0.8"
+VERSION = "1.2.0.9"
 
 # ── Tool-chain efficiency knobs ──
 # How many model round-trips a single user turn may chain through.  With
@@ -6419,6 +6419,11 @@ def forced_search_url(question: str, tools_used, already_forced: bool = False):
 _FOLLOWTHROUGH_SKIP_HOSTS = (
     "duckduckgo.com", "google.com", "bing.com", "r.jina.ai",
     "youtube.com", "facebook.com", "x.com", "twitter.com",
+    # Consent-wall / heavy-JS front doors that come back as a cookie prompt
+    # with no article text (the "Yahoo bounced me to a consent wall" dead end).
+    # Skipping them makes the follow-through pick a result that actually renders.
+    "yahoo.com", "news.yahoo.com", "msn.com", "consent.yahoo.com",
+    "consent.google.com", "reddit.com",
 )
 
 
@@ -14188,11 +14193,14 @@ class MainWindow(Adw.ApplicationWindow):
         # lists exactly the tools it was told about (leashed vs armed tracks
         # automatically) and never a phantom one. Agent mode only — the model
         # can only act then — and cached by prompt so it is parsed once, not
-        # every turn. The backend degrades to the text protocol if the provider
-        # rejects it, so this is the primary path with the old one as the floor.
+        # every turn. OPT-IN: native tool-calling is OFF by default (it
+        # regressed on the live setup); the text `<tool>` protocol is the
+        # driver unless the operator turns this on in Settings. The fallback
+        # here is False on purpose, in lockstep with DEFAULT_SETTINGS and the
+        # router gate, so a settings dict missing the key never flips it on.
         _tools = None
         if self.current_agent_mode and self.settings.get(
-                "native_tool_calls", True):
+                "native_tool_calls", False):
             try:
                 _ph = hash(sysprompt)
                 _c = getattr(self, "_tools_cache", None)
