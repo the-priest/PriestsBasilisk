@@ -104,6 +104,63 @@ ck("both carry their own url",
    str([x.args for x in _c]))
 
 
+# ── 1b. THE DEGRADED NATIVE FORMAT (the empty-loop bug) ──────────────
+# DeepSeek's tool tokens are written with FULLWIDTH PIPE (｜) and ▁, but both
+# DEGRADE on the wire: the pipe to ASCII `|`, a box `│`, doubled pipes; the ▁
+# separator to `_`. The parser used to require the exact canonical glyphs, so a
+# degraded call was NEITHER parsed NOR stripped — the tool never ran, the model
+# got no result, and it looped ("said it would and didn't" / empty), on BOTH
+# DeepSeek models because it is their shared trained syntax. Each variant below
+# MUST parse to a real call AND strip cleanly (parse and strip in agreement, so
+# no raw tokens reach the screen). This is the exact reproduction, pinned.
+print("\n== degraded DeepSeek pipes/separators still parse (empty-loop fix) ==")
+
+
+def ds_variant(pipe, sep, name="web_read", body='{"url": "https://x"}'):
+    return (f"<{pipe}tool{sep}calls{sep}begin{pipe}>"
+            f"<{pipe}tool{sep}call{sep}begin{pipe}>function"
+            f"<{pipe}tool{sep}sep{pipe}>{name}\n```json\n{body}\n```"
+            f"<{pipe}tool{sep}call{sep}end{pipe}>"
+            f"<{pipe}tool{sep}calls{sep}end{pipe}>")
+
+
+DEGRADED = {
+    "ascii pipe | + canonical ▁": ds_variant("|", SEP),
+    "ascii pipe | + underscore sep": ds_variant("|", "_"),
+    "canonical ｜ + underscore sep": ds_variant(PIPE, "_"),
+    "box │ pipe + ▁": ds_variant("│", SEP),
+    "doubled ascii || + underscore": ds_variant("||", "_"),
+    "doubled fullwidth ｜｜ + ▁": ds_variant(PIPE + PIPE, SEP),
+}
+for label, raw in DEGRADED.items():
+    calls = parse_tool_calls(raw)
+    ck(f"{label}: parses to one call", len(calls) == 1, str(len(calls)))
+    if calls:
+        ck(f"{label}: correct name+args",
+           calls[0].name == "web_read" and calls[0].args.get("url") == "https://x",
+           f"{calls[0].name} {calls[0].args}")
+    # parse/strip AGREEMENT: after normalising, the visible reply must not still
+    # carry raw protocol tokens (that is the leak half of the same bug).
+    disp = scrub_tool_debris(strip_tool_calls(_normalise_tool_syntax(raw))).strip()
+    ck(f"{label}: nothing raw left on screen", disp == "", repr(disp)[:80])
+
+# the filmed shape: prose ("I'll read the page") + a degraded call. The prose
+# made it look like a bare stall (-> nudge); the call, unparsed, made the next
+# turn empty. Now the call parses, so the tool actually runs.
+_mixed = "I'll read the page now.\n" + ds_variant("|", "_")
+_mc = parse_tool_calls(_mixed)
+ck("prose + degraded call: the call is recovered", len(_mc) == 1, str(len(_mc)))
+ck("prose + degraded call: the prose survives stripping",
+   "read the page" in strip_tool_calls(_normalise_tool_syntax(_mixed)))
+
+# a prose `<|x|>` that is NOT a tool token must still be left completely alone
+# (the keyword gate) — a false rewrite here would execute prose.
+for _prose in ("pipe a <|b|> c in a table", "regex <|foo|> not a tool",
+               "shell: echo 'a' <|<| b"):
+    ck(f"prose pipe not mistaken for a call: {_prose[:30]!r}",
+       len(parse_tool_calls(_prose)) == 0, str(parse_tool_calls(_prose)))
+
+
 # ── 2. normalisation is CONSERVATIVE ─────────────────────────────────
 # A false rewrite executes something the model meant as prose. That is much
 # worse than a miss, because the backstop below recovers a miss.

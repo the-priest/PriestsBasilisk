@@ -199,6 +199,22 @@ ck("the stream-done handler recovers a call from the reasoning stream",
 ck("...gated on there being no visible answer and no call already found",
    "not executable and not calls and not cancelled" in _BSRC)
 
+# v1.2.0.5: the degraded-exhausted branch must TERMINATE the turn, not fall
+# through into the empty-answer force-answer block below it (which re-kicked the
+# turn with a fresh 3-retry budget — an ~11-round-trip loop that printed
+# "giving up" while it visibly kept going). Pin that it finishes and returns
+# before reaching the "dead ends that lose an answer" block.
+_exh = _BSRC.split("Retries exhausted. Don't loop.", 1)
+ck("the degraded-exhausted branch is present", len(_exh) == 2)
+_tail = _exh[1] if len(_exh) == 2 else ""
+_deadends = _tail.find("dead ends that lose an answer")
+_cleanup = _tail.find("_finish_turn_cleanup()")
+_ret = _tail.find("return False")
+ck("degraded-exhausted finishes the turn and returns before the force-answer "
+   "block (no fall-through loop)",
+   0 <= _cleanup < _deadends and 0 <= _ret < _deadends,
+   f"cleanup={_cleanup} return={_ret} deadends={_deadends}")
+
 
 # ── 4. the repeat-guard content fingerprint ──────────────────────────
 print("\n== iterating on one file is not a repeat; re-writing bytes is ==")
@@ -293,6 +309,35 @@ for _ in range(3):
     _log2.record(_same, "ok", changes_state=True)
 ck("3 identical re-writes: the third is blocked", _blk == [False, False, True],
    str(_blk))
+
+
+# ── 5. the bare <calls>/<call> wrapper never leaks to the screen ─────
+# Some DeepSeek builds emit `<calls></calls>` (or the singular) around a call;
+# the operator saw an empty `<calls></calls>` printed in a reply. The wrapper
+# carries nothing, so it is stripped, while a real call inside it still parses
+# and a genuine single <tool_call name=…> and the word "calls" in prose are
+# untouched.
+print("\n== an empty <calls></calls> wrapper is scrubbed from the display ==")
+# The scrub runs on the VISIBLE reply (display path), never on tool CONTENT —
+# a source file that merely contains "<calls>" must survive byte-for-byte.
+_e = C.scrub_tool_debris("I'll pull headlines now.\n<calls>\n</calls>")
+ck("an empty <calls></calls> wrapper is scrubbed from the display",
+   "<calls>" not in _e and "</calls>" not in _e, repr(_e))
+ck("the visible prose survives", "pull headlines" in _e, repr(_e))
+_single = C.parse_tool_calls('<tool_call name="run">{"command":"ls"}</tool_call>')
+ck("a genuine single <tool_call name=…> still parses (not a wrapper)",
+   len(_single) == 1 and _single[0].name == "run", str(_single))
+ck("the word 'calls' in ordinary prose is untouched",
+   C.scrub_tool_debris("This function calls the API and recalls it.")
+   == "This function calls the API and recalls it.")
+# CONTENT that merely contains <calls></calls> is NOT corrupted by the parser
+# (the round-trip guarantee that test_repofix pins at scale).
+_j = __import__("json").dumps({"path": "x.py",
+                               "content": "note: <calls></calls> appears here\n"})
+_rt = C.parse_tool_calls('<tool name="write_file">' + _j + "</tool>")
+ck("<calls></calls> inside written content round-trips intact",
+   _rt and "<calls></calls>" in _rt[0].args.get("content", ""),
+   str(_rt[0].args.get("content") if _rt else None))
 
 
 print(f"\nstructcalls: {_p} passed, {_f} failed")

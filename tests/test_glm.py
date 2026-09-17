@@ -367,9 +367,12 @@ ck("a model with no dial gets no fields at all",
    reasoning_extra("deepseek-ai/DeepSeek-V4-Flash", "high") == {})
 ck("the shipped default rung is 'low'",
    C.DEFAULT_SETTINGS.get("reasoning_effort") == "low")
-ck("GLM is no longer the shipped default, but is still first in the picker",
+# v1.2.0.5: the picker is the trimmed three-model list led by the V4.1-Flash
+# default; GLM-5.3-Flash is no longer the default nor first, but is still one of
+# the three kept picks.
+ck("GLM is no longer the shipped default, but is still a kept pick",
    C.DEFAULT_SETTINGS["siliconflow_model"] != GLM53
-   and C.PROVIDERS_BY_KEY["siliconflow"].pick_ids[0] == GLM53)
+   and GLM53 in C.PROVIDERS_BY_KEY["siliconflow"].pick_ids)
 
 
 # ═════════════════════════════════════════════════════════════════════

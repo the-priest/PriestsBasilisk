@@ -1,3 +1,292 @@
+# v1.2.0.9
+
+**THE root cause of the empty loop, found and fixed: DeepSeek's own tool-call
+syntax was only decoded with its EXACT special characters, and those degrade on
+the wire. Plus a model-walk escape hatch as a second line of defence, native
+function-calling off by default again, and empty call wrappers scrubbed from the
+display.**
+
+**The bug that survived every previous "fix," because it was never the model:
+the operator switched to V4-Flash and got the SAME loop, which proves it.**
+DeepSeek's V4/V4.1-Flash family emit tool calls in their trained native syntax —
+special tokens built from a FULLWIDTH PIPE (`｜`, U+FF5C) and a `▁` separator:
+`<｜tool▁call▁begin｜>…<｜tool▁sep｜>web_read…`. Those characters **degrade on the
+way through the tokenizer and the wire**: the pipe becomes an ASCII `|`, a box
+`│`, or a doubled `||`; the `▁` separator becomes an underscore
+(`<|tool_call_begin|>`). The DSML dialect had already been hardened for exactly
+this — it matches a *class* of pipe characters — but this second native dialect,
+the one V4/V4.1 actually emit, was still pinned to the one canonical pipe **and**
+the one canonical separator. So the instant either degraded, the call was
+**neither parsed nor recognised**: the tool never ran, the model got back
+nothing, and it re-tried the same call for ever. That is the "said it would and
+didn't," the empty replies, and the raw pipes-and-boxes on screen — all one bug,
+and it hit every DeepSeek model because the syntax is the model's, not the id's.
+
+The fix matches the **same character classes the DSML path already trusts** — any
+pipe glyph, `▁` or `_` as the separator, single or doubled — gated by the literal
+`tool` keyword so ordinary prose containing `<|x|>` is never touched. Every
+degraded variant now decodes to a real call *and* strips cleanly, so parse and
+strip stay in agreement and nothing raw reaches the screen. Reproduced verbatim
+first (six pipe/separator degradations, plus the prose-then-call shape from the
+screenshots), then pinned in `test_toolsyntax.py` so it cannot come back.
+
+**Second line of defence: a model that still returns EMPTY gets walked to the
+next model, instead of asked the same thing until it gives up.** An empty reply
+is a clean HTTP 200, so the backend's own fallback chain (which only walks on
+HTTP *errors*) never triggered — the host just re-asked the same model three
+times. Now the first degraded retry stays put (cheap shot at a one-off hiccup)
+and any retry after that **walks the provider's own chain** — V4.1-Flash →
+V4-Flash → GLM-5.3-Flash — via a one-turn override that never touches your saved
+model and resets on the next question. Same provider, never a cross-cloud hop.
+This also covers a provider that silently strips `enable_thinking:false` (the
+model comes back empty; the walk escalates to one that answers).
+
+**Native function-calling is off by default again — because on the live setup it
+made things worse, not better. The text protocol is the default it always was,
+back to the behaviour that worked before any of this. Native stays wired as an
+opt-in for anyone who wants it.**
+
+**The honest version of what happened.** v1.2.0.8 turned native tool-calling ON
+by default and made it "whole" — the whole conversation restructured into
+`assistant.tool_calls` + `role:"tool"` messages, exactly the way DeepSeek's own
+harness drives the family. On paper that is the correct way to drive V4/V4.1. On
+*this* operator's live SiliconFlow endpoint it regressed: the model emitted empty
+`<calls></calls>` wrappers and fell back into the say-nothing loop — the exact
+failure the whole effort was meant to kill. The reference-correct path and the
+path that actually works on the wire were not the same path. So this release
+**treats the cause, not the symptom, and reverts the default**: `native_tool_calls`
+is **OFF**, the text `<tool>` protocol is the driver again — the behaviour from
+before any of these changes went in, which is what the operator reported working.
+Native is still fully wired (`structure_tool_messages`, the reject-and-degrade
+floor, the structured-`tool_calls` reader) and one flip away in **Settings →
+Backends** for an endpoint where it helps; it is just no longer forced on
+everyone by default.
+
+**Empty `<calls></calls>` wrappers are scrubbed from what you see.** If a model
+ever emits a bare, argument-less `<calls>`/`<tool_calls>` wrapper — nothing to
+dispatch — it is stripped from the visible reply instead of being rendered as
+debris. This is a **display-only** clean-up in `scrub_tool_debris`; it does not
+touch the parse path, so a real tool call carrying a body is unaffected, and
+content that legitimately contains the literal text `<calls>` is not corrupted
+(the earlier, too-aggressive global strip that broke round-tripping was reverted
+in favour of this narrow, empty-wrapper-only rule).
+
+**The follow-through gate skips consent-wall and aggregator hosts.** The gate
+that turns a search into a read (so "give me news" ends on a story, not a page of
+links) now skips `yahoo.com`, `msn.com`, `reddit.com` and known consent/redirect
+walls when it picks the top result to follow itself — those hosts return a cookie
+wall or an interstitial with HTTP 200, which is not a real read. It follows the
+first result that is an actual article.
+
+**Deep debug pass.** Full suite re-run green after the revert; ruff `F,E9` scan
+clean (no undefined names, no syntax errors anywhere); GUARDRAIL byte-identical;
+CSS parses under real GTK and stays ASCII-only. The self-referential
+`test_repofix` failure (a comment in `basilisk_core.py` that literally contained
+a `<tool …>{…}</tool>` tag, which the test embeds and re-parses) was fixed by
+rewording the comment.
+
+**5,140 assertions across 83 suites**, zero red. New coverage in
+`test_toolsyntax.py` (every degraded DeepSeek pipe/separator parses AND strips
+clean — the root-cause fix) and a new `test_degraded_walk.py` (the model-walk
+escape: the router `model_override` reaches the wire with thinking-off following
+the final model, and the chain walk is finite and same-provider). GUARDRAIL
+byte-identical.
+
+---
+
+# v1.2.0.8
+
+**Native function-calling done the way DeepSeek actually specifies — whole, not
+half. Plus the mic button back, Camoufox driven from its on-disk binary, and a
+follow-through gate so a search always becomes a read.**
+
+**Native tool-calling, done right.** The earlier attempt sent the OpenAI `tools`
+schema but still fed the conversation *history* back as `<tool_result>` TEXT — so
+the model saw two conflicting channels (schema says "call", history says
+"narrate") and did the worst thing: it wrote "let me read the page" turn after
+turn and never emitted the call. That is now fixed at the cause. When tools are
+in play, the **entire conversation the model sees is structured**: every prior
+tool call is an `assistant.tool_calls` message and every result a `role:"tool"`
+message with the matching `tool_call_id` (`structure_tool_messages`). One
+consistent channel, exactly as DeepSeek's own harness drives the V4/V4.1 family.
+
+The transform is **valid by construction** — an assistant call is only
+structured when the exact tool-result messages it needs immediately follow it;
+anything that can't be paired (an in-flight call, a bare system note) is left as
+text — so the request can never contain a dangling `tool_calls` or an orphan
+`role:"tool"`, the two shapes an API rejects. The text `<tool>` protocol stays
+wired as an automatic fallback and a provider that rejects the field
+strips-and-retries onto plain text, so it is the native path with a floor under
+it. It's back ON by default.
+
+**A follow-through gate so a search always becomes a read.** Even with the
+channel fixed, an open-ended "give me news" could leave the model with a page of
+search *results* (sites, not stories). If the reply intends a fetch, a search
+already ran, and the model emits no call, the host now **follows the top result
+itself** (decoding the real URL out of the results page) — the exact step the
+model kept saying it would take and didn't. Bounded so it advances the read
+without becoming its own loop.
+
+**The mic button is back.** It had been removed from the composer while all the
+record→transcribe machinery stayed, so the feature existed with no way to reach
+it. Tap to record, tap to stop → the clip is transcribed (SiliconFlow SenseVoice
+or Groq Whisper, per Settings → Voice) and dropped into the composer; with
+Auto-send on it sends straight away. Pinned by a test so it can't vanish again.
+
+**Camoufox works from its on-disk binary.** The reported case — the browser
+present in `~/.cache/camoufox` but `import camoufox` returning `None`, so
+`web_read` fell back to plain HTTP — is fixed by a new `camoufox-bin` engine that
+drives that binary directly through Playwright. `browser_status` reports the
+path, the diagnostic names the one-line fix, and `install.sh` sets up the browser
+stack on a fresh box.
+
+**Security fix:** the `.gitignore` on the pushed repo was missing the
+`settings.json` exclusion (which holds API keys). Restored — keys can't be
+committed.
+
+**5,025 assertions across 82 suites**, zero red. GUARDRAIL byte-identical.
+
+---
+
+# v1.2.0.6
+
+**Claude-coloured dark theme, the Camoufox browser fixed, and the code-writing
+loop killed at the root.**
+
+**The GUI is Claude-coloured now.** The accent had migrated red -> blue -> grey
+and a token-only change last round left the *thirty-two* hardcoded grey accent
+hexes (`#45484a`, `#292a2b`, and their `rgba(69,72,74,…)` glows, 90 uses in all)
+untouched in the custom widgets — which is exactly why it "still looked black and
+grey." Those are now Claude's clay/coral: `#d97757` carries every highlight
+(focus, links, switches, selection, glows, the ready-dot), suggested-action
+buttons fill with `#c15f3c` on white, and the near-black neutrals are warmed a
+touch toward charcoal. Danger red, warning amber and success green are semantic
+and were left untouched. Verified: parses under real GTK 4.14, ASCII-only, and
+pinned by a new `test_theme.py` so it can't silently revert.
+
+**Camoufox works when the browser is on disk but the package isn't.** The
+reported case: `~/.cache/camoufox` held the whole Firefox tree (`camoufox-bin`,
+`libxul.so`, …) but `import camoufox` returned `None`, so `web_read` dropped to
+plain HTTP. New **`camoufox-bin`** engine tier drives that on-disk binary
+directly through Playwright's `executable_path` — the browser you already have,
+no package import needed. It sits second in the ladder
+(camoufox -> camoufox-bin -> firefox -> chromium -> HTTP), `browser_status` now
+reports the binary path, and the diagnostic tells you the one-line fix
+(`pip install playwright` alone is enough to drive it). `install.sh` now sets up
+playwright + camoufox so a fresh box has a real browser on day one.
+
+**The code-writing loop ("propose_edit did not render (unparseable args)") is
+fixed at the root.** When a big file was crammed into one call, the token cap cut
+the JSON off mid-file and the call was unparseable — and the old correction told
+the model to *re-send it as a single call*, so it re-sent the same giant blob and
+truncated again, forever. Now the host reads the cut reason it already has and,
+either way, **mandates small append chunks** — a concrete `write_file`
+create-then-append recipe, with the target path recovered even from the
+truncated call, so a call that only ever carries ~40 lines can never be cut off.
+The persona was rewritten to match: the self-contradicting "content is the WHOLE
+file, never a fragment" line (the thing that caused the giant blobs) is gone,
+replaced by a chunk-first rule with a hard ~40-line ceiling.
+
+**4,994 assertions across 82 suites**, zero red. New suites: `test_theme.py`;
+new coverage in `test_browsersearch.py` (camoufox-bin) and `test_truncwrite.py`
+(the chunk-steering correction). GUARDRAIL byte-identical.
+
+---
+
+# v1.2.0.5
+
+**Three models, a real loop-termination bug fixed, and an aggressive debug pass.**
+
+**The catalogue is now three models, on purpose.** The operator cut it to the
+three he actually runs: **DeepSeek-V4.1-Flash** (the new default and the best of
+them), **DeepSeek-V4-Flash** (the measured 87/113 build, immediate fallback),
+and **GLM-5.3-Flash** (the one-click alternative). Everything else is gone from
+the picker and the fallback chain. `hard_engagement_model` ships empty — there
+is no heavier sibling to escalate to now, so a heavy turn just deepens the
+reasoning dial (on GLM) or keeps the bigger token budget (on DeepSeek, which
+steers with `enable_thinking`, not a depth dial). The vision picker and the
+default vision model point at GLM-5.3-Flash, the one kept model that takes
+images. The live-catalogue recovery still exists, so a hand-typed id that 404s
+still self-heals.
+
+**The bug that made it "full of bugs": the degraded-reply loop didn't stop when
+it said it did.** When the model returned empty several times (a provider
+hiccup, a blocked fetch — the "cant even fetch news" case), the retries-exhausted
+branch wrote "I couldn't get a usable reply — tap send to try again" and then
+**fell through** into the force-answer path: it orphaned that message, re-locked
+tools, and kicked up to two more turns — each re-entering the degraded block with
+a **fresh** three-retry budget. A three-retry ceiling was really about eleven
+round-trips, and the app printed "giving up" while visibly carrying on. It now
+finishes the turn and returns where it says it does. And both degraded dead-ends
+write a visible, honest message into the reply instead of leaving a blank bubble.
+
+**Aggressive debug pass** (a subagent audited every changed path and ran the full
+suite):
+
+- Native-tools rejection now degrades on **422** as well as 400 (some
+  OpenAI-compatible servers reject an unsupported `tools` field with 422), so it
+  still falls back to the text protocol instead of dying.
+- The repeat-guard content fingerprint now also covers `workspace_replace`'s
+  alias argument names (`new_str`/`old_str`/`replace`/`find`), closing the last
+  gap where three distinct alias-form edits of one file could false-block.
+- Confirmed no dangling runtime reference to any removed model, no double
+  dispatch across the structured + text tool channels, and that the
+  reasoning-stream recovery never fires on an ordinary prose reply.
+
+**4,965 assertions across 81 suites**, zero red. GUARDRAIL byte-identical.
+
+---
+
+# v1.2.0.4
+
+**Native function-calling — driving the model the way DeepSeek says to, and the
+way Claude Code / opencode / DeepSeek's own app do.**
+
+v1.2.0.3 stopped the empty-reply loop. This makes the model *good* at tool use
+instead of merely surviving it. DeepSeek's V4/V4.1 family is trained for the
+OpenAI `tools` flow: the harness declares the tools as function schemas in the
+request, and the model replies with structured `tool_calls`. Basilisk had only
+ever used a text `<tool>` protocol and never sent a `tools` array — so the model
+was guessing a convention instead of doing what it was trained for, which is
+where a lot of the "dumb shit on screen" came from.
+
+Now Basilisk sends a real `tools` schema, **built from the same system prompt
+the model is about to read** — so it lists exactly the tools the model was told
+about (the leashed and armed tool sets track automatically) and can never
+advertise a phantom one. Each tool's parameters and types are lifted from the
+persona's own example JSON; the `//` comment becomes the description.
+
+Three properties make this safe rather than a gamble:
+
+- **The text protocol is still the floor.** The persona still documents it, the
+  canonicaliser still parses it, and the dispatcher's argument aliasing still
+  absorbs any drift — so nothing regresses if the model mixes channels (which
+  DeepSeek's own tracker notes it sometimes does).
+- **A provider that rejects `tools` degrades automatically.** A 400 naming the
+  tools field strips it, retries the *same* model on the text protocol, and
+  remembers not to send it again that session — the model is never abandoned
+  over an unsupported field.
+- **It is a setting.** `native_tool_calls` is on by default and off in one flip;
+  sidecar completions never send tools.
+
+Combined with v1.2.0.3's structured-`tool_calls` reader and reasoning-stream
+recovery, the model is now driven, and read back, exactly the way the reference
+harnesses do it.
+
+**GUI:** the brief was "pro coding-terminal vibes, not a black-and-white movie —
+change colour and texture a bit, keep the structure." So the v1.2.0.3 serif
+title-card experiment is reverted, a **muted phosphor-green terminal accent**
+(desaturated, restrained to highlights — focus, links, switches, the ready-dot)
+replaces the flat grey, and the near-black surfaces get a **faint top-to-bottom
+gradient** for depth instead of a flat fill. Danger red and warning amber are
+untouched. Verified: parses clean under real GTK 4.14, ASCII-only bytes literal.
+
+**4,961 assertions across 81 suites**, zero red. New suite:
+`test_nativetools.py` (schema build, payload wiring, the reject-and-degrade
+path, the router gates). GUARDRAIL byte-identical.
+
+---
+
 # v1.2.0.3
 
 **The one where V4.1-Flash actually builds the game. From a live build the
