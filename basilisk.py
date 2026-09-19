@@ -4092,6 +4092,254 @@ window.dialog, dialog, .messagedialog, .dialog-content {
 /* DROPPED: deliberately not done.  Dim, not alarming. */
 .activity-plan-row.plan-dropped .activity-plan-glyph { color: #62605d; }
 .activity-plan-row.plan-dropped .activity-plan-name  { color: #6b6a65; }
+
+/* =====================================================================
+   THE COLOUR PASS - appended last, so it wins over every pass above.
+   ASCII-only, like the rest of this bytes literal.
+
+   The passes before this one all traded colour away for calm.  The quiet
+   pass, the last of them, deliberately made the chrome "near-neutral" and
+   dropped the grounds to near-black - handsome, but it reads on screen as
+   a black-and-white film: grey text on grey panels on a black ground with
+   the coral accent barely visible anywhere.  This pass puts the colour
+   back while keeping the structure and every contrast the calm passes got
+   right.  It is a re-tint, not a re-layout: the only thing that changes is
+   hue.
+
+   The palette is a deep indigo ground, indigo surfaces one step lighter,
+   coral as the primary accent and a violet secondary that actually reaches
+   the screen (selection, focus, the operator's own bubble).  Green, amber
+   and red stay semantic and stay where they were.
+   ===================================================================== */
+
+/* ---- structural re-tint for libadwaita's own named colours ---- */
+@define-color accent_color              #d97757;
+@define-color accent_bg_color           #c15f3c;
+@define-color accent_fg_color           #ffffff;
+@define-color window_bg_color           #0c0a16;
+@define-color window_fg_color           #eae7f7;
+@define-color view_bg_color             #151228;
+@define-color view_fg_color             #eae7f7;
+@define-color headerbar_bg_color        #151228;
+@define-color headerbar_fg_color        #eae7f7;
+@define-color headerbar_border_color    #2c2550;
+@define-color popover_bg_color          #1a1632;
+@define-color popover_fg_color          #eae7f7;
+@define-color dialog_bg_color           #1a1632;
+@define-color dialog_fg_color           #eae7f7;
+@define-color card_bg_color             #1c1836;
+@define-color card_fg_color             #eae7f7;
+@define-color sidebar_bg_color          #100e20;
+@define-color sidebar_fg_color          #eae7f7;
+@define-color borders                   #2c2550;
+
+/* ---- the ground: indigo, not black ---- */
+window, .background {
+    background-color: #0c0a16;
+    background-image: linear-gradient(to bottom, #12102a, #0a0814 62%);
+    color: #eae7f7;
+}
+headerbar {
+    background-color: #151228;
+    background-image: linear-gradient(to bottom, #201b40, #141126);
+    color: #eae7f7;
+    border-bottom: 1px solid rgba(217, 119, 87, 0.55);
+}
+.sidebar headerbar {
+    background-image: linear-gradient(to bottom, #1a1534, #120f24);
+}
+.sidebar {
+    background-color: #100e20;
+    background-image: linear-gradient(to bottom, #16122c, #0d0b1b);
+    border-right: 1px solid #2c2550;
+}
+
+/* ---- branding ---- */
+.app-title {
+    color: #f5f2ff;
+    text-shadow: 0 2px 3px rgba(0, 0, 0, 0.9),
+                 0 0 18px rgba(167, 139, 250, 0.38);
+}
+.app-subtitle  { color: #a49dc4; }
+.chat-title    { color: #eae7f7; }
+.chat-subtitle { color: #a49dc4; }
+.online-dot.online {
+    color: #d97757;
+    text-shadow: 0 0 9px rgba(217, 119, 87, 0.55);
+}
+.online-dot.offline { color: #6f6a8c; }
+
+/* ---- sidebar chat rows: violet is "here", coral is a pin ---- */
+.chat-row:hover {
+    background-color: rgba(167, 139, 250, 0.12);
+    border-left-color: rgba(167, 139, 250, 0.70);
+}
+.chat-row.selected, .chat-row:selected {
+    background-color: rgba(139, 92, 246, 0.20);
+    background-image: linear-gradient(90deg,
+        rgba(167, 139, 250, 0.32),
+        rgba(139, 92, 246, 0.07) 60%,
+        rgba(139, 92, 246, 0.0) 92%);
+    border-left: 3px solid #a78bfa;
+    box-shadow: none;
+}
+.chat-row .title-line { color: #f0edfb; }
+.chat-row.selected .title-line, .chat-row:selected .title-line { color: #ffffff; }
+.chat-row .meta-line  { color: #8d87ad; }
+.chat-row .pin-icon   { color: #d97757; }
+.chat-row .agent-icon { color: #a78bfa; }
+
+/* ---- empty state / hero ---- */
+.empty-state       { color: #7a7496; }
+.empty-state-title { color: #f6f3ff; text-shadow: 0 0 24px rgba(167, 139, 250, 0.28); }
+.empty-state-body  { color: #a49dc4; }
+.hero-chip {
+    background-color: rgba(124, 92, 240, 0.18);
+    border: 1px solid rgba(167, 139, 250, 0.45);
+    border-top-color: rgba(196, 181, 253, 0.60);
+}
+.hero-chip-label { color: #ddd7f6; }
+.hero-chip-dot   { color: #d97757; }
+.hero-armline    { color: #9a94bd; }
+
+/* ---- the two speakers: violet (operator) vs coral (Basilisk) ---- */
+.msg-user {
+    background-color: rgba(124, 92, 240, 0.16);
+    background-image: linear-gradient(180deg,
+        rgba(167, 139, 250, 0.20) 0%,
+        rgba(124, 92, 240, 0.07) 46%,
+        rgba(124, 92, 240, 0.0) 60%,
+        rgba(10, 8, 20, 0.26) 100%);
+    border: 1px solid rgba(167, 139, 250, 0.42);
+    border-top-color: rgba(196, 181, 253, 0.62);
+    color: #f4f1ff;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16);
+}
+.msg-user:hover {
+    background-color: rgba(124, 92, 240, 0.22);
+    border-color: rgba(196, 181, 253, 0.55);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.20);
+}
+.msg-assistant {
+    background-color: rgba(217, 119, 87, 0.13);
+    background-image: linear-gradient(180deg,
+        rgba(217, 119, 87, 0.20) 0%,
+        rgba(217, 119, 87, 0.06) 50%,
+        rgba(217, 119, 87, 0.0) 66%,
+        rgba(20, 12, 10, 0.22) 100%);
+    border-color: rgba(217, 119, 87, 0.42);
+    border-top-color: rgba(240, 160, 120, 0.58);
+    color: #f5f1ee;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14);
+}
+.msg-assistant:hover { border-color: rgba(240, 160, 120, 0.58); }
+
+/* ---- role labels ---- */
+.role-label            { color: #9a94bd; }
+.role-label.user       { color: #a78bfa; }
+.role-label.basilisk   { color: #d97757; }
+
+/* ---- avatars ---- */
+.avatar {
+    background-color: #1c1836;
+    color: #eae7f7;
+}
+.avatar-user { background-color: #2a2250; color: #eae7f7; }
+.avatar-basilisk {
+    background: linear-gradient(135deg, #7c5cf0, #d97757);
+    color: #0c0a16;
+    border: 1px solid #a78bfa;
+    box-shadow: 0 0 12px rgba(167, 139, 250, 0.35);
+}
+.avatar-dragon, .avatar-cross, .avatar-priest { color: #c4b5fd; }
+
+/* ---- code ---- */
+.code-block {
+    background-color: #120f24;
+    border: 1px solid #2c2550;
+}
+.code-block-header {
+    background-color: #181430;
+    color: #a49dc4;
+    border-bottom: 1px solid #2c2550;
+}
+.code-block textview { color: #b6f3d4; }
+
+/* ---- composer ---- */
+.input-frame {
+    background-color: rgba(26, 22, 50, 0.78);
+    background-image: linear-gradient(180deg,
+        rgba(167, 139, 250, 0.10) 0%,
+        rgba(255, 255, 255, 0.0) 55%,
+        rgba(0, 0, 0, 0.16) 100%);
+    border: 1px solid rgba(167, 139, 250, 0.42);
+    border-top-color: rgba(196, 181, 253, 0.55);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.10);
+}
+.input-frame:focus-within {
+    background-color: rgba(32, 27, 60, 0.86);
+    border-color: #a78bfa;
+    border-top-color: #c4b5fd;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14),
+                0 0 20px rgba(167, 139, 250, 0.22);
+}
+
+/* ---- status pills ---- */
+.status-pill            { background-color: #1c1836; color: #a49dc4; }
+.status-pill-label      { color: #a49dc4; }
+.status-pill.busy       { background-color: #2a2250; }
+.status-pill.busy .status-pill-label { color: #c4b5fd; }
+.status-pill.offline    { background-color: #241f3d; color: #eae7f7; }
+
+/* ---- tool indicators and thoughts ---- */
+.tool-indicator-label { color: #8d87ad; }
+.thoughts-expander       { color: #9a94bd; }
+.thoughts-expander > title { color: #9a94bd; }
+.thoughts-text {
+    color: #c0badd;
+    background: rgba(124, 92, 240, 0.10);
+    border-left: 2px solid rgba(167, 139, 250, 0.55);
+}
+.msg-system-notice { color: #9a94bd; }
+
+/* ---- the activity feed / dock, tinted to match ---- */
+.activity-title       { color: #cfc9ea; }
+.activity-meta        { color: #8d87ad; }
+.activity-chevron     { color: #7a7496; }
+.activity-step-detail { color: #9a94bd; }
+.activity-step-time   { color: #7a7496; }
+.activity-preview     { color: #8d87ad; }
+.activity-plan-title  { color: #8d87ad; }
+.activity-plan-count  { color: #8d87ad; }
+.activity-plan-name   { color: #b8b2d8; }
+.activity-plan-note   { color: #8d87ad; }
+.activity-plan-row.plan-open .activity-plan-name  { color: #a49dc4; }
+.activity-plan-row.plan-doing .activity-plan-glyph { color: #a78bfa; }
+.activity-plan-row.plan-doing .activity-plan-name  { color: #ece7ff; }
+.activity-plan-row.plan-done .activity-plan-glyph { color: #2ecc71; }
+.activity-plan-row.plan-done .activity-plan-name  { color: #8d87ad; }
+
+/* ---- quick-action chips in the empty state ---- */
+.quick-chip {
+    background-color: rgba(124, 92, 240, 0.16);
+    border: 1px solid rgba(167, 139, 250, 0.42);
+    color: #ddd7f6;
+}
+.quick-chip:hover {
+    background-color: rgba(139, 92, 246, 0.26);
+    border-color: rgba(196, 181, 253, 0.60);
+    color: #ffffff;
+}
+
+/* ---- cards and banners get the indigo surface too ---- */
+.card {
+    background-color: #1c1836;
+    border: 1px solid #2c2550;
+}
+.terminal-panel {
+    background-color: #0f0d1e;
+    border: 1px solid #2c2550;
+}
 """
 
 
@@ -14420,6 +14668,25 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_stream_done_body(self, meta):
         final = self.streaming_msg_widget.finish_streaming()
+        # ── THE BACKEND'S FULL TEXT IS AUTHORITATIVE ──────────────────────
+        # Normally the widget buffer and meta["text"] are identical: every
+        # content token is pushed through on_token into the buffer. They can
+        # diverge for a STRUCTURED (native) tool call, which the backends
+        # synthesize at the very end of the stream. Older builds reported that
+        # synthesized call only in meta["text"], never as a token — so the
+        # widget stayed empty, parse_tool_calls("") found nothing, and a
+        # perfectly valid native write_file/run call was declared an empty
+        # "degraded" reply and retried against the model for ever. The
+        # backends now emit the call as a token too; this is the defensive
+        # half, so any backend that only fills meta["text"] still dispatches.
+        _meta_text = meta.get("text") or ""
+        if _meta_text and not parse_tool_calls(final or ""):
+            try:
+                _meta_norm = _normalise_tool_syntax(_meta_text)
+            except Exception:
+                _meta_norm = _meta_text
+            if parse_tool_calls(_meta_norm):
+                final = _meta_norm
         # ── THE REPLY MAY NOT HAVE FINISHED; THE PROVIDER SAYS SO ──
         # finish_reason == "length" means the model was cut off at max_tokens.
         # Kept on the window because the two consumers are far apart: the card
@@ -18438,10 +18705,17 @@ class MainWindow(Adw.ApplicationWindow):
                             parts.append("Python syntax was checked, but the "
                                          "live persona reload failed — "
                                          "relaunch to apply.")
-                    else:
+                    elif base in ("basilisk.py", "basilisk_core.py"):
                         parts.append("Python syntax was checked before "
                                      "writing. This is a core file (basilisk.py / "
                                      "basilisk_core.py) — relaunch to load it.")
+                    else:
+                        # An ordinary .py (a scratch script, a project file)
+                        # is NOT a core file: it does not need the running app
+                        # reloaded, and saying so made the host look confused
+                        # about its own write. Only the two modules the RUNNING
+                        # process imported are named as core.
+                        parts.append("Python syntax was checked before writing.")
                 out = "\n".join(parts)
             else:
                 out = f"write failed for {path}\nerror: {r.get('error')}"

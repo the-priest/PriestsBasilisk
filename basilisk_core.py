@@ -1273,6 +1273,20 @@ class GroqBackend:
                 if _tc_acc:
                     _synth = _render_native_tool_calls(_tc_acc)
                     if _synth and not parse_tool_calls("".join(parts)):
+                        # ── PUBLISH THE CALL ON THE TOKEN CHANNEL, NOT JUST IN
+                        # meta["text"] ──
+                        # Every other token reaches the UI through on_token; the
+                        # widget buffer IS the reply the host parses. Reporting
+                        # a synthesized native call only in the on_done payload
+                        # left the buffer empty, so a perfect write_file/run call
+                        # read as "" -> no executable call -> "response looked
+                        # degraded" and an endless model retry. Emit it here so
+                        # the widget, the display and the dispatcher all see the
+                        # same canonical text.
+                        try:
+                            on_token(_synth)
+                        except Exception:
+                            pass
                         parts.append(_synth)
                 on_done({
                     "text": "".join(parts),
@@ -1958,6 +1972,15 @@ class OpenAICompatBackend:
                 if _tc_acc:
                     _synth = _render_native_tool_calls(_tc_acc)
                     if _synth and not parse_tool_calls("".join(parts)):
+                        # Publish through on_token as well — see the identical
+                        # note in the Groq backend. meta["text"] alone is not the
+                        # reply: the streaming widget buffers TOKENS, and the
+                        # dispatcher parses the WIDGET. A native call reported
+                        # only in meta read as an empty, "degraded" turn.
+                        try:
+                            on_token(_synth)
+                        except Exception:
+                            pass
                         parts.append(_synth)
                 on_done({
                     "text": "".join(parts),
@@ -3155,6 +3178,19 @@ def tool_write_file(path: str, content: str,
         mode = (mode or "replace").strip().lower()
         if mode in ("a", "add", "append_to", "appendto"):
             mode = "append"
+        # ── "create" IS THE MODE THE PERSONA ADVERTISES ──
+        # The write_file contract and the big-file recipe in basilisk_persona
+        # both tell the model to open a new file with `"mode": "create"`, but
+        # this normaliser never mapped it — so the host rejected its own
+        # documented instruction with "unknown mode 'create'", and a brand-new
+        # file cost an extra model round-trip (or, on a model that does not
+        # retry, a failed write and a "can't write" report). "create" means
+        # "write this content", which is exactly `replace`; the parent-dir
+        # creation below is what actually makes it a create. Truly unknown
+        # modes are still named and refused.
+        elif mode in ("create", "create_new", "create-new", "createfile",
+                      "create_file", "new"):
+            mode = "replace"
         # ── 0b. THE TRUNCATED-WRITE FLOOR ──
         # Same guard as tool_workspace_write, here too because this is the
         # primitive with the widest reach and a guard only ever protects the
